@@ -1,0 +1,135 @@
+# Task runner for MyOwnPKI – https://taskfile.dev
+#
+# Works the same in PowerShell, Git Bash, Linux, macOS and FreeBSD: Task runs every
+# command in its own built-in POSIX shell (including rm, mkdir, …), so no Make,
+# MSYS or WSL is needed. Run `task` to list all tasks.
+
+version: '3'
+
+vars:
+  # Pinned tool versions – keep in sync with .github/workflows/ci.yml.
+  # GO_VERSION must match the `toolchain` line in go.mod: with the default
+  # GOTOOLCHAIN=auto, an older local Go downloads that toolchain by itself.
+  # templ and govulncheck are pinned in go.mod (`go tool …`) and need no entry here.
+  GO_VERSION: 1.27.2
+  GOLANGCI_LINT_VERSION: 2.14.0
+
+  BIN_DIR: bin
+  # Release targets (PLAN §3, go-conventions.md "Build and CI").
+  PLATFORMS: linux/amd64 linux/arm64 darwin/arm64 windows/amd64 freebsd/amd64
+  # -trimpath removes local paths (C:\Users\…) from the binaries: smaller,
+  # reproducible, and no information about the build machine leaks.
+  BUILD_FLAGS: -trimpath
+
+env:
+  # Pure Go builds only (ADR-01). The HSM variant will get its own task.
+  CGO_ENABLED: '0'
+
+tasks:
+  default:
+    desc: List all tasks
+    silent: true
+    cmds:
+      - task --list
+
+  tools:check:
+    desc: Verify that the installed Go and golangci-lint match the pinned versions
+    silent: true
+    cmds:
+      - |
+        v=$(go env GOVERSION)
+        if [ "$v" != "go{{.GO_VERSION}}" ]; then
+          echo "Go: found $v, expected go{{.GO_VERSION}} (GOTOOLCHAIN=$(go env GOTOOLCHAIN); needs 'auto' or go{{.GO_VERSION}})"
+          exit 1
+        fi
+        echo "Go            $v  ok"
+      - |
+        v=$(golangci-lint version --short)
+        if [ "$v" != "{{.GOLANGCI_LINT_VERSION}}" ]; then
+          echo "golangci-lint: found $v, expected {{.GOLANGCI_LINT_VERSION}}"; exit 1
+        fi
+        echo "golangci-lint $v  ok"
+      - go tool templ version
+      - go tool govulncheck -version
+
+  build:
+    desc: Build all three binaries for this machine into bin/
+    cmds:
+      - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/ ./cmd/...
+
+  cross:
+    desc: Build all binaries for every release platform into bin/<os>-<arch>/
+    cmds:
+      - for: { var: PLATFORMS }
+        cmd: >-
+          GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}}
+          go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/{{replace "/" "-" .ITEM}}/ ./cmd/...
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run all tests with the race detector (needs a C compiler – runs in CI on Linux)
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - go test -race ./...
+
+  fmt:
+    desc: Format all Go files
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail if any Go file is not formatted
+    silent: true
+    cmds:
+      - |
+        files=$(gofmt -l .)
+        if [ -n "$files" ]; then
+          echo "Not formatted (run 'task fmt'):"; echo "$files"; exit 1
+        fi
+
+  lint:
+    desc: Run go vet and golangci-lint
+    cmds:
+      - go vet ./...
+      - golangci-lint run ./...
+
+  vuln:
+    desc: Check dependencies and the Go standard library for known vulnerabilities (needs internet)
+    cmds:
+      - go tool govulncheck ./...
+
+  generate:
+    desc: Regenerate generated code (templ, later sqlc and OpenAPI)
+    cmds:
+      - go generate ./...
+
+  generate:check:
+    desc: Fail if generated code is out of date (regenerates, then checks git for changes)
+    silent: true
+    deps: [generate]
+    cmds:
+      - |
+        changes=$(git status --porcelain)
+        if [ -n "$changes" ]; then
+          echo "Generated code is out of date or the tree is dirty – run 'task generate' and commit:"
+          echo "$changes"; exit 1
+        fi
+
+  check:
+    desc: Everything that must pass before a commit (vuln and generate:check run in CI)
+    cmds:
+      - task: tools:check
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: build
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf {{.BIN_DIR}}
