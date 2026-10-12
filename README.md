@@ -2,8 +2,9 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: planning.** There is no runnable server yet. See [docs/PLAN.md](docs/PLAN.md) for
-> the architecture, decisions and roadmap.
+> **Status: phase 0 (foundation) complete.** The binaries build and the design system is
+> visible, but there is no CA functionality yet – that is phase 1. See [docs/PLAN.md](docs/PLAN.md)
+> for the architecture, decisions and roadmap.
 
 MyOwnPKI is a self-hosted certificate authority platform:
 
@@ -20,7 +21,27 @@ MyOwnPKI is a self-hosted certificate authority platform:
 | Path | Content |
 |---|---|
 | `docs/PLAN.md` | Project plan, architecture decisions (ADRs), roadmap |
+| `cmd/` | The three binaries: `myownpki` (server), `myownpki-agent`, `myownpki-ctl` |
+| `internal/ca/preset` | Loader and validation for certificate presets |
+| `internal/web` | templ components, layouts and pages of the admin UI |
+| `presets/` | Built-in certificate presets (YAML, ported from `legacy/lib/presets.sh`) |
+| `api/openapi.yaml` | REST API specification (draft for phase 1) |
+| `web/styles/` | Design tokens and the global CSS classes |
 | `legacy/` | The original Bash PKI suite (`pki.sh`) – still usable as an offline/air-gapped root CA tool |
+
+## Development
+
+Requirements: Go (the exact toolchain is pinned in `go.mod` and downloaded automatically),
+[Task](https://taskfile.dev) and [golangci-lint](https://golangci-lint.run) – versions in `Taskfile.yml`.
+templ and govulncheck are pinned in `go.mod` and run via `go tool`. Works in PowerShell and Git Bash.
+
+```sh
+task              # list all tasks
+task check        # everything that must pass before a commit
+task dev          # component gallery at http://127.0.0.1:9443/design (no TLS, no login, loopback only)
+task vuln         # known vulnerabilities in dependencies and the Go standard library
+task cross        # build for linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64
+```
 
 ## Legacy Bash suite
 

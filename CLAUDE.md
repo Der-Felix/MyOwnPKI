@@ -1,7 +1,7 @@
 # MyOwnPKI
 
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
-templ + htmx web UI, multiple SQLite databases. Status: phase 0 (foundation).
+templ + htmx web UI, multiple SQLite databases. Status: phase 0 (foundation) complete – phase 1 next.
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap).
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,

@@ -24,7 +24,7 @@
 
 ## Configuration
 
-- One config file (YAML or TOML – decide in phase 0) plus environment overrides (`MYOWNPKI_*`).
+- One config file in **YAML** (decided in phase 0; strict decoding, unknown keys are errors) plus environment overrides (`MYOWNPKI_*`). Dev mode is a CLI flag only, never a config key.
 - Parse into typed structs, validate at startup, fail fast with a clear message.
 - No shell sourcing, no templating of config.
 
@@ -73,7 +73,7 @@
 ## Build and CI
 
 - `CGO_ENABLED=0` for all default builds; `-tags hsm` + CGO only for the HSM variant.
-- Cross-platform task runner (Taskfile or Make – decide in phase 0; the owner develops on Windows).
+- Task runner: **Taskfile** (decided in phase 0; runs the same in PowerShell and Git Bash). `task check` before every commit.
 - CI (GitHub Actions): gofmt check, `go vet`, `golangci-lint`, `govulncheck`, tests with `-race`,
   `templ generate` / `sqlc generate` diff check, no-inline-style check, cross-compile matrix
   (linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64), legacy ShellCheck.

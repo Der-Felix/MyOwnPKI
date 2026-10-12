@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: planning · Last updated: 2026-10-12 · License: Apache-2.0
+> Status: phase 0 complete, phase 1 next · Last updated: 2026-10-13 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -306,12 +306,14 @@ MyOwnPKI/
 ├─ web/
 │  ├─ styles/              tokens, base, components, layouts
 │  └─ islands/             Web Components (TypeScript)
-├─ api/openapi.yaml
-├─ presets/*.yaml          ported from legacy/lib/presets.sh
+├─ api/openapi.yaml        spec first (ADR-05); api.Spec embeds it
+├─ presets/*.yaml          ported from legacy/lib/presets.sh (+ README.md: file format)
 ├─ guides/*.tmpl           ported from legacy/lib/export.sh (GUIDE.txt)
 ├─ deploy/                 Dockerfile, Compose, LXC, systemd, Homebrew, Windows
 ├─ legacy/                 pki.sh + lib/ (offline root tool)
-└─ docs/
+├─ .github/                CI workflow, shared setup action, Dependabot
+├─ Taskfile.yml            build, test, lint, dev, cross, vuln
+└─ docs/                   PLAN.md, NIGHTLOG.md (phase 0 log), PHASE1.md (proposal)
 ```
 
 ---
@@ -329,7 +331,7 @@ MyOwnPKI/
 
 | Phase | Scope | Outcome |
 |---|---|---|
-| **0 – Foundation** | Go skeleton, CI, presets → YAML, OpenAPI draft, design tokens + component gallery | Runnable empty binary, design system visible |
+| **0 – Foundation** ✅ 2026-10-13 | Go skeleton, CI, presets → YAML, OpenAPI draft, design tokens + component gallery | Runnable empty binary, design system visible (`task dev` → `/design`) |
 | **1 – Core** | Data model, CA engine, importer, REST API, login (2FA), RBAC, unseal, audit log, UI: issue / revoke / upload / download, layout B | Bash script replaced in the browser |
 | **2 – ACME server & domains** | ACME server (http-01, dns-01, tls-alpn-01), domain model, policies, approval levels, EAB | certbot/Traefik/Caddy against the own CA (integration level 1) |
 | **3 – Agent** | Enrollment with proof of control, issuance via ACME, deploy profiles (Linux first), heartbeat/inventory, batched reload + rollback; then Windows, FreeBSD; ACME client (lego) for Let's Encrypt | Deploy and monitor certificates (level 3), public certificates |
@@ -357,4 +359,28 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [ ] Check name availability: domains (`.io`, `.de`, `.dev`), trademark registers (DPMA/EUIPO)
 - [ ] Which DNS providers and deploy profiles have priority for phases 2/3?
 - [ ] Which notification channels first?
-- [ ] Task runner: Taskfile (cross-platform) vs. Make
+- [x] Task runner: Taskfile (phase 0, see §13)
+- [x] Configuration format: YAML (phase 0, see §13)
+- [ ] OpenAPI code generator for phase 1 (oapi-codegen has partial 3.1 support, ogen full) – see docs/PHASE1.md
+- [ ] Server-side key generation in the UI/API, or CSR signing only? – see docs/PHASE1.md
+
+---
+
+## 13. Tooling and conventions (decided in phase 0)
+
+Not ADRs – operational choices that can be revisited without touching the architecture.
+Rationale and alternatives: docs/NIGHTLOG.md.
+
+| Topic | Decision |
+|---|---|
+| Go version | Toolchain pinned in `go.mod` (`toolchain go1.27.2`); `GOTOOLCHAIN=auto` downloads it, CI uses `GOTOOLCHAIN=local` |
+| Task runner | Taskfile (`task check` before every commit; `task dev`, `task cross`, `task vuln`) |
+| Configuration | One YAML file, strict decoding (unknown keys are errors) + `MYOWNPKI_*` env overrides; library `go.yaml.in/yaml/v3` |
+| Dev mode | `myownpki serve --dev` – CLI flag only, never in the config file; binds only to the IP literals `127.0.0.1`/`::1`; "DEV MODE – no TLS, no auth" on start and on every page |
+| Tools in `go.mod` (`go tool`) | templ (generator = runtime version), govulncheck |
+| Tools as pinned binaries | golangci-lint 2.14.0 (GPL – must not enter `go.mod`), sqlc 1.31.1 (from phase 1), ShellCheck 0.11.0 (CI) |
+| CI | GitHub Actions; actions pinned to commit SHAs; downloads verified by SHA-256; read-only token; daily govulncheck; Dependabot weekly |
+| Lint | golangci-lint v2 with security and project rules (`.golangci.yml`): e.g. no `math/rand`, no `time.Now` outside tests, no `//nolint` without reason |
+| Presets | `presets/*.yaml`, embedded; strict validation; parity test against `legacy/lib/presets.sh` |
+| UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
+| API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (no domain chosen yet) |
