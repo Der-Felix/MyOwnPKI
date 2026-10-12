@@ -1,0 +1,23 @@
+# Dual role: accepts TLS connections and opens mutual-TLS connections itself
+# (cluster nodes, etcd, syslog over TLS, MQTT, SaltStack).
+#
+# Both serverAuth and clientAuth – handy, but it widens what a stolen key can do.
+# Prefer separate server and client certificates where the software allows it.
+name: server-client
+description: "Dual Server + Client: mTLS peers, cluster nodes, etcd, Syslog TLS, SaltStack, MQTT broker/client"
+usage: "Services that accept inbound connections and initiate outbound mutual TLS connections"
+family: server
+validity_days: 397
+key_usage:
+  rsa: [digitalSignature, keyEncipherment]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: [serverAuth, clientAuth]
+  critical: false
+subject_alt_names:
+  required_any_of: [dns, ip]
+  offered: [dns, ip]
+common_name_from: dns
+openssl_purpose: sslserver
+ocsp_no_check: false
+customizable: false

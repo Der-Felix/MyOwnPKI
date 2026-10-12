@@ -1,0 +1,22 @@
+# Custom – key usage and extended key usage chosen per certificate.
+#
+# The values below are only the starting point; customizable: true allows the
+# issuer to override them (still validated against the same rules as all presets).
+name: custom
+description: "Custom Key Usage and Extended Key Usage configured freely"
+usage: "Special scenarios - KU and EKU are stored in cert.meta for full renewal compatibility"
+family: custom
+validity_days: 365
+key_usage:
+  rsa: [digitalSignature]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: []
+  critical: false
+subject_alt_names:
+  required_any_of: []
+  offered: [dns, ip, email, uri]
+common_name_from: ""
+openssl_purpose: any
+ocsp_no_check: false
+customizable: true

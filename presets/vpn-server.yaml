@@ -1,0 +1,25 @@
+# VPN gateway – OpenVPN, IPsec/IKEv2 (strongSwan, Windows RRAS, MikroTik, pfSense/OPNsense).
+#
+# ext_key_usage:
+#   serverAuth        – OpenVPN (remote-cert-tls server) and many IKEv2 clients check it
+#   ipsecIKE          – 1.3.6.1.5.5.7.3.17, RFC 4945 EKU for IKE peers
+#   1.3.6.1.5.5.8.2.2 – "IP Security IKE Intermediate", expected by older Windows and macOS
+#                       IKEv2 clients; crypto/x509 has no name for it, so it stays an OID
+name: vpn-server
+description: "VPN Server: OpenVPN, IPsec/IKEv2 (strongSwan, Windows RRAS, MikroTik, pfSense/OPNsense)"
+usage: "OpenVPN: cert/key + ca-bundle.pem | strongSwan: swanctl x509 + private"
+family: vpnserver
+validity_days: 730
+key_usage:
+  rsa: [digitalSignature, keyEncipherment]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: [serverAuth, ipsecIKE, 1.3.6.1.5.5.8.2.2]
+  critical: false
+subject_alt_names:
+  required_any_of: [dns, ip]
+  offered: [dns, ip]
+common_name_from: dns
+openssl_purpose: sslserver
+ocsp_no_check: false
+customizable: false

@@ -1,0 +1,21 @@
+# VPN client – OpenVPN, IPsec/IKEv2 (user or device authentication).
+#
+# clientAuth for OpenVPN (remote-cert-tls client), ipsecIKE (1.3.6.1.5.5.7.3.17) for IKEv2.
+name: vpn-client
+description: "VPN Client: OpenVPN, IPsec/IKEv2 (user or device authentication)"
+usage: "OpenVPN: embed inline into .ovpn configuration file | Windows/macOS/iOS: cert.p12"
+family: client
+validity_days: 730
+key_usage:
+  rsa: [digitalSignature, keyEncipherment]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: [clientAuth, ipsecIKE]
+  critical: false
+subject_alt_names:
+  required_any_of: []
+  offered: [dns, email]
+common_name_from: ""
+openssl_purpose: sslclient
+ocsp_no_check: false
+customizable: false

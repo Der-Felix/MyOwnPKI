@@ -1,0 +1,25 @@
+# OCSP responder signer – signs OCSP answers on behalf of the issuing CA.
+#
+# OCSPSigning: clients accept an OCSP answer from this key only because the CA
+#   delegated that right via this EKU (RFC 6960 §4.2.2.2).
+# ocsp_no_check (id-pkix-ocsp-nocheck): "don't check my own revocation status" –
+#   otherwise checking the responder would need the responder (endless loop).
+#   Trade-off: this certificate cannot be revoked effectively, so keep it short-lived.
+name: ocsp
+description: "OCSP Responder Signer: signs OCSP responses for the issuing CA"
+usage: "pki ocsp-server --ca <ca> --signer <name>"
+family: ocsp
+validity_days: 365
+key_usage:
+  rsa: [digitalSignature]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: [OCSPSigning]
+  critical: false
+subject_alt_names:
+  required_any_of: []
+  offered: []
+common_name_from: ""
+openssl_purpose: ocsphelper
+ocsp_no_check: true
+customizable: false

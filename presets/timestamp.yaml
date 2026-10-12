@@ -1,0 +1,23 @@
+# Time stamping authority (TSA, RFC 3161) – signed timestamps for documents and code.
+#
+# RFC 3161 §2.3: the EKU must contain *only* timeStamping and must be *critical*.
+# Critical means: software that doesn't understand the extension must reject the
+# certificate instead of ignoring it – so the key can never be used for anything else.
+name: timestamp
+description: "Time Stamping Authority (TSA, RFC 3161): signed timestamps for documents and code"
+usage: "openssl ts -reply ... -signer cert.pem -inkey key.pem"
+family: timestamp
+validity_days: 1825
+key_usage:
+  rsa: [digitalSignature, nonRepudiation]
+  other: [digitalSignature, nonRepudiation]
+ext_key_usage:
+  usages: [timeStamping]
+  critical: true
+subject_alt_names:
+  required_any_of: []
+  offered: []
+common_name_from: ""
+openssl_purpose: timestampsign
+ocsp_no_check: false
+customizable: false

@@ -1,0 +1,23 @@
+# TLS server with a wildcard name (*.example.com).
+#
+# Same extensions as "server". A wildcard covers exactly one label: *.lan.example
+# matches app.lan.example but neither lan.example itself nor a.b.lan.example –
+# which is why the base domain is added as a second SAN.
+name: wildcard
+description: "TLS Server Wildcard: *.domain + base domain (e.g., *.homelab.lan and homelab.lan)"
+usage: "Same as server - one certificate covering all subdomains at that level (e.g. app1.lan, app2.lan)"
+family: server
+validity_days: 397
+key_usage:
+  rsa: [digitalSignature, keyEncipherment]
+  other: [digitalSignature]
+ext_key_usage:
+  usages: [serverAuth]
+  critical: false
+subject_alt_names:
+  required_any_of: [dns, ip]
+  offered: [dns, ip]
+common_name_from: dns
+openssl_purpose: sslserver
+ocsp_no_check: false
+customizable: false
