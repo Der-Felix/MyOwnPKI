@@ -78,24 +78,18 @@ tasks:
       - go test -race ./...
 
   fmt:
-    desc: Format all Go files
+    desc: Format all Go files (gofmt + goimports, settings in .golangci.yml)
     cmds:
-      - gofmt -w .
+      - golangci-lint fmt ./...
 
   fmt:check:
-    desc: Fail if any Go file is not formatted
-    silent: true
+    desc: Fail if any Go file is not formatted – shows the diff (run 'task fmt' to fix)
     cmds:
-      - |
-        files=$(gofmt -l .)
-        if [ -n "$files" ]; then
-          echo "Not formatted (run 'task fmt'):"; echo "$files"; exit 1
-        fi
+      - golangci-lint fmt --diff ./...
 
   lint:
-    desc: Run go vet and golangci-lint
+    desc: Run golangci-lint (includes go vet; rules in .golangci.yml)
     cmds:
-      - go vet ./...
       - golangci-lint run ./...
 
   vuln:

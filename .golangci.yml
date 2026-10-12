@@ -1,0 +1,137 @@
+# golangci-lint v2 configuration – https://golangci-lint.run
+# Pinned version: see GOLANGCI_LINT_VERSION in Taskfile.yml.
+#
+# Selection principle: every linter here either catches a class of real bugs or
+# enforces a project rule (docs/PLAN.md, .claude/skills/myownpki). Pure style
+# linters are left out on purpose – they create noise, not safety.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    # --- Security (this program signs certificates) ---
+    - gosec         # weak crypto, weak randomness, file permissions, decompression bombs …
+    - bidichk       # "Trojan Source": invisible Unicode that makes code read differently than it runs
+    - asciicheck    # non-ASCII identifiers (look-alike characters)
+    - depguard      # forbidden packages, see settings below
+    - forbidigo     # forbidden functions, see settings below
+    - noctx         # outgoing HTTP without context = no timeout/cancel (ACME, http-01 checks)
+    - bodyclose     # unclosed HTTP bodies leak connections
+    - sqlclosecheck # unclosed SQL rows/statements
+    - rowserrcheck  # forgotten rows.Err() hides database errors
+    - gomoddirectives # no `replace` in go.mod – dependencies come from the public, verified proxy
+
+    # --- Error handling (go-conventions.md "Errors") ---
+    - errorlint     # use errors.Is/As and %w, so wrapped errors can still be matched
+    - errname       # ErrSomething / SomethingError naming
+    - nilerr        # returning nil although an error was checked
+    - nilnesserr    # returning the wrong error variable
+
+    # --- Correctness ---
+    - exhaustive    # switch over an enum (key type, revocation reason, status) must handle every value
+    - forcetypeassert
+    - durationcheck
+    - makezero
+    - reassign
+    - unconvert
+    - gocritic
+    - sloglint      # structured logging rules (go-conventions.md "Logging")
+    - usestdlibvars
+    - misspell
+
+    # --- Tests ---
+    - usetesting
+    - tparallel
+    - thelper
+
+    # --- Hygiene ---
+    - nolintlint    # every //nolint must name the linter and say why
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # memory layout micro-optimisation, hurts readability
+
+    exhaustive:
+      # A `default:` branch counts as handling the rest – it must then reject, not ignore.
+      default-signifies-exhaustive: true
+
+    sloglint:
+      attr-only: true        # slog.String("ca", name) – never loose key/value pairs
+      static-msg: true       # message is a constant; variable data goes into attributes
+      key-naming-case: snake
+
+    misspell:
+      locale: US             # ADR-17: English, US spelling
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    depguard:
+      rules:
+        all:
+          list-mode: lax     # everything allowed except the deny list
+          deny:
+            - pkg: math/rand
+              desc: "use crypto/rand – serials, nonces and tokens must be unpredictable"
+            - pkg: math/rand/v2
+              desc: "use crypto/rand – serials, nonces and tokens must be unpredictable"
+            - pkg: github.com/mattn/go-sqlite3
+              desc: "needs CGO – use modernc.org/sqlite (ADR-01, ADR-06)"
+            - pkg: gopkg.in/yaml.v2
+              desc: "use go.yaml.in/yaml/v3"
+            - pkg: gopkg.in/yaml.v3
+              desc: "archived upstream – use go.yaml.in/yaml/v3"
+            - pkg: github.com/pkg/errors
+              desc: "use fmt.Errorf with %w and errors.Is/As"
+            - pkg: log$
+              desc: "use log/slog (structured, redactable)"
+            # Weak cryptography: gosec already blocks md5, sha1, des, rc4, md4 and
+            # ripemd160 (G501–G507). Only what gosec doesn't cover is listed here.
+            - pkg: crypto/dsa
+              desc: "DSA is deprecated and not allowed by the CA/Browser Forum – use ECDSA, Ed25519 or RSA"
+            - pkg: golang.org/x/crypto/pkcs12
+              desc: "decode-only and frozen – pick a maintained PKCS#12 library (ask first, ADR-14)"
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^time\.Now$
+          msg: "inject a clock (interface{ Now() time.Time }) so validity and renewal tests control time"
+        - pattern: ^(fmt\.Print(f|ln)?|print|println)$
+          msg: "use log/slog, or write to an injected io.Writer"
+
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      # Tests may read the wall clock (e.g. to build fixtures relative to now).
+      - path: _test\.go
+        linters: [forbidigo]
+        text: time\.Now
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+    goimports:
+      local-prefixes:
+        - github.com/Der-Felix/MyOwnPKI
