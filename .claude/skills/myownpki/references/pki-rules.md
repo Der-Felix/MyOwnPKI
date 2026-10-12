@@ -1,0 +1,139 @@
+# PKI correctness rules
+
+Rules for everything that creates, parses or validates certificates. When in doubt, RFC 5280
+(X.509 profile), RFC 8555 (ACME) and RFC 6960 (OCSP) win over convenience.
+
+## Contents
+1. Presets (ported from legacy)
+2. Leaf certificate rules
+3. CA rules
+4. Keys and algorithms
+5. Validity
+6. CSR handling
+7. CRL and OCSP
+8. ACME specifics
+9. Legacy importer
+
+---
+
+## 1. Presets (ported from `legacy/lib/presets.sh`)
+
+Presets become `presets/*.yaml`. Port them faithfully first, improve later.
+
+| Preset | KU (RSA) | KU (EdDSA/ECDSA) | EKU | Days | SAN required |
+|---|---|---|---|---|---|
+| server | digitalSignature, keyEncipherment | digitalSignature | serverAuth | 397 | dns or ip |
+| wildcard | same as server | same | serverAuth | 397 | dns or ip |
+| client | digitalSignature, keyEncipherment | digitalSignature | clientAuth | 730 | – |
+| server-client | digitalSignature, keyEncipherment | digitalSignature | serverAuth, clientAuth | 397 | dns or ip |
+| user | digitalSignature, nonRepudiation, keyEncipherment | digitalSignature, nonRepudiation | clientAuth, emailProtection | 730 | email |
+| vpn-server | digitalSignature, keyEncipherment | digitalSignature | serverAuth, ipsecIKE (1.3.6.1.5.5.7.3.17), 1.3.6.1.5.5.8.2.2 | 730 | dns or ip |
+| vpn-client | digitalSignature, keyEncipherment | digitalSignature | clientAuth, ipsecIKE | 730 | – |
+| smime | digitalSignature, nonRepudiation, keyEncipherment | digitalSignature, nonRepudiation | emailProtection | 730 | email |
+| codesign | digitalSignature | digitalSignature | codeSigning | 1095 | – |
+| ocsp | digitalSignature | digitalSignature | OCSPSigning (+ id-pkix-ocsp-nocheck) | 365 | – |
+| timestamp | digitalSignature, nonRepudiation | digitalSignature, nonRepudiation | timeStamping (**critical**) | 1825 | – |
+| custom | user-defined | user-defined | user-defined | 365 | – |
+
+The legacy "KU (Ed25519)" column applies to every non-RSA key: `keyEncipherment` only makes
+sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is correct
+(add `keyAgreement` only for a documented static-ECDH use case).
+
+## 2. Leaf certificate rules
+
+- `basicConstraints = critical, CA:FALSE`
+- `keyUsage` critical, from the preset (see the key type note above)
+- `extendedKeyUsage` from the preset; non-critical unless the preset says otherwise (timestamp)
+- `subjectKeyIdentifier` (hash) and `authorityKeyIdentifier` (keyid of the issuer)
+- **SAN is mandatory for TLS.** Clients ignore the CN for hostname matching. The CN is a display name.
+- AIA (`caIssuers`, `OCSP`) and CRL Distribution Point URLs come from the CA's **public base URL**.
+  They are baked into every certificate and can never be changed afterwards – validate that a CA
+  has a stable public base URL before it issues its first certificate.
+- Wildcards: only one label (`*.example.com`), never `*.*.x` or `*.com`; `*.example.com` does not
+  cover `example.com`, so add both (legacy behaviour).
+- IP SANs: IPv4 and IPv6 in binary form, never as DNS SANs.
+
+## 3. CA rules
+
+- Root: self-signed, `basicConstraints = critical, CA:TRUE` (no pathlen or a deliberate one),
+  `keyUsage = critical, keyCertSign, cRLSign` (+ digitalSignature if it signs OCSP directly).
+- Intermediate: `basicConstraints = critical, CA:TRUE, pathlen:0` by default,
+  `keyUsage = critical, digitalSignature, keyCertSign, cRLSign`.
+- Optional EKU on an intermediate acts as a limit (legacy `EKU_LIMIT`).
+- **Name constraints** (legacy `PERMIT_DNS`, `PERMIT_IP`): critical by default (RFC 5280), with a
+  per-CA compatibility switch for clients that mishandle critical NC. Support IPv6 CIDRs (legacy only did IPv4).
+- Enforce name constraints **before signing** as well – don't rely on clients to reject.
+- A CA never issues beyond its own `notAfter`.
+- Root key modes: offline / online-encrypted / HSM (ADR-09). In offline mode the server only
+  ever holds the root **certificate**.
+
+## 4. Keys and algorithms
+
+| Type | Use | Notes |
+|---|---|---|
+| ECDSA P-256 | default for leaves and ACME | what certbot/Traefik/Caddy generate by default |
+| ECDSA P-384 | CAs, high-assurance leaves | |
+| RSA 2048 | compatibility only | flag in compliance view (BSI TR-02102 recommends ≥ 3000 bit) |
+| RSA 3072/4096 | legacy default leaf/CA | |
+| Ed25519 | SSH, internal mTLS, signing | **browsers do not accept Ed25519 TLS server certificates** – warn in the UI |
+
+- Randomness only from `crypto/rand`.
+- Signature algorithm follows the issuer key (SHA-256 for RSA/P-256, SHA-384 for P-384, pure Ed25519).
+- Minimum key policy is configurable per tenant.
+
+## 5. Validity
+
+- `notBefore` = now minus a small backdate (e.g. 5 minutes) for clock skew.
+- Public CAs (CA/Browser Forum ballot SC-081) are capped at 200 days from 2026-03-15, 100 days
+  from 2027-03-15 and 47 days from 2029-03-15. This does not bind a private CA, but our defaults
+  should move in that direction because automation makes short lifetimes cheap.
+- Renewal window default: at 2/3 of lifetime, with random jitter; expose the window via ARI.
+
+## 6. CSR handling
+
+- Verify the CSR signature (`CheckSignature`) before anything else.
+- Treat every field as attacker input: length limits, character checks, escape on output.
+- **Never copy extensions from the CSR.** Take the requested SANs, check them against the domain
+  policy and name constraints, then build extensions from the preset (legacy: `copy_extensions = none`).
+- Reject CSRs whose key violates the key policy.
+- Legacy option `--no-csr-san` (ignore CSR SANs, use only explicitly given ones) stays available.
+
+## 7. CRL and OCSP
+
+- CRL number strictly increasing per CA; include AKI; `nextUpdate` = now + configured CRL days.
+- Regenerate CRLs on every revocation **and** well before `nextUpdate` (scheduler).
+- OCSP responder certificate: preset `ocsp` (EKU OCSPSigning, `id-pkix-ocsp-nocheck`), issued by the same CA.
+- Answer `unknown` for serials the CA never issued, `revoked` with reason and time, `good` otherwise.
+- Serve OCSP from the database; pre-sign and cache responses, rebuild on revocation (no restart –
+  this fixes the legacy limitation in `lib/ocsp.sh`).
+- Revocation reasons per RFC 5280 (keyCompromise, superseded, cessationOfOperation, …).
+
+## 8. ACME specifics
+
+- Implement RFC 8555 objects faithfully: directory, newNonce, newAccount, newOrder, authz,
+  challenge, finalize, certificate, revokeCert, keyChange. Test against Pebble behaviour and
+  real clients (certbot, acme.sh, lego, Traefik, Caddy, win-acme).
+- Challenges: http-01 (port 80 only, redirects only to 80/443), dns-01 (TXT on `_acme-challenge`,
+  follow CNAMEs for delegation), tls-alpn-01 (RFC 8737, port 443).
+- EAB (external account binding) for account approval; ARI (RFC 9773) for renewal windows.
+- Per-order manual approval doesn't work with standard clients (they time out after finalize) –
+  approvals live at account level or "new hostname" level (PLAN §6.3).
+- The agent is an ACME client too (ADR-19). Its extra powers (inventory, deploy) come from its
+  own mTLS channel, not from a privileged issuance path.
+
+## 9. Legacy importer
+
+Reads the directory produced by `legacy/pki.sh` (`$PKI_DIR`, default `./pki`):
+
+```
+pki/pki.conf                      KEY="value" lines (see legacy/lib/config.sh CONF_KEYS)
+pki/root/{certs/ca.crt, private/ca.key, index.txt, crlnumber, ca.meta}
+pki/intermediate/<name>/{certs/ca.crt, certs/chain.pem, private/ca.key, index.txt, crlnumber, ca.meta}
+pki/issued/<name>/{cert.pem, key.pem?, chain.pem, fullchain.pem, cert.meta, archive/<stamp>/}
+```
+
+- `index.txt` is the OpenSSL CA database: `status(V/R/E) \t expiry \t revocation[,reason] \t serial(hex) \t filename \t subject`.
+- `cert.meta` / `ca.meta` are `KEY="value"` files – parse them like `load_kv` does (whitelisted keys, never execute).
+- Preserve **serial numbers, revocation status/reason/time and CRL numbers** – otherwise existing
+  CRLs and OCSP answers become wrong.
+- Encrypted keys need the passphrase at import time (legacy env vars `PKI_CA_PASS_<NAME>`, `PKI_CA_PASS`).

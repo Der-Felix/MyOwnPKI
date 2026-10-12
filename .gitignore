@@ -1,0 +1,52 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go
+/vendor/
+go.work
+go.work.sum
+coverage.*
+*.coverprofile
+
+# Runtime data (never commit databases or real keys)
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+/var/
+
+# Legacy script runtime output
+/legacy/pki/
+/legacy/dist/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.local.yaml
+*.local.toml
+
+# Dev tooling (Node is only allowed for optional E2E tests, never in the product)
+node_modules/
+/test-results/
+/playwright-report/
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json
