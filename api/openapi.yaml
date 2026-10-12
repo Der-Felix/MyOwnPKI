@@ -1,0 +1,1864 @@
+openapi: 3.1.0
+info:
+  title: MyOwnPKI Admin API
+  version: 0.1.0-draft
+  summary: REST API of the MyOwnPKI admin listener (phase 1 scope)
+  description: |
+    Draft for phase 1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download,
+    revocation, legacy import, login with mandatory second factor, RBAC, unseal and audit log.
+    ACME (phase 2), domains/policies (phase 2) and agents (phase 3) are not part of this draft.
+
+    **Conventions**
+    - Served only on the admin listener (ADR-08), base path `/api/v1`.
+    - JSON with `snake_case` fields; times are RFC 3339 in UTC; serial numbers and
+      fingerprints are upper-case hex without separators.
+    - Errors use RFC 9457 `application/problem+json`. Problem `type` values are URNs
+      (`urn:myownpki:problem:<name>`), listed in the `Problem` schema.
+    - Authentication: a browser session (cookie + CSRF header) **or** an API token
+      (`Authorization: Bearer`). The tenant always comes from the authenticated context,
+      never from a request parameter.
+    - `x-required-role` on an operation names the minimum role (`viewer` < `operator` < `admin`)
+      within the scope of the target object. The service layer enforces it, not only the handler.
+    - `x-step-up: true` means a fresh second factor is required (see `POST /auth/step-up`);
+      otherwise the request fails with `403` and problem type `step-up-required`.
+    - Lists use cursor pagination: `limit` + `cursor`, response field `next_cursor`.
+    - Certificate issuance through this API runs through the same policy engine as the
+      ACME server of phase 2 (ADR-19). Extensions always come from the preset, never from a CSR.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+servers:
+  - url: /api/v1
+    description: Admin listener (default port 9443)
+
+security:
+  - session: []
+    csrf: []
+  - bearer: []
+
+tags:
+  - name: system
+    description: Health, status, seal/unseal
+  - name: auth
+    description: Login, second factor, step-up, session
+  - name: users
+    description: Local users, roles, second-factor enrollment
+  - name: tokens
+    description: API tokens
+  - name: presets
+    description: Certificate presets (read-only, built in)
+  - name: cas
+    description: Root and intermediate certificate authorities
+  - name: certificates
+    description: Issue, inspect, download, revoke and renew certificates
+  - name: imports
+    description: Import of a legacy pki.sh directory and of external certificates
+  - name: audit
+    description: Tamper-evident audit log
+
+paths:
+  # ---------------------------------------------------------------- system
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Liveness check for load balancers
+      description: Unauthenticated. Reveals nothing but "ok" – no version, no seal state.
+      security: []
+      x-required-role: none
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+
+  /system/status:
+    get:
+      tags: [system]
+      operationId: getSystemStatus
+      summary: Version, seal state and server time
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Current status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /system/unseal:
+    post:
+      tags: [system]
+      operationId: unseal
+      summary: Unlock the encrypted CA keys
+      description: |
+        The server starts sealed: online CA keys are stored encrypted and no signing is possible.
+        The passphrase derives the key-encryption key (Argon2id); the decrypted keys stay in memory only.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnsealRequest" }
+      responses:
+        "204": { description: Unsealed }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /system/seal:
+    post:
+      tags: [system]
+      operationId: seal
+      summary: Remove all CA keys from memory immediately
+      description: Emergency stop. Signing stops until the next unseal.
+      x-required-role: admin
+      responses:
+        "204": { description: Sealed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---------------------------------------------------------------- auth
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: First factor (username + password)
+      description: |
+        On success a short-lived pre-auth cookie is set; the session only becomes valid after
+        the second factor (`/auth/totp` or `/auth/webauthn/finish`). Rate-limited with lockout.
+      security: []
+      x-required-role: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Password accepted, second factor required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/totp:
+    post:
+      tags: [auth]
+      operationId: verifyTOTP
+      summary: Second factor with a TOTP code (or a recovery code)
+      security: []
+      x-required-role: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TOTPRequest" }
+      responses:
+        "200":
+          description: Logged in; session cookie set and rotated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/webauthn/begin:
+    post:
+      tags: [auth]
+      operationId: beginWebAuthnLogin
+      summary: Start a passkey/WebAuthn assertion (second factor or step-up)
+      security: []
+      x-required-role: none
+      responses:
+        "200":
+          description: PublicKeyCredentialRequestOptions for navigator.credentials.get()
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebAuthnOptions" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/webauthn/finish:
+    post:
+      tags: [auth]
+      operationId: finishWebAuthnLogin
+      summary: Complete the WebAuthn assertion
+      security: []
+      x-required-role: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebAuthnCredential" }
+      responses:
+        "200":
+          description: Logged in (or step-up refreshed)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/step-up:
+    post:
+      tags: [auth]
+      operationId: stepUp
+      summary: Confirm the second factor again for a sensitive action
+      description: |
+        Refreshes `step_up_valid_until` of the current session. For WebAuthn, use
+        `/auth/webauthn/begin` + `/auth/webauthn/finish` while logged in instead.
+      x-required-role: viewer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TOTPRequest" }
+      responses:
+        "200":
+          description: Step-up valid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/session:
+    get:
+      tags: [auth]
+      operationId: getSession
+      summary: Current user, roles and session state
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Current session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End the current session (server-side)
+      x-required-role: viewer
+      responses:
+        "204": { description: Logged out }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ---------------------------------------------------------------- users
+  /users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List local users
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a local user
+      description: The user must enroll a second factor at first login before anything else works.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get a user
+      x-required-role: admin
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Change display name, e-mail or disable a user
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Delete a user (the audit log keeps the history)
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/{userId}/roles:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    put:
+      tags: [users]
+      operationId: setUserRoles
+      summary: Replace the role bindings of a user
+      description: Sessions of the user are rotated so the change takes effect immediately.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: "#/components/schemas/RoleBinding" }
+      responses:
+        "200":
+          description: New role bindings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RoleBinding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/me/password:
+    put:
+      tags: [users]
+      operationId: changeOwnPassword
+      summary: Change the own password
+      x-required-role: viewer
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordChange" }
+      responses:
+        "204": { description: Changed; other sessions of the user are ended }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /users/me/totp:
+    post:
+      tags: [users]
+      operationId: beginTOTPEnrollment
+      summary: Start TOTP enrollment (returns the otpauth URI once)
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Secret for the authenticator app – shown only now
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TOTPEnrollment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/me/totp/confirm:
+    post:
+      tags: [users]
+      operationId: confirmTOTPEnrollment
+      summary: Confirm TOTP enrollment with a first code; returns recovery codes once
+      x-required-role: viewer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TOTPRequest" }
+      responses:
+        "200":
+          description: TOTP active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryCodes" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /users/me/webauthn/begin:
+    post:
+      tags: [users]
+      operationId: beginWebAuthnRegistration
+      summary: Start registering a passkey / security key
+      x-required-role: viewer
+      x-step-up: true
+      responses:
+        "200":
+          description: PublicKeyCredentialCreationOptions for navigator.credentials.create()
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebAuthnOptions" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /users/me/webauthn/finish:
+    post:
+      tags: [users]
+      operationId: finishWebAuthnRegistration
+      summary: Complete passkey registration
+      x-required-role: viewer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebAuthnCredential" }
+      responses:
+        "204": { description: Registered }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ---------------------------------------------------------------- tokens
+  /tokens:
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      summary: List the own API tokens (never the secret)
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/APIToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create an API token – the secret is returned exactly once
+      description: Stored only as a hash. A token can never have more rights than its owner.
+      x-required-role: viewer
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/APITokenCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APITokenCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /tokens/{tokenId}:
+    parameters:
+      - name: tokenId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      summary: Revoke an API token immediately
+      x-required-role: viewer
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- presets
+  /presets:
+    get:
+      tags: [presets]
+      operationId: listPresets
+      summary: List the certificate presets
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Presets, sorted by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Preset" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /presets/{presetName}:
+    get:
+      tags: [presets]
+      operationId: getPreset
+      summary: Get one preset
+      x-required-role: viewer
+      parameters:
+        - name: presetName
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+      responses:
+        "200":
+          description: Preset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preset" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- CAs
+  /cas:
+    get:
+      tags: [cas]
+      operationId: listCAs
+      summary: List certificate authorities
+      x-required-role: viewer
+      responses:
+        "200":
+          description: CAs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CA" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [cas]
+      operationId: createCA
+      summary: Create a root or intermediate CA
+      description: |
+        - `kind: intermediate` with `issuer_ca_id`: signed by an online CA of this server.
+        - `kind: intermediate` with `offline_signing: true`: only key + CSR are created; the
+          response contains the CSR for signing on the offline root (legacy `pki.sh`). Upload
+          the signed certificate with `PUT /cas/{caId}/certificate`.
+        - `kind: root`: allowed, but the UI warns – a root key online is a single point of compromise,
+          and a root can't really be revoked. Prefer an offline root.
+        The CA's `public_base_url` is baked into every certificate (AIA, CRL DP) and can never
+        change afterwards.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CACreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CACreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /cas/import:
+    post:
+      tags: [cas]
+      operationId: importCA
+      summary: Import an existing CA (certificate, optional encrypted key)
+      description: |
+        Without a key the CA is stored in `offline` mode: the server knows the certificate (for
+        chains and CRL checks) but can't sign. Keys are re-encrypted under the unseal key.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/CAImport" }
+      responses:
+        "201":
+          description: Imported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CA" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /cas/{caId}:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    get:
+      tags: [cas]
+      operationId: getCA
+      summary: Get a CA
+      x-required-role: viewer
+      responses:
+        "200":
+          description: CA
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CA" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /cas/{caId}/certificate:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    get:
+      tags: [cas]
+      operationId: downloadCACertificate
+      summary: Download the CA certificate
+      x-required-role: viewer
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [pem, der, chain]
+            default: pem
+      responses:
+        "200":
+          description: Certificate (chain = this CA and its issuers up to the root)
+          content:
+            application/pem-certificate-chain:
+              schema: { type: string }
+            application/pkix-cert:
+              schema: { type: string, contentEncoding: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [cas]
+      operationId: uploadSignedCACertificate
+      summary: Upload the certificate of an offline-signed intermediate
+      description: The certificate must match the pending key and chain to a known CA.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignedCAUpload" }
+      responses:
+        "200":
+          description: CA is active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CA" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /cas/{caId}/csr:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    get:
+      tags: [cas]
+      operationId: downloadCACSR
+      summary: Download the CSR of a CA that waits for offline signing
+      x-required-role: admin
+      responses:
+        "200":
+          description: PKCS#10 request
+          content:
+            application/pkcs10:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /cas/{caId}/crl:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    get:
+      tags: [cas]
+      operationId: downloadCRL
+      summary: Download the current CRL (also served on the public listener)
+      x-required-role: viewer
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [der, pem]
+            default: der
+      responses:
+        "200":
+          description: Certificate revocation list
+          content:
+            application/pkix-crl:
+              schema: { type: string, contentEncoding: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [cas]
+      operationId: regenerateCRL
+      summary: Issue a new CRL now (CRL number + 1)
+      x-required-role: operator
+      responses:
+        "200":
+          description: New CRL metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CRLInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  # ---------------------------------------------------------------- certificates
+  /certificates:
+    get:
+      tags: [certificates]
+      operationId: listCertificates
+      summary: List certificates
+      x-required-role: viewer
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: ca_id
+          in: query
+          schema: { $ref: "#/components/schemas/ID" }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/CertificateStatus" }
+        - name: preset
+          in: query
+          schema: { type: string }
+        - name: expires_before
+          in: query
+          description: Only certificates whose notAfter is before this time
+          schema: { type: string, format: date-time }
+        - name: q
+          in: query
+          description: Search in CN, SANs and serial number
+          schema: { type: string, maxLength: 253 }
+      responses:
+        "200":
+          description: Certificates, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [certificates]
+      operationId: issueCertificate
+      summary: Issue a certificate from a CSR or with a server-generated key
+      description: |
+        Exactly one of `csr_pem` or `key` must be given.
+        - With a CSR (preferred): the private key never leaves the requester. Only the names are
+          taken from the CSR (unless `use_csr_sans` is false); extensions come from the preset.
+        - With `key`: the server generates the key and stores it encrypted, so it can be
+          downloaded later (step-up + audit) – the legacy pki.sh workflow.
+        Names are checked against the CA's name constraints before signing.
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueRequest" }
+      responses:
+        "201":
+          description: Issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /certificates/{certificateId}:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+    get:
+      tags: [certificates]
+      operationId: getCertificate
+      summary: Get certificate details
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Certificate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /certificates/{certificateId}/download/{format}:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+      - name: format
+        in: path
+        required: true
+        description: |
+          `pem` = certificate only, `chain` = issuing CAs, `fullchain` = certificate + chain
+          (what nginx/Traefik/Caddy want), `der` = binary certificate.
+        schema:
+          type: string
+          enum: [pem, chain, fullchain, der]
+    get:
+      tags: [certificates]
+      operationId: downloadCertificate
+      summary: Download public parts (no private key)
+      x-required-role: viewer
+      responses:
+        "200":
+          description: File
+          content:
+            application/pem-certificate-chain:
+              schema: { type: string }
+            application/pkix-cert:
+              schema: { type: string, contentEncoding: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /certificates/{certificateId}/export:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+    post:
+      tags: [certificates]
+      operationId: exportCertificateWithKey
+      summary: Download the private key (PKCS#12, PEM key, combined PEM or ZIP with guide)
+      description: |
+        Only for certificates with a server-generated key. POST, because the export password
+        must never appear in a URL (proxy logs, browser history). Every export is audited.
+      x-required-role: operator
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportRequest" }
+      responses:
+        "200":
+          description: File (Content-Disposition attachment)
+          content:
+            application/x-pkcs12:
+              schema: { type: string, contentEncoding: binary }
+            application/x-pem-file:
+              schema: { type: string }
+            application/zip:
+              schema: { type: string, contentEncoding: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /certificates/{certificateId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+    post:
+      tags: [certificates]
+      operationId: revokeCertificate
+      summary: Revoke a certificate (irreversible)
+      description: |
+        The CRL is regenerated immediately and OCSP answers change without restart.
+        `certificateHold` is not offered: a "temporary" revocation is not supported by many clients.
+      x-required-role: operator
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeRequest" }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /certificates/{certificateId}/renew:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+    post:
+      tags: [certificates]
+      operationId: renewCertificate
+      summary: Issue a successor with the same names, preset and CA
+      x-required-role: operator
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenewRequest" }
+      responses:
+        "201":
+          description: New certificate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /csr/inspect:
+    post:
+      tags: [certificates]
+      operationId: inspectCSR
+      summary: Parse a CSR and show what it asks for – nothing is issued
+      description: Lets the UI preview a CSR (untrusted input) before issuing. The signature is verified.
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/pkcs10:
+            schema: { type: string, maxLength: 65536 }
+      responses:
+        "200":
+          description: Parsed request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CSRInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+
+  # ---------------------------------------------------------------- imports
+  /imports/legacy:
+    post:
+      tags: [imports]
+      operationId: startLegacyImport
+      summary: Import a pki.sh directory (tar.gz or zip of ./pki)
+      description: |
+        Runs in the background. Serial numbers, revocations (status, reason, time) and CRL
+        numbers are preserved so existing CRLs and OCSP answers stay correct. Passphrases of
+        encrypted CA keys are passed as form fields `ca_passphrase[<name>]` and never stored.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/LegacyImportUpload" }
+      responses:
+        "202":
+          description: Import started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /imports/{importId}:
+    get:
+      tags: [imports]
+      operationId: getImport
+      summary: Progress and result of an import
+      x-required-role: admin
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/ID" }
+      responses:
+        "200":
+          description: Import job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /imports/external-certificate:
+    post:
+      tags: [imports]
+      operationId: importExternalCertificate
+      summary: Add a certificate from another CA for expiry monitoring
+      description: "Stored with `source: external`; never signed, renewed or revoked by this server."
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/pem-certificate-chain:
+            schema: { type: string, maxLength: 262144 }
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+
+  # ---------------------------------------------------------------- audit
+  /audit:
+    get:
+      tags: [audit]
+      operationId: listAuditEntries
+      summary: Read the audit log (newest first)
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: action
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: actor
+          in: query
+          schema: { type: string, maxLength: 128 }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /audit/verify:
+    post:
+      tags: [audit]
+      operationId: verifyAuditChain
+      summary: Walk the hash chain and report the first broken entry, if any
+      x-required-role: admin
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditVerifyResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-myownpki_session
+      description: Server-side session; HttpOnly, Secure, SameSite=Strict.
+    csrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Synchronizer token for every state-changing request with a session cookie.
+    bearer:
+      type: http
+      scheme: bearer
+      description: "API token (`Authorization: Bearer <token>`); scoped and expiring."
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque value from `next_cursor` of the previous page
+      schema: { type: string, maxLength: 512 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+    CAId:
+      name: caId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+    CertificateId:
+      name: certificateId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
+  responses:
+    BadRequest:
+      description: Malformed request or invalid fields
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ValidationProblem" }
+    Unauthorized:
+      description: Not logged in, session expired or invalid token
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: Role too low, or step-up required (type `step-up-required`)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Object doesn't exist or is not visible to the caller
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: State doesn't allow the action (e.g. already revoked, already unsealed)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooLarge:
+      description: Request body or upload exceeds the size limit
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PolicyViolation:
+      description: Request is well-formed but violates policy (name constraints, key policy, CA validity)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ValidationProblem" }
+    TooManyRequests:
+      description: Rate limit or lockout; see the Retry-After header
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Sealed:
+      description: The server is sealed; signing is impossible until unseal
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    ID:
+      type: string
+      description: Opaque identifier
+      pattern: "^[0-9A-Za-z_-]{1,64}$"
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: |
+            One of `about:blank` or `urn:myownpki:problem:` + bad-request, unauthorized,
+            forbidden, step-up-required, not-found, conflict, too-large, policy-violation,
+            rate-limited, sealed, internal
+          examples: ["urn:myownpki:problem:step-up-required"]
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string }
+        request_id:
+          type: string
+          description: Correlates with server logs
+
+    ValidationProblem:
+      allOf:
+        - $ref: "#/components/schemas/Problem"
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                    description: JSON pointer to the offending field
+                  message: { type: string }
+
+    SystemStatus:
+      type: object
+      required: [version, sealed, server_time]
+      properties:
+        version: { type: string }
+        sealed: { type: boolean }
+        server_time: { type: string, format: date-time }
+
+    UnsealRequest:
+      type: object
+      required: [passphrase]
+      properties:
+        passphrase: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
+
+    LoginResponse:
+      type: object
+      required: [mfa_required, mfa_methods]
+      properties:
+        mfa_required: { type: boolean, const: true }
+        mfa_methods:
+          type: array
+          items: { type: string, enum: [totp, webauthn] }
+        mfa_enrollment_required:
+          type: boolean
+          description: User has no second factor yet and must enroll one before anything else
+
+    TOTPRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: 6-digit TOTP code or a recovery code
+          pattern: "^([0-9]{6}|[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})$"
+          writeOnly: true
+
+    TOTPEnrollment:
+      type: object
+      required: [otpauth_uri]
+      properties:
+        otpauth_uri: { type: string, description: "otpauth:// URI for the QR code – shown once" }
+
+    RecoveryCodes:
+      type: object
+      required: [codes]
+      properties:
+        codes:
+          type: array
+          description: Shown exactly once; stored only as hashes
+          items: { type: string }
+
+    WebAuthnOptions:
+      type: object
+      description: WebAuthn options as JSON (passed unchanged to the browser API)
+      additionalProperties: true
+
+    WebAuthnCredential:
+      type: object
+      description: Credential returned by the browser API, serialized as JSON
+      additionalProperties: true
+
+    Session:
+      type: object
+      required: [user, roles, expires_at]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+        expires_at: { type: string, format: date-time }
+        step_up_valid_until:
+          type: [string, "null"]
+          format: date-time
+        csrf_token:
+          type: string
+          description: Only for cookie sessions; send it as X-CSRF-Token
+
+    Role:
+      type: string
+      enum: [viewer, operator, admin]
+
+    RoleBinding:
+      type: object
+      required: [role, scope]
+      properties:
+        role: { $ref: "#/components/schemas/Role" }
+        scope:
+          type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [tenant, ca]
+              description: Domain and agent-group scopes follow in phases 2 and 3
+            id:
+              $ref: "#/components/schemas/ID"
+
+    User:
+      type: object
+      required: [id, username, disabled, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        username: { type: string }
+        display_name: { type: string }
+        email: { type: string, format: email }
+        disabled: { type: boolean }
+        mfa:
+          type: object
+          properties:
+            totp: { type: boolean }
+            webauthn_credentials: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: [string, "null"], format: date-time }
+
+    UserList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        next_cursor: { type: [string, "null"] }
+
+    UserCreate:
+      type: object
+      required: [username, password, roles]
+      properties:
+        username: { type: string, pattern: "^[a-z0-9._-]{2,64}$" }
+        display_name: { type: string, maxLength: 128 }
+        email: { type: string, format: email }
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 12
+          maxLength: 1024
+          description: Initial password; the user must change it at first login
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+
+    UserUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        display_name: { type: string, maxLength: 128 }
+        email: { type: string, format: email }
+        disabled: { type: boolean }
+
+    PasswordChange:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password, writeOnly: true, maxLength: 1024 }
+        new_password: { type: string, format: password, writeOnly: true, minLength: 12, maxLength: 1024 }
+
+    APIToken:
+      type: object
+      required: [id, name, scopes, created_at, expires_at]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/TokenScope" }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+
+    TokenScope:
+      type: string
+      enum: [certificates:read, certificates:issue, certificates:revoke, cas:read, audit:read]
+
+    APITokenCreate:
+      type: object
+      required: [name, scopes, expires_in_days]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        scopes:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/TokenScope" }
+        expires_in_days: { type: integer, minimum: 1, maximum: 365 }
+
+    APITokenCreated:
+      allOf:
+        - $ref: "#/components/schemas/APIToken"
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: The secret – shown exactly once, stored only as a hash
+
+    SANType:
+      type: string
+      enum: [dns, ip, email, uri]
+
+    Preset:
+      type: object
+      description: Mirrors presets/*.yaml (see presets/README.md)
+      required: [name, description, family, validity_days, key_usage, ext_key_usage, subject_alt_names, openssl_purpose, ocsp_no_check, customizable]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        usage: { type: string }
+        family: { type: string, enum: [server, vpnserver, client, codesign, ocsp, timestamp, custom] }
+        validity_days: { type: integer }
+        key_usage:
+          type: object
+          required: [rsa, other]
+          properties:
+            rsa: { type: array, items: { type: string } }
+            other: { type: array, items: { type: string } }
+        ext_key_usage:
+          type: object
+          required: [usages, critical]
+          properties:
+            usages: { type: array, items: { type: string } }
+            critical: { type: boolean }
+        subject_alt_names:
+          type: object
+          required: [required_any_of, offered]
+          properties:
+            required_any_of: { type: array, items: { $ref: "#/components/schemas/SANType" } }
+            offered: { type: array, items: { $ref: "#/components/schemas/SANType" } }
+        common_name_from: { type: string, enum: ["", dns, email] }
+        openssl_purpose: { type: string }
+        ocsp_no_check: { type: boolean }
+        customizable: { type: boolean }
+
+    KeyAlgorithm:
+      type: string
+      description: |
+        ecdsa-p256 is the default for leaves. Ed25519 server certificates are not accepted by
+        browsers; rsa-2048 is flagged by the compliance view (BSI TR-02102 recommends ≥ 3000 bit).
+      enum: [ecdsa-p256, ecdsa-p384, rsa-2048, rsa-3072, rsa-4096, ed25519]
+
+    Subject:
+      type: object
+      required: [common_name]
+      properties:
+        common_name: { type: string, minLength: 1, maxLength: 64 }
+        organization: { type: string, maxLength: 64 }
+        organizational_unit: { type: string, maxLength: 64 }
+        locality: { type: string, maxLength: 128 }
+        state: { type: string, maxLength: 128 }
+        country: { type: string, pattern: "^[A-Z]{2}$" }
+
+    SANs:
+      type: object
+      properties:
+        dns:
+          type: array
+          maxItems: 100
+          items: { type: string, maxLength: 253 }
+        ip:
+          type: array
+          maxItems: 100
+          items: { type: string, description: "IPv4 or IPv6 address" }
+        email:
+          type: array
+          maxItems: 100
+          items: { type: string, format: email }
+        uri:
+          type: array
+          maxItems: 100
+          items: { type: string, format: uri }
+
+    NameConstraints:
+      type: object
+      description: |
+        Limits which names this CA may sign for. Marked critical by default (RFC 5280); enforced
+        by the server before signing as well, not only by clients.
+      properties:
+        permitted_dns:
+          type: array
+          items: { type: string, description: "e.g. .homelab.lan or homelab.lan" }
+        permitted_ip:
+          type: array
+          items: { type: string, description: "CIDR, IPv4 or IPv6" }
+        critical: { type: boolean, default: true }
+
+    CAKind:
+      type: string
+      enum: [root, intermediate]
+
+    CAStatus:
+      type: string
+      enum: [active, pending_signature, expired, revoked, retired]
+
+    KeyMode:
+      type: string
+      description: ADR-09 – offline (certificate only), online_encrypted (unseal needed), hsm
+      enum: [offline, online_encrypted, hsm]
+
+    CA:
+      type: object
+      required: [id, name, kind, status, key_mode, subject, not_before, not_after, serial, fingerprint_sha256]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/CAKind" }
+        status: { $ref: "#/components/schemas/CAStatus" }
+        key_mode: { $ref: "#/components/schemas/KeyMode" }
+        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+        subject: { type: string, description: RFC 4514 string }
+        issuer_ca_id: { type: [string, "null"] }
+        serial: { type: string, pattern: "^[0-9A-F]+$" }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        fingerprint_sha256: { type: string, pattern: "^[0-9A-F]{64}$" }
+        path_len: { type: [integer, "null"], minimum: 0 }
+        name_constraints: { $ref: "#/components/schemas/NameConstraints" }
+        eku_limit:
+          type: array
+          description: EKUs this CA may issue (legacy EKU_LIMIT)
+          items: { type: string }
+        public_base_url:
+          type: string
+          format: uri
+          description: Base of AIA/CRL URLs in issued certificates – immutable after the first issuance
+        crl: { $ref: "#/components/schemas/CRLInfo" }
+
+    CACreate:
+      type: object
+      required: [name, kind, subject, key_algorithm, validity_days, public_base_url]
+      properties:
+        name: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+        kind: { $ref: "#/components/schemas/CAKind" }
+        subject: { $ref: "#/components/schemas/Subject" }
+        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+        validity_days: { type: integer, minimum: 1, maximum: 9125 }
+        issuer_ca_id: { $ref: "#/components/schemas/ID" }
+        offline_signing:
+          type: boolean
+          default: false
+          description: Create key + CSR only; the certificate comes from an offline root
+        path_len: { type: integer, minimum: 0, default: 0 }
+        name_constraints: { $ref: "#/components/schemas/NameConstraints" }
+        eku_limit: { type: array, items: { type: string } }
+        public_base_url: { type: string, format: uri }
+
+    CACreated:
+      allOf:
+        - $ref: "#/components/schemas/CA"
+        - type: object
+          properties:
+            csr_pem:
+              type: string
+              description: Only with offline_signing – sign it on the offline root
+
+    CAImport:
+      type: object
+      required: [name, certificate]
+      properties:
+        name: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+        certificate: { type: string, contentMediaType: application/x-pem-file }
+        private_key:
+          type: string
+          contentMediaType: application/x-pem-file
+          description: Optional; encrypted PEM recommended
+        key_passphrase: { type: string, format: password, writeOnly: true }
+        public_base_url: { type: string, format: uri }
+
+    SignedCAUpload:
+      type: object
+      required: [certificate_pem]
+      properties:
+        certificate_pem: { type: string, maxLength: 65536 }
+        chain_pem: { type: string, maxLength: 262144 }
+
+    CRLInfo:
+      type: object
+      required: [number, this_update, next_update]
+      properties:
+        number: { type: integer, minimum: 0, description: Strictly increasing per CA }
+        this_update: { type: string, format: date-time }
+        next_update: { type: string, format: date-time }
+        revoked_count: { type: integer, minimum: 0 }
+
+    CertificateStatus:
+      type: string
+      enum: [valid, revoked, expired]
+
+    RevocationReason:
+      type: string
+      description: RFC 5280 §5.3.1 (certificateHold intentionally not offered)
+      enum: [unspecified, keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, privilegeWithdrawn]
+
+    Certificate:
+      type: object
+      required: [id, ca_id, status, source, subject, sans, serial, not_before, not_after, fingerprint_sha256, key_stored]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        ca_id: { type: [string, "null"], description: "null for external certificates" }
+        preset: { type: [string, "null"] }
+        status: { $ref: "#/components/schemas/CertificateStatus" }
+        source:
+          type: string
+          enum: [issued, imported, external]
+        subject: { type: string, description: RFC 4514 string }
+        common_name: { type: string }
+        sans: { $ref: "#/components/schemas/SANs" }
+        serial: { type: string, pattern: "^[0-9A-F]+$" }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+        key_stored:
+          type: boolean
+          description: The server holds the (encrypted) private key – only for server-generated keys
+        fingerprint_sha256: { type: string, pattern: "^[0-9A-F]{64}$" }
+        revocation:
+          type: [object, "null"]
+          properties:
+            reason: { $ref: "#/components/schemas/RevocationReason" }
+            revoked_at: { type: string, format: date-time }
+            invalidity_date: { type: [string, "null"], format: date-time }
+        renewal_of: { type: [string, "null"] }
+        issued_by: { type: [string, "null"], description: User or token that requested it }
+        created_at: { type: string, format: date-time }
+
+    CertificateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Certificate" }
+        next_cursor: { type: [string, "null"] }
+
+    IssueRequest:
+      type: object
+      required: [ca_id, preset, subject]
+      oneOf:
+        - required: [csr_pem]
+        - required: [key]
+      properties:
+        ca_id: { $ref: "#/components/schemas/ID" }
+        preset: { type: string }
+        subject: { $ref: "#/components/schemas/Subject" }
+        sans: { $ref: "#/components/schemas/SANs" }
+        validity_days:
+          type: integer
+          minimum: 1
+          description: Defaults to the preset; capped by the CA's own notAfter
+        csr_pem: { type: string, maxLength: 65536 }
+        use_csr_sans:
+          type: boolean
+          default: true
+          description: false = ignore names in the CSR, use only `sans` (legacy --no-csr-san)
+        key:
+          type: object
+          required: [algorithm]
+          properties:
+            algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+        key_usage:
+          type: array
+          items: { type: string }
+          description: Only for customizable presets; validated like preset files
+        ext_key_usage:
+          type: array
+          items: { type: string }
+          description: Only for customizable presets; validated like preset files
+
+    RevokeRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { $ref: "#/components/schemas/RevocationReason" }
+        invalidity_date:
+          type: string
+          format: date-time
+          description: When the key is known or suspected to have been compromised
+
+    RenewRequest:
+      type: object
+      properties:
+        reuse_key:
+          type: boolean
+          default: false
+          description: Keep the existing key (only for server-generated keys)
+        revoke_previous:
+          type: boolean
+          default: false
+          description: Revoke the old certificate with reason superseded
+        validity_days: { type: integer, minimum: 1 }
+
+    ExportRequest:
+      type: object
+      required: [format]
+      properties:
+        format:
+          type: string
+          enum: [pkcs12, key, combined, zip]
+          description: |
+            pkcs12 = certificate + key + chain (Windows, macOS, browsers);
+            key = PEM private key; combined = key + fullchain in one PEM (HAProxy);
+            zip = all files plus the deployment guide
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 8
+          maxLength: 1024
+          description: Required for pkcs12 and to encrypt the key in key/combined/zip
+        pkcs12_legacy:
+          type: boolean
+          default: false
+          description: Legacy encryption (3DES/RC2) for old Windows/macOS/Java – weak, use only if needed
+
+    CSRInfo:
+      type: object
+      required: [subject, sans, key_algorithm, signature_valid]
+      properties:
+        subject: { type: string }
+        sans: { $ref: "#/components/schemas/SANs" }
+        key_algorithm: { type: string }
+        signature_valid: { type: boolean }
+        requested_extensions:
+          type: array
+          description: Shown for information only – extensions are never copied from a CSR
+          items: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+
+    LegacyImportUpload:
+      type: object
+      required: [archive]
+      properties:
+        archive:
+          type: string
+          contentMediaType: application/octet-stream
+          description: tar.gz or zip of the pki/ directory (size-limited, zip-slip safe)
+        dry_run:
+          type: boolean
+          default: false
+          description: Only analyse and report, write nothing
+      additionalProperties:
+        type: string
+        description: "ca_passphrase[<name>] fields for encrypted CA keys"
+
+    ImportJob:
+      type: object
+      required: [id, status]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        dry_run: { type: boolean }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        summary:
+          type: object
+          properties:
+            cas: { type: integer }
+            certificates: { type: integer }
+            revoked: { type: integer }
+            keys_imported: { type: integer }
+        problems:
+          type: array
+          items:
+            type: object
+            required: [severity, message]
+            properties:
+              severity: { type: string, enum: [info, warning, error] }
+              path: { type: string, description: File inside the archive }
+              message: { type: string }
+
+    AuditEntry:
+      type: object
+      required: [seq, time, actor, action, result, hash, prev_hash]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        time: { type: string, format: date-time }
+        actor:
+          type: object
+          required: [type]
+          properties:
+            type: { type: string, enum: [user, token, system, acme_account, agent] }
+            id: { type: string }
+            name: { type: string }
+        action: { type: string, examples: ["certificate.revoke"] }
+        target:
+          type: object
+          properties:
+            type: { type: string }
+            id: { type: string }
+        result: { type: string, enum: [success, failure, denied] }
+        source_ip: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+          description: Never contains secrets or key material
+        hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        prev_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+
+    AuditList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEntry" }
+        next_cursor: { type: [string, "null"] }
+
+    AuditVerifyResult:
+      type: object
+      required: [ok, entries_checked]
+      properties:
+        ok: { type: boolean }
+        entries_checked: { type: integer, minimum: 0 }
+        first_broken_seq: { type: [integer, "null"] }
