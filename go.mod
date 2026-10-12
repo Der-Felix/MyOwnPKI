@@ -9,11 +9,13 @@ tool (
 	golang.org/x/vuln/cmd/govulncheck
 )
 
-require go.yaml.in/yaml/v3 v3.0.5
+require (
+	github.com/a-h/templ v0.3.1070
+	go.yaml.in/yaml/v3 v3.0.5
+)
 
 require (
 	github.com/a-h/parse v0.0.0-20250122154542-74294addb73e // indirect
-	github.com/a-h/templ v0.3.1070 // indirect
 	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cli/browser v1.3.0 // indirect

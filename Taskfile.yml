@@ -67,6 +67,12 @@ tasks:
     cmds:
       - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/ ./cmd/...
 
+  dev:
+    desc: Run the server in dev mode (http://127.0.0.1:9443/design – no TLS, no login, loopback only)
+    deps: [generate]
+    cmds:
+      - go run ./cmd/myownpki serve --dev
+
   cross:
     desc: Build all binaries for every release platform into bin/<os>-<arch>/
     cmds:

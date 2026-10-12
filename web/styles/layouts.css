@@ -1,0 +1,163 @@
+/*
+ * Layout shells (ADR-13). Phase 0 ships shell B "Standard" (top navigation,
+ * page title, info column). Shells A "Compact" and C "Focus" follow in phase 4;
+ * pages never depend on the shell they are rendered in.
+ */
+
+.shell-b {
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  height: 48px;
+  padding: 0 var(--sp-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand-name {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.topnav {
+  display: flex;
+  align-self: stretch;
+  gap: var(--sp-1);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.topnav-item {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-3);
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+.topnav-item:hover {
+  color: var(--text);
+}
+
+.topnav-item.is-active {
+  color: var(--text);
+  border-bottom-color: var(--brand);
+  font-weight: 600;
+}
+
+.topnav-item.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--sp-5);
+}
+
+.page-head {
+  margin-bottom: var(--sp-5);
+}
+
+.page-head .lead {
+  color: var(--text-muted);
+  max-width: 72ch;
+  margin: 0;
+}
+
+.with-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.aside {
+  position: sticky;
+  top: var(--sp-6);
+  display: grid;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+.toc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--border);
+}
+
+.toc a {
+  display: block;
+  padding: 2px var(--sp-3);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.toc a:hover {
+  color: var(--text);
+}
+
+.sec {
+  margin-bottom: var(--sp-6);
+  scroll-margin-top: var(--sp-6);
+}
+
+.sec > h2 {
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.sec-intro {
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.sec-sub {
+  margin-top: var(--sp-5);
+}
+
+.stack {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+@media (max-width: 960px) {
+  .with-aside {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aside {
+    position: static;
+    order: -1;
+  }
+
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    gap: var(--sp-3);
+    padding: 0 var(--sp-3);
+  }
+
+  .page {
+    padding: var(--sp-3);
+  }
+}

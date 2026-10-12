@@ -1,14 +1,17 @@
 // Command myownpki is the MyOwnPKI server: web UI, REST API, ACME server and CA engine.
 //
-// Phase 0: only --version is implemented.
+// Phase 0: --version, and `serve --dev` for the component gallery (/design).
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/version"
 )
@@ -16,15 +19,22 @@ import (
 const binary = "myownpki"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
-// run parses the arguments and returns the process exit code
-// (0 success, 2 usage error).
-func run(args []string, stdout, stderr io.Writer) int {
+// run dispatches the command line and returns the process exit code
+// (0 success, 1 runtime error, 2 usage error).
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(fs.Output(), "Usage:\n  %s --version\n  %s serve --dev [--listen 127.0.0.1:9443]\n\nFlags:\n", binary, binary)
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -37,7 +47,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	_, _ = fmt.Fprintf(stderr, "%s: no command given (phase 0 only supports --version)\n", binary)
+	switch fs.Arg(0) {
+	case "serve":
+		return runServe(ctx, fs.Args()[1:], stderr)
+	case "":
+		_, _ = fmt.Fprintf(stderr, "%s: no command given\n", binary)
+	default:
+		_, _ = fmt.Fprintf(stderr, "%s: unknown command %q\n", binary, fs.Arg(0))
+	}
 	fs.Usage()
 	return 2
 }

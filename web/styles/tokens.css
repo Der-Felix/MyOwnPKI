@@ -1,0 +1,137 @@
+/*
+ * Design tokens – the only file themes change (ADR-12).
+ *
+ * Two groups:
+ *  - Brand/neutral tokens: themeable (instance → tenant → user, PLAN §7).
+ *  - Status tokens (--status-*): FIXED. They differ between light and dark
+ *    mode for contrast, but no theme may override them – "expired" must never
+ *    look like branding.
+ *
+ * Light/dark: prefers-color-scheme, overridden by data-theme="light|dark" on
+ * any element (the /design page uses this to show both modes side by side).
+ * Density: data-density="compact" on any element.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Neutral */
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #eff1f4;
+  --border: #d8dce2;
+  --border-strong: #b6bdc6;
+  --text: #1b1f24;
+  --text-muted: #59626e;
+
+  /* Brand (themeable) */
+  --brand: #24527a;
+  --brand-hover: #1b4061;
+  --brand-contrast: #ffffff;
+  --link: #1f5a8c;
+  --focus: #2b6cb0;
+
+  /* Status (fixed – never themeable) */
+  --status-ok: #1e7a3c;
+  --status-ok-bg: #e7f3eb;
+  --status-warn: #8a5300;
+  --status-warn-bg: #fcf2df;
+  --status-crit: #b42318;
+  --status-crit-bg: #fcebea;
+  --status-info: #1d5ea6;
+  --status-info-bg: #e8f0fa;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #121417;
+  --surface: #1a1d21;
+  --surface-2: #23272c;
+  --border: #31363d;
+  --border-strong: #474e57;
+  --text: #e5e7ea;
+  --text-muted: #9ba3ad;
+
+  --brand: #6fa2d4;
+  --brand-hover: #8cb6e0;
+  --brand-contrast: #0c1a28;
+  --link: #8cb6e0;
+  --focus: #8cb6e0;
+
+  --status-ok: #5ec486;
+  --status-ok-bg: #13291c;
+  --status-warn: #e2a84b;
+  --status-warn-bg: #2d220f;
+  --status-crit: #f27c73;
+  --status-crit-bg: #341816;
+  --status-info: #7aaef0;
+  --status-info-bg: #132338;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #121417;
+    --surface: #1a1d21;
+    --surface-2: #23272c;
+    --border: #31363d;
+    --border-strong: #474e57;
+    --text: #e5e7ea;
+    --text-muted: #9ba3ad;
+
+    --brand: #6fa2d4;
+    --brand-hover: #8cb6e0;
+    --brand-contrast: #0c1a28;
+    --link: #8cb6e0;
+    --focus: #8cb6e0;
+
+    --status-ok: #5ec486;
+    --status-ok-bg: #13291c;
+    --status-warn: #e2a84b;
+    --status-warn-bg: #2d220f;
+    --status-crit: #f27c73;
+    --status-crit-bg: #341816;
+    --status-info: #7aaef0;
+    --status-info-bg: #132338;
+  }
+}
+
+:root {
+  /* Typography – system fonts only: nothing to download, nothing to license */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.875rem;
+  --fs-lg: 1rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
+  --lh: 1.5;
+
+  /* Shape */
+  --radius: 4px;
+  --radius-sm: 3px;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 6%);
+
+  /* Spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* Density (comfortable) */
+  --cell-y: 8px;
+  --cell-x: 12px;
+  --control-h: 32px;
+}
+
+[data-density="compact"] {
+  --cell-y: 4px;
+  --cell-x: 8px;
+  --control-h: 26px;
+}

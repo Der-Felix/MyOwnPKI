@@ -1,0 +1,326 @@
+package design
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+)
+
+// Page renders the component gallery inside shell B.
+templ Page(dev bool) {
+	@layout.Standard(layout.Page{Title: "Design system", Active: "design", Dev: dev}) {
+		<div class="page-head">
+			<h1>Design system</h1>
+			<p class="lead">
+				Every class of web/styles in one place. Templates use only these classes – no inline
+				styles. Themes change tokens only; status colors are fixed.
+			</p>
+		</div>
+		<div class="with-aside">
+			<div>
+				@colorsSection()
+				@typeSection()
+				@badgesSection()
+				@buttonsSection()
+				@tablesSection()
+				@statsSection()
+				@formsSection()
+				@notesSection()
+				@detailsSection()
+				@emptySection()
+				@themesSection()
+			</div>
+			<aside class="aside">
+				<nav aria-label="On this page">
+					<ul class="toc">
+						for _, e := range toc {
+							<li><a href={ templ.SafeURL("#" + e.ID) }>{ e.Label }</a></li>
+						}
+					</ul>
+				</nav>
+				@components.Note(components.StatusInfo, "Phase 0") {
+					<p class="small">Static sample data. Navigation items other than Design are built in phase 1.</p>
+				}
+			</aside>
+		</div>
+	}
+}
+
+templ swatchGrid(list []swatch) {
+	<div class="swatches">
+		for _, s := range list {
+			<div class="swatch">
+				<div class={ "swatch-color", s.Class }></div>
+				<div class="swatch-name">
+					<div class="mono">{ s.Token }</div>
+					<div class="muted">{ s.Note }</div>
+				</div>
+			</div>
+		}
+	</div>
+}
+
+templ colorsSection() {
+	<section class="sec" id="colors">
+		<h2>Colors</h2>
+		<p class="sec-intro">Neutral and brand tokens can be changed by themes (instance, tenant, user).</p>
+		@swatchGrid(neutralSwatches)
+		<h3 class="sec-sub">Status – fixed</h3>
+		<p class="sec-intro">
+			Status tokens are never themeable, so "expired" can't look like branding. Status is always
+			shown as color plus icon plus text.
+		</p>
+		@swatchGrid(statusSwatches)
+	</section>
+}
+
+templ typeSection() {
+	<section class="sec" id="type">
+		<h2>Typography</h2>
+		<div class="type-scale">
+			<h1>Heading 1 – page title</h1>
+			<h2>Heading 2 – section</h2>
+			<h3>Heading 3 – subsection</h3>
+			<p>Body text for descriptions and help. System fonts only: nothing is downloaded.</p>
+			<p class="small muted">Small muted text for hints and secondary information.</p>
+			<p>
+				Serial <span class="mono">4F3A9C21E07B5D8816A2F0C3B9D47E15</span> – serials, fingerprints, OIDs and
+				PEM use monospace (<code>.mono</code>) because admins compare them character by character.
+			</p>
+			<p>
+				Dates are absolute: 2027-01-04<span class="rel">in 83 days</span>. Times in UTC: 2026-10-13 04:17 UTC.
+			</p>
+			<p><a href="#type">A link</a> in running text.</p>
+		</div>
+	</section>
+}
+
+templ badgesSection() {
+	<section class="sec" id="badges">
+		<h2>Status badges</h2>
+		<p class="sec-intro"><code>.bd</code> with <code>.bd-ok .bd-wa .bd-cr .bd-in .bd-ne</code>.</p>
+		<div class="btn-row">
+			@components.Badge(components.StatusOK, "Valid")
+			@components.Badge(components.StatusWarn, "Expires in 20 days")
+			@components.Badge(components.StatusCrit, "Revoked")
+			@components.Badge(components.StatusCrit, "Expired")
+			@components.Badge(components.StatusInfo, "Pending approval")
+			@components.Badge(components.StatusNeutral, "External")
+		</div>
+	</section>
+}
+
+templ buttonsSection() {
+	<section class="sec" id="buttons">
+		<h2>Buttons</h2>
+		<p class="sec-intro">
+			One primary action per view. Destructive actions use the fixed critical color and always
+			require confirmation (and step-up authentication) in the real UI.
+		</p>
+		<div class="btn-row">
+			<button type="button" class="btn btn-primary">Issue certificate</button>
+			<button type="button" class="btn">Cancel</button>
+			<button type="button" class="btn">
+				@components.Icon("i-download")
+				Download
+			</button>
+			<button type="button" class="btn btn-danger">Revoke</button>
+			<button type="button" class="btn" disabled>Disabled</button>
+			<button type="button" class="btn btn-sm">Small</button>
+		</div>
+	</section>
+}
+
+templ certTable(caption string) {
+	<div class="tb-wrap">
+		<table class="tb">
+			<caption>{ caption }</caption>
+			<thead>
+				<tr>
+					<th scope="col">Common name</th>
+					<th scope="col">Preset</th>
+					<th scope="col">CA</th>
+					<th scope="col">Serial</th>
+					<th scope="col">Expires</th>
+					<th scope="col">Status</th>
+					<th scope="col"><span class="visually-hidden">Actions</span></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, c := range sampleCerts {
+					<tr>
+						<td>{ c.CommonName }</td>
+						<td>{ c.Preset }</td>
+						<td>{ c.CA }</td>
+						<td class="mono small">{ c.Serial }</td>
+						<td class="nowrap">{ c.Expires }<span class="rel">{ c.Relative }</span></td>
+						<td>
+							@components.Badge(c.Status, c.StatusText)
+						</td>
+						<td class="actions"><button type="button" class="btn btn-sm">Details</button></td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ tablesSection() {
+	<section class="sec" id="tables">
+		<h2>Tables</h2>
+		<p class="sec-intro">
+			Lists are tables, not cards: dense, sortable, comparable. Above a table sits the filter bar
+			(<code>.toolbar</code>).
+		</p>
+		<div class="toolbar">
+			<input class="grow" type="search" placeholder="Search CN, SAN or serial" aria-label="Search certificates"/>
+			<select aria-label="Filter by status">
+				<option>All statuses</option>
+				<option>Valid</option>
+				<option>Expires soon</option>
+				<option>Revoked</option>
+			</select>
+			<select aria-label="Filter by CA">
+				<option>All CAs</option>
+				<option>homelab-issuing</option>
+				<option>homelab-users</option>
+			</select>
+		</div>
+		@certTable("Certificates (sample data)")
+	</section>
+}
+
+templ statsSection() {
+	<section class="sec" id="stats">
+		<h2>KPI tiles</h2>
+		<p class="sec-intro">Cards are reserved for KPIs and dashboard widgets. The colored edge is backed by a text hint.</p>
+		<div class="stats">
+			@components.Stat("Certificates", "1,284", "", "")
+			@components.Stat("Expiring ≤ 30 days", "17", "Renewal due", components.StatusWarn)
+			@components.Stat("Revoked", "3", "CRL updated 04:17 UTC", components.StatusCrit)
+			@components.Stat("CAs online", "2 / 2", "All unsealed", components.StatusOK)
+		</div>
+	</section>
+}
+
+templ formsSection() {
+	<section class="sec" id="forms">
+		<h2>Forms</h2>
+		<p class="sec-intro">Label left, control right, hint below; errors in critical color with icon and text.</p>
+		<form class="form" action="#forms" method="get">
+			@components.FormRow("f-cn", "Common name", "Display name only – clients match host names against the SANs.", "", true) {
+				<input id="f-cn" type="text" value="nas.homelab.lan" aria-describedby="f-cn-hint" required/>
+			}
+			@components.FormRow("f-preset", "Preset", "Decides key usage, extended key usage and required SANs.", "", true) {
+				<select id="f-preset" aria-describedby="f-preset-hint">
+					<option>server</option>
+					<option>wildcard</option>
+					<option>client</option>
+					<option>server-client</option>
+				</select>
+			}
+			@components.FormRow("f-dns", "DNS names", "", "\"nas.example.org\" is outside the name constraints of homelab-issuing (.homelab.lan).", false) {
+				<textarea id="f-dns" aria-invalid="true" aria-describedby="f-dns-err">{ sampleDNSNames }</textarea>
+			}
+			@components.FormRow("f-days", "Validity (days)", "Preset default 397; capped by the CA's own expiry.", "", false) {
+				<input id="f-days" type="number" value="397" min="1" aria-describedby="f-days-hint"/>
+			}
+			<div class="form-row">
+				<span class="label">Key</span>
+				<div>
+					<label class="check"><input type="radio" name="key" checked/> Upload CSR (key stays on the host)</label>
+					<label class="check"><input type="radio" name="key"/> Generate key on the server (ECDSA P-256)</label>
+				</div>
+			</div>
+			<div class="form-actions">
+				<button type="button" class="btn">Cancel</button>
+				<button type="button" class="btn btn-primary">Issue certificate</button>
+			</div>
+		</form>
+	</section>
+}
+
+templ notesSection() {
+	<section class="sec" id="notes">
+		<h2>Notices</h2>
+		<div class="stack">
+			@components.Note(components.StatusInfo, "Server is sealed") {
+				<p>CA keys are encrypted. Enter the unseal passphrase to enable signing.</p>
+			}
+			@components.Note(components.StatusWarn, "Root CA key is online") {
+				<p>A root certificate can't really be revoked. Keep the root offline and sign intermediates with legacy/pki.sh.</p>
+			}
+			@components.Note(components.StatusCrit, "CRL expired") {
+				<p>The CRL of homelab-issuing passed its nextUpdate. Clients that check revocation will reject certificates.</p>
+			}
+		</div>
+	</section>
+}
+
+templ detailsSection() {
+	<section class="sec" id="details">
+		<h2>Details</h2>
+		<div class="grid-2">
+			<dl class="kv">
+				<dt>Subject</dt>
+				<dd>CN=nas.homelab.lan</dd>
+				<dt>Issuer</dt>
+				<dd>CN=homelab-issuing</dd>
+				<dt>Serial</dt>
+				<dd class="mono">4F3A9C21E07B5D8816A2F0C3B9D47E15</dd>
+				<dt>SHA-256 fingerprint</dt>
+				<dd class="mono small">3B:9F:0A:C1:7E:52:D4:88:16:E0:A9:2C:5B:F7:61:03:CD:49:8A:2E:F1:07:B6:93:D5:20:6C:E8:4A:91:7F:12</dd>
+				<dt>Key usage</dt>
+				<dd>digitalSignature <span class="muted">(critical)</span></dd>
+				<dt>Extended key usage</dt>
+				<dd>serverAuth</dd>
+				<dt>Valid</dt>
+				<dd>2026-10-13 – 2027-01-04<span class="rel">83 days left</span></dd>
+			</dl>
+			<pre class="pem">{ samplePEM }</pre>
+		</div>
+	</section>
+}
+
+templ emptySection() {
+	<section class="sec" id="empty">
+		<h2>Empty state &amp; charts</h2>
+		<div class="grid-2">
+			<div class="empty">
+				<div class="empty-title">No certificates yet</div>
+				<p>Issue the first certificate or import an existing pki.sh directory.</p>
+				<div class="btn-row">
+					<button type="button" class="btn btn-primary">Issue certificate</button>
+					<button type="button" class="btn">Import</button>
+				</div>
+			</div>
+			<div class="chart-box">Chart container – ECharts islands follow in phase 4</div>
+		</div>
+	</section>
+}
+
+templ themesSection() {
+	<section class="sec" id="themes">
+		<h2>Dark mode &amp; density</h2>
+		<p class="sec-intro">
+			Same classes, different tokens: <code>data-theme="dark"</code> and <code>data-density="compact"</code>
+			can be set on any element. The page itself follows the operating system setting.
+		</p>
+		<div class="preview" data-theme="dark" data-density="compact">
+			<div class="stats">
+				@components.Stat("Certificates", "1,284", "", "")
+				@components.Stat("Expiring ≤ 30 days", "17", "Renewal due", components.StatusWarn)
+				@components.Stat("Revoked", "3", "CRL updated", components.StatusCrit)
+			</div>
+			<div class="btn-row">
+				<button type="button" class="btn btn-primary">Issue certificate</button>
+				<button type="button" class="btn">Cancel</button>
+				<button type="button" class="btn btn-danger">Revoke</button>
+				@components.Badge(components.StatusOK, "Valid")
+				@components.Badge(components.StatusWarn, "Expires soon")
+				@components.Badge(components.StatusCrit, "Revoked")
+				@components.Badge(components.StatusInfo, "Pending")
+			</div>
+			@certTable("Dark, compact")
+		</div>
+	</section>
+}

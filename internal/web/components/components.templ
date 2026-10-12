@@ -1,0 +1,104 @@
+package components
+
+// Status is the meaning of a badge, stat or notice. Status colors are fixed
+// tokens (--status-*) that themes can't change (ADR-12).
+type Status string
+
+// Statuses map to the CSS suffixes -ok, -wa, -cr, -in and -ne (neutral).
+const (
+	StatusOK      Status = "ok"
+	StatusWarn    Status = "wa"
+	StatusCrit    Status = "cr"
+	StatusInfo    Status = "in"
+	StatusNeutral Status = "ne"
+)
+
+// icon returns the sprite symbol shown next to a status, so status is never
+// conveyed by color alone (accessibility).
+func (s Status) icon() string {
+	switch s {
+	case StatusOK:
+		return "i-ok"
+	case StatusWarn:
+		return "i-warn"
+	case StatusCrit:
+		return "i-crit"
+	case StatusInfo, StatusNeutral:
+		return "i-info"
+	default:
+		return "i-info"
+	}
+}
+
+// Icon renders one symbol of /static/icons.svg. Decorative: hidden from screen readers.
+templ Icon(name string) {
+	<svg class="ic" aria-hidden="true" focusable="false"><use href={ "/static/icons.svg#" + name }></use></svg>
+}
+
+// Badge shows a status with icon and text.
+templ Badge(s Status, text string) {
+	<span class={ "bd", "bd-" + string(s) }>
+		if s != StatusNeutral {
+			@Icon(s.icon())
+		}
+		{ text }
+	</span>
+}
+
+// Stat is a KPI tile. s may be "" for a neutral tile.
+templ Stat(label, value, hint string, s Status) {
+	<div class={ "stat", templ.KV("stat-"+string(s), s != "") }>
+		<div class="stat-label">{ label }</div>
+		<div class="stat-value">{ value }</div>
+		if hint != "" {
+			<div class="stat-hint">
+				if s != "" {
+					@Icon(s.icon())
+				}
+				{ hint }
+			</div>
+		}
+	</div>
+}
+
+// Note is a notice box; the children are its body text.
+templ Note(s Status, title string) {
+	<div class={ "note", "note-" + string(s) } role="note">
+		@Icon(s.icon())
+		<div>
+			<div class="note-title">{ title }</div>
+			{ children... }
+		</div>
+	</div>
+}
+
+// FormRow lays out one labelled form control (the children). errMsg marks the
+// row invalid and is announced via aria-describedby on the control.
+templ FormRow(id, label, hint, errMsg string, required bool) {
+	<div class={ "form-row", templ.KV("has-error", errMsg != "") }>
+		<label for={ id }>
+			{ label }
+			if required {
+				<span class="req" aria-hidden="true">*</span>
+			}
+		</label>
+		{ children... }
+		if hint != "" {
+			<div class="hint" id={ id + "-hint" }>{ hint }</div>
+		}
+		if errMsg != "" {
+			<div class="err" id={ id + "-err" }>
+				@Icon("i-crit")
+				{ errMsg }
+			</div>
+		}
+	</div>
+}
+
+// DevBanner is shown on every page while the server runs with --dev.
+templ DevBanner() {
+	<div class="dev-banner" role="alert">
+		@Icon("i-warn")
+		DEV MODE – no TLS, no auth
+	</div>
+}
