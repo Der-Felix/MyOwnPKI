@@ -13,6 +13,8 @@ vars:
   # templ and govulncheck are pinned in go.mod (`go tool …`) and need no entry here.
   GO_VERSION: 1.27.2
   GOLANGCI_LINT_VERSION: 2.14.0
+  # Prebuilt binary (not `go tool`): checked only once sqlc.yaml exists (phase 1).
+  SQLC_VERSION: 1.31.1
 
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
@@ -33,7 +35,7 @@ tasks:
       - task --list
 
   tools:check:
-    desc: Verify that the installed Go and golangci-lint match the pinned versions
+    desc: Verify that the installed Go, golangci-lint (and sqlc, once used) match the pinned versions
     silent: true
     cmds:
       - |
@@ -49,6 +51,14 @@ tasks:
           echo "golangci-lint: found $v, expected {{.GOLANGCI_LINT_VERSION}}"; exit 1
         fi
         echo "golangci-lint $v  ok"
+      - |
+        if [ -f sqlc.yaml ]; then
+          v=$(sqlc version)
+          if [ "$v" != "v{{.SQLC_VERSION}}" ]; then
+            echo "sqlc: found $v, expected v{{.SQLC_VERSION}}"; exit 1
+          fi
+          echo "sqlc          $v  ok"
+        fi
       - go tool templ version
       - go tool govulncheck -version
 

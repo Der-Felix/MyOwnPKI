@@ -1,0 +1,28 @@
+# Dependabot opens pull requests for dependency updates (nothing is merged automatically).
+#
+# Not covered – update by hand, keep in sync with Taskfile.yml:
+#   GO_VERSION, TASK_VERSION, GOLANGCI_LINT_*, SQLC_*, SHELLCHECK_* in .github/workflows/ci.yml
+#   and the `toolchain` line in go.mod.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]

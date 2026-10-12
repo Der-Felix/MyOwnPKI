@@ -1,0 +1,55 @@
+# Shared setup for CI jobs: pinned Go toolchain, Task and optional tools.
+# Versions and checksums come from the `env:` block in .github/workflows/ci.yml.
+name: Set up Go and tools
+description: Install the pinned Go toolchain, Task and optionally golangci-lint and sqlc
+
+inputs:
+  golangci-lint:
+    description: Install golangci-lint ("true"/"false")
+    default: "false"
+  sqlc:
+    description: Install sqlc ("true"/"false")
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: go.sum
+
+    # `go install` verifies the module against the Go checksum database.
+    - name: Install Task
+      shell: bash
+      run: go install "github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}"
+
+    - name: Prepare tool directory
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/bin"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+    - name: Install golangci-lint
+      if: inputs.golangci-lint == 'true'
+      shell: bash
+      run: |
+        f="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/$f"
+        echo "${GOLANGCI_LINT_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/golangci-lint"
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/golangci-lint"
+        install -m 0755 "$(find "$RUNNER_TEMP/golangci-lint" -type f -name golangci-lint)" "$RUNNER_TEMP/bin/"
+
+    - name: Install sqlc
+      if: inputs.sqlc == 'true'
+      shell: bash
+      run: |
+        f="sqlc_${SQLC_VERSION}_linux_amd64.tar.gz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/sqlc-dev/sqlc/releases/download/v${SQLC_VERSION}/$f"
+        echo "${SQLC_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/sqlc"
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/sqlc"
+        install -m 0755 "$(find "$RUNNER_TEMP/sqlc" -type f -name sqlc)" "$RUNNER_TEMP/bin/"

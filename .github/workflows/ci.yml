@@ -1,0 +1,132 @@
+# Continuous integration for MyOwnPKI.
+#
+# Security posture of this workflow:
+# - read-only token (permissions: contents: read), no secrets used
+# - third-party actions pinned to a full commit SHA (tags can be moved)
+# - downloaded tools are verified against pinned SHA-256 checksums
+# - GOTOOLCHAIN=local: CI never silently downloads a different Go version
+#
+# Pinned versions must match Taskfile.yml – `task tools:check` fails otherwise.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily vulnerability scan: new advisories appear without any code change.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27.2"
+  TASK_VERSION: "3.54.0"
+  GOLANGCI_LINT_VERSION: "2.14.0"
+  GOLANGCI_LINT_SHA256: "ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab"
+  SQLC_VERSION: "1.31.1"
+  SQLC_SHA256: "497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354"
+  SHELLCHECK_VERSION: "0.11.0"
+  SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+
+jobs:
+  check:
+    name: check (fmt, lint, test, build, generated code)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          golangci-lint: "true"
+          sqlc: ${{ hashFiles('sqlc.yaml') != '' }}
+      - run: task check
+      - run: task generate:check
+
+  race:
+    name: tests with race detector
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: task test:race
+
+  test-os:
+    name: tests on ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - run: go test ./...
+
+  cross:
+    name: cross-compile (linux, darwin, windows, freebsd)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: task cross
+
+  vuln:
+    name: vulnerability scan (govulncheck)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: task vuln
+
+  shellcheck:
+    name: shellcheck (legacy Bash suite)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: |
+          f="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/$f" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$f"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/shellcheck" "$RUNNER_TEMP/bin"
+          tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/shellcheck"
+          install -m 0755 "$(find "$RUNNER_TEMP/shellcheck" -type f -name shellcheck)" "$RUNNER_TEMP/bin/"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Severity "error" for now: the legacy suite still has warnings
+      # (see docs/NIGHTLOG.md); raise to "warning" once they are fixed.
+      - name: ShellCheck sources and compiled standalone script
+        run: |
+          bash legacy/build.sh
+          shellcheck --severity=error \
+            legacy/*.sh legacy/lib/*.sh legacy/completions/*.bash \
+            legacy/dist/pki-standalone.sh
