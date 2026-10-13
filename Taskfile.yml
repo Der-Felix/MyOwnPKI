@@ -23,9 +23,11 @@ vars:
   # reproducible, and no information about the build machine leaks.
   BUILD_FLAGS: -trimpath
 
-env:
-  # Pure Go builds only (ADR-01). The HSM variant will get its own task.
-  CGO_ENABLED: '0'
+# CGO: pure Go builds only (ADR-01); the HSM variant will get its own task.
+# CGO_ENABLED is written directly in front of every go build/run/test command.
+# A top-level `env:` block would NOT be enough: Task never overrides a variable
+# that is already set in the environment, so a CGO_ENABLED=1 from the shell or
+# the CI would silently win. `task build:verify` proves the result.
 
 tasks:
   default:
@@ -63,35 +65,51 @@ tasks:
       - go tool govulncheck -version
 
   build:
-    desc: Build all three binaries for this machine into bin/
+    desc: Build all three binaries for this machine into bin/ (pure Go, verified)
     cmds:
-      - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/ ./cmd/...
+      - CGO_ENABLED=0 go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/ ./cmd/...
+      - task: build:verify
+
+  build:verify:
+    desc: Fail if any binary in bin/ was built with CGO (ADR-01) – reads the build info of each file
+    silent: true
+    cmds:
+      - |
+        found=0
+        for f in {{.BIN_DIR}}/* {{.BIN_DIR}}/*/*; do
+          [ -f "$f" ] || continue
+          found=1
+          case "$(go version -m "$f")" in
+            *"CGO_ENABLED=0"*) echo "pure Go      $f" ;;
+            *) echo "CGO ENABLED  $f  – violates ADR-01 (pure Go builds)"; exit 1 ;;
+          esac
+        done
+        if [ "$found" = 0 ]; then echo "no binaries in {{.BIN_DIR}}/"; exit 1; fi
 
   dev:
     desc: Run the server in dev mode (http://127.0.0.1:9443/design – no TLS, no login, loopback only)
     deps: [generate]
     cmds:
-      - go run ./cmd/myownpki serve --dev
+      - CGO_ENABLED=0 go run ./cmd/myownpki serve --dev
 
   cross:
-    desc: Build all binaries for every release platform into bin/<os>-<arch>/
+    desc: Build all binaries for every release platform into bin/<os>-<arch>/ (pure Go, verified)
     cmds:
       - for: { var: PLATFORMS }
         cmd: >-
-          GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}}
+          CGO_ENABLED=0 GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}}
           go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/{{replace "/" "-" .ITEM}}/ ./cmd/...
+      - task: build:verify
 
   test:
-    desc: Run all tests
+    desc: Run all tests (pure Go, like the release binaries)
     cmds:
-      - go test ./...
+      - CGO_ENABLED=0 go test ./...
 
   test:race:
-    desc: Run all tests with the race detector (needs a C compiler – runs in CI on Linux)
-    env:
-      CGO_ENABLED: '1'
+    desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)
     cmds:
-      - go test -race ./...
+      - CGO_ENABLED=1 go test -race ./...
 
   fmt:
     desc: Format all Go files (gofmt + goimports, settings in .golangci.yml)

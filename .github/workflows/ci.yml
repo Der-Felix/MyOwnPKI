@@ -58,6 +58,10 @@ jobs:
     name: tests with race detector
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
+    env:
+      # The race detector needs cgo (gcc is preinstalled on the runner). Only this
+      # job – release binaries stay pure Go (ADR-01, verified by task build:verify).
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
