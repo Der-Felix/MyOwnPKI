@@ -54,7 +54,7 @@ MyOwnPKI is a self-hosted certificate authority platform:
 ## Development
 
 Requirements: Go (the exact toolchain is pinned in `go.mod` and downloaded automatically),
-[Task](https://taskfile.dev) and [golangci-lint](https://golangci-lint.run) – versions in `Taskfile.yml`.
+[Task](https://taskfile.dev), [golangci-lint](https://golangci-lint.run) and [sqlc](https://sqlc.dev) – versions in `Taskfile.yml`.
 templ and govulncheck are pinned in `go.mod` and run via `go tool`. Works in PowerShell and Git Bash.
 Rules for changes and commits: [CONTRIBUTING.md](CONTRIBUTING.md).
 

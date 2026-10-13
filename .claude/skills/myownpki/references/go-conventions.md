@@ -42,8 +42,13 @@
 - Driver `modernc.org/sqlite` (pure Go). One database per purpose and tenant (`system`, `pki`, `acme`, `audit`, `metrics`).
 - Pragmas on open: `journal_mode=WAL`, `busy_timeout`, `foreign_keys=ON`, `synchronous=NORMAL`.
 - Per database: one writer connection (`SetMaxOpenConns(1)` on the write handle) and a separate read pool.
-- Queries with `sqlc`; migrations with `goose`, embedded via `embed.FS`, one migration set per database type,
-  applied to every tenant DB at startup.
+- Migrations with the own runner `internal/store/migrate` (forward only, one transaction per migration,
+  SHA-256 of every applied file is stored – a changed file stops the start), one set per database type in
+  `internal/store/schema/<kind>/`, embedded via `embed.FS` and applied to every tenant DB at startup
+  (`myownpki db migrate` does the same by hand).
+- Queries with `sqlc`: one package per kind (`internal/store/<kind>db`), generated from the migration files
+  and `internal/store/queries/<kind>/`. SQL files are ASCII only (sqlc bug, enforced by a test).
+  New database type: see the comment on `store.Kinds`.
 - A transaction never spans two databases. Use an outbox table + worker when a flow touches two
   (e.g. issuance in `pki.db` → audit entry in `audit.db`).
 - Hot-path state (agent heartbeats, ACME nonces if needed) stays in memory; persist changes, not every tick.

@@ -115,7 +115,9 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   and the operations docs say this prominently.
 
 - SQLite in **WAL mode**, one writer per file → the split prevents cross-blocking.
-- Type-safe queries with `sqlc`, migrations with `goose` (per database type).
+- Type-safe queries with `sqlc`; migrations with an own small runner per database type – forward
+  only, one transaction each, and the SHA-256 of every applied migration is stored, so a changed
+  migration file stops the server instead of silently diverging *(decided 2026-10-13, instead of goose)*.
 - Backup/export/delete of a tenant = one directory.
 - **`myownpki backup` / `myownpki restore`** *(phase 1)*: consistent online backup of `system.db`
   and all tenant databases (`VACUUM INTO` / SQLite online backup, `audit.db` last) with a SHA-256
@@ -321,7 +323,7 @@ MyOwnPKI/
 │  ├─ agent/               agent protocol, gateway, deploy profiles
 │  ├─ api/                 REST handlers (hand-written, checked against the spec by contract tests)
 │  ├─ auth/                login, WebAuthn, TOTP, OIDC, RBAC
-│  ├─ store/               SQLite, migrations, sqlc queries
+│  ├─ store/               SQLite, migration runner + schema/<kind>, sqlc queries, <kind>db packages
 │  ├─ keys/                unseal, encryption, PKCS#11
 │  ├─ policy/              policies
 │  ├─ notify/              notifications
@@ -460,6 +462,19 @@ keeps the reasons. None of them changes an ADR.
 | Role scopes `tenant` and `ca` only; no tenant in any path | Domain/agent-group scopes come with phases 2/3; the tenant comes from the authenticated context |
 | Not in the draft: batch upload, encrypted backup download, ACME, domains, agents | Not in the phase 1 row or belong to later phases |
 | **No code generator: API handlers are written by hand** with `net/http` (ServeMux patterns) and `encoding/json`; the spec stays the source of truth through **contract tests** (step 16) that check every operation for route, method, role (`x-required-role`), RFC 9457 errors and response schema (owner decision 2026-10-13, trial in `docs/trials/ogen.md`) | ogen would add 27 runtime modules (+18 % binary for 3 endpoints), can't generate `issueCertificate` and the legacy import, gives handlers no access to cookies/headers and leaks internal error text by default; its strength – schema-driven input validation – is covered by the contract tests |
+
+### Storage foundation (phase 1 step 4)
+| Decision | Why |
+|---|---|
+| `modernc.org/sqlite` v1.60.1 (SQLite 3.53.4, BSD-3, 8 runtime modules, ~7 MB) – approved 2026-10-13 | Pure Go (ADR-01/06); builds for all five targets without CGO |
+| Per file one **writer connection** (`_txlock=immediate`) and a **read pool** with `PRAGMA query_only` | Writes queue inside the process instead of failing with SQLITE_BUSY; WAL keeps readers going; a read path can't write by mistake |
+| Pragmas on every connection: WAL (writer), `busy_timeout` 5 s, `foreign_keys`, `synchronous=NORMAL` | NORMAL is safe with WAL: a power cut can lose the last commits, never corrupt the file |
+| **Own migration runner** instead of goose (owner decision 2026-10-13): forward only, one transaction per migration, SHA-256 of each applied file (line endings normalized) stored; a changed file or a database from a newer binary stops everything | No dependency; the schema history of a CA can't diverge silently; going back = `myownpki restore` |
+| Every database starts with `db_info.db_type`; a file of the wrong type is refused before anything is migrated | Catches swapped files after a manual restore |
+| Tenant IDs are directory names: `^[a-z0-9][a-z0-9-]{0,62}$`; directories created with mode 0700 | No path traversal, no case collisions on Windows/macOS |
+| `myownpki db status` (read-only; exit 0 = up to date, 1 = problem, 3 = missing/pending) and `myownpki db migrate` | Scriptable check for monitoring; a problem outranks "pending" because migrating would not fix it |
+| sqlc: one block and one Go package per database type (`systemdb`, later `pkidb`, `auditdb` …); schema = the migration files | A package only knows the tables of its own file – a query across databases doesn't compile |
+| SQL files (schema and queries) are ASCII only, enforced by a test | sqlc 1.31.1 miscounts positions after multi-byte characters in SQLite files and cuts statements short (found in step 4) |
 
 ### Web UI and dev mode
 | Decision | Why |

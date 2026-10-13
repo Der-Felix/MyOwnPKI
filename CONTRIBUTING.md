@@ -18,7 +18,7 @@ them privately, never as a public issue or pull request.
 ## Development setup
 
 Requirements: Go (the toolchain is pinned in `go.mod` and downloaded automatically),
-[Task](https://taskfile.dev) and [golangci-lint](https://golangci-lint.run) – versions in
+[Task](https://taskfile.dev), [golangci-lint](https://golangci-lint.run) and [sqlc](https://sqlc.dev) – versions in
 `Taskfile.yml`. Everything works the same in PowerShell, Git Bash, Linux and macOS.
 
 ```sh
@@ -41,7 +41,7 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
   and ACME payloads are untrusted input. Tests that produce certificates parse them with
   `crypto/x509` and, where available, cross-check with `openssl verify`.
 - **Time**: UTC everywhere, with an injected clock in tests – no sleeping, no wall time.
-- **Generated code** (templ, later sqlc) is regenerated with `task generate`
+- **Generated code** (templ, sqlc) is regenerated with `task generate`
   and committed.
 - **API changes** go into `api/openapi.yaml` first (ADR-05) and pass `task lint:api` (vacuum).
 - **Workflow changes** pass `task lint:ci` (actionlint). Both tools are pinned binaries – versions in
