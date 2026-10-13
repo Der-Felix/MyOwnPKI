@@ -118,7 +118,7 @@ settings(key PK, value_json)
 ### 1.3 `tenants/<t>/audit.db`
 
 ```
-audit_entries(seq INTEGER PK, time, actor_type, actor_id, actor_name, action,
+audit_entries(seq INTEGER PK, outbox_id TEXT UNIQUE /*source DB + outbox row, dedup*/, time, actor_type, actor_id, actor_name, action,
               target_type, target_id, result, source_ip, details_json,
               prev_hash, hash)   -- hash = SHA-256(prev_hash || canonical JSON of the entry)
 ```
@@ -138,7 +138,6 @@ be lost or duplicated even though they live in different files.
 
 ---
 
-
 ## 2. Work plan
 
 Each step ends with: summary for the owner (German), verification commands, a commit proposal;
@@ -152,21 +151,31 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 2 | `internal/clock` (injectable clock) and `internal/config` (YAML, strict, `MYOWNPKI_*` env overrides); `myownpki config check` | – | unit tests; `myownpki config check --config example.yaml` |
 | 3 | **ogen trial** on two endpoints (`GET /health`, `GET /presets`) on a separate branch; comparison with a hand-written version – result shown to the owner, then decided | ogen (trial) | generated server answers like the spec; diff size, readability, router fit |
 | 4 | Store foundation: SQLite (pure Go), WAL pragmas, one writer + read pool, goose migrations per DB type (`system`, `pki`, `audit`), sqlc; tenant directory layout | modernc.org/sqlite, goose; owner installs sqlc 1.31.1 | migration tests in a temp dir; `myownpki db status` |
-| 5 | Keys + unseal: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
-| 6 | CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected |
-| 7 | CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); CA import | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root |
-| 8 | CRL generation (number +1, AKI, nextUpdate) and serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
-| 9 | Audit log (`audit.db`, hash chain) + outbox worker | – | tampering test breaks verification at the right `seq` |
+| 5 | **Audit log** (`audit.db`, hash chain) + **outbox** worker – before any CA code, so steps 7–11 audit from the start | – | tampering test breaks verification at the right `seq`; outbox delivers exactly once after a crash between commit and delivery |
+| 6 | Keys + unseal: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
+| 7 | CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
+| 8 | CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); CA import | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root |
+| 9 | Revocation + CRL generation (number +1, AKI, nextUpdate), serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
 | 10 | Legacy importer; CI builds a fixture PKI with `legacy/pki.sh` and imports it | – | serials, revocations (time + reason) and CRL numbers identical before/after |
-| 11 | `myownpki init`: first admin + unseal passphrase, **prominent warning to keep the passphrase separate from backups** | – | init on an empty data dir; refuses to run twice |
-| 12 | Auth core: Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer, API tokens | – | one test per rule in security.md; RFC 6238 test vectors |
-| 13 | Passkeys / WebAuthn | go-webauthn/webauthn | registration + login with a virtual authenticator in tests |
-| 14 | Listeners with TLS: admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA | – | `openssl s_client`, `curl -v`; fingerprint matches the console |
-| 15 | REST API per `api/openapi.yaml` (generator per step 3), RFC 9457 errors, contract tests | ogen (if chosen) | contract tests; vacuum clean; `curl` examples in the summary |
-| 16 | UI (shell B), in sub-steps: a) login/2FA/unseal, b) certificates list/detail/download, c) issue (CSR default, server key if allowed) / revoke / renew / export, d) CAs (create, import, offline flow), e) import, audit, presets, tenant settings | htmx (vendored, at 16a) | handler tests incl. no-inline-style checks; screenshots light/dark |
-| 17 | Phase 1 wrap-up: end-to-end test "pki.sh replaced" (import legacy PKI → issue → revoke → CRL check with OpenSSL), operations guide (incl. backup/passphrase warning), PLAN.md | – | the end-to-end test; `task check`; CI green |
+| 11 | **`myownpki backup` / `myownpki restore`**: consistent online backup of `system.db` and all databases of a tenant (`VACUUM INTO` / SQLite online backup) with a SHA-256 manifest; restore only into a stopped/empty data dir, with `PRAGMA integrity_check`, migration version check, manifest check and audit chain verification; prominent warning to keep the unseal passphrase separate | – | backup during concurrent writes; restore round trip identical; corrupted/tampered backup rejected |
+| 12 | `myownpki init`: first admin + unseal passphrase, **prominent warning to keep the passphrase separate from backups** | – | init on an empty data dir; refuses to run twice |
+| 13 | Auth core: Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer, API tokens | – | one test per rule in security.md; RFC 6238 test vectors |
+| 14 | Passkeys / WebAuthn | go-webauthn/webauthn | registration + login with a virtual authenticator in tests |
+| 15 | Listeners with TLS: admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA | – | `openssl s_client`, `curl -v`; fingerprint matches the console |
+| 16 | REST API per `api/openapi.yaml` (generator per step 3), RFC 9457 errors, contract tests | ogen (if chosen) | contract tests; vacuum clean; `curl` examples in the summary |
+| 17 | UI (shell B), in sub-steps: a) login/2FA/unseal, b) certificates list/detail/download, c) issue (CSR default, server key if allowed) / revoke / renew / export, d) CAs (create, import, offline flow), e) import, audit, presets, tenant settings | htmx (vendored, at 17a) | handler tests incl. no-inline-style checks; screenshots light/dark |
+| 18 | Phase 1 wrap-up: end-to-end test "pki.sh replaced" (import legacy PKI → issue → revoke → CRL check with OpenSSL → backup → restore), operations guide (incl. backup/passphrase warning), PLAN.md | – | the end-to-end test; `task check`; CI green |
 
-Steps 0–10 need no login and no UI: the CA core is finished and verified first.
+Steps 0–12 need no web login and no UI: the CA core, its audit trail and its backup are finished
+and verified first.
+
+**Backup consistency (step 11):** each database file is copied as one consistent snapshot, but
+the snapshots of different files are taken one after another. This is safe because no transaction
+spans two databases and cross-database effects go through the outbox – **provided the order is
+right**: first the producing databases (`system.db`, `pki.db`, …), **last** the consuming
+`audit.db`. Then the audit copy contains at least every entry the other copies mark as delivered;
+entries delivered in between are delivered again after a restore and deduplicated by their outbox
+ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 
 ---
 
@@ -179,9 +188,9 @@ Steps 0–10 need no login and no UI: the CA core is finished and verified first
 | `modernc.org/sqlite` | BSD-3 | pure-Go SQLite (ADR-06) | ask at step 4 |
 | `github.com/pressly/goose/v3` | MIT | migrations | ask at step 4 |
 | sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) | approved in phase 0; owner installs at step 4 |
-| `golang.org/x/crypto` | BSD-3 | `argon2`, `cryptobyte`, later `ocsp` | ask at step 5 |
-| `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 13 |
-| htmx (vendored JS file) | 0BSD | UI interactions | ask at step 16a |
+| `golang.org/x/crypto` | BSD-3 | `argon2`, `cryptobyte`, later `ocsp` | ask at step 6 |
+| `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 14 |
+| htmx (vendored JS file) | 0BSD | UI interactions | ask at step 17a |
 
 TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test vectors, no dependency.
 
@@ -199,5 +208,5 @@ TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test v
 | 6 | Lifetimes | **Keep presets + maximum validity per CA**; ACME issuances default to **90 days** (phase 2) |
 | 7 | Algorithms | **ECDSA P-256 for leaves, P-384 for CAs** |
 | 8 | Legacy ShellCheck warnings | **Fix in a separate commit**, then CI at severity `warning` |
-| 9 | First push | Owner pushes; repository visibility still to be confirmed |
+| 9 | First push | Repository **stays public**; owner pushes |
 | 10 | Problem types | **Keep `urn:myownpki:problem:*`** |

@@ -117,6 +117,10 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 - SQLite in **WAL mode**, one writer per file → the split prevents cross-blocking.
 - Type-safe queries with `sqlc`, migrations with `goose` (per database type).
 - Backup/export/delete of a tenant = one directory.
+- **`myownpki backup` / `myownpki restore`** *(phase 1)*: consistent online backup of `system.db`
+  and all tenant databases (`VACUUM INTO` / SQLite online backup, `audit.db` last) with a SHA-256
+  manifest; restore with integrity, migration-version, manifest and audit-chain checks.
+  Litestream (ADR-07) adds continuous replication later.
 - No transactions across database boundaries → design flows so each transaction stays in one DB (outbox pattern where needed).
 
 ### Scaling targets (enterprise)
@@ -383,7 +387,7 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [ ] OpenAPI code generator: trial of `ogen` on two endpoints in phase 1, then decide (docs/PHASE1.md)
 - [x] Server-side key generation: yes, switchable per tenant, CSR is the default (§5)
 - [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
-- [ ] Repository visibility (public/private) before the first push
+- [x] Repository visibility: public (2026-10-13)
 
 ---
 
