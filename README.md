@@ -72,6 +72,10 @@ The predecessor of this project lives in [`legacy/`](legacy/README.md). It remai
 offline tool for root CA ceremonies. Its full history is in the original
 [pki_script](https://github.com/Der-Felix/pki_script) repository.
 
+## Security
+
+Please report vulnerabilities privately – see [SECURITY.md](SECURITY.md).
+
 ## License
 
 [Apache License 2.0](LICENSE)
