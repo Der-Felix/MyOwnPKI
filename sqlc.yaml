@@ -25,3 +25,11 @@ sql:
         package: auditdb
         out: internal/store/auditdb
         emit_empty_slices: true
+  - engine: sqlite
+    schema: internal/store/schema/pki
+    queries: internal/store/queries/pki
+    gen:
+      go:
+        package: pkidb
+        out: internal/store/pkidb
+        emit_empty_slices: true

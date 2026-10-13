@@ -27,3 +27,14 @@ type Tenant struct {
 	AllowServerKeygen int64
 	CreatedAt         string
 }
+
+type Unseal struct {
+	Slot           string
+	RootKeyVersion int64
+	Kdf            string
+	KdfParams      string
+	Salt           []byte
+	WrappedRootKey []byte
+	CreatedAt      string
+	UpdatedAt      string
+}
