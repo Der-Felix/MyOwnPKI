@@ -102,6 +102,8 @@ linters:
               desc: "DSA is deprecated and not allowed by the CA/Browser Forum – use ECDSA, Ed25519 or RSA"
             - pkg: golang.org/x/crypto/pkcs12
               desc: "decode-only and frozen – pick a maintained PKCS#12 library (ask first, ADR-14)"
+            - pkg: golang.org/x/crypto/openpgp
+              desc: "unmaintained and unsafe by design (GO-2026-5932) – not needed by a PKI"
 
     forbidigo:
       analyze-types: true
