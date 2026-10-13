@@ -64,6 +64,8 @@ task check        # everything that must pass before a commit
 task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, loopback only)
 task screenshots  # regenerate docs/screenshots – at milestones only
 task vuln         # known vulnerabilities in dependencies and the Go standard library
+task lint:ci      # actionlint on the GitHub workflows (needs actionlint, see Taskfile.yml)
+task lint:api     # vacuum on api/openapi.yaml (needs vacuum, see Taskfile.yml)
 task cross        # build for linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64
 ```
 

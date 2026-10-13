@@ -43,7 +43,9 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
 - **Time**: UTC everywhere, with an injected clock in tests – no sleeping, no wall time.
 - **Generated code** (templ, later sqlc and the OpenAPI code) is regenerated with `task generate`
   and committed.
-- **API changes** go into `api/openapi.yaml` first (ADR-05).
+- **API changes** go into `api/openapi.yaml` first (ADR-05) and pass `task lint:api` (vacuum).
+- **Workflow changes** pass `task lint:ci` (actionlint). Both tools are pinned binaries – versions in
+  `Taskfile.yml`; CI runs them on every push.
 
 ## Commits and pull requests
 

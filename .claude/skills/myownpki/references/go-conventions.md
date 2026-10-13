@@ -76,7 +76,8 @@
 - Task runner: **Taskfile** (decided in phase 0; runs the same in PowerShell and Git Bash). `task check` before every commit.
 - CI (GitHub Actions): gofmt check, `go vet`, `golangci-lint`, `govulncheck`, tests with `-race`,
   `templ generate` / `sqlc generate` diff check, no-inline-style check, cross-compile matrix
-  (linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64), legacy ShellCheck (severity warning) and `legacy/tests/smoke.sh` (Linux; needs openssl).
+  (linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64), legacy ShellCheck (severity warning) and `legacy/tests/smoke.sh` (Linux; needs openssl),
+  actionlint on the workflows (`task lint:ci`) and vacuum on the OpenAPI spec (`task lint:api`, rules in `api/vacuum.yaml`).
 - Releases with GoReleaser + cosign + SBOM; container image `ghcr.io/der-felix/myownpki`.
 
 ## Commits

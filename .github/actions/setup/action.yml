@@ -1,7 +1,7 @@
 # Shared setup for CI jobs: pinned Go toolchain, Task and optional tools.
 # Versions and checksums come from the `env:` block in .github/workflows/ci.yml.
 name: Set up Go and tools
-description: Install the pinned Go toolchain, Task and optionally golangci-lint and sqlc
+description: Install the pinned Go toolchain, Task and optionally golangci-lint, sqlc, ShellCheck, actionlint and vacuum
 
 inputs:
   golangci-lint:
@@ -9,6 +9,15 @@ inputs:
     default: "false"
   sqlc:
     description: Install sqlc ("true"/"false")
+    default: "false"
+  shellcheck:
+    description: Install ShellCheck ("true"/"false")
+    default: "false"
+  actionlint:
+    description: Install actionlint ("true"/"false")
+    default: "false"
+  vacuum:
+    description: Install vacuum ("true"/"false")
     default: "false"
 
 runs:
@@ -53,3 +62,39 @@ runs:
         mkdir -p "$RUNNER_TEMP/sqlc"
         tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/sqlc"
         install -m 0755 "$(find "$RUNNER_TEMP/sqlc" -type f -name sqlc)" "$RUNNER_TEMP/bin/"
+
+    - name: Install ShellCheck
+      if: inputs.shellcheck == 'true'
+      shell: bash
+      run: |
+        f="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$f"
+        echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/shellcheck"
+        tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/shellcheck"
+        install -m 0755 "$(find "$RUNNER_TEMP/shellcheck" -type f -name shellcheck)" "$RUNNER_TEMP/bin/"
+
+    - name: Install actionlint
+      if: inputs.actionlint == 'true'
+      shell: bash
+      run: |
+        f="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$f"
+        echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/actionlint"
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/actionlint"
+        install -m 0755 "$(find "$RUNNER_TEMP/actionlint" -type f -name actionlint)" "$RUNNER_TEMP/bin/"
+
+    - name: Install vacuum
+      if: inputs.vacuum == 'true'
+      shell: bash
+      run: |
+        f="vacuum_${VACUUM_VERSION}_linux_x86_64.tar.gz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/daveshanley/vacuum/releases/download/v${VACUUM_VERSION}/$f"
+        echo "${VACUUM_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/vacuum"
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/vacuum"
+        install -m 0755 "$(find "$RUNNER_TEMP/vacuum" -type f -name vacuum)" "$RUNNER_TEMP/bin/"

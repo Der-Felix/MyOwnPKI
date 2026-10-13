@@ -35,6 +35,10 @@ env:
   SQLC_SHA256: "497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354"
   SHELLCHECK_VERSION: "0.11.0"
   SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+  VACUUM_VERSION: "0.30.6"
+  VACUUM_SHA256: "179f038a71cd88721738d6c739dd07fbeebc905b48301935f2416e66aead95c6"
   GOTOOLCHAIN: local
   CGO_ENABLED: "0"
 
@@ -108,6 +112,23 @@ jobs:
       - uses: ./.github/actions/setup
       - run: task vuln
 
+  lint-meta:
+    name: workflows and API spec (actionlint, vacuum)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # ShellCheck too: actionlint checks the run: scripts with it.
+      - uses: ./.github/actions/setup
+        with:
+          shellcheck: "true"
+          actionlint: "true"
+          vacuum: "true"
+      - run: task lint:ci
+      - run: task lint:api
+
   shellcheck:
     name: legacy Bash suite (shellcheck, smoke test)
     if: github.event_name != 'schedule'
@@ -116,16 +137,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install ShellCheck
-        run: |
-          f="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-          curl -fsSL -o "$RUNNER_TEMP/$f" \
-            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$f"
-          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/shellcheck" "$RUNNER_TEMP/bin"
-          tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/shellcheck"
-          install -m 0755 "$(find "$RUNNER_TEMP/shellcheck" -type f -name shellcheck)" "$RUNNER_TEMP/bin/"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup
+        with:
+          shellcheck: "true"
       # The lib/*.sh modules share globals: a variable set in one module is
       # read in another. Checked one by one, every such variable looks
       # unused (SC2034), so the modules skip that check; the standalone

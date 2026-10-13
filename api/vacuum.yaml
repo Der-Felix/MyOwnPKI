@@ -1,0 +1,16 @@
+# vacuum ruleset for api/openapi.yaml (task lint:api, CI).
+#
+# Starts from vacuum's recommended rules; CI fails on any warning. Rules are only
+# switched off here with a reason – never silently.
+extends: [[vacuum:oas, recommended]]
+
+rules:
+  # The API uses snake_case JSON fields on purpose (see the conventions in
+  # openapi.yaml's description), like RFC 9457 problem details and the
+  # pki.sh metadata the importer reads.
+  camel-case-properties: off
+
+  # Examples for every single property would only repeat the schema. Example
+  # requests and responses are added per endpoint when it is implemented and
+  # covered by contract tests (phase 1, steps 3 and 16).
+  oas3-missing-example: off

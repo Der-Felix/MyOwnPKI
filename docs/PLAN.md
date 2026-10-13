@@ -411,7 +411,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | Presets | `presets/*.yaml`, embedded; strict validation; parity test against `legacy/lib/presets.sh` |
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
-| CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13) |
+| CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13); added in phase 1 step 1: actionlint 1.7.12, vacuum 0.30.6 (newest release older than two weeks), rules in `api/vacuum.yaml` – snake_case and per-property examples switched off with reasons, every other warning fails CI |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
 
 ---
@@ -426,7 +426,7 @@ keeps the reasons. None of them changes an ADR.
 | Decision | Why |
 |---|---|
 | Third-party actions pinned to a full commit SHA, not a tag | A tag can be moved to other code later; a SHA can't. The CI builds a CA |
-| Only GitHub's own actions; golangci-lint, ShellCheck, sqlc (and later actionlint, vacuum) downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
+| Only GitHub's own actions; golangci-lint, ShellCheck, sqlc, actionlint and vacuum downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
 | `permissions: contents: read`, `persist-credentials: false` | Least privilege – a compromised step can't push or read a token from `.git/config` |
 | Runner images pinned (`ubuntu-24.04`, `windows-2025`, `macos-15`) | `*-latest` changes underneath; failures should come from our changes |
 | sqlc is installed in CI only when `sqlc.yaml` exists | Not used before phase 1 |

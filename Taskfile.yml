@@ -15,6 +15,9 @@ vars:
   GOLANGCI_LINT_VERSION: 2.14.0
   # Prebuilt binary (not `go tool`): checked only once sqlc.yaml exists (phase 1).
   SQLC_VERSION: 1.31.1
+  # Prebuilt binaries for lint:ci and lint:api (not part of `task check`).
+  ACTIONLINT_VERSION: 1.7.12
+  VACUUM_VERSION: 0.30.6
 
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
@@ -131,6 +134,26 @@ tasks:
     desc: Run golangci-lint (includes go vet; rules in .golangci.yml)
     cmds:
       - golangci-lint run ./...
+
+  lint:ci:
+    desc: Lint the GitHub Actions workflows with actionlint (run scripts with ShellCheck, if installed)
+    cmds:
+      - |
+        v=$(actionlint -version | head -n 1)
+        if [ "$v" != "{{.ACTIONLINT_VERSION}}" ]; then
+          echo "actionlint: found '$v', expected {{.ACTIONLINT_VERSION}} (https://github.com/rhysd/actionlint/releases)"; exit 1
+        fi
+      - actionlint
+
+  lint:api:
+    desc: Lint api/openapi.yaml with vacuum (rules in api/vacuum.yaml; any warning fails)
+    cmds:
+      - |
+        v=$(vacuum version)
+        if [ "$v" != "{{.VACUUM_VERSION}}" ]; then
+          echo "vacuum: found '$v', expected {{.VACUUM_VERSION}} (https://github.com/daveshanley/vacuum/releases)"; exit 1
+        fi
+      - vacuum lint --ruleset api/vacuum.yaml --fail-severity warn --no-banner api/openapi.yaml
 
   vuln:
     desc: Check dependencies and the Go standard library for known vulnerabilities (needs internet)
