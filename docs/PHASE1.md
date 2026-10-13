@@ -82,9 +82,9 @@ keys
   purpose          TEXT               -- ca | leaf
   algorithm        TEXT
   storage          TEXT               -- envelope | hsm
-  dek_wrapped      BLOB NULL          -- DEK encrypted with the KEK (AES-256-GCM)
+  wrapped_dek      BLOB NULL          -- DEK encrypted with the root key (AES-256-GCM)
   key_ciphertext   BLOB NULL          -- private key (PKCS#8) encrypted with the DEK
-  kek_version      INTEGER
+  root_key_version INTEGER NULL
   hsm_ref          TEXT NULL          -- PKCS#11 URI (hsm build only)
   created_at       TEXT
 
@@ -111,7 +111,7 @@ webauthn_credentials(id, user_id, credential_id UNIQUE, public_key, sign_count, 
 sessions(id_hash PK, user_id, created_at, last_seen_at, expires_at, step_up_until NULL,
          csrf_token_hash, ip, user_agent)
 api_tokens(id, user_id, name, token_hash UNIQUE, scopes_json, created_at, expires_at, last_used_at)
-unseal(kek_version PK, argon2_params, salt, verifier_ciphertext)  -- proves the passphrase, holds no key
+unseal(slot PK /*passphrase|recovery*/, root_key_version, kdf, kdf_params, salt, wrapped_root_key)  -- the GCM tag proves the secret
 settings(key PK, value_json)
 ```
 
@@ -152,14 +152,14 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 3 | ~~ogen trial~~ **done 2026-10-13:** hand-written handlers chosen, no generator (`docs/trials/ogen.md`) | – | – |
 | 4 | **done 2026-10-13** – Store foundation: SQLite (pure Go), WAL pragmas, one writer + read pool, own migration runner (forward only, checksums) per DB type (`system`, `pki`, `audit`), sqlc; tenant directory layout | modernc.org/sqlite (approved 2026-10-13); owner installs sqlc 1.31.1 | migration tests in a temp dir; `myownpki db status` |
 | 5 | **done 2026-10-13** (server wiring of the deliverer with step 15) – **Audit log** (instance `<data>/audit.db` + `tenants/<t>/audit.db`, hash chain, append-only triggers, no secrets in details) + **outbox** worker (exactly once via `outbox_id`; delivered rows deleted after 30 days, undelivered never) + `myownpki audit verify [--expect-head]`; chain heads to the process log at start and daily – before any CA code, so steps 7–11 audit from the start | – | tampering test breaks verification at the right `seq`; outbox delivers exactly once after a crash between commit and delivery |
-| 6 | Keys + unseal: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
+| 6 | **done 2026-10-13** (API/UI wiring with steps 15–17) – Keys + unseal **+ recovery key**: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
 | 6a | **Signed audit checkpoints**: at start, daily and every N entries a checkpoint (scope, seq, hash, time) is signed with a key derived from the unseal key and stored; `audit verify` checks the chain against the checkpoints – rewriting a chain then requires the passphrase (owner decision 2026-10-13) | – | recomputed chain without the key is detected; checkpoints survive restore |
 | 7 | CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
 | 8 | CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); CA import | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root |
-| 9 | Revocation + CRL generation (number +1, AKI, nextUpdate), serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
+| 9 | Revocation + CRL generation (number +1, AKI, nextUpdate) – **a sealed server can't renew CRLs: status/warning "sealed since …, CRL of <CA> expires on …"** in `db status`, API and process log (owner 2026-10-13), serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
 | 10 | Legacy importer; CI builds a fixture PKI with `legacy/pki.sh` and imports it | – | serials, revocations (time + reason) and CRL numbers identical before/after |
 | 11 | **`myownpki backup` / `myownpki restore`**: consistent online backup of `system.db` and all databases of a tenant (`VACUUM INTO` / SQLite online backup), **audit databases (instance + tenants) last**, with a SHA-256 manifest that records every audit chain head; restore only into a stopped/empty data dir, with `PRAGMA integrity_check`, migration version check, manifest check and verification of every audit chain (instance + tenants) against the heads in the manifest; prominent warning to keep the unseal passphrase separate | – | backup during concurrent writes; restore round trip identical; corrupted/tampered backup rejected |
-| 12 | `myownpki init`: first admin + unseal passphrase, **prominent warning to keep the passphrase separate from backups** | – | init on an empty data dir; refuses to run twice |
+| 12 | `myownpki init`: first admin + unseal passphrase + **recovery key** (`keys.NewRecoveryKey` → show → confirm → `keys.Init`), **prominent warning to keep passphrase, recovery key and backups apart**. Recovery key only on an interactive terminal (`keys.RecoveryKeyOutput`); otherwise (Docker, systemd, pipe) init refuses and requires `--recovery-key-file <path>`, written with 0600 and never overwriting (`keys.WriteRecoveryKeyFile`), with the hint to store it safely and remove it from the server. Before init finishes the user re-types two random groups (`keys.ConfirmIndexes`/`CheckGroups`); the same for `recovery-key rotate` (owner 2026-10-13) | – | init on an empty data dir; refuses to run twice; non-terminal without file refused; wrong confirmation aborts without writing anything |
 | 13 | Auth core: Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer, API tokens | – | one test per rule in security.md; RFC 6238 test vectors |
 | 14 | Passkeys / WebAuthn | go-webauthn/webauthn | registration + login with a virtual authenticator in tests |
 | 15 | Listeners with TLS: admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA | – | `openssl s_client`, `curl -v`; fingerprint matches the console |
@@ -208,7 +208,7 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 | `modernc.org/sqlite` | BSD-3 | pure-Go SQLite (ADR-06) | **approved** 2026-10-13: v1.60.1 (SQLite 3.53.4), 8 runtime modules, ~7 MB |
 | `github.com/pressly/goose/v3` | MIT | migrations | **not used** – own runner with checksums instead (2026-10-13) |
 | sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) | approved in phase 0; owner installs at step 4 |
-| `golang.org/x/crypto` | BSD-3 | `argon2`, `cryptobyte`, later `ocsp` | ask at step 6 |
+| `golang.org/x/crypto` | BSD-3 | `argon2` (step 6), later `cryptobyte`, `ocsp` | **approved** 2026-10-13; v0.58.0 – already selected in the module graph via x/net (govulncheck); `argon2`/`blake2b` identical to the approved v0.57.0 on our platforms (diff checked: only LoongArch additions) |
 | `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 14 |
 | htmx (vendored JS file) | 0BSD | UI interactions | ask at step 17a |
 | goversioninfo (or similar, build tool) | MIT | embed `assets/brand/app.ico` and version info in the Windows binaries | noted 2026-10-13 – ask before release packaging |

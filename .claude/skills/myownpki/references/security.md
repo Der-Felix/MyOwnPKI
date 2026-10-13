@@ -37,8 +37,10 @@ Separate `http.ServeMux` per listener so a route can't leak across.
 
 ## Key storage (ADR-09)
 
-- Online-encrypted mode: envelope encryption. KEK derived from the unseal passphrase (Argon2id),
-  one DEK per key, AES-256-GCM, key ID + version in the ciphertext header.
+- Online-encrypted mode: envelope encryption in `internal/keys`. KEK derived from the unseal passphrase (Argon2id),
+  wraps a random root key; one DEK per key, AES-256-GCM, purpose and key ID bound as additional data.
+  A recovery key is a second wrap of the root key. Never log or print the passphrase or recovery key
+  (`RecoveryKey` is redacted except `Reveal()`); use the private key only inside `WithKey`/`WithSigner`.
 - The server starts **sealed**; no signing until unsealed. Unseal state is in memory only.
 - Private key material: keep in memory as briefly as possible, zero buffers where Go allows (best effort),
   never log, never put in error messages, never send to the browser except an explicit, audited,

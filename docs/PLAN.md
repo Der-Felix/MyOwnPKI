@@ -164,6 +164,22 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 - **Default algorithms:** ECDSA P-256 for leaf keys, ECDSA P-384 for CA keys *(decided 2026-10-13)*.
 - **Server-side key generation** for leaves is available but **switchable off per tenant**; CSR
   signing is the default in UI and API *(decided 2026-10-13)*.
+- **Key hierarchy** *(phase 1 step 6, decided 2026-10-13)*: passphrase →Argon2id (t=4, 256 MiB,
+  p=4; parameters stored)→ KEK → **root key** (random, wrapped in `system.db`) → one DEK per private
+  key → private key (PKCS#8), all AES-256-GCM with additional data that binds each ciphertext to its
+  purpose and key ID. Changing the passphrase rewraps only the root key (one row, atomic); the root
+  key's GCM tag proves the passphrase, no separate verifier. Sealed after every start; when
+  unsealed only the root key is in memory, DEKs and private keys are decrypted per signing
+  operation. Passphrase ≥ 16 characters.
+- **Recovery key** *(decided 2026-10-13)*: 256 random bits, created at init, shown **once** (Crockford
+  Base32 in groups of six with two check characters), stored only as a second wrap of the root key.
+  Unseal and passphrase reset with the recovery key, each with its own audit entry. **Keep the
+  recovery key apart from the passphrase and from the backups** – backup + recovery key = the CA.
+  Old backups still open with the passphrase or recovery key that was valid when they were taken.
+- **A sealed server can't sign – also no CRL renewal.** Step 9 shows "sealed since …, CRL of <CA>
+  expires on …"; phase 4 alarms when the sealed state outlasts the CRL lifetimes.
+- **Later option: auto-unseal** via TPM, cloud KMS or a key file – the key file only with a clear
+  warning (whoever takes file and database together has the CA). Not in phase 1.
 
 ### Setup and admin access
 - First administrator via **`myownpki init`** on the console (username, password; second factor
@@ -388,8 +404,8 @@ MyOwnPKI/
 | **1 – Core** | Data model, CA engine, importer, REST API, login (2FA), RBAC, unseal, audit log, UI: issue / revoke / upload / download, layout B | Bash script replaced in the browser |
 | **2 – ACME server & domains** | ACME server (http-01, dns-01, tls-alpn-01), domain model, policies, approval levels, EAB | certbot/Traefik/Caddy against the own CA (integration level 1) |
 | **3 – Agent** | Enrollment with proof of control, issuance via ACME, deploy profiles (Linux first), heartbeat/inventory, batched reload + rollback; then Windows, FreeBSD; ACME client (lego) for Let's Encrypt | Deploy and monitor certificates (level 3), public certificates |
-| **4 – Operations** | Dashboards, layouts A + C, themes (3 levels), notifications, OCSP/CRL, Prometheus, Litestream, trust store distribution | Production-ready |
-| **5 – Enterprise** | Tenant UI, OIDC, HSM build, SIEM export, CT monitoring, network scan | Enterprise feature set |
+| **4 – Operations** | Dashboards, layouts A + C, themes (3 levels), notifications, OCSP/CRL, Prometheus, Litestream, trust store distribution, **alarm when the server stays sealed** (measured against the remaining CRL lifetimes) | Production-ready |
+| **5 – Enterprise** | Tenant UI, OIDC, HSM build, SIEM export, CT monitoring, network scan, **Shamir split of the recovery key (m of n, four-eyes principle)** | Enterprise feature set |
 | **Later** | Plugins (WASM sandbox), SSH CA, SCEP/EST, Terraform provider | – |
 
 ---
@@ -457,6 +473,7 @@ keeps the reasons. None of them changes an ADR.
 | Third-party actions pinned to a full commit SHA, not a tag | A tag can be moved to other code later; a SHA can't. The CI builds a CA |
 | Only GitHub's own actions; golangci-lint, ShellCheck, sqlc, actionlint and vacuum downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
 | Two-week rule: dependencies and tools are only updated to releases that have been public for at least 14 days – Dependabot `cooldown: 14` days, the same rule by hand for pinned binaries; security updates are not delayed | A broken or hijacked release usually surfaces within days; a CA should not be among the first to run it |
+| Two-week rule, exception: if an approved tool already pulls a newer version of a module into the graph (Go picks the highest), we don't downgrade the tool – the diff of the packages we actually use is checked against the approved version and the exception recorded (first case: x/crypto v0.58.0 via govulncheck, 2026-10-13) | Downgrading the vulnerability scanner would cost more safety than it buys |
 | `permissions: contents: read`, `persist-credentials: false` | Least privilege – a compromised step can't push or read a token from `.git/config` |
 | Runner images pinned (`ubuntu-24.04`, `windows-2025`, `macos-15`) | `*-latest` changes underneath; failures should come from our changes |
 | sqlc is installed in CI only when `sqlc.yaml` exists | Not used before phase 1 |
@@ -509,6 +526,17 @@ keeps the reasons. None of them changes an ADR.
 | Outbox per producing database (`AUTOINCREMENT` ids), delivered exactly once: append (dedup by `outbox_id`, also `UNIQUE` in the schema), then mark delivered; delivered rows deleted after 30 days, undelivered never | A crash between the two steps leads to a recognized duplicate, never to a lost or double entry |
 | Details are validated: no secret-looking keys (password, passphrase, secret, private, credential, token …), IP addresses only, ≤ 8 KiB | Second line of defense against logging secrets; data minimization (GDPR note in §5) |
 | `myownpki audit verify [--scope] [--expect-head SEQ:HASH]` (read-only; exit 0/1/3); the deliverer logs every chain head at start and daily | The head in the process log is the anchor until signed checkpoints (step 6a) and SIEM export (phase 5) |
+
+### Keys and unseal (phase 1 step 6, design approved 2026-10-13)
+| Decision | Why |
+|---|---|
+| Hierarchy passphrase → KEK (Argon2id t=4, 256 MiB, p=4) → root key → DEK per key → private key; recovery key (HKDF) as second wrap of the root key; AES-256-GCM everywhere with additional data binding purpose, slot or key ID | Passphrase change and reset rewrite one row; a ciphertext moved to another row or purpose doesn't decrypt |
+| Root key only in memory while unsealed; DEK and private key decrypted per operation (`WithKey`/`WithSigner`), buffers cleared afterwards; seal waits for running signatures | Shortest possible lifetime of key material; Go can't clear parsed key objects – docs recommend no core dumps and no unencrypted swap |
+| One secret check at a time; 3 free failures, then 1 min doubling to 1 h; every attempt audited (success, failure, denied) in the instance log; nothing about the secret is logged | Each attempt costs 256 MiB – no memory exhaustion by parallel guesses; guessing is slowed and visible |
+| Stored Argon2id parameters are bounds-checked before use | A tampered row can't turn an unseal attempt into a denial of service |
+| Recovery key: Crockford Base32, 9 groups of 6, 2 check characters (typos are caught before a real attempt); redacted in `%v`, JSON and slog – only `Reveal()` prints it | It can't reach a log by accident |
+| Recovery key output and confirmation are prepared for `myownpki init` (step 12): terminal only if interactive, otherwise `--recovery-key-file` (0600, never overwritten); two random groups re-typed before anything is stored | Owner decision 2026-10-13 |
+| `golang.org/x/crypto/openpgp` is blocked by depguard | GO-2026-5932: unmaintained and unsafe by design; it ships in the same module as argon2 |
 
 ### Web UI and dev mode
 | Decision | Why |
