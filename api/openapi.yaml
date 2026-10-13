@@ -105,6 +105,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "The unseal passphrase"
         required: true
         content:
           application/json:
@@ -141,6 +142,7 @@ paths:
       security: []
       x-required-role: none
       requestBody:
+        description: "Username and password (first factor)"
         required: true
         content:
           application/json:
@@ -163,6 +165,7 @@ paths:
       security: []
       x-required-role: none
       requestBody:
+        description: "TOTP code from the authenticator app, or a recovery code"
         required: true
         content:
           application/json:
@@ -201,6 +204,7 @@ paths:
       security: []
       x-required-role: none
       requestBody:
+        description: "Assertion returned by navigator.credentials.get()"
         required: true
         content:
           application/json:
@@ -225,6 +229,7 @@ paths:
         `/auth/webauthn/begin` + `/auth/webauthn/finish` while logged in instead.
       x-required-role: viewer
       requestBody:
+        description: "A fresh TOTP code or recovery code"
         required: true
         content:
           application/json:
@@ -289,13 +294,14 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "The new user with an initial password and role bindings"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/UserCreate" }
       responses:
         "201":
-          description: Created
+          description: User created
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
@@ -328,6 +334,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "Fields to change (at least one)"
         required: true
         content:
           application/json:
@@ -366,6 +373,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "The complete new set of role bindings – replaces all existing ones"
         required: true
         content:
           application/json:
@@ -394,6 +402,7 @@ paths:
       x-required-role: viewer
       x-step-up: true
       requestBody:
+        description: "Current and new password"
         required: true
         content:
           application/json:
@@ -426,6 +435,7 @@ paths:
       summary: Confirm TOTP enrollment with a first code; returns recovery codes once
       x-required-role: viewer
       requestBody:
+        description: "First code from the authenticator app, proving the secret was stored"
         required: true
         content:
           application/json:
@@ -462,6 +472,7 @@ paths:
       summary: Complete passkey registration
       x-required-role: viewer
       requestBody:
+        description: "Attestation returned by navigator.credentials.create()"
         required: true
         content:
           application/json:
@@ -495,13 +506,14 @@ paths:
       x-required-role: viewer
       x-step-up: true
       requestBody:
+        description: "Name, scopes and lifetime of the new token"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/APITokenCreate" }
       responses:
         "201":
-          description: Created
+          description: "Token created; the secret is in `token`"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/APITokenCreated" }
@@ -512,6 +524,7 @@ paths:
   /tokens/{tokenId}:
     parameters:
       - name: tokenId
+        description: "ID of the token"
         in: path
         required: true
         schema: { $ref: "#/components/schemas/ID" }
@@ -550,6 +563,7 @@ paths:
       x-required-role: viewer
       parameters:
         - name: presetName
+          description: "Preset name, for example `server`"
           in: path
           required: true
           schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
@@ -594,13 +608,14 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "The CA to create"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/CACreate" }
       responses:
         "201":
-          description: Created
+          description: CA created
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CACreated" }
@@ -621,6 +636,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "CA certificate in PEM, optionally with its private key"
         required: true
         content:
           multipart/form-data:
@@ -665,6 +681,7 @@ paths:
       x-required-role: viewer
       parameters:
         - name: format
+          description: "`pem` = CA certificate, `der` = binary, `chain` = this CA and its issuers up to the root"
           in: query
           schema:
             type: string
@@ -688,6 +705,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "The certificate signed by the offline root, optionally with its chain"
         required: true
         content:
           application/json:
@@ -732,6 +750,7 @@ paths:
       x-required-role: viewer
       parameters:
         - name: format
+          description: "`der` = binary (as served to clients), `pem` = text"
           in: query
           schema:
             type: string
@@ -772,12 +791,15 @@ paths:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
         - name: ca_id
+          description: "Only certificates issued by this CA"
           in: query
           schema: { $ref: "#/components/schemas/ID" }
         - name: status
+          description: "Only certificates with this status"
           in: query
           schema: { $ref: "#/components/schemas/CertificateStatus" }
         - name: preset
+          description: "Only certificates issued with this preset"
           in: query
           schema: { type: string }
         - name: expires_before
@@ -809,6 +831,7 @@ paths:
         Names are checked against the CA's name constraints before signing.
       x-required-role: operator
       requestBody:
+        description: "CA, preset and names, plus either a CSR or the key algorithm for a server-generated key"
         required: true
         content:
           application/json:
@@ -885,6 +908,7 @@ paths:
       x-required-role: operator
       x-step-up: true
       requestBody:
+        description: "Export format and the password that protects the key"
         required: true
         content:
           application/json:
@@ -919,13 +943,14 @@ paths:
       x-required-role: operator
       x-step-up: true
       requestBody:
+        description: "Revocation reason and optional invalidity date"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/RevokeRequest" }
       responses:
         "200":
-          description: Revoked
+          description: Revoked; the CRL is already regenerated
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Certificate" }
@@ -945,6 +970,7 @@ paths:
       summary: Issue a successor with the same names, preset and CA
       x-required-role: operator
       requestBody:
+        description: "Optional changes for the successor; without a body the defaults apply"
         required: false
         content:
           application/json:
@@ -970,6 +996,7 @@ paths:
       description: Lets the UI preview a CSR (untrusted input) before issuing. The signature is verified.
       x-required-role: operator
       requestBody:
+        description: "PKCS#10 request in PEM (untrusted input)"
         required: true
         content:
           application/pkcs10:
@@ -998,6 +1025,7 @@ paths:
       x-required-role: admin
       x-step-up: true
       requestBody:
+        description: "Archive of the pki.sh directory plus passphrases of encrypted CA keys"
         required: true
         content:
           multipart/form-data:
@@ -1023,6 +1051,7 @@ paths:
       x-required-role: admin
       parameters:
         - name: importId
+          description: "ID returned when the import was started"
           in: path
           required: true
           schema: { $ref: "#/components/schemas/ID" }
@@ -1044,6 +1073,7 @@ paths:
       description: "Stored with `source: external`; never signed, renewed or revoked by this server."
       x-required-role: operator
       requestBody:
+        description: "Certificate in PEM, optionally followed by its chain"
         required: true
         content:
           application/pem-certificate-chain:
@@ -1071,12 +1101,15 @@ paths:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
         - name: action
+          description: "Only entries with this action, for example `certificate.revoke`"
           in: query
           schema: { type: string, maxLength: 64 }
         - name: actor
+          description: "Only entries of this actor (user name, token or account)"
           in: query
           schema: { type: string, maxLength: 128 }
         - name: since
+          description: "Only entries at or after this time (UTC)"
           in: query
           schema: { type: string, format: date-time }
       responses:
@@ -1123,6 +1156,7 @@ components:
 
   parameters:
     Limit:
+      description: "Maximum number of items per page"
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
@@ -1132,16 +1166,19 @@ components:
       description: Opaque value from `next_cursor` of the previous page
       schema: { type: string, maxLength: 512 }
     UserId:
+      description: "ID of the user"
       name: userId
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
     CAId:
+      description: "ID of the CA"
       name: caId
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
     CertificateId:
+      description: "ID of the certificate"
       name: certificateId
       in: path
       required: true
@@ -1225,6 +1262,7 @@ components:
           description: Correlates with server logs
 
     ValidationProblem:
+      description: "Problem details with one entry per invalid field"
       allOf:
         - $ref: "#/components/schemas/Problem"
         - type: object
@@ -1241,6 +1279,7 @@ components:
                   message: { type: string }
 
     SystemStatus:
+      description: "Server version, seal state and server time (UTC)"
       type: object
       required: [version, sealed, server_time]
       properties:
@@ -1249,12 +1288,14 @@ components:
         server_time: { type: string, format: date-time }
 
     UnsealRequest:
+      description: "Passphrase that unlocks the online CA keys"
       type: object
       required: [passphrase]
       properties:
         passphrase: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
 
     LoginRequest:
+      description: "First login factor"
       type: object
       required: [username, password]
       properties:
@@ -1262,6 +1303,7 @@ components:
         password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
 
     LoginResponse:
+      description: "Result of the first factor – a second factor is always required"
       type: object
       required: [mfa_required, mfa_methods]
       properties:
@@ -1274,6 +1316,7 @@ components:
           description: User has no second factor yet and must enroll one before anything else
 
     TOTPRequest:
+      description: "TOTP or recovery code for the second factor, step-up or enrollment"
       type: object
       required: [code]
       properties:
@@ -1284,12 +1327,14 @@ components:
           writeOnly: true
 
     TOTPEnrollment:
+      description: "Secret for the authenticator app – returned once"
       type: object
       required: [otpauth_uri]
       properties:
         otpauth_uri: { type: string, description: "otpauth:// URI for the QR code – shown once" }
 
     RecoveryCodes:
+      description: "One-time recovery codes for when the authenticator is lost"
       type: object
       required: [codes]
       properties:
@@ -1309,6 +1354,7 @@ components:
       additionalProperties: true
 
     Session:
+      description: "The logged-in user, roles and session lifetimes"
       type: object
       required: [user, roles, expires_at]
       properties:
@@ -1325,10 +1371,12 @@ components:
           description: Only for cookie sessions; send it as X-CSRF-Token
 
     Role:
+      description: "Role, from least to most rights – viewer, operator, admin"
       type: string
       enum: [viewer, operator, admin]
 
     RoleBinding:
+      description: "A role granted on a scope (the tenant or one CA)"
       type: object
       required: [role, scope]
       properties:
@@ -1345,6 +1393,7 @@ components:
               $ref: "#/components/schemas/ID"
 
     User:
+      description: "A local user account"
       type: object
       required: [id, username, disabled, created_at]
       properties:
@@ -1362,6 +1411,7 @@ components:
         last_login_at: { type: [string, "null"], format: date-time }
 
     UserList:
+      description: "One page of users"
       type: object
       required: [items]
       properties:
@@ -1371,6 +1421,7 @@ components:
         next_cursor: { type: [string, "null"] }
 
     UserCreate:
+      description: "A new local user"
       type: object
       required: [username, password, roles]
       properties:
@@ -1389,6 +1440,7 @@ components:
           items: { $ref: "#/components/schemas/RoleBinding" }
 
     UserUpdate:
+      description: "Changes to a user (at least one field)"
       type: object
       minProperties: 1
       properties:
@@ -1397,6 +1449,7 @@ components:
         disabled: { type: boolean }
 
     PasswordChange:
+      description: "Password change of the logged-in user"
       type: object
       required: [current_password, new_password]
       properties:
@@ -1404,6 +1457,7 @@ components:
         new_password: { type: string, format: password, writeOnly: true, minLength: 12, maxLength: 1024 }
 
     APIToken:
+      description: "An API token without its secret"
       type: object
       required: [id, name, scopes, created_at, expires_at]
       properties:
@@ -1417,10 +1471,12 @@ components:
         last_used_at: { type: [string, "null"], format: date-time }
 
     TokenScope:
+      description: "What an API token may do; never more than its owner"
       type: string
       enum: [certificates:read, certificates:issue, certificates:revoke, cas:read, audit:read]
 
     APITokenCreate:
+      description: "A new API token"
       type: object
       required: [name, scopes, expires_in_days]
       properties:
@@ -1432,6 +1488,7 @@ components:
         expires_in_days: { type: integer, minimum: 1, maximum: 365 }
 
     APITokenCreated:
+      description: "A new API token including the secret – returned once"
       allOf:
         - $ref: "#/components/schemas/APIToken"
         - type: object
@@ -1442,6 +1499,7 @@ components:
               description: The secret – shown exactly once, stored only as a hash
 
     SANType:
+      description: "Kind of subject alternative name"
       type: string
       enum: [dns, ip, email, uri]
 
@@ -1486,6 +1544,7 @@ components:
       enum: [ecdsa-p256, ecdsa-p384, rsa-2048, rsa-3072, rsa-4096, ed25519]
 
     Subject:
+      description: "Distinguished name parts of a certificate subject"
       type: object
       required: [common_name]
       properties:
@@ -1497,6 +1556,7 @@ components:
         country: { type: string, pattern: "^[A-Z]{2}$" }
 
     SANs:
+      description: "Subject alternative names, grouped by kind"
       type: object
       properties:
         dns:
@@ -1531,10 +1591,12 @@ components:
         critical: { type: boolean, default: true }
 
     CAKind:
+      description: "Root (self-signed) or intermediate CA"
       type: string
       enum: [root, intermediate]
 
     CAStatus:
+      description: "Lifecycle state of a CA"
       type: string
       enum: [active, pending_signature, expired, revoked, retired]
 
@@ -1544,6 +1606,7 @@ components:
       enum: [offline, online_encrypted, hsm]
 
     CA:
+      description: "A certificate authority of this tenant"
       type: object
       required: [id, name, kind, status, key_mode, subject, not_before, not_after, serial, fingerprint_sha256]
       properties:
@@ -1553,7 +1616,7 @@ components:
         status: { $ref: "#/components/schemas/CAStatus" }
         key_mode: { $ref: "#/components/schemas/KeyMode" }
         key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
-        subject: { type: string, description: RFC 4514 string }
+        subject: { type: string, description: Subject DN of the CA as an RFC 4514 string }
         issuer_ca_id: { type: [string, "null"] }
         serial: { type: string, pattern: "^[0-9A-F]+$" }
         not_before: { type: string, format: date-time }
@@ -1572,6 +1635,7 @@ components:
         crl: { $ref: "#/components/schemas/CRLInfo" }
 
     CACreate:
+      description: "A CA to create"
       type: object
       required: [name, kind, subject, key_algorithm, validity_days, public_base_url]
       properties:
@@ -1591,6 +1655,7 @@ components:
         public_base_url: { type: string, format: uri }
 
     CACreated:
+      description: "A created CA, with the CSR when it waits for offline signing"
       allOf:
         - $ref: "#/components/schemas/CA"
         - type: object
@@ -1600,6 +1665,7 @@ components:
               description: Only with offline_signing – sign it on the offline root
 
     CAImport:
+      description: "An existing CA to import"
       type: object
       required: [name, certificate]
       properties:
@@ -1613,6 +1679,7 @@ components:
         public_base_url: { type: string, format: uri }
 
     SignedCAUpload:
+      description: "Certificate of an offline-signed intermediate"
       type: object
       required: [certificate_pem]
       properties:
@@ -1620,6 +1687,7 @@ components:
         chain_pem: { type: string, maxLength: 262144 }
 
     CRLInfo:
+      description: "Metadata of the current CRL of a CA"
       type: object
       required: [number, this_update, next_update]
       properties:
@@ -1629,6 +1697,7 @@ components:
         revoked_count: { type: integer, minimum: 0 }
 
     CertificateStatus:
+      description: "Validity state of a certificate"
       type: string
       enum: [valid, revoked, expired]
 
@@ -1638,6 +1707,7 @@ components:
       enum: [unspecified, keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, privilegeWithdrawn]
 
     Certificate:
+      description: "An end-entity certificate known to this tenant"
       type: object
       required: [id, ca_id, status, source, subject, sans, serial, not_before, not_after, fingerprint_sha256, key_stored]
       properties:
@@ -1648,7 +1718,7 @@ components:
         source:
           type: string
           enum: [issued, imported, external]
-        subject: { type: string, description: RFC 4514 string }
+        subject: { type: string, description: Subject DN as an RFC 4514 string }
         common_name: { type: string }
         sans: { $ref: "#/components/schemas/SANs" }
         serial: { type: string, pattern: "^[0-9A-F]+$" }
@@ -1670,6 +1740,7 @@ components:
         created_at: { type: string, format: date-time }
 
     CertificateList:
+      description: "One page of certificates"
       type: object
       required: [items]
       properties:
@@ -1679,6 +1750,7 @@ components:
         next_cursor: { type: [string, "null"] }
 
     IssueRequest:
+      description: "Request to issue a certificate; exactly one of `csr_pem` or `key`"
       type: object
       required: [ca_id, preset, subject]
       oneOf:
@@ -1706,13 +1778,14 @@ components:
         key_usage:
           type: array
           items: { type: string }
-          description: Only for customizable presets; validated like preset files
+          description: Key usages – only for customizable presets; validated like preset files
         ext_key_usage:
           type: array
           items: { type: string }
-          description: Only for customizable presets; validated like preset files
+          description: Extended key usages – only for customizable presets; validated like preset files
 
     RevokeRequest:
+      description: "Request to revoke a certificate"
       type: object
       required: [reason]
       properties:
@@ -1723,6 +1796,7 @@ components:
           description: When the key is known or suspected to have been compromised
 
     RenewRequest:
+      description: "Options for renewing a certificate"
       type: object
       properties:
         reuse_key:
@@ -1736,6 +1810,7 @@ components:
         validity_days: { type: integer, minimum: 1 }
 
     ExportRequest:
+      description: "Request to export a certificate together with its private key"
       type: object
       required: [format]
       properties:
@@ -1759,6 +1834,7 @@ components:
           description: Legacy encryption (3DES/RC2) for old Windows/macOS/Java – weak, use only if needed
 
     CSRInfo:
+      description: "What a CSR asks for, parsed for preview"
       type: object
       required: [subject, sans, key_algorithm, signature_valid]
       properties:
@@ -1775,6 +1851,7 @@ components:
           items: { type: string }
 
     LegacyImportUpload:
+      description: "Upload of a legacy pki.sh directory"
       type: object
       required: [archive]
       properties:
@@ -1791,6 +1868,7 @@ components:
         description: "ca_passphrase[<name>] fields for encrypted CA keys"
 
     ImportJob:
+      description: "State and result of a legacy import"
       type: object
       required: [id, status]
       properties:
@@ -1819,6 +1897,7 @@ components:
               message: { type: string }
 
     AuditEntry:
+      description: "One entry of the hash-chained audit log"
       type: object
       required: [seq, time, actor, action, result, hash, prev_hash]
       properties:
@@ -1847,6 +1926,7 @@ components:
         prev_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
 
     AuditList:
+      description: "One page of audit entries"
       type: object
       required: [items]
       properties:
@@ -1856,6 +1936,7 @@ components:
         next_cursor: { type: [string, "null"] }
 
     AuditVerifyResult:
+      description: "Result of walking the audit hash chain"
       type: object
       required: [ok, entries_checked]
       properties:
