@@ -8,28 +8,37 @@ Everything is embedded in the binary via `embed.FS`. No Node.js in the build.
 
 ```
 internal/web/
-├─ layout/        shells: compact.templ (A), standard.templ (B), focus.templ (C)
-├─ components/    shared building blocks: table, badge, stat, form, chart box, empty state …
-└─ pages/         one package/file per area: certificates, cas, domains, agents, audit, settings, design
+├─ view/          shared view types: page metadata, appearance prefs (cookie), status, date formats
+├─ components/    shared building blocks: status text, message bar, breadcrumb, page head, tabs,
+│                 key/value list, number row, form row, choice row, wizard steps, certificate table …
+├─ layout/        app.templ – the application shell (header, sidebar, variants A/B/C)
+├─ pages/         one package per area: overview, certificates, authorities, admin, design …
+└─ fixture/       sample data for the dev-mode prototype only (replaced by the store in phase 1)
 web/styles/       tokens.css, base.css, components.css, layouts.css
-web/islands/      TypeScript Web Components (<pki-chart>, <pki-agent-status>, <pki-dashboard>)
+web/islands/      TypeScript Web Components (later: <pki-chart> …)
 ```
 
-- **Pages never know which layout they're in.** A page renders its content; the shell is chosen from
-  the user's preference (fallback: role default; mobile: C). A new page must work in all three shells.
-- Shells differ in navigation and chrome only (A: tree nav + toolbar + task bar; B: top nav + title/filter
-  bar + info column; C: slim text nav + KPIs + "needs attention").
+- **Pages never know which layout they're in.** A page renders its content into `layout.App`;
+  the variant comes from the user's appearance preference (`data-layout` on `<html>`).
+- Pages receive plain view models (`view.*`, page-specific `Data` structs). They never query services.
+- Shell: dark header (product, tenant switch, search, user menu as `<details>`), text-only sidebar
+  grouped by area (Overview, Certificates, Authorities, ACME, Agents, Administration), breadcrumb,
+  page title left with commands right, content at full width.
+- Variants (prototype, final split decided later – PLAN §14): A narrow sidebar, B standard sidebar
+  (default), C no sidebar (main entries as one line). Small screens use the C navigation.
+- Appearance (layout, light/dark/system, density) is stored server-side in a cookie whose values are
+  checked against an allow-list – no JavaScript.
 
 ## CSS
 
 - Only classes defined in `web/styles/`. **No `style=""` attributes, no `<style>` blocks in templates** – CI checks this.
 - Need something new? Add a class to `components.css` and show it in the `/design` gallery.
-- Class names are short and stable: `.card .btn .btn-primary .tb .bd-ok .bd-wa .bd-cr .st .stat .form-row .chart-box .mono …`
-- Sizes, colours, radii, fonts only via tokens (`var(--…)`) defined in `tokens.css`.
+- Class names are short and stable: `.btn .btn-primary .cmdbar .cmd .st .st-ok .msg .msg-warn .table .numbers .tabs .kv .form-row .steps .mono …`
+- Sizes, colors, radii, fonts only via tokens (`var(--…)`) defined in `tokens.css`.
 - Two token groups:
   - **Brand tokens** (themeable): `--brand`, `--accent`, `--logo`, fonts, radius, density.
   - **Status tokens** (fixed): `--status-ok`, `--status-warn`, `--status-crit`, `--status-info`. Never themeable.
-- Light/dark via token overrides (`prefers-color-scheme` + explicit user choice).
+- **Light is the default**; dark via `data-theme="dark"`, or `data-theme="system"` to follow the OS.
 - Density (compact/comfortable) via spacing tokens.
 
 ## Themes (three levels)
@@ -37,17 +46,24 @@ web/islands/      TypeScript Web Components (<pki-chart>, <pki-agent-status>, <p
 Global (instance) → tenant → user. Each level is a set of token overrides stored in the database and
 emitted as a small CSS block. Higher levels decide which tokens lower levels may override.
 - Themes are data, not code: no JavaScript, no templates, no arbitrary CSS selectors.
-- Validate colours server-side and enforce WCAG contrast (auto-adjust foreground or reject).
+- Validate colors server-side and enforce WCAG contrast (auto-adjust foreground or reject).
 
 ## Look and feel
 
-An early mockup was rejected as "too AI-looking". Aim for a calm, professional admin tool:
-- Prefer **tables over cards** for lists; cards only for KPIs and dashboard widgets.
-- **Icons sparingly** – navigation and a few actions; not in every row or heading. One icon set
-  (an SVG sprite embedded in the binary), outline style.
-- Serial numbers, fingerprints, OIDs, PEM in monospace (`.mono`) – admins compare them character by character.
-- Dates absolute (`2027-01-04`) with relative hint ("in 12 days") where useful; times in UTC with local hint.
-- Status always as colour **plus** text/icon (accessibility).
+Direction: **classic enterprise admin tool** (Windows Admin Center, vCenter). An early mockup was
+rejected as "too AI-looking", and the first gallery still read as such – so:
+- **Tables for everything that is a list**; dense rows, horizontal scroll instead of wrapping serials.
+- **No cards and no boxes around sections.** Sections are separated by spacing and headings.
+  Overview figures are a plain number row (`.numbers`), never tiles with colored edges.
+- **Small radii only** (2 px, `--radius`); few borders – row separators, not frames.
+- **No icons** in status, messages, buttons or navigation. Status is text, optionally with a small dot
+  (`.st .st-dot`); color supports the text, never replaces it.
+- **Messages** are a plain line with a text label – "Note:", "Warning:", "Error:", "Done:" – and a
+  colored left rule; no tinted (pastel) backgrounds.
+- **Commands** sit in a flat command bar (`.cmdbar`) above the table or right of the page title.
+- **Fonts:** system UI fonts – Segoe UI on Windows (like Windows Admin Center), the platform font
+  elsewhere; Consolas/Cascadia Mono for serials, fingerprints, OIDs and PEM (`.mono`).
+- Dates absolute (`2027-01-04`) with a relative hint ("in 12 days"); times in UTC.
 
 ## htmx
 
@@ -70,3 +86,5 @@ An early mockup was rejected as "too AI-looking". Aim for a calm, professional a
 
 - Semantic HTML, labels for every input, keyboard navigation, visible focus.
 - Screenshot tests per layout (A/B/C) and theme (light/dark) for key pages.
+- Tests render every page and fail on inline styles/scripts, event handlers, icons (`<svg>`/`<img>`),
+  undefined CSS classes, unknown tokens and hard-coded colors outside `tokens.css`.

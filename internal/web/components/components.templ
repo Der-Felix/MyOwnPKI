@@ -1,79 +1,101 @@
 package components
 
-// Status is the meaning of a badge, stat or notice. Status colors are fixed
-// tokens (--status-*) that themes can't change (ADR-12).
-type Status string
+import "github.com/Der-Felix/MyOwnPKI/internal/web/view"
 
-// Statuses map to the CSS suffixes -ok, -wa, -cr, -in and -ne (neutral).
-const (
-	StatusOK      Status = "ok"
-	StatusWarn    Status = "wa"
-	StatusCrit    Status = "cr"
-	StatusInfo    Status = "in"
-	StatusNeutral Status = "ne"
-)
+// Status renders a status as colored text with a small dot – never an icon,
+// never a tinted background. The text carries the meaning; color only supports it.
+templ Status(s view.Status, text string) {
+	<span class={ "st", "st-" + string(s) }><span class="st-dot" aria-hidden="true"></span>{ text }</span>
+}
 
-// icon returns the sprite symbol shown next to a status, so status is never
-// conveyed by color alone (accessibility).
-func (s Status) icon() string {
-	switch s {
-	case StatusOK:
-		return "i-ok"
-	case StatusWarn:
-		return "i-warn"
-	case StatusCrit:
-		return "i-crit"
-	case StatusInfo, StatusNeutral:
-		return "i-info"
-	default:
-		return "i-info"
+// MessageBar is a plain line with a text label ("Warning:", "Error:" …).
+templ MessageBar(m view.Message) {
+	<div class={ "msg", "msg-" + string(m.Kind) } role={ messageRole(m.Kind) }>
+		<span class="msg-label">{ m.Kind.Label() }</span>
+		{ m.Text }
+	</div>
+}
+
+func messageRole(k view.MessageKind) string {
+	if k == view.MessageError || k == view.MessageWarning {
+		return "alert"
+	}
+	return "status"
+}
+
+// Messages renders a list of message bars.
+templ Messages(list []view.Message) {
+	for _, m := range list {
+		@MessageBar(m)
 	}
 }
 
-// Icon renders one symbol of /static/icons.svg. Decorative: hidden from screen readers.
-templ Icon(name string) {
-	<svg class="ic" aria-hidden="true" focusable="false"><use href={ "/static/icons.svg#" + name }></use></svg>
-}
-
-// Badge shows a status with icon and text.
-templ Badge(s Status, text string) {
-	<span class={ "bd", "bd-" + string(s) }>
-		if s != StatusNeutral {
-			@Icon(s.icon())
-		}
-		{ text }
-	</span>
-}
-
-// Stat is a KPI tile. s may be "" for a neutral tile.
-templ Stat(label, value, hint string, s Status) {
-	<div class={ "stat", templ.KV("stat-"+string(s), s != "") }>
-		<div class="stat-label">{ label }</div>
-		<div class="stat-value">{ value }</div>
-		if hint != "" {
-			<div class="stat-hint">
-				if s != "" {
-					@Icon(s.icon())
+// Breadcrumb renders the trail up to (not including) the current page.
+templ Breadcrumb(crumbs []view.Crumb, current string) {
+	<nav aria-label="Breadcrumb">
+		<ol class="breadcrumb">
+			for _, c := range crumbs {
+				if c.Href != "" {
+					<li><a href={ templ.SafeURL(c.Href) }>{ c.Label }</a></li>
+				} else {
+					<li>{ c.Label }</li>
 				}
-				{ hint }
+			}
+			<li aria-current="page">{ current }</li>
+		</ol>
+	</nav>
+}
+
+// Tabs renders server-side tabs; each tab is its own URL.
+templ Tabs(tabs []view.Tab) {
+	<ul class="tabs">
+		for _, t := range tabs {
+			<li>
+				if t.Active {
+					<a class="tab" href={ templ.SafeURL(t.Href) } aria-current="page">{ t.Label }</a>
+				} else {
+					<a class="tab" href={ templ.SafeURL(t.Href) }>{ t.Label }</a>
+				}
+			</li>
+		}
+	</ul>
+}
+
+// KVList renders a key/value list (certificate and CA details).
+templ KVList(rows []view.KV) {
+	<dl class="kv">
+		for _, r := range rows {
+			<dt>{ r.Key }</dt>
+			<dd class={ templ.KV("mono", r.Mono) }>{ r.Value }</dd>
+		}
+	</dl>
+}
+
+// Number is one figure of a number row.
+type Number struct {
+	Label, Value, Href string
+	Status             view.Status // "" = neutral; warn/crit color the figure
+}
+
+// NumberRow shows overview figures in one plain line – no cards.
+templ NumberRow(numbers []Number) {
+	<dl class="numbers">
+		for _, n := range numbers {
+			<div class={ "number", templ.KV("number-"+string(n.Status), n.Status != "") }>
+				<dt>{ n.Label }</dt>
+				<dd>
+					if n.Href != "" {
+						<a href={ templ.SafeURL(n.Href) }>{ n.Value }</a>
+					} else {
+						{ n.Value }
+					}
+				</dd>
 			</div>
 		}
-	</div>
+	</dl>
 }
 
-// Note is a notice box; the children are its body text.
-templ Note(s Status, title string) {
-	<div class={ "note", "note-" + string(s) } role="note">
-		@Icon(s.icon())
-		<div>
-			<div class="note-title">{ title }</div>
-			{ children... }
-		</div>
-	</div>
-}
-
-// FormRow lays out one labelled form control (the children). errMsg marks the
-// row invalid and is announced via aria-describedby on the control.
+// FormRow lays out one labelled control (the children). errMsg marks the row invalid.
 templ FormRow(id, label, hint, errMsg string, required bool) {
 	<div class={ "form-row", templ.KV("has-error", errMsg != "") }>
 		<label for={ id }>
@@ -83,22 +105,62 @@ templ FormRow(id, label, hint, errMsg string, required bool) {
 			}
 		</label>
 		{ children... }
+		if errMsg != "" {
+			<div class="err" id={ id + "-err" }>{ errMsg }</div>
+		}
 		if hint != "" {
 			<div class="hint" id={ id + "-hint" }>{ hint }</div>
-		}
-		if errMsg != "" {
-			<div class="err" id={ id + "-err" }>
-				@Icon("i-crit")
-				{ errMsg }
-			</div>
 		}
 	</div>
 }
 
+// Step is one step of a wizard.
+type Step struct {
+	Label string
+	State string // done | current | todo
+}
+
+// Steps renders the wizard progress as a numbered text line.
+templ Steps(steps []Step) {
+	<ol class="steps">
+		for _, s := range steps {
+			if s.State == "current" {
+				<li class="step step-current" aria-current="step">{ s.Label }</li>
+			} else {
+				<li class={ "step", templ.KV("step-done", s.State == "done") }>{ s.Label }</li>
+			}
+		}
+	</ol>
+}
+
 // DevBanner is shown on every page while the server runs with --dev.
 templ DevBanner() {
-	<div class="dev-banner" role="alert">
-		@Icon("i-warn")
-		DEV MODE – no TLS, no auth
+	<div class="dev-banner" role="alert">DEV MODE – no TLS, no auth</div>
+}
+
+// ChoiceRow lays out a group of radio buttons (the children) like a form row.
+// A fieldset/legend can't take part in the row grid, so the group is labelled
+// with role="radiogroup" and aria-labelledby instead.
+templ ChoiceRow(id, label string) {
+	<div class="form-row" role="radiogroup" aria-labelledby={ id }>
+		<span class="label" id={ id }>{ label }</span>
+		<div>
+			{ children... }
+		</div>
+	</div>
+}
+
+// CommandGroup is one group of a command bar. Groups are separated by a line
+// and always ordered: create | edit/transfer | dangerous (always last).
+templ CommandGroup(label string) {
+	<div class="cmd-group" role="group" aria-label={ label }>
+		{ children... }
+	</div>
+}
+
+// CommandBar is the toolbar above a table; its children are CommandGroups.
+templ CommandBar(label string) {
+	<div class="cmdbar" role="toolbar" aria-label={ label }>
+		{ children... }
 	</div>
 }

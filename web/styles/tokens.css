@@ -1,137 +1,176 @@
 /*
  * Design tokens – the only file themes change (ADR-12).
  *
+ * Direction: classic enterprise admin tool. Metrics follow Microsoft Fluent 2
+ * as a yardstick (values only, no dependency): 4 px spacing grid, a fixed type
+ * ramp, 32 px controls. Every size used by the other stylesheets is a token
+ * here; tests reject raw pixel values elsewhere (except 1px/2px lines) and
+ * check that spacing tokens are multiples of 4.
+ *
  * Two groups:
  *  - Brand/neutral tokens: themeable (instance → tenant → user, PLAN §7).
- *  - Status tokens (--status-*): FIXED. They differ between light and dark
- *    mode for contrast, but no theme may override them – "expired" must never
- *    look like branding.
+ *  - Status tokens (--status-*): FIXED. They differ between light and dark for
+ *    contrast, but no theme may override them.
  *
- * Light/dark: prefers-color-scheme, overridden by data-theme="light|dark" on
- * any element (the /design page uses this to show both modes side by side).
- * Density: data-density="compact" on any element.
+ * Color scheme: light is the default. data-theme="dark" forces dark,
+ * data-theme="system" follows the operating system. Density: data-density="compact".
  */
 
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Neutral */
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --surface-2: #eff1f4;
-  --border: #d8dce2;
-  --border-strong: #b6bdc6;
-  --text: #1b1f24;
-  --text-muted: #59626e;
+  --bg: #ffffff;
+  --bg-subtle: #f5f5f5;
+  --sidebar-bg: #f5f5f5;
+  --border: #e0e0e0;
+  --border-strong: #c7c7c7;
+  --text: #242424;
+  --text-muted: #616161;
+  --row-hover: #f5f5f5;
+  --row-selected: #ebf3fc;
+
+  --header-bg: #1f2a36;
+  --header-text: #ffffff;
+  --header-muted: #b8c2cc;
 
   /* Brand (themeable) */
-  --brand: #24527a;
-  --brand-hover: #1b4061;
+  --brand: #0f5c99;
+  --brand-hover: #0b4a7d;
   --brand-contrast: #ffffff;
-  --link: #1f5a8c;
-  --focus: #2b6cb0;
+  --link: #0b5aa0;
+  --focus: #000000;
 
   /* Status (fixed – never themeable) */
-  --status-ok: #1e7a3c;
-  --status-ok-bg: #e7f3eb;
+  --status-ok: #107c10;
   --status-warn: #8a5300;
-  --status-warn-bg: #fcf2df;
-  --status-crit: #b42318;
-  --status-crit-bg: #fcebea;
-  --status-info: #1d5ea6;
-  --status-info-bg: #e8f0fa;
+  --status-crit: #c50f1f;
+  --status-info: #0f5c99;
+  --status-neutral: #616161;
+  --on-status: #ffffff; /* text on a solid status background */
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #121417;
-  --surface: #1a1d21;
-  --surface-2: #23272c;
-  --border: #31363d;
-  --border-strong: #474e57;
-  --text: #e5e7ea;
-  --text-muted: #9ba3ad;
+  --bg: #1f1f1f;
+  --bg-subtle: #292929;
+  --sidebar-bg: #1a1a1a;
+  --border: #3d3d3d;
+  --border-strong: #525252;
+  --text: #ebebeb;
+  --text-muted: #a8a8a8;
+  --row-hover: #292929;
+  --row-selected: #1f3347;
 
-  --brand: #6fa2d4;
-  --brand-hover: #8cb6e0;
-  --brand-contrast: #0c1a28;
-  --link: #8cb6e0;
-  --focus: #8cb6e0;
+  --header-bg: #0f0f0f;
+  --header-text: #f0f0f0;
+  --header-muted: #a8a8a8;
 
-  --status-ok: #5ec486;
-  --status-ok-bg: #13291c;
-  --status-warn: #e2a84b;
-  --status-warn-bg: #2d220f;
-  --status-crit: #f27c73;
-  --status-crit-bg: #341816;
-  --status-info: #7aaef0;
-  --status-info-bg: #132338;
+  --brand: #4a9ae0;
+  --brand-hover: #6aaee8;
+  --brand-contrast: #0b1520;
+  --link: #6aaee8;
+  --focus: #ffffff;
+
+  --status-ok: #6cc56c;
+  --status-warn: #f0b350;
+  --status-crit: #ff7a7a;
+  --status-info: #6aaee8;
+  --status-neutral: #a8a8a8;
+  --on-status: #1b1b1b;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  [data-theme="system"] {
     color-scheme: dark;
 
-    --bg: #121417;
-    --surface: #1a1d21;
-    --surface-2: #23272c;
-    --border: #31363d;
-    --border-strong: #474e57;
-    --text: #e5e7ea;
-    --text-muted: #9ba3ad;
+    --bg: #1f1f1f;
+    --bg-subtle: #292929;
+    --sidebar-bg: #1a1a1a;
+    --border: #3d3d3d;
+    --border-strong: #525252;
+    --text: #ebebeb;
+    --text-muted: #a8a8a8;
+    --row-hover: #292929;
+    --row-selected: #1f3347;
 
-    --brand: #6fa2d4;
-    --brand-hover: #8cb6e0;
-    --brand-contrast: #0c1a28;
-    --link: #8cb6e0;
-    --focus: #8cb6e0;
+    --header-bg: #0f0f0f;
+    --header-text: #f0f0f0;
+    --header-muted: #a8a8a8;
 
-    --status-ok: #5ec486;
-    --status-ok-bg: #13291c;
-    --status-warn: #e2a84b;
-    --status-warn-bg: #2d220f;
-    --status-crit: #f27c73;
-    --status-crit-bg: #341816;
-    --status-info: #7aaef0;
-    --status-info-bg: #132338;
+    --brand: #4a9ae0;
+    --brand-hover: #6aaee8;
+    --brand-contrast: #0b1520;
+    --link: #6aaee8;
+    --focus: #ffffff;
+
+    --status-ok: #6cc56c;
+    --status-warn: #f0b350;
+    --status-crit: #ff7a7a;
+    --status-info: #6aaee8;
+    --status-neutral: #a8a8a8;
+    --on-status: #1b1b1b;
   }
 }
 
 :root {
-  /* Typography – system fonts only: nothing to download, nothing to license */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --fs-xs: 0.75rem;
-  --fs-sm: 0.8125rem;
-  --fs-md: 0.875rem;
-  --fs-lg: 1rem;
-  --fs-xl: 1.25rem;
-  --fs-2xl: 1.5rem;
-  --lh: 1.5;
+  /* Fonts – system UI fonts: Segoe UI on Windows (as in Windows Admin Center),
+     the platform UI font elsewhere. Nothing is downloaded. */
+  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", ui-monospace, "SF Mono", Menlo, "Liberation Mono", monospace;
 
-  /* Shape */
-  --radius: 4px;
-  --radius-sm: 3px;
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 6%);
+  /* Type ramp: size / line height. Line heights are multiples of 4. */
+  --fs-caption: 12px;
+  --lh-caption: 16px;
+  --fs-body: 14px;
+  --lh-body: 20px;
+  --fs-subtitle: 16px;
+  --lh-subtitle: 24px;
+  --fs-title: 20px;
+  --lh-title: 28px;
+  --fs-figure: 28px;
+  --lh-figure: 36px;
+  --fw-regular: 400;
+  --fw-semibold: 600;
 
-  /* Spacing */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
+  /* Spacing – 4 px grid */
+  --s-4: 4px;
+  --s-8: 8px;
+  --s-12: 12px;
+  --s-16: 16px;
+  --s-20: 20px;
+  --s-24: 24px;
+  --s-32: 32px;
+  --s-40: 40px;
+  --s-48: 48px;
 
-  /* Density (comfortable) */
-  --cell-y: 8px;
-  --cell-x: 12px;
+  /* Shapes and fixed sizes (all multiples of 4, except the 2px radius) */
+  --radius: 2px;
+  --rule: 4px;          /* message rule, navigation indicator */
+  --dot: 8px;           /* status dot */
+  --check: 16px;        /* checkbox, radio */
+  --header-h: 48px;
+  --sidebar-w: 240px;
+  --sidebar-w-narrow: 192px;
+  --label-w: 200px;     /* form labels, key/value keys */
+  --field-w: 480px;
+  --form-w: 768px;
+  --search-w: 280px;
+  --header-search-w: 400px;
+  --number-w: 160px;    /* minimum column of the number row */
+  --menu-w: 240px;
+
+  /* Density (comfortable): 32 px controls, 36 px table rows */
   --control-h: 32px;
+  --row-pad-y: 8px;
+  --cell-x: 12px;
+  --cmd-x: 8px;
 }
 
 [data-density="compact"] {
-  --cell-y: 4px;
+  /* 28 px controls, 28 px table rows */
+  --control-h: 28px;
+  --row-pad-y: 4px;
   --cell-x: 8px;
-  --control-h: 26px;
 }

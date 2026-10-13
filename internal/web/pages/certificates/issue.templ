@@ -1,0 +1,225 @@
+package certificates
+
+import (
+	"strconv"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Wizard steps.
+const (
+	StepPreset = 1
+	StepNames  = 2
+	StepKey    = 3
+	StepReview = 4
+)
+
+// StepLabels are shown in the progress line.
+var StepLabels = []string{"Preset", "Names", "Key", "Review"}
+
+// PresetOption is one row of the preset choice.
+type PresetOption struct {
+	Name, Description string
+	ValidityDays      int
+	Selected          bool
+}
+
+// IssueState is everything the wizard collects. It travels between the steps
+// as hidden form fields and is validated again on every step.
+type IssueState struct {
+	Preset, CA         string
+	CommonName         string
+	DNS, IP, Email     string // one entry per line
+	KeyMode, Algorithm string // KeyMode: csr | server
+	CSR                string
+	Days               string
+}
+
+// IssueData is the content of one wizard step.
+type IssueData struct {
+	Step       int
+	State      IssueState
+	Errors     map[string]string
+	Messages   []view.Message
+	Presets    []PresetOption
+	CAs        []view.Option
+	Algorithms []view.Option
+	// Step 2: which SAN types the chosen preset offers and requires.
+	OfferDNS, OfferIP, OfferEmail bool
+	SANRule                       string
+	// Step 3
+	ServerKeyAllowed bool
+	MaxDaysHint      string
+	// Step 4
+	Review []view.KV
+}
+
+func (d IssueData) steps() []components.Step {
+	out := make([]components.Step, len(StepLabels))
+	for i, l := range StepLabels {
+		state := "todo"
+		switch {
+		case i+1 < d.Step:
+			state = "done"
+		case i+1 == d.Step:
+			state = "current"
+		}
+		out[i] = components.Step{Label: l, State: state}
+	}
+	return out
+}
+
+// Issue renders the current wizard step.
+templ Issue(p view.Page, d IssueData) {
+	@layout.App(p) {
+		@components.Steps(d.steps())
+		@components.Messages(d.Messages)
+		<form class="form" action="/certificates/new" method="post">
+			<input type="hidden" name="from" value={ strconv.Itoa(d.Step) }/>
+			@hiddenState(d)
+			switch d.Step {
+				case StepNames:
+					@namesStep(d)
+				case StepKey:
+					@keyStep(d)
+				case StepReview:
+					@reviewStep(d)
+				default:
+					@presetStep(d)
+			}
+			<div class="form-actions">
+				if d.Step > StepPreset {
+					<button type="submit" class="btn" name="go" value="back">Back</button>
+				}
+				if d.Step < StepReview {
+					<button type="submit" class="btn btn-primary" name="go" value="next">Next</button>
+				} else {
+					<button type="submit" class="btn btn-primary" name="go" value="issue">Issue certificate</button>
+				}
+				<a class="btn" href="/certificates">Cancel</a>
+			</div>
+		</form>
+	}
+}
+
+// hiddenState carries the values of the steps that are not shown.
+templ hiddenState(d IssueData) {
+	if d.Step != StepPreset {
+		<input type="hidden" name="preset" value={ d.State.Preset }/>
+		<input type="hidden" name="ca" value={ d.State.CA }/>
+	}
+	if d.Step != StepNames {
+		<input type="hidden" name="cn" value={ d.State.CommonName }/>
+		<input type="hidden" name="dns" value={ d.State.DNS }/>
+		<input type="hidden" name="ip" value={ d.State.IP }/>
+		<input type="hidden" name="email" value={ d.State.Email }/>
+	}
+	if d.Step != StepKey {
+		<input type="hidden" name="keymode" value={ d.State.KeyMode }/>
+		<input type="hidden" name="alg" value={ d.State.Algorithm }/>
+		<input type="hidden" name="csr" value={ d.State.CSR }/>
+		<input type="hidden" name="days" value={ d.State.Days }/>
+	}
+}
+
+templ presetStep(d IssueData) {
+	<fieldset class={ templ.KV("has-error", d.Errors["preset"] != "") }>
+		<legend>Preset</legend>
+		<p class="muted">The preset decides key usage, extended key usage and which names are required.</p>
+		if d.Errors["preset"] != "" {
+			<p class="msg msg-crit"><span class="msg-label">Error:</span>{ d.Errors["preset"] }</p>
+		}
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th class="col-check" scope="col"><span class="visually-hidden">Choose</span></th>
+						<th scope="col">Preset</th>
+						<th scope="col">Use</th>
+						<th scope="col" class="num">Default validity</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, o := range d.Presets {
+						<tr>
+							<td class="col-check">
+								<input type="radio" id={ "preset-" + o.Name } name="preset" value={ o.Name } checked?={ o.Selected }/>
+							</td>
+							<td class="nowrap"><label for={ "preset-" + o.Name }>{ o.Name }</label></td>
+							<td>{ o.Description }</td>
+							<td class="num nowrap">{ strconv.Itoa(o.ValidityDays) } days</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</fieldset>
+	@components.FormRow("ca", "Issuing CA", "Only CAs whose key is online can sign.", d.Errors["ca"], true) {
+		<select id="ca" name="ca">
+			for _, o := range d.CAs {
+				<option value={ o.Value } selected?={ o.Selected }>{ o.Label }</option>
+			}
+		</select>
+	}
+}
+
+templ namesStep(d IssueData) {
+	<p class="muted">{ d.SANRule }</p>
+	@components.FormRow("cn", "Common name", "Display name. Clients match host names against the subject alternative names only.", d.Errors["cn"], true) {
+		<input id="cn" type="text" name="cn" value={ d.State.CommonName }/>
+	}
+	if d.OfferDNS {
+		@components.FormRow("dns", "DNS names", "One per line. *.example.lan covers one level only – add the base name as well.", d.Errors["dns"], false) {
+			<textarea id="dns" name="dns" rows="3">{ d.State.DNS }</textarea>
+		}
+	} else {
+		<input type="hidden" name="dns" value={ d.State.DNS }/>
+	}
+	if d.OfferIP {
+		@components.FormRow("ip", "IP addresses", "One per line, IPv4 or IPv6.", d.Errors["ip"], false) {
+			<textarea id="ip" name="ip" rows="2">{ d.State.IP }</textarea>
+		}
+	} else {
+		<input type="hidden" name="ip" value={ d.State.IP }/>
+	}
+	if d.OfferEmail {
+		@components.FormRow("email", "E-mail addresses", "One per line.", d.Errors["email"], false) {
+			<textarea id="email" name="email" rows="2">{ d.State.Email }</textarea>
+		}
+	} else {
+		<input type="hidden" name="email" value={ d.State.Email }/>
+	}
+}
+
+templ keyStep(d IssueData) {
+	@components.ChoiceRow("group-key", "Key") {
+		<label class="choice">
+			<input type="radio" name="keymode" value="csr" checked?={ d.State.KeyMode != "server" }/>
+			Upload a certificate request (CSR) – the private key never leaves your host (recommended)
+		</label>
+		<label class="choice">
+			<input type="radio" name="keymode" value="server" checked?={ d.State.KeyMode == "server" } disabled?={ !d.ServerKeyAllowed }/>
+			Generate the key on the server – stored encrypted, download needs step-up authentication
+		</label>
+	}
+	@components.FormRow("csr", "Certificate request", "PEM, starting with -----BEGIN CERTIFICATE REQUEST-----. Only the names are taken from it.", d.Errors["csr"], false) {
+		<textarea id="csr" name="csr" rows="6">{ d.State.CSR }</textarea>
+	}
+	@components.FormRow("alg", "Key algorithm", "Only used when the server generates the key. ECDSA P-256 is understood by every current TLS client.", d.Errors["alg"], false) {
+		<select id="alg" name="alg">
+			for _, o := range d.Algorithms {
+				<option value={ o.Value } selected?={ o.Selected }>{ o.Label }</option>
+			}
+		</select>
+	}
+	@components.FormRow("days", "Validity (days)", d.MaxDaysHint, d.Errors["days"], true) {
+		<input id="days" type="number" name="days" min="1" value={ d.State.Days }/>
+	}
+}
+
+templ reviewStep(d IssueData) {
+	<h2 class="section-head">Review</h2>
+	@components.KVList(d.Review)
+}

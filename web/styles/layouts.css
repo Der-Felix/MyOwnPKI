@@ -1,163 +1,354 @@
 /*
- * Layout shells (ADR-13). Phase 0 ships shell B "Standard" (top navigation,
- * page title, info column). Shells A "Compact" and C "Focus" follow in phase 4;
- * pages never depend on the shell they are rendered in.
+ * Application shell (ADR-13): header on top, navigation sidebar on the left,
+ * content at full width. Pages never depend on the variant they are shown in.
+ *
+ * Variants (data-layout on <html>, chosen per user in Administration > Appearance):
+ *   a – narrow sidebar
+ *   b – standard sidebar (default)
+ *   c – no sidebar; the main entry of each group is shown as a text line
+ * The final split of layouts A/B/C is decided after the prototype (PLAN §14).
+ *
+ * Alignment: brand, navigation group titles and navigation entries share one
+ * left edge (16 px); the page content starts 24 px right of the sidebar.
  */
 
-.shell-b {
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: auto var(--header-h) minmax(0, 1fr);
+  grid-template-areas:
+    "banner banner"
+    "header header"
+    "nav main";
   min-height: 100vh;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-5);
-  height: 48px;
-  padding: 0 var(--sp-5);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+.app > .dev-banner {
+  grid-area: banner;
 }
 
-.brand-name {
-  font-weight: 700;
-  letter-spacing: 0.01em;
+/* ---------- Header ---------- */
+.app-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--s-24);
+  padding: 0 var(--s-16);
+  background: var(--header-bg);
+  color: var(--header-text);
+}
+
+.app-brand {
+  font-size: var(--fs-subtitle);
+  line-height: var(--lh-subtitle);
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
 
-.topnav {
-  display: flex;
-  align-self: stretch;
-  gap: var(--sp-1);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.topnav-item {
+.app-tenant {
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-3);
-  color: var(--text-muted);
+  gap: var(--s-8);
+  color: var(--header-muted);
+}
+
+.app-header select,
+.app-header input[type="search"],
+.app-header .btn {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--header-bg);
+}
+
+.app-search {
+  flex: 0 1 var(--header-search-w);
+}
+
+.app-search input[type="search"] {
+  width: 100%;
+}
+
+.app-user {
+  position: relative;
+  margin-left: auto;
+}
+
+.app-user summary {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  list-style: none;
+  cursor: pointer;
+  color: var(--header-text);
+  white-space: nowrap;
+}
+
+.app-user summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-user summary::after {
+  content: "\25BE";
+  margin-left: var(--s-8);
+  color: var(--header-muted);
+}
+
+.app-user-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s-8));
+  z-index: 30;
+  min-width: var(--menu-w);
+  margin: 0;
+  padding: var(--s-4) 0;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+}
+
+.app-user-menu a,
+.app-user-menu span {
+  display: block;
+  padding: var(--s-4) var(--s-16);
+  color: var(--text);
+}
+
+.app-user-menu a:hover {
+  background: var(--row-hover);
   text-decoration: none;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
 }
 
-.topnav-item:hover {
+.app-user-menu span {
+  color: var(--text-muted);
+}
+
+/* ---------- Sidebar navigation ---------- */
+.app-nav {
+  grid-area: nav;
+  padding: var(--s-16) 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+}
+
+.nav-group {
+  margin: 0 0 var(--s-16);
+  padding: 0;
+  list-style: none;
+}
+
+.nav-group-title {
+  padding: 0 var(--s-16) var(--s-4);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+}
+
+/* 32 px rows: 24 px line + 2 × 4 px. The indicator is drawn inside the row,
+   so the text never moves. */
+.nav-link {
+  display: block;
+  padding: var(--s-4) var(--s-16);
+  line-height: var(--s-24);
   color: var(--text);
 }
 
-.topnav-item.is-active {
-  color: var(--text);
-  border-bottom-color: var(--brand);
-  font-weight: 600;
+.nav-link:hover {
+  background: var(--row-hover);
+  text-decoration: none;
 }
 
-.topnav-item.is-disabled {
-  opacity: 0.5;
+.nav-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.nav-link[aria-current="page"] {
+  background: var(--bg);
+  box-shadow: inset var(--rule) 0 0 var(--brand);
+  font-weight: var(--fw-semibold);
+}
+
+.nav-link.is-disabled {
+  color: var(--text-muted);
   cursor: default;
 }
 
-.page {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: var(--sp-5);
+.nav-link.is-disabled:hover {
+  background: transparent;
 }
 
-.page-head {
-  margin-bottom: var(--sp-5);
+.nav-note {
+  margin-left: var(--s-4);
+  font-size: var(--fs-caption);
 }
 
-.page-head .lead {
-  color: var(--text-muted);
-  max-width: 72ch;
-  margin: 0;
+/* ---------- Main area and page header ---------- */
+.app-main {
+  grid-area: main;
+  min-width: 0;
+  padding: var(--s-16) var(--s-24) var(--s-48);
 }
 
-.with-aside {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: var(--sp-6);
-  align-items: start;
+.page-header {
+  margin-bottom: var(--s-24);
 }
 
-.aside {
-  position: sticky;
-  top: var(--sp-6);
-  display: grid;
-  gap: var(--sp-4);
-  font-size: var(--fs-sm);
-}
-
-.toc {
-  list-style: none;
-  margin: 0;
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  margin: 0 0 var(--s-4);
   padding: 0;
-  border-left: 1px solid var(--border);
-}
-
-.toc a {
-  display: block;
-  padding: 2px var(--sp-3);
+  list-style: none;
   color: var(--text-muted);
-  text-decoration: none;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
 }
 
-.toc a:hover {
-  color: var(--text);
+.breadcrumb li + li::before {
+  content: "/";
+  margin-right: var(--s-4);
 }
 
-.sec {
-  margin-bottom: var(--sp-6);
-  scroll-margin-top: var(--sp-6);
+.page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-4) var(--s-16);
+  min-height: var(--control-h);
 }
 
-.sec > h2 {
-  padding-bottom: var(--sp-2);
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0 calc(var(--cmd-x) * -1) 0 auto;
+}
+
+.page-desc {
+  margin: var(--s-4) 0 0;
+  color: var(--text-muted);
+}
+
+/* ---------- Variant A: narrow sidebar ---------- */
+[data-layout="a"] .app {
+  grid-template-columns: var(--sidebar-w-narrow) minmax(0, 1fr);
+}
+
+[data-layout="a"] .nav-note {
+  display: none;
+}
+
+/* ---------- Variant C and small screens: one line of main entries ---------- */
+[data-layout="c"] .app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto var(--header-h) auto minmax(0, 1fr);
+  grid-template-areas:
+    "banner"
+    "header"
+    "nav"
+    "main";
+}
+
+[data-layout="c"] .app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s-24);
+  padding: 0 var(--s-24);
+  border-right: 0;
   border-bottom: 1px solid var(--border);
 }
 
-.sec-intro {
-  color: var(--text-muted);
-  max-width: 72ch;
+[data-layout="c"] .nav-group {
+  display: contents;
 }
 
-.sec-sub {
-  margin-top: var(--sp-5);
+[data-layout="c"] .nav-group-title,
+[data-layout="c"] .nav-group li:not(:has(.nav-primary)) {
+  display: none;
 }
 
-.stack {
-  display: grid;
-  gap: var(--sp-3);
+[data-layout="c"] .nav-link {
+  padding: var(--s-8) 0;
+  border-bottom: 2px solid transparent;
 }
 
-.grid-2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-4);
+[data-layout="c"] .nav-link[aria-current="page"] {
+  background: transparent;
+  box-shadow: none;
+  border-bottom-color: var(--brand);
 }
 
-@media (max-width: 960px) {
-  .with-aside {
+@media (max-width: 760px) {
+  .app,
+  [data-layout="a"] .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "banner"
+      "header"
+      "nav"
+      "main";
+  }
+
+  .app-header {
+    flex-wrap: wrap;
+    gap: var(--s-8) var(--s-12);
+    padding: var(--s-8) var(--s-16);
+  }
+
+  .app-search {
+    order: 5;
+    flex-basis: 100%;
+  }
+
+  .app-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--s-16);
+    padding: 0 var(--s-16);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-group {
+    display: contents;
+  }
+
+  .nav-group-title,
+  .nav-group li:not(:has(.nav-primary)) {
+    display: none;
+  }
+
+  .nav-link {
+    padding: var(--s-8) 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .nav-link[aria-current="page"] {
+    background: transparent;
+    box-shadow: none;
+    border-bottom-color: var(--brand);
+  }
+
+  .app-main {
+    padding: var(--s-16);
+  }
+
+  .kv,
+  .form-row {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .aside {
-    position: static;
-    order: -1;
-  }
-
-  .grid-2 {
-    grid-template-columns: minmax(0, 1fr);
+  .form-row .hint,
+  .form-row .err {
+    grid-column: 1;
   }
 }
 
-@media (max-width: 640px) {
-  .topbar {
-    gap: var(--sp-3);
-    padding: 0 var(--sp-3);
-  }
-
-  .page {
-    padding: var(--sp-3);
-  }
+/* Action forms (POST commands) take part in the action row like plain groups. */
+.page-actions > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
 }

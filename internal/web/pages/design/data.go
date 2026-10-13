@@ -1,44 +1,26 @@
 // Package design renders the component gallery at /design: every CSS class of
-// web/styles is shown here with realistic sample data (frontend.md).
+// web/styles is shown with realistic sample data (frontend.md).
 package design
 
-import "github.com/Der-Felix/MyOwnPKI/internal/web/components"
-
-// sampleCert is fixed demo data. Dates are absolute (with a relative hint), as
-// the UI will show them; nothing here depends on the current time.
-type sampleCert struct {
-	CommonName string
-	Preset     string
-	CA         string
-	Serial     string
-	Expires    string
-	Relative   string
-	Status     components.Status
-	StatusText string
-}
-
-var sampleCerts = []sampleCert{
-	{"nas.homelab.lan", "server", "homelab-issuing", "4F3A9C21E07B5D8816A2F0C3B9D47E15", "2027-01-04", "in 83 days", components.StatusOK, "Valid"},
-	{"proxmox.homelab.lan", "server", "homelab-issuing", "1B7E0D44A9C3F28E5560B1D7A2C98F03", "2026-11-02", "in 20 days", components.StatusWarn, "Expires soon"},
-	{"*.apps.homelab.lan", "wildcard", "homelab-issuing", "6C02E9B5F1A47D3388E0C5B2D91A7F64", "2027-03-18", "in 156 days", components.StatusOK, "Valid"},
-	{"it-admin@homelab.lan", "smime", "homelab-users", "2A91F7C05E3B6D8441C9A0E2B7F35D18", "2026-08-30", "44 days ago", components.StatusCrit, "Expired"},
-	{"radius.homelab.lan", "server-client", "homelab-issuing", "7D45B0E8C2F19A3667B3E5D0A4C81F92", "2027-05-21", "in 220 days", components.StatusCrit, "Revoked"},
-	{"vpn.homelab.lan", "vpn-server", "homelab-issuing", "3E8C1A6F09D27B5554F2B8C0E6A93D71", "2027-09-12", "in 334 days", components.StatusOK, "Valid"},
-}
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
 
 type swatch struct {
 	Class, Token, Note string
 }
 
 var neutralSwatches = []swatch{
-	{"sw-bg", "--bg", "page background"},
-	{"sw-surface", "--surface", "tables, cards, inputs"},
-	{"sw-surface-2", "--surface-2", "headers, hover"},
-	{"sw-border", "--border", "lines"},
+	{"sw-bg", "--bg", "content background"},
+	{"sw-bg-subtle", "--bg-subtle", "code blocks"},
+	{"sw-sidebar", "--sidebar-bg", "navigation"},
+	{"sw-header", "--header-bg", "header bar"},
+	{"sw-border", "--border", "row separators"},
 	{"sw-text", "--text", "body text"},
 	{"sw-text-muted", "--text-muted", "labels, hints"},
+	{"sw-selected", "--row-selected", "selected rows"},
 	{"sw-brand", "--brand", "primary action (themeable)"},
-	{"sw-link", "--link", "links (themeable)"},
 }
 
 var statusSwatches = []swatch{
@@ -48,28 +30,44 @@ var statusSwatches = []swatch{
 	{"sw-info", "--status-info", "pending, information"},
 }
 
-type tocEntry struct {
-	ID, Label string
+var sampleRows = []view.CertRow{
+	{ID: "c-0101", CommonName: "nas.homelab.lan", Preset: "server", CA: "homelab-issuing", Serial: "4F3A9C21E07B5D8816A2F0C3B9D47E15", Expires: "2027-01-04", ExpiresRel: "in 83 days", Status: view.StatusOK, StatusText: "Valid"},
+	{ID: "c-0102", CommonName: "proxmox.homelab.lan", Preset: "server", CA: "homelab-issuing", Serial: "1B7E0D44A9C3F28E5560B1D7A2C98F03", Expires: "2026-11-02", ExpiresRel: "in 20 days", Status: view.StatusWarn, StatusText: "Expires soon"},
+	{ID: "c-0104", CommonName: "radius.homelab.lan", Preset: "server-client", CA: "homelab-issuing", Serial: "7D45B0E8C2F19A3667B3E5D0A4C81F92", Expires: "2027-05-21", ExpiresRel: "in 220 days", Status: view.StatusCrit, StatusText: "Revoked"},
+	{ID: "c-0111", CommonName: "it-admin@homelab.lan", Preset: "smime", CA: "homelab-users", Serial: "2A91F7C05E3B6D8441C9A0E2B7F35D18", Expires: "2026-08-30", ExpiresRel: "44 days ago", Status: view.StatusCrit, StatusText: "Expired"},
 }
 
-var toc = []tocEntry{
-	{"colors", "Colors"},
-	{"type", "Typography"},
-	{"badges", "Status badges"},
-	{"buttons", "Buttons"},
-	{"tables", "Tables"},
-	{"stats", "KPI tiles"},
-	{"forms", "Forms"},
-	{"notes", "Notices"},
-	{"details", "Details"},
-	{"empty", "Empty state & charts"},
-	{"themes", "Dark mode & density"},
+var sampleNumbers = []components.Number{
+	{Label: "Certificates", Value: "1,284"},
+	{Label: "Valid", Value: "1,241"},
+	{Label: "Expire in 30 days", Value: "17", Status: view.StatusWarn},
+	{Label: "Revoked", Value: "3"},
+	{Label: "Expired", Value: "23", Status: view.StatusCrit},
+	{Label: "Certificate authorities", Value: "3"},
 }
 
-// sampleDNSNames fills the textarea of the form demo (one name per line).
-const sampleDNSNames = "nas.homelab.lan\nnas.example.org"
+var sampleKV = []view.KV{
+	{Key: "Subject", Value: "CN=nas.homelab.lan"},
+	{Key: "Issuer", Value: "CN=Homelab Issuing CA 1, O=Homelab, C=DE"},
+	{Key: "Serial number", Value: "4F3A9C21E07B5D8816A2F0C3B9D47E15", Mono: true},
+	{Key: "SHA-256 fingerprint", Value: view.Fingerprint("3B9F0AC17E52D48816E0A92C5BF76103CD498A2EF107B693D5206CE84A917F12"), Mono: true},
+	{Key: "Valid", Value: "2025-12-03 – 2027-01-04 (83 days left)"},
+}
 
-// samplePEM is a truncated, clearly fake PEM block for the code-block demo.
+var sampleTabs = []view.Tab{
+	{Label: "Overview", Href: "#tabs", Active: true},
+	{Label: "Extensions", Href: "#tabs"},
+	{Label: "Chain", Href: "#tabs"},
+	{Label: "History", Href: "#tabs"},
+}
+
+var sampleSteps = []components.Step{
+	{Label: "Preset", State: "done"},
+	{Label: "Names", State: "current"},
+	{Label: "Key", State: "todo"},
+	{Label: "Review", State: "todo"},
+}
+
 const samplePEM = `-----BEGIN CERTIFICATE-----
 MIIB9TCCAZugAwIBAgIUTzqcIeB7XYgWovDDudR+FTAKBggqhkjOPQQDAjAaMRgw
 FgYDVQQDDA9ob21lbGFiLWlzc3VpbmcwHhcNMjYxMDEzMDAwMDAwWhcNMjcwMTA0

@@ -1,0 +1,77 @@
+package certificates
+
+import (
+	"strconv"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// ListData is the content of the certificate list.
+type ListData struct {
+	Messages []view.Message
+	Query    string
+	Statuses []view.Option
+	CAs      []view.Option
+	Presets  []view.Option
+	Rows     []view.CertRow
+	Total    int
+}
+
+// List renders the certificate list: filters, command bar, selectable table.
+templ List(p view.Page, d ListData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<form class="filters" action="/certificates" method="get" role="search">
+			<label class="filter">
+				Name or serial
+				<input type="search" name="q" value={ d.Query }/>
+			</label>
+			<label class="filter">
+				Status
+				@selectBox("status", d.Statuses)
+			</label>
+			<label class="filter">
+				Issuing CA
+				@selectBox("ca", d.CAs)
+			</label>
+			<label class="filter">
+				Preset
+				@selectBox("preset", d.Presets)
+			</label>
+			<button type="submit" class="btn">Apply</button>
+			<a class="btn" href="/certificates">Reset</a>
+		</form>
+		<form id="selection" action="/certificates/actions" method="post">
+			@components.CommandBar("Certificate commands") {
+				@components.CommandGroup("Create") {
+					<a class="cmd cmd-primary" href="/certificates/new">New certificate</a>
+					<button type="submit" class="cmd" name="action" value="import">Import</button>
+				}
+				@components.CommandGroup("Edit") {
+					<button type="submit" class="cmd" name="action" value="export">Export</button>
+					<button type="submit" class="cmd" name="action" value="renew">Renew</button>
+				}
+				@components.CommandGroup("Dangerous") {
+					<button type="submit" class="cmd cmd-danger" name="action" value="revoke">Revoke</button>
+				}
+				<span class="cmdbar-end">Select rows, then choose a command.</span>
+			}
+		</form>
+		if len(d.Rows) == 0 {
+			<p class="empty">No certificates match the filter.</p>
+		} else {
+			@components.CertificateTable(d.Rows, true, "selection")
+		}
+		<div class="table-foot">{ strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } certificates</div>
+	}
+}
+
+templ selectBox(name string, options []view.Option) {
+	<select name={ name }>
+		for _, o := range options {
+			<option value={ o.Value } selected?={ o.Selected }>{ o.Label }</option>
+		}
+	</select>
+}

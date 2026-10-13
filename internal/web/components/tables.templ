@@ -1,0 +1,75 @@
+package components
+
+import "github.com/Der-Felix/MyOwnPKI/internal/web/view"
+
+// CertificateTable lists certificates. With selectable, every row gets a
+// checkbox named "id" that belongs to the form with the given id, so command
+// bar buttons can act on the selection without JavaScript.
+templ CertificateTable(rows []view.CertRow, selectable bool, form string) {
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					if selectable {
+						<th class="col-check" scope="col"><span class="visually-hidden">Select</span></th>
+					}
+					<th scope="col">Common name</th>
+					<th scope="col">Status</th>
+					<th scope="col">Expires</th>
+					<th scope="col">Preset</th>
+					<th scope="col">Issuing CA</th>
+					<th scope="col">Serial number</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range rows {
+					<tr>
+						if selectable {
+							<td class="col-check">
+								<input type="checkbox" name="id" value={ r.ID } form={ form } aria-label={ "Select " + r.CommonName }/>
+							</td>
+						}
+						<td><a href={ templ.SafeURL("/certificates/" + r.ID) }>{ r.CommonName }</a></td>
+						<td>
+							@Status(r.Status, r.StatusText)
+						</td>
+						<td class="nowrap">{ r.Expires }<span class="rel">{ r.ExpiresRel }</span></td>
+						<td class="nowrap">{ r.Preset }</td>
+						<td class="nowrap">{ r.CA }</td>
+						<td class="mono"><span class="trunc" title={ r.Serial }>{ r.Serial }</span></td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// ActivityTable lists recent audit entries.
+templ ActivityTable(rows []view.ActivityRow) {
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					<th scope="col">Time (UTC)</th>
+					<th scope="col">Actor</th>
+					<th scope="col">Action</th>
+					<th scope="col">Target</th>
+					<th scope="col">Result</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range rows {
+					<tr>
+						<td class="nowrap">{ r.Time }</td>
+						<td>{ r.Actor }</td>
+						<td class="mono">{ r.Action }</td>
+						<td class="nowrap">{ r.Target }</td>
+						<td>
+							@Status(r.Result, r.ResultText)
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}

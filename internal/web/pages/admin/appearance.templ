@@ -1,0 +1,54 @@
+package admin
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Choice is one radio option with an explanation.
+type Choice struct {
+	Value, Label, Help string
+	Checked            bool
+}
+
+// AppearanceData is the content of the appearance settings.
+type AppearanceData struct {
+	Messages  []view.Message
+	Layouts   []Choice
+	Themes    []Choice
+	Densities []Choice
+}
+
+// Appearance renders the per-user appearance settings. Saved server-side in a
+// cookie – no JavaScript involved.
+templ Appearance(p view.Page, d AppearanceData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<form class="form" action="/admin/appearance" method="post">
+			@choiceGroup("Layout", "layout", d.Layouts)
+			@choiceGroup("Color scheme", "theme", d.Themes)
+			@choiceGroup("Density", "density", d.Densities)
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Save</button>
+				<a class="btn" href="/admin/appearance">Cancel</a>
+			</div>
+		</form>
+	}
+}
+
+templ choiceGroup(title, name string, choices []Choice) {
+	@components.ChoiceRow("group-"+name, title) {
+		for _, c := range choices {
+			<label class="choice">
+				<input type="radio" name={ name } value={ c.Value } checked?={ c.Checked }/>
+				<span>
+					{ c.Label }
+					if c.Help != "" {
+						<span class="muted">– { c.Help }</span>
+					}
+				</span>
+			</label>
+		}
+	}
+}

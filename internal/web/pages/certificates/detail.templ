@@ -1,0 +1,198 @@
+package certificates
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Tab keys of the detail page; each tab is its own URL.
+const (
+	TabOverview   = "overview"
+	TabExtensions = "extensions"
+	TabChain      = "chain"
+	TabHistory    = "history"
+)
+
+// ExtRow is one X.509 extension as shown on the Extensions tab.
+type ExtRow struct {
+	Name, OID string
+	Critical  bool
+	Value     string
+}
+
+// ChainRow is one certificate of the chain, leaf first.
+type ChainRow struct {
+	Role, Subject, Href, Expires string
+	Status                       view.Status
+	StatusText                   string
+}
+
+// HistoryRow is one event in the life of the certificate.
+type HistoryRow struct {
+	Time, Actor, Event string
+}
+
+// DetailData is the content of the certificate detail page.
+type DetailData struct {
+	ID, CommonName string
+	Status         view.Status
+	StatusText     string
+	Tab            string
+	Tabs           []view.Tab
+	Messages       []view.Message
+	KeyStored      bool
+	Revoked        bool
+	Overview       []view.KV
+	Names          []view.KV
+	Extensions     []ExtRow
+	Chain          []ChainRow
+	History        []HistoryRow
+}
+
+// Detail renders one certificate with tabs.
+templ Detail(p view.Page, d DetailData) {
+	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(detailActions(d))) {
+		@components.Messages(d.Messages)
+		@components.Tabs(d.Tabs)
+		switch d.Tab {
+			case TabExtensions:
+				@extensionsTab(d.Extensions)
+			case TabChain:
+				@chainTab(d.Chain)
+			case TabHistory:
+				@historyTab(d.History)
+			default:
+				@overviewTab(d)
+		}
+	}
+}
+
+templ overviewTab(d DetailData) {
+	<div class="columns">
+		<section class="section" aria-labelledby="h-props">
+			<h2 id="h-props" class="section-head">Properties</h2>
+			@components.KVList(d.Overview)
+		</section>
+		<section class="section" aria-labelledby="h-names">
+			<h2 id="h-names" class="section-head">Subject alternative names</h2>
+			if len(d.Names) == 0 {
+				<p class="empty">This certificate has no subject alternative names.</p>
+			} else {
+				@components.KVList(d.Names)
+			}
+		</section>
+	</div>
+}
+
+templ extensionsTab(rows []ExtRow) {
+	<p class="muted">Extensions are set by the preset and the issuing CA – never copied from the request.</p>
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					<th scope="col">Extension</th>
+					<th scope="col">OID</th>
+					<th scope="col">Critical</th>
+					<th scope="col">Value</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range rows {
+					<tr>
+						<td class="nowrap">{ r.Name }</td>
+						<td class="mono">{ r.OID }</td>
+						<td>
+							if r.Critical {
+								Yes
+							} else {
+								No
+							}
+						</td>
+						<td class="break">{ r.Value }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ chainTab(rows []ChainRow) {
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					<th scope="col">Role</th>
+					<th scope="col">Subject</th>
+					<th scope="col">Expires</th>
+					<th scope="col">Status</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range rows {
+					<tr>
+						<td class="nowrap">{ r.Role }</td>
+						<td>
+							if r.Href != "" {
+								<a href={ templ.SafeURL(r.Href) }>{ r.Subject }</a>
+							} else {
+								{ r.Subject }
+							}
+						</td>
+						<td class="nowrap">{ r.Expires }</td>
+						<td>
+							@components.Status(r.Status, r.StatusText)
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ historyTab(rows []HistoryRow) {
+	if len(rows) == 0 {
+		<p class="empty">No events recorded for this certificate.</p>
+	} else {
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th scope="col">Time (UTC)</th>
+						<th scope="col">Actor</th>
+						<th scope="col">Event</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range rows {
+						<tr>
+							<td class="nowrap">{ r.Time }</td>
+							<td>{ r.Actor }</td>
+							<td>{ r.Event }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ detailActions(d DetailData) {
+	<form action={ templ.SafeURL("/certificates/" + d.ID + "/actions") } method="post">
+		@components.CommandGroup("Create") {
+			<button type="submit" class="cmd" name="action" value="renew">Renew</button>
+		}
+		@components.CommandGroup("Transfer") {
+			<button type="submit" class="cmd" name="action" value="download-pem">Download PEM</button>
+			<button type="submit" class="cmd" name="action" value="download-chain">Download chain</button>
+			if d.KeyStored {
+				<button type="submit" class="cmd" name="action" value="export">Export with key</button>
+			}
+		}
+		if !d.Revoked {
+			@components.CommandGroup("Dangerous") {
+				<button type="submit" class="cmd cmd-danger" name="action" value="revoke">Revoke</button>
+			}
+		}
+	</form>
+}

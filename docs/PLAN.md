@@ -465,3 +465,34 @@ keeps the reasons. None of them changes an ADR.
 | Status colors fixed per light/dark mode | Themes can't change them (ADR-12), but dark mode needs other shades for contrast |
 | Log timestamps converted to UTC | "UTC everywhere" – the first dev run logged local time |
 | Demo data without real names (`it-admin@homelab.lan`) | Public repository |
+
+### UI direction (after review of the phase 0 gallery, 2026-10-13)
+The first gallery was rated "about 40 % AI-looking" (layout, tiles/boxes, icons). New direction:
+**classic enterprise admin tool** (Windows Admin Center, vCenter). ADR-12 and ADR-13 stay unchanged –
+this only changes tokens, component classes and the shell.
+
+| Decision | Why |
+|---|---|
+| Shell: fixed text-only sidebar grouped by area (Overview, Certificates, Authorities, ACME, Agents, Administration); dark header with product, tenant switch, search, user menu; breadcrumb; title left, commands right; content at full width | Familiar from Windows/VMware admin tools; no centered column, no table of contents |
+| Light by default, dark and "follow the OS" optional; 2 px radii; few borders; sections separated by spacing and headings | Calm, dense, professional |
+| No KPI cards – overview figures as a plain number row; no pastel notices – messages as a line with a text label ("Warning:", "Error:") | Removes the "dashboard template" look |
+| No icons in status, messages, buttons or navigation; status as text with an optional small dot | Text is unambiguous and accessible; the icon sprite was removed |
+| System fonts (Segoe UI + Consolas on Windows, platform fonts elsewhere); IBM Plex Sans/Mono was compared in screenshots and not adopted (owner decision) | No download, no license file; switching later only touches two tokens |
+| Appearance (layout variant, light/dark/system, density) stored per browser in a cookie, values checked against an allow-list, switched server-side without JavaScript | Works under the strict CSP; no client code |
+| Layout variants for now: A narrow sidebar, B standard sidebar (default), C no sidebar; small screens use the C navigation | The final split of A/B/C (PLAN §7) is decided after the prototype |
+| UI prototype in dev mode on fixture data with the real templ components (dashboard, certificate list and detail with tabs, issue wizard, CA list and detail, appearance) | Phase 1 reuses pages and components and only replaces the fixture with the store |
+| Wizard checks (presets, name constraints, CSR signature, per-CA max validity) run server-side and are repeated on the final submit | Hidden form fields are client input; the CA engine checks everything again in phase 1 |
+| State-changing requests are rejected when cross-origin (`http.CrossOriginProtection`, Sec-Fetch-Site/Origin) | Baseline CSRF defence from the first form on; session-bound CSRF tokens follow with login (phase 1) |
+
+### UI precision pass (2026-10-13)
+| Decision | Why |
+|---|---|
+| Microsoft Fluent 2 as the metric yardstick (values only, no dependency) rather than VMware Clarity | Fluent 2 is built around Segoe UI (our font) and Windows Admin Center; its spacing ramp is in 4 px steps |
+| Strict 4 px grid: every size is a token; outside `tokens.css` only 1px/2px lines are allowed – enforced by `TestStrictGrid` | Precision that can't erode over time |
+| Type ramp caption 12/16, body 14/20 (also tables), subtitle 16/24, title 20/28, figures 28/36; 32 px controls, 36 px table rows (28 px compact) | One fixed hierarchy; line heights on the 4 px grid |
+| Common left edge for breadcrumb, title, description, filters, command text, table text; table row lines end flush with the text edge (like the line under the tabs), command bars "bleed" by their inner padding | Edges line up; table lines and tab line form one edge (owner decision) |
+| One page header for all pages, rendered by the shell from `view.Page` (breadcrumb except on the dashboard, title, status, description, actions) | Pages can't drift apart |
+| Command bars grouped create \| edit/transfer \| dangerous (always last), separated by a line | Same order everywhere; destructive commands never in the middle |
+| Number row as equal grid columns, semibold tabular figures | Figures line up like a table |
+| Serials truncated with "…" in tables (full value in `title` and on the detail page); SHA-256 fingerprints as `78:3D:…` in two lines of 16 bytes | Readable lists; fingerprints comparable with `openssl x509 -fingerprint -sha256` |
+| Consolas before Cascadia Mono | Optically closer to Segoe UI at the same size |

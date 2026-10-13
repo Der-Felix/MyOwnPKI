@@ -1,0 +1,50 @@
+package overview
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Data is the content of the dashboard.
+type Data struct {
+	Messages []view.Message
+	Numbers  []components.Number
+	Expiring []view.CertRow
+	Activity []view.ActivityRow
+}
+
+// Page renders the dashboard.
+templ Page(p view.Page, d Data) {
+	@layout.App(p.WithActions(dashboardActions())) {
+		@components.Messages(d.Messages)
+		@components.NumberRow(d.Numbers)
+		<section class="section" aria-labelledby="h-expiring">
+			<div class="section-head">
+				<h2 id="h-expiring">Expiring in the next 30 days</h2>
+				<a href="/certificates?status=expiring">All expiring certificates</a>
+			</div>
+			if len(d.Expiring) == 0 {
+				<p class="empty">No certificate expires in the next 30 days.</p>
+			} else {
+				@components.CertificateTable(d.Expiring, false, "")
+			}
+		</section>
+		<section class="section" aria-labelledby="h-activity">
+			<div class="section-head">
+				<h2 id="h-activity">Recent activity</h2>
+				<span class="muted small">Audit log (phase 1)</span>
+			</div>
+			@components.ActivityTable(d.Activity)
+		</section>
+	}
+}
+
+templ dashboardActions() {
+	@components.CommandGroup("Create") {
+		<a class="cmd cmd-primary" href="/certificates/new">Issue certificate</a>
+	}
+	@components.CommandGroup("View") {
+		<a class="cmd" href="/certificates?status=expiring">Show expiring</a>
+	}
+}

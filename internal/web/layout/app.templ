@@ -1,0 +1,153 @@
+package layout
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+type navItem struct {
+	Key, Label, Href string
+	Note             string // shown for entries that are not built yet
+	Primary          bool   // shown in layout C (no sidebar)
+}
+
+type navGroup struct {
+	Title string
+	Items []navItem
+}
+
+// nav is the main navigation: groups and entries are text only.
+var nav = []navGroup{
+	{"Overview", []navItem{
+		{Key: "dashboard", Label: "Dashboard", Href: "/", Primary: true},
+	}},
+	{"Certificates", []navItem{
+		{Key: "certificates", Label: "All certificates", Href: "/certificates", Primary: true},
+		{Key: "issue", Label: "Issue certificate", Href: "/certificates/new"},
+		{Key: "expiring", Label: "Expiring soon", Href: "/certificates?status=expiring"},
+	}},
+	{"Authorities", []navItem{
+		{Key: "authorities", Label: "Certificate authorities", Href: "/authorities", Primary: true},
+		{Key: "crls", Label: "Revocation lists", Note: "phase 1"},
+	}},
+	{"ACME", []navItem{
+		{Key: "acme-accounts", Label: "Accounts", Note: "phase 2"},
+		{Key: "acme-orders", Label: "Orders", Note: "phase 2"},
+	}},
+	{"Agents", []navItem{
+		{Key: "agents", Label: "Agents", Note: "phase 3"},
+		{Key: "enrollment", Label: "Enrollment requests", Note: "phase 3"},
+	}},
+	{"Administration", []navItem{
+		{Key: "users", Label: "Users and roles", Note: "phase 1"},
+		{Key: "audit", Label: "Audit log", Note: "phase 1"},
+		{Key: "appearance", Label: "Appearance", Href: "/admin/appearance", Primary: true},
+		{Key: "design", Label: "Design system", Href: "/design"},
+	}},
+}
+
+// App is the application shell. The page content is passed as children.
+templ App(p view.Page) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme={ string(p.Prefs.Theme) } data-density={ string(p.Prefs.Density) } data-layout={ string(p.Prefs.Layout) }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="color-scheme" content="light dark"/>
+			<title>{ p.Title } – MyOwnPKI</title>
+			<link rel="stylesheet" href="/static/styles/tokens.css"/>
+			<link rel="stylesheet" href="/static/styles/base.css"/>
+			<link rel="stylesheet" href="/static/styles/components.css"/>
+			<link rel="stylesheet" href="/static/styles/layouts.css"/>
+		</head>
+		<body>
+			<a class="skip-link" href="#main">Skip to content</a>
+			<div class="app">
+				if p.Dev {
+					@components.DevBanner()
+				}
+				@header(p)
+				@sidebar(p.Section)
+				<main id="main" class="app-main">
+					@pageHeader(p)
+					{ children... }
+				</main>
+			</div>
+		</body>
+	</html>
+}
+
+templ header(p view.Page) {
+	<header class="app-header">
+		<span class="app-brand">MyOwnPKI</span>
+		<form class="app-tenant" action="/" method="get">
+			<label for="tenant">Tenant</label>
+			<select id="tenant" name="tenant">
+				for _, t := range p.Tenants {
+					<option value={ t } selected?={ t == p.Tenant }>{ t }</option>
+				}
+			</select>
+			<button type="submit" class="btn">Switch</button>
+		</form>
+		<form class="app-search" action="/certificates" method="get" role="search">
+			<input type="search" name="q" value={ p.Search } placeholder="Search certificates by name or serial" aria-label="Search certificates"/>
+		</form>
+		<details class="app-user">
+			<summary>{ p.User }</summary>
+			<ul class="app-user-menu">
+				<li><a href="/admin/appearance">Appearance</a></li>
+				<li><span>Security keys and 2FA (phase 1)</span></li>
+				<li><span>Sign out (phase 1)</span></li>
+			</ul>
+		</details>
+	</header>
+}
+
+templ sidebar(active string) {
+	<nav class="app-nav" aria-label="Main">
+		for _, g := range nav {
+			<ul class="nav-group" aria-label={ g.Title }>
+				<li class="nav-group-title" aria-hidden="true">{ g.Title }</li>
+				for _, it := range g.Items {
+					<li>
+						if it.Href == "" {
+							<span class={ "nav-link", "is-disabled", templ.KV("nav-primary", it.Primary) } aria-disabled="true">
+								{ it.Label }
+								<span class="nav-note">{ it.Note }</span>
+							</span>
+						} else if it.Key == active {
+							<a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) } aria-current="page">{ it.Label }</a>
+						} else {
+							<a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) }>{ it.Label }</a>
+						}
+					</li>
+				}
+			</ul>
+		}
+	</nav>
+}
+
+// pageHeader is the same on every page: breadcrumb (all pages but the
+// dashboard), title with optional status, actions on the right, optional
+// one-line description.
+templ pageHeader(p view.Page) {
+	<header class="page-header">
+		if len(p.Crumbs) > 0 {
+			@components.Breadcrumb(p.Crumbs, p.Title)
+		}
+		<div class="page-title-row">
+			<h1>{ p.Title }</h1>
+			if p.StatusText != "" {
+				@components.Status(p.Status, p.StatusText)
+			}
+			if p.Actions != nil {
+				<div class="page-actions">
+					@p.Actions
+				</div>
+			}
+		</div>
+		if p.Description != "" {
+			<p class="page-desc">{ p.Description }</p>
+		}
+	</header>
+}

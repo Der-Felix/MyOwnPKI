@@ -1,7 +1,8 @@
 // Package web serves the admin UI: templ pages, the embedded static assets and
 // the security headers every response gets.
 //
-// Phase 0: only the component gallery (/design) exists, and only in dev mode.
+// Phase 0: the component gallery (/design) and, in dev mode only, the UI
+// prototype on fixture data (prototype*.go).
 package web
 
 import (
@@ -17,6 +18,7 @@ import (
 	assets "github.com/Der-Felix/MyOwnPKI/web"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/design"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
 // ContentSecurityPolicy is sent with every response (security.md). No inline
@@ -26,7 +28,8 @@ const ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 
 
 // Options configure the handler.
 type Options struct {
-	// Dev shows the DEV MODE banner on every page.
+	// Dev shows the DEV MODE banner on every page and enables the UI
+	// prototype on fixture data.
 	Dev    bool
 	Logger *slog.Logger
 }
@@ -39,12 +42,24 @@ func NewHandler(opts Options) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFiles(assets.Static)))
-	mux.Handle("GET /design", page(design.Page(opts.Dev), opts.Logger))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/design", http.StatusSeeOther)
+	mux.HandleFunc("GET /design", func(w http.ResponseWriter, r *http.Request) {
+		p := newPage(r, "Design system", "design", opts.Dev, view.Crumb{Label: "Administration"})
+		p.Description = "Every class of web/styles in one place. Themes change tokens only."
+		render(w, r, opts.Logger, http.StatusOK, design.Page(p))
 	})
+	if opts.Dev {
+		registerPrototype(mux, opts.Logger)
+	} else {
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/design", http.StatusSeeOther)
+		})
+	}
 
-	return recoverer(opts.Logger, logRequests(opts.Logger, securityHeaders(mux))), nil
+	// Reject state-changing cross-origin requests (Sec-Fetch-Site / Origin).
+	// CSRF tokens for logged-in sessions follow in phase 1 (security.md).
+	csrf := http.NewCrossOriginProtection()
+
+	return recoverer(opts.Logger, logRequests(opts.Logger, securityHeaders(csrf.Handler(mux)))), nil
 }
 
 // staticFiles serves the embedded assets. Content types are set explicitly:
@@ -58,11 +73,8 @@ func staticFiles(files fs.FS) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		switch path.Ext(r.URL.Path) {
-		case ".css":
+		if path.Ext(r.URL.Path) == ".css" {
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		case ".svg":
-			w.Header().Set("Content-Type", "image/svg+xml")
 		}
 		// Asset URLs are not fingerprinted yet, so browsers must revalidate.
 		w.Header().Set("Cache-Control", "no-cache")
@@ -70,20 +82,19 @@ func staticFiles(files fs.FS) http.Handler {
 	})
 }
 
-// page renders a component into a buffer first, so a render error becomes a
+// render writes a component into a buffer first, so a render error becomes a
 // clean 500 instead of a half-written page.
-func page(c templ.Component, log *slog.Logger) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var buf bytes.Buffer
-		if err := c.Render(r.Context(), &buf); err != nil {
-			log.ErrorContext(r.Context(), "render page", slog.String("path", r.URL.Path), slog.Any("error", err))
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(buf.Bytes())
-	})
+func render(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, c templ.Component) {
+	var buf bytes.Buffer
+	if err := c.Render(r.Context(), &buf); err != nil {
+		log.ErrorContext(r.Context(), "render page", slog.String("path", r.URL.Path), slog.Any("error", err))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func securityHeaders(next http.Handler) http.Handler {

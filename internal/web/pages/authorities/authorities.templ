@@ -1,0 +1,138 @@
+package authorities
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Row is one CA in the list.
+type Row struct {
+	ID, Name, Kind, Subject   string
+	KeyAlgorithm, KeyMode     string
+	ValidUntil, ValidUntilRel string
+	MaxValidity, Issued       string
+	Status                    view.Status
+	StatusText                string
+}
+
+// ListData is the content of the CA list.
+type ListData struct {
+	Messages []view.Message
+	Rows     []Row
+}
+
+// List renders all certificate authorities of the tenant.
+templ List(p view.Page, d ListData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<form action="/authorities/actions" method="post">
+			@components.CommandBar("CA commands") {
+				@components.CommandGroup("Create") {
+					<button type="submit" class="cmd cmd-primary" name="action" value="new-intermediate">New intermediate CA</button>
+					<button type="submit" class="cmd" name="action" value="import">Import CA</button>
+				}
+				@components.CommandGroup("Transfer") {
+					<button type="submit" class="cmd" name="action" value="offline">Sign offline (CSR)</button>
+				}
+			}
+		</form>
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th scope="col">Name</th>
+						<th scope="col">Type</th>
+						<th scope="col">Status</th>
+						<th scope="col">Subject</th>
+						<th scope="col">Key</th>
+						<th scope="col">Key storage</th>
+						<th scope="col">Valid until</th>
+						<th scope="col" class="num">Max. validity</th>
+						<th scope="col" class="num">Issued</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range d.Rows {
+						<tr>
+							<td><a href={ templ.SafeURL("/authorities/" + r.ID) }>{ r.Name }</a></td>
+							<td>{ r.Kind }</td>
+							<td>
+								@components.Status(r.Status, r.StatusText)
+							</td>
+							<td>{ r.Subject }</td>
+							<td class="nowrap">{ r.KeyAlgorithm }</td>
+							<td class="nowrap">{ r.KeyMode }</td>
+							<td class="nowrap">{ r.ValidUntil }<span class="rel">{ r.ValidUntilRel }</span></td>
+							<td class="num">{ r.MaxValidity }</td>
+							<td class="num">{ r.Issued }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// DetailData is the content of one CA's page.
+type DetailData struct {
+	ID, Name    string
+	Status      view.Status
+	StatusText  string
+	Messages    []view.Message
+	Properties  []view.KV
+	Constraints []view.KV
+	CRL         []view.KV
+	Issued      []view.CertRow
+	CanSign     bool
+}
+
+// Detail renders one certificate authority.
+templ Detail(p view.Page, d DetailData) {
+	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(caActions(d))) {
+		@components.Messages(d.Messages)
+		<div class="columns">
+			<section class="section" aria-labelledby="h-props">
+				<h2 id="h-props" class="section-head">Properties</h2>
+				@components.KVList(d.Properties)
+			</section>
+			<div>
+				<section class="section" aria-labelledby="h-nc">
+					<h2 id="h-nc" class="section-head">Name constraints</h2>
+					if len(d.Constraints) == 0 {
+						<p class="empty">No name constraints – this CA may sign any name its policy allows.</p>
+					} else {
+						@components.KVList(d.Constraints)
+					}
+				</section>
+				<section class="section" aria-labelledby="h-crl">
+					<h2 id="h-crl" class="section-head">Revocation list</h2>
+					@components.KVList(d.CRL)
+				</section>
+			</div>
+		</div>
+		<section class="section" aria-labelledby="h-issued">
+			<h2 id="h-issued" class="section-head">Issued certificates</h2>
+			if len(d.Issued) == 0 {
+				<p class="empty">This CA has not issued any end-entity certificates.</p>
+			} else {
+				@components.CertificateTable(d.Issued, false, "")
+			}
+		</section>
+	}
+}
+
+templ caActions(d DetailData) {
+	<form action={ templ.SafeURL("/authorities/" + d.ID + "/actions") } method="post">
+		if d.CanSign {
+			@components.CommandGroup("Create") {
+				<a class="cmd cmd-primary" href={ templ.SafeURL("/certificates/new?ca=" + d.ID) }>Issue certificate</a>
+				<button type="submit" class="cmd" name="action" value="publish-crl">Publish CRL now</button>
+			}
+		}
+		@components.CommandGroup("Transfer") {
+			<button type="submit" class="cmd" name="action" value="download-cert">Download certificate</button>
+			<button type="submit" class="cmd" name="action" value="download-crl">Download CRL</button>
+		}
+	</form>
+}

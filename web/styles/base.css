@@ -1,4 +1,4 @@
-/* Reset, typography and form controls. Uses tokens only. */
+/* Reset, typography and form controls. Sizes via tokens only. */
 
 *,
 *::before,
@@ -16,46 +16,45 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--fs-md);
-  line-height: var(--lh);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
 }
 
 h1,
 h2,
 h3,
 h4 {
-  margin: 0 0 var(--sp-3);
-  line-height: 1.25;
-  font-weight: 600;
+  margin: 0;
+  font-weight: var(--fw-semibold);
 }
 
 h1 {
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
 }
 
 h2 {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-subtitle);
+  line-height: var(--lh-subtitle);
 }
 
-h3 {
-  font-size: var(--fs-lg);
-}
-
+h3,
 h4 {
-  font-size: var(--fs-md);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
 }
 
 p {
-  margin: 0 0 var(--sp-3);
+  margin: 0 0 var(--s-8);
 }
 
 a {
   color: var(--link);
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 a:hover {
-  text-decoration-thickness: 2px;
+  text-decoration: underline;
 }
 
 code,
@@ -63,18 +62,12 @@ kbd,
 pre,
 samp {
   font-family: var(--font-mono);
-  font-size: 0.95em;
 }
 
+/* Keyboard focus: one clearly visible ring everywhere, never on mouse click. */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-}
-
-hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: var(--sp-5) 0;
 }
 
 /* Form controls */
@@ -94,50 +87,55 @@ input[type="search"],
 input[type="url"],
 select,
 textarea {
-  width: 100%;
-  min-height: var(--control-h);
-  padding: 0 var(--sp-2);
-  background: var(--surface);
+  height: var(--control-h);
+  padding: 0 var(--s-8);
+  background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--text-muted);
 }
 
 textarea {
-  padding: var(--sp-2);
-  min-height: 6rem;
+  width: 100%;
+  height: auto;
+  padding: var(--s-4) var(--s-8);
   font-family: var(--font-mono);
-  font-size: var(--fs-sm);
 }
 
 input:disabled,
 select:disabled,
 textarea:disabled {
-  background: var(--surface-2);
+  background: var(--bg-subtle);
   color: var(--text-muted);
 }
 
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--brand);
-  width: 1rem;
-  height: 1rem;
+  width: var(--check);
+  height: var(--check);
   margin: 0;
+  vertical-align: middle;
 }
 
 fieldset {
   margin: 0;
   padding: 0;
   border: 0;
+  min-width: 0;
 }
 
 legend {
   padding: 0;
-  font-weight: 600;
-  margin-bottom: var(--sp-2);
-}
-
-::selection {
-  background: var(--status-info-bg);
+  margin-bottom: var(--s-8);
+  font-size: var(--fs-subtitle);
+  line-height: var(--lh-subtitle);
+  font-weight: var(--fw-semibold);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -145,6 +143,5 @@ legend {
   *::before,
   *::after {
     transition: none !important;
-    animation: none !important;
   }
 }
