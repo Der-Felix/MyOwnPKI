@@ -37,6 +37,7 @@ func runAuditVerify(ctx context.Context, args, environ []string, stdout, stderr 
 	path := configFlag(fs)
 	scope := fs.String("scope", "", "verify only this log: instance or tenant:<id> (default: all)")
 	expect := fs.String("expect-head", "", "SEQ:HASH noted earlier (process log, backup manifest); needs --scope")
+	ckey := fs.String("checkpoint-key", "", "fingerprint of the checkpoint key (shown at init, logged at unseal); at least 16 hex digits")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -48,6 +49,10 @@ func runAuditVerify(ctx context.Context, args, environ []string, stdout, stderr 
 		return exitUsage
 	}
 	var want *audit.Head
+	if *ckey != "" && len(*ckey) < 16 {
+		_, _ = fmt.Fprintf(stderr, "%s audit verify: --checkpoint-key needs at least 16 hex digits\n", binary)
+		return exitUsage
+	}
 	if *expect != "" {
 		if *scope == "" {
 			_, _ = fmt.Fprintf(stderr, "%s audit verify: --expect-head needs --scope (a head belongs to one log)\n", binary)
@@ -78,7 +83,7 @@ func runAuditVerify(ctx context.Context, args, environ []string, stdout, stderr 
 			continue
 		}
 		matched = true
-		line, code := verifyLog(ctx, log, want)
+		line, code := verifyLog(ctx, log, want, audit.VerifyOptions{CheckpointKey: *ckey})
 		_, _ = fmt.Fprintf(stdout, "  %-16s %s\n", log.Scope, line)
 		if code == exitProblem || (code == exitPending && result == exitOK) {
 			result = code
@@ -94,7 +99,7 @@ func runAuditVerify(ctx context.Context, args, environ []string, stdout, stderr 
 	return result
 }
 
-func verifyLog(ctx context.Context, log store.AuditLog, want *audit.Head) (string, int) {
+func verifyLog(ctx context.Context, log store.AuditLog, want *audit.Head, opts audit.VerifyOptions) (string, int) {
 	if _, err := os.Stat(log.Path); errors.Is(err, fs.ErrNotExist) {
 		return "not created yet (run `" + binary + " db migrate`)", exitPending
 	}
@@ -103,7 +108,7 @@ func verifyLog(ctx context.Context, log store.AuditLog, want *audit.Head) (strin
 		return "PROBLEM: " + err.Error(), exitProblem
 	}
 	defer func() { _ = db.Close() }()
-	rep, err := audit.Verify(ctx, db.Read, log.Scope)
+	rep, err := audit.VerifyWith(ctx, db.Read, log.Scope, opts)
 	switch {
 	case err != nil:
 		return "PROBLEM: " + err.Error(), exitProblem
@@ -119,5 +124,22 @@ func verifyLog(ctx context.Context, log store.AuditLog, want *audit.Head) (strin
 	if want != nil {
 		line += fmt.Sprintf(" (contains expected head %d)", want.Seq)
 	}
-	return line, exitOK
+	return line + checkpointLine(rep), exitOK
+}
+
+// checkpointLine describes the signed checkpoints of a log. A missing or old
+// checkpoint is a note, not an error: a sealed server can't sign.
+func checkpointLine(rep audit.Report) string {
+	if rep.LastCheckpoint == nil {
+		if rep.Entries == 0 {
+			return ""
+		}
+		return "\n                   no signed checkpoint yet (made at unseal, daily and every 1000 entries)"
+	}
+	line := fmt.Sprintf("\n                   %d signed checkpoint(s), newest at seq %d (%s), key %s",
+		rep.Checkpoints, rep.LastCheckpoint.Seq, rep.LastCheckpoint.Time, rep.CheckpointKey)
+	if after := rep.Head.Seq - rep.LastCheckpoint.Seq; after > 0 {
+		line += fmt.Sprintf("\n                   %d newer entr(y/ies) not covered by a checkpoint yet", after)
+	}
+	return line
 }

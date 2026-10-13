@@ -93,6 +93,10 @@ type Deliverer struct {
 	Clock  clock.Clock
 	Log    *slog.Logger
 
+	// Checkpoints, if set, makes a checkpoint after every 1000 entries and
+	// once a day (step 6a).
+	Checkpoints *Checkpointer
+
 	// afterAppend runs between appending to the audit log and marking the
 	// outbox row; tests use it to simulate a crash at exactly that point.
 	afterAppend func() error
@@ -231,8 +235,18 @@ func (d *Deliverer) Run(ctx context.Context, wake <-chan struct{}, pollInterval 
 		if _, err := d.DeliverPending(ctx); err != nil && ctx.Err() == nil {
 			d.Log.ErrorContext(ctx, "audit delivery", slog.Any("error", err))
 		}
+		if d.Checkpoints != nil {
+			if err := d.Checkpoints.MaybeEvery(ctx); err != nil && ctx.Err() == nil {
+				d.Log.ErrorContext(ctx, "audit checkpoint", slog.Any("error", err))
+			}
+		}
 	}
 	daily := func() {
+		if d.Checkpoints != nil {
+			if err := d.Checkpoints.MakeAll(ctx, "daily"); err != nil {
+				d.Log.ErrorContext(ctx, "audit checkpoint", slog.Any("error", err))
+			}
+		}
 		d.LogHeads(ctx)
 		if n, err := d.Cleanup(ctx); err != nil {
 			d.Log.ErrorContext(ctx, "outbox cleanup", slog.Any("error", err))

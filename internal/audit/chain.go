@@ -87,13 +87,26 @@ func Append(ctx context.Context, db *sql.DB, scope string, e Entry, outboxID str
 		}
 	}
 
+	seq, err = insert(ctx, q, scope, e, details, outboxID)
+	if err != nil {
+		return 0, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, false, fmt.Errorf("audit append: %w", err)
+	}
+	return seq, true, nil
+}
+
+// insert appends a validated entry after the current head, inside the
+// caller's transaction.
+func insert(ctx context.Context, q *auditdb.Queries, scope string, e Entry, details, outboxID string) (int64, error) {
 	prev, last := Genesis(scope), int64(0)
 	head, err := q.GetHead(ctx)
 	switch {
 	case err == nil:
 		prev, last = head.Hash, head.Seq
 	case !errors.Is(err, sql.ErrNoRows):
-		return 0, false, fmt.Errorf("audit append: %w", err)
+		return 0, fmt.Errorf("audit append: %w", err)
 	}
 
 	row := auditdb.AuditEntry{
@@ -112,13 +125,10 @@ func Append(ctx context.Context, db *sql.DB, scope string, e Entry, outboxID str
 		PrevHash:    prev,
 	}
 	row.Hash = entryHash(row)
-	if err = q.InsertEntry(ctx, auditdb.InsertEntryParams(row)); err != nil {
-		return 0, false, fmt.Errorf("audit append: %w", err)
+	if err := q.InsertEntry(ctx, auditdb.InsertEntryParams(row)); err != nil {
+		return 0, fmt.Errorf("audit append: %w", err)
 	}
-	if err = tx.Commit(); err != nil {
-		return 0, false, fmt.Errorf("audit append: %w", err)
-	}
-	return row.Seq, true, nil
+	return row.Seq, nil
 }
 
 // Head identifies the newest entry of a chain: "seq:hash".
@@ -156,6 +166,24 @@ type Report struct {
 	Entries int64
 	Head    Head   // Seq 0 = empty log
 	Break   *Break // nil = intact
+
+	Checkpoints    int64
+	LastCheckpoint *CheckpointInfo // nil = none yet
+	CheckpointKey  string          // fingerprint of the key all checkpoints use
+}
+
+// CheckpointInfo locates the newest checkpoint.
+type CheckpointInfo struct {
+	Seq  int64
+	Time string
+}
+
+// VerifyOptions tighten Verify.
+type VerifyOptions struct {
+	// CheckpointKey pins the checkpoint key: a fingerprint (prefix of at
+	// least 16 hex digits) noted at init or taken from the process log.
+	// Without it, Verify only checks that all checkpoints use one key.
+	CheckpointKey string
 }
 
 const verifyBatch = 500
@@ -165,6 +193,13 @@ const verifyBatch = 500
 // entry (deleted, inserted or reordered entries) or a hash that doesn't match
 // the entry's content (modified entry). It only reads.
 func Verify(ctx context.Context, q auditdb.DBTX, scope string) (Report, error) {
+	return VerifyWith(ctx, q, scope, VerifyOptions{})
+}
+
+// VerifyWith is Verify with options. Checkpoints are checked on the way:
+// each must cover the entry before it, carry a valid Ed25519 signature and
+// use the same (and, if pinned, the expected) key.
+func VerifyWith(ctx context.Context, q auditdb.DBTX, scope string, opts VerifyOptions) (Report, error) {
 	r := Report{Head: Head{Hash: Genesis(scope)}}
 	queries := auditdb.New(q)
 	next := int64(1)
@@ -181,6 +216,10 @@ func Verify(ctx context.Context, q auditdb.DBTX, scope string) (Report, error) {
 				r.Break = &Break{Seq: row.Seq, Reason: "link broken (prev_hash does not match the previous entry)"}
 			case entryHash(row) != row.Hash:
 				r.Break = &Break{Seq: row.Seq, Reason: "entry modified (hash mismatch)"}
+			case row.Action == ActionCheckpoint:
+				if reason := verifyCheckpoint(scope, row, &r, opts.CheckpointKey); reason != "" {
+					r.Break = &Break{Seq: row.Seq, Reason: reason}
+				}
 			}
 			if r.Break != nil {
 				return r, nil

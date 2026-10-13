@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"regexp"
 	"strings"
 	"testing"
@@ -122,5 +123,44 @@ func TestAuditVerifyUsage(t *testing.T) {
 	if code := runAuditVerify(t.Context(), []string{"--config", cfg}, nil, &stdout, &stderr); code != exitPending ||
 		!strings.Contains(stdout.String(), "not created yet") {
 		t.Errorf("before migrate: exit %d\n%s", code, stdout.String())
+	}
+}
+
+type edSigner struct{ priv ed25519.PrivateKey }
+
+func (s edSigner) SignCheckpoint(msg []byte) ([]byte, ed25519.PublicKey, error) {
+	return ed25519.Sign(s.priv, msg), ed25519.PublicKey(s.priv[ed25519.SeedSize:]), nil
+}
+
+func TestAuditVerifyCheckpoints(t *testing.T) {
+	t.Parallel()
+	cfg, log := auditData(t, 3)
+	db, err := store.Open(t.Context(), log.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := edSigner{ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))}
+	res, err := audit.Checkpoint(t.Context(), db.Write, log.Scope, s, time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC))
+	_ = db.Close()
+	if err != nil || !res.Made {
+		t.Fatal(res, err)
+	}
+
+	run := func(extra ...string) (int, string, string) {
+		var stdout, stderr bytes.Buffer
+		code := runAuditVerify(t.Context(), append([]string{"--config", cfg}, extra...), nil, &stdout, &stderr)
+		return code, stdout.String(), stderr.String()
+	}
+	if code, out, _ := run(); code != exitOK || !strings.Contains(out, "1 signed checkpoint(s), newest at seq 4") || !strings.Contains(out, "key "+res.Key) {
+		t.Errorf("exit %d\n%s", code, out)
+	}
+	if code, out, _ := run("--checkpoint-key", res.Key[:16]); code != exitOK {
+		t.Errorf("pinned right key: exit %d\n%s", code, out)
+	}
+	if code, out, _ := run("--checkpoint-key", strings.Repeat("0", 16)); code != exitProblem || !strings.Contains(out, "not the expected key") {
+		t.Errorf("pinned wrong key: exit %d\n%s", code, out)
+	}
+	if code, _, errOut := run("--checkpoint-key", "abc"); code != exitUsage || !strings.Contains(errOut, "16 hex digits") {
+		t.Errorf("short key: exit %d\n%s", code, errOut)
 	}
 }

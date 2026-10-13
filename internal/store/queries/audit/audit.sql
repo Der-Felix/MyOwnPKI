@@ -2,7 +2,10 @@
 -- There is deliberately no UPDATE or DELETE here.
 
 -- name: GetHead :one
-SELECT seq, hash FROM audit_entries ORDER BY seq DESC LIMIT 1;
+SELECT seq, hash, action FROM audit_entries ORDER BY seq DESC LIMIT 1;
+
+-- name: GetLastCheckpointSeq :one
+SELECT seq FROM audit_entries WHERE action = 'audit.checkpoint' ORDER BY seq DESC LIMIT 1;
 
 -- name: CountOutboxID :one
 SELECT count(*) FROM audit_entries WHERE outbox_id = ?;

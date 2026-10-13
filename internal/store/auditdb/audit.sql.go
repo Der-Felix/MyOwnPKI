@@ -39,12 +39,13 @@ func (q *Queries) GetEntry(ctx context.Context, seq int64) (GetEntryRow, error) 
 
 const getHead = `-- name: GetHead :one
 
-SELECT seq, hash FROM audit_entries ORDER BY seq DESC LIMIT 1
+SELECT seq, hash, action FROM audit_entries ORDER BY seq DESC LIMIT 1
 `
 
 type GetHeadRow struct {
-	Seq  int64
-	Hash string
+	Seq    int64
+	Hash   string
+	Action string
 }
 
 // Audit log queries (ASCII only, see queries/system/tenants.sql).
@@ -52,8 +53,19 @@ type GetHeadRow struct {
 func (q *Queries) GetHead(ctx context.Context) (GetHeadRow, error) {
 	row := q.db.QueryRowContext(ctx, getHead)
 	var i GetHeadRow
-	err := row.Scan(&i.Seq, &i.Hash)
+	err := row.Scan(&i.Seq, &i.Hash, &i.Action)
 	return i, err
+}
+
+const getLastCheckpointSeq = `-- name: GetLastCheckpointSeq :one
+SELECT seq FROM audit_entries WHERE action = 'audit.checkpoint' ORDER BY seq DESC LIMIT 1
+`
+
+func (q *Queries) GetLastCheckpointSeq(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLastCheckpointSeq)
+	var seq int64
+	err := row.Scan(&seq)
+	return seq, err
 }
 
 const getScope = `-- name: GetScope :one
