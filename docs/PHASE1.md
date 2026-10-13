@@ -190,7 +190,7 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
   - CA creation (API/UI) and – once a default base URL exists in the config – `myownpki config check`
     **warn when the base URL contains a non-standard port** (anything but 80 for `http`, 443 for
     `https`), and name the consequence: the URL stays in every certificate until it expires.
-  - Proposal to decide at step 8: also warn on `https://` base URLs – RFC 5280 recommends HTTP for
+  - Decided (owner 2026-10-13), implement at step 8: also warn on `https://` base URLs – RFC 5280 recommends HTTP for
     CRL and AIA, and a client that needs a CRL to check the TLS certificate of the CRL server is stuck.
 
 ### Planned for the end of phase 1
