@@ -325,7 +325,9 @@ MyOwnPKI/
 │  ├─ keys/                unseal, encryption, PKCS#11
 │  ├─ policy/              policies
 │  ├─ notify/              notifications
-│  └─ web/                 templ components, layouts A/B/C
+│  ├─ web/                 templ components, layouts A/B/C
+│  └─ tools/screenshots/   dev tool: README screenshots (task screenshots)
+├─ assets/brand/           logo, favicons, app.ico (source of truth: SVGs); assets.go embeds what the UI serves
 ├─ web/
 │  ├─ styles/              tokens, base, components, layouts
 │  └─ islands/             Web Components (TypeScript)
@@ -336,7 +338,7 @@ MyOwnPKI/
 ├─ legacy/                 pki.sh + lib/ (offline root tool)
 ├─ .github/                CI workflow, shared setup action, Dependabot
 ├─ Taskfile.yml            build, test, lint, dev, cross, vuln
-└─ docs/                   PLAN.md, NIGHTLOG.md (phase 0 log), PHASE1.md (proposal)
+└─ docs/                   PLAN.md, NIGHTLOG.md (phase 0 log), PHASE1.md, screenshots/
 ```
 
 ---
@@ -477,6 +479,7 @@ this only changes tokens, component classes and the shell.
 | Light by default, dark and "follow the OS" optional; 2 px radii; few borders; sections separated by spacing and headings | Calm, dense, professional |
 | No KPI cards – overview figures as a plain number row; no pastel notices – messages as a line with a text label ("Warning:", "Error:") | Removes the "dashboard template" look |
 | No icons in status, messages, buttons or navigation; status as text with an optional small dot | Text is unambiguous and accessible; the icon sprite was removed |
+| Logo (assets/brand, owner's design) as the only image: small on-dark variant in the header, favicons (SVG with light/dark, ICO, Apple touch icon) served same-origin; brand gold only in the logo, not a CSS token | Recognizable without breaking the "no icons" rule; gold would be confused with the warning color |
 | System fonts (Segoe UI + Consolas on Windows, platform fonts elsewhere); IBM Plex Sans/Mono was compared in screenshots and not adopted (owner decision) | No download, no license file; switching later only touches two tokens |
 | Appearance (layout variant, light/dark/system, density) stored per browser in a cookie, values checked against an allow-list, switched server-side without JavaScript | Works under the strict CSP; no client code |
 | Layout variants for now: A narrow sidebar, B standard sidebar (default), C no sidebar; small screens use the C navigation | The final split of A/B/C (PLAN §7) is decided after the prototype |

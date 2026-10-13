@@ -90,6 +90,13 @@ func TestRoutes(t *testing.T) {
 		{"design", dev, http.MethodGet, "/design", http.StatusOK, "text/html; charset=utf-8"},
 		{"css", dev, http.MethodGet, "/static/styles/tokens.css", http.StatusOK, "text/css; charset=utf-8"},
 		{"no directory listing", dev, http.MethodGet, "/static/styles/", http.StatusNotFound, ""},
+		{"logo", prod, http.MethodGet, "/static/brand/logo-small-on-dark.svg", http.StatusOK, "image/svg+xml"},
+		{"favicon svg", prod, http.MethodGet, "/static/brand/favicon.svg", http.StatusOK, "image/svg+xml"},
+		{"favicon ico at the root", prod, http.MethodGet, "/favicon.ico", http.StatusOK, "image/x-icon"},
+		{"apple touch icon", prod, http.MethodGet, "/static/brand/png/apple-touch-icon.png", http.StatusOK, "image/png"},
+		{"brand files not embedded", prod, http.MethodGet, "/static/brand/app.ico", http.StatusNotFound, ""},
+		{"brand README not served", prod, http.MethodGet, "/static/brand/README.md", http.StatusNotFound, ""},
+		{"no brand directory listing", prod, http.MethodGet, "/static/brand/", http.StatusNotFound, ""},
 		{"missing asset", dev, http.MethodGet, "/static/missing.css", http.StatusNotFound, ""},
 		{"path cleaning", dev, http.MethodGet, "/static/../web.go", http.StatusTemporaryRedirect, ""},
 		{"unknown certificate", dev, http.MethodGet, "/certificates/nope", http.StatusNotFound, ""},
@@ -150,7 +157,8 @@ var (
 	reScriptTag   = regexp.MustCompile(`(?i)<script[\s>]`)
 	reEventAttr   = regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
 	reJSURL       = regexp.MustCompile(`(?i)(href|src|action)\s*=\s*"\s*javascript:`)
-	reIcon        = regexp.MustCompile(`(?i)<(svg|img)[\s>]`)
+	reIcon        = regexp.MustCompile(`(?i)<svg[\s>]`)
+	reImgTag      = regexp.MustCompile(`(?is)<img\b[^>]*>`)
 	reClassAttr   = regexp.MustCompile(`\sclass="([^"]*)"`)
 	reCSSClass    = regexp.MustCompile(`\.([a-zA-Z][a-zA-Z0-9_-]*)`)
 	reCSSVarUse   = regexp.MustCompile(`var\((--[a-z0-9-]+)\)`)
@@ -182,7 +190,7 @@ func TestNoInlineStylesOrScripts(t *testing.T) {
 		"<script> tag":       reScriptTag,
 		"inline event (on*)": reEventAttr,
 		"javascript: URL":    reJSURL,
-		"icon (svg/img)":     reIcon,
+		"inline <svg> icon":  reIcon,
 	}
 	for page, html := range renderedPages(t) {
 		for name, re := range checks {
@@ -190,7 +198,23 @@ func TestNoInlineStylesOrScripts(t *testing.T) {
 				t.Errorf("%s contains a %s: %q", page, name, m)
 			}
 		}
+		for _, img := range nonBrandImages(html) {
+			t.Errorf("%s contains an image that is not a brand file with alt text: %q", page, img)
+		}
 	}
+}
+
+// nonBrandImages returns every <img> that does not show a file of
+// assets/brand or lacks an alt attribute: the logo is the only image in the
+// UI ("no icons", frontend.md).
+func nonBrandImages(src string) []string {
+	var bad []string
+	for _, img := range reImgTag.FindAllString(src, -1) {
+		if !strings.Contains(img, `"/static/brand/`) || !strings.Contains(img, " alt=") {
+			bad = append(bad, img)
+		}
+	}
+	return bad
 }
 
 // TestTemplSourcesHaveNoInlineStyles scans the .templ sources, so a page that is
@@ -208,11 +232,14 @@ func TestTemplSourcesHaveNoInlineStyles(t *testing.T) {
 		}
 		for name, re := range map[string]*regexp.Regexp{
 			"style attribute": reStyleAttr, "<style> block": reStyleTag,
-			"<script> tag": reScriptTag, "inline event (on*)": reEventAttr, "icon": reIcon,
+			"<script> tag": reScriptTag, "inline event (on*)": reEventAttr, "inline <svg> icon": reIcon,
 		} {
 			if m := re.FindString(string(src)); m != "" {
 				t.Errorf("%s contains a %s: %q", path, name, m)
 			}
+		}
+		for _, img := range nonBrandImages(string(src)) {
+			t.Errorf("%s contains an image that is not a brand file with alt text: %q", path, img)
 		}
 		return nil
 	})

@@ -1,10 +1,15 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-on-dark.svg">
+  <img src="assets/brand/logo.svg" alt="MyOwnPKI logo: shield, certificate and seal" width="120">
+</picture>
+
 # MyOwnPKI
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: phase 0 (foundation) complete.** The binaries build and the design system is
-> visible, but there is no CA functionality yet – that is phase 1. See [docs/PLAN.md](docs/PLAN.md)
-> for the architecture, decisions and roadmap.
+> **Status: phase 1 in progress.** Phase 0 (foundation) is complete and the UI prototype runs on
+> sample data, but there is no CA functionality yet. See [docs/PLAN.md](docs/PLAN.md) for the
+> architecture, decisions and roadmap.
 
 MyOwnPKI is a self-hosted certificate authority platform:
 
@@ -15,6 +20,23 @@ MyOwnPKI is a self-hosted certificate authority platform:
   services safely and monitors what is actually being served
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
+
+> **UI prototype with sample data – phase 1 in progress.**
+
+<p><img src="docs/screenshots/dashboard.png" alt="Dashboard: figures, certificates expiring in 30 days, recent activity" width="100%"></p>
+
+<table>
+  <tr>
+    <td width="33%"><a href="docs/screenshots/certificates.png"><img src="docs/screenshots/certificates.png" alt="Certificate list with filters and command bar"></a><br>Certificates</td>
+    <td width="33%"><a href="docs/screenshots/certificate-detail.png"><img src="docs/screenshots/certificate-detail.png" alt="Certificate detail page"></a><br>Certificate detail</td>
+    <td width="33%"><a href="docs/screenshots/issue-wizard.png"><img src="docs/screenshots/issue-wizard.png" alt="Issue wizard, step 1: preset"></a><br>Issue wizard</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/authorities.png"><img src="docs/screenshots/authorities.png" alt="Certificate authorities"></a><br>Certificate authorities</td>
+    <td><a href="docs/screenshots/dashboard-dark.png"><img src="docs/screenshots/dashboard-dark.png" alt="Dashboard in the dark theme"></a><br>Dark theme</td>
+    <td></td>
+  </tr>
+</table>
 
 ## Repository layout
 
@@ -38,7 +60,8 @@ templ and govulncheck are pinned in `go.mod` and run via `go tool`. Works in Pow
 ```sh
 task              # list all tasks
 task check        # everything that must pass before a commit
-task dev          # component gallery at http://127.0.0.1:9443/design (no TLS, no login, loopback only)
+task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, loopback only)
+task screenshots  # regenerate docs/screenshots – at milestones only
 task vuln         # known vulnerabilities in dependencies and the Go standard library
 task cross        # build for linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64
 ```

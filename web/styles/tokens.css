@@ -160,6 +160,8 @@
   --header-search-w: 400px;
   --number-w: 160px;    /* minimum column of the number row */
   --menu-w: 240px;
+  --logo-header: 32px;  /* logo in the 48 px header: small variant */
+  --logo-sample: 64px;  /* logo samples on /design: full variant */
 
   /* Density (comfortable): 32 px controls, 36 px table rows */
   --control-h: 32px;

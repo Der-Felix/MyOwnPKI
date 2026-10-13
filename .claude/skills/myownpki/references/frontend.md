@@ -58,6 +58,10 @@ rejected as "too AI-looking", and the first gallery still read as such – so:
 - **Small radii only** (2 px, `--radius`); few borders – row separators, not frames.
 - **No icons** in status, messages, buttons or navigation. Status is text, optionally with a small dot
   (`.st .st-dot`); color supports the text, never replaces it.
+- **The logo is the only image**: `<img>` from `/static/brand/` (embedded from `assets/brand`, see its
+  README) with an `alt` attribute – the small on-dark variant in the 48 px header. Brand gold `#C27F12` is
+  for the logo only: never an accent, link or status color (it is close to the fixed warning color),
+  and it is deliberately not a CSS token.
 - **Messages** are a plain line with a text label – "Note:", "Warning:", "Error:", "Done:" – and a
   colored left rule; no tinted (pastel) backgrounds.
 - **Commands** sit in a flat command bar (`.cmdbar`) above the table or right of the page title.
@@ -86,5 +90,14 @@ rejected as "too AI-looking", and the first gallery still read as such – so:
 
 - Semantic HTML, labels for every input, keyboard navigation, visible focus.
 - Screenshot tests per layout (A/B/C) and theme (light/dark) for key pages.
-- Tests render every page and fail on inline styles/scripts, event handlers, icons (`<svg>`/`<img>`),
+- Tests render every page and fail on inline styles/scripts, event handlers, inline `<svg>`, images other
+  than brand files with `alt`,
   undefined CSS classes, unknown tokens and hard-coded colors outside `tokens.css`.
+
+## Screenshots
+
+- `task screenshots` renders the dev prototype (fixture data, DEV MODE banner stays visible) with a
+  headless Edge/Chrome/Chromium into `docs/screenshots/` and optimizes the PNGs losslessly (target
+  < 150 KB each). Browser: auto-detected, or `task screenshots -- -browser PATH` / `MYOWNPKI_BROWSER`.
+- **Regenerate only at milestones**, not on every UI change: every committed image stays in the Git
+  history for good.

@@ -9,6 +9,7 @@ import (
 // Page renders the component gallery inside the application shell.
 templ Page(p view.Page) {
 	@layout.App(p) {
+		@brandSection()
 		@colorsSection()
 		@typeSection()
 		@statusSection()
@@ -177,6 +178,35 @@ templ previewSection() {
 			}
 			@components.MessageBar(view.Message{Kind: view.MessageWarning, Text: "The CRL of homelab-users expires in 2 days."})
 			@components.CertificateTable(sampleRows, false, "")
+		</div>
+	</section>
+}
+
+templ brandSection() {
+	<section class="section" id="brand" aria-labelledby="h-brand">
+		<div class="section-head"><h2 id="h-brand">Brand</h2></div>
+		<p class="muted">Logo files live in assets/brand (source of truth: the SVGs). Below 64 px use the small variants.</p>
+		@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "Gold is for the logo only. It is close to the fixed warning color, so it is never an accent, link or status color in the interface."})
+		@components.KVList(brandColors)
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr><th scope="col">Preview</th><th scope="col">File</th><th scope="col">Use</th></tr>
+				</thead>
+				<tbody>
+					for _, v := range logoVariants {
+						<tr>
+							<td class="brand-cell">
+								<span class={ "brand-sample", templ.KV("brand-sample-dark", v.Dark) }>
+									<img class={ templ.KV("brand-logo", !v.Small), templ.KV("brand-logo-small", v.Small) } src={ "/static/brand/" + v.File } alt={ v.File }/>
+								</span>
+							</td>
+							<td class="mono nowrap">{ v.File }</td>
+							<td>{ v.Use }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
 		</div>
 	</section>
 }

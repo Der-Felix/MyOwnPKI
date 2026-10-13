@@ -666,3 +666,32 @@
   color: var(--text);
   border: 1px solid var(--border);
 }
+
+/* ---------- Brand samples (/design) ----------
+   Logos are the only images in the UI (frontend.md); gold stays in the SVGs. */
+.brand-cell {
+  width: calc(var(--logo-sample) + var(--s-32));
+}
+
+.brand-sample {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-8);
+  border: 1px solid var(--border);
+}
+
+.brand-sample-dark {
+  background: var(--header-bg);
+  border-color: var(--header-bg);
+}
+
+.brand-logo {
+  width: auto;
+  height: var(--logo-sample);
+}
+
+.brand-logo-small {
+  width: auto;
+  height: var(--logo-header);
+}

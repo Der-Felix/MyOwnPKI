@@ -179,6 +179,11 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 
 ---
 
+### Planned for the end of phase 1
+
+- **Live demo on GitHub Pages**: a static export of the UI prototype on sample data (no server,
+  no keys). Not built yet; planned once the phase 1 pages are complete.
+
 ## 3. Dependencies and their approval status
 
 | Module / tool | License | For | Status |
@@ -191,6 +196,7 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 | `golang.org/x/crypto` | BSD-3 | `argon2`, `cryptobyte`, later `ocsp` | ask at step 6 |
 | `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 14 |
 | htmx (vendored JS file) | 0BSD | UI interactions | ask at step 17a |
+| goversioninfo (or similar, build tool) | MIT | embed `assets/brand/app.ico` and version info in the Windows binaries | noted 2026-10-13 – ask before release packaging |
 
 TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test vectors, no dependency.
 

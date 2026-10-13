@@ -1,7 +1,7 @@
 # MyOwnPKI
 
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
-templ + htmx web UI, multiple SQLite databases. Status: phase 0 (foundation) complete – phase 1 next.
+templ + htmx web UI, multiple SQLite databases. Status: phase 1 in progress (UI prototype on sample data, CA core next).
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); current work plan in `docs/PHASE1.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
@@ -21,7 +21,7 @@ templ + htmx web UI, multiple SQLite databases. Status: phase 0 (foundation) com
 - Builds are pure Go (`CGO_ENABLED=0`), except the `hsm` build tag. Targets: Linux, macOS, Windows, FreeBSD.
 - Development must work the same on Windows (PowerShell, Git Bash), Linux and macOS – that's why
   the task runner is Taskfile. Start with `task` (list), `task check` (before every commit),
-  `task dev` (UI gallery on http://127.0.0.1:9443/design).
+  `task dev` (UI prototype on http://127.0.0.1:9443/, gallery at /design).
 
 ## Personal settings
 

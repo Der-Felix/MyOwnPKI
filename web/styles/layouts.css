@@ -39,10 +39,18 @@
 }
 
 .app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-8);
   font-size: var(--fs-subtitle);
   line-height: var(--lh-subtitle);
   font-weight: var(--fw-semibold);
   white-space: nowrap;
+}
+
+.app-logo {
+  width: auto;
+  height: var(--logo-header);
 }
 
 .app-tenant {

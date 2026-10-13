@@ -15,6 +15,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	brand "github.com/Der-Felix/MyOwnPKI/assets"
 	assets "github.com/Der-Felix/MyOwnPKI/web"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/design"
@@ -42,6 +43,14 @@ func NewHandler(opts Options) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFiles(assets.Static)))
+	brandFiles := staticFiles(brand.Brand)
+	mux.Handle("GET /static/brand/", http.StripPrefix("/static/", brandFiles))
+	// Browsers ask for /favicon.ico on their own, even with <link rel="icon">.
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/brand/favicon.ico"
+		brandFiles.ServeHTTP(w, r2)
+	})
 	mux.HandleFunc("GET /design", func(w http.ResponseWriter, r *http.Request) {
 		p := newPage(r, "Design system", "design", opts.Dev, view.Crumb{Label: "Administration"})
 		p.Description = "Every class of web/styles in one place. Themes change tokens only."
@@ -66,6 +75,13 @@ func NewHandler(opts Options) (http.Handler, error) {
 // on Windows, Go would otherwise take them from the registry, and with
 // X-Content-Type-Options: nosniff a wrong type breaks the stylesheet.
 // Directory listings are not served.
+var staticTypes = map[string]string{
+	".css": "text/css; charset=utf-8",
+	".svg": "image/svg+xml",
+	".ico": "image/x-icon",
+	".png": "image/png",
+}
+
 func staticFiles(files fs.FS) http.Handler {
 	fileServer := http.FileServerFS(files)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +89,8 @@ func staticFiles(files fs.FS) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if path.Ext(r.URL.Path) == ".css" {
-			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		if ct, ok := staticTypes[path.Ext(r.URL.Path)]; ok {
+			w.Header().Set("Content-Type", ct)
 		}
 		// Asset URLs are not fingerprinted yet, so browsers must revalidate.
 		w.Header().Set("Cache-Control", "no-cache")

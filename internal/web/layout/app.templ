@@ -55,6 +55,9 @@ templ App(p view.Page) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<meta name="color-scheme" content="light dark"/>
 			<title>{ p.Title } – MyOwnPKI</title>
+			<link rel="icon" href="/favicon.ico" sizes="32x32"/>
+			<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml"/>
+			<link rel="apple-touch-icon" href="/static/brand/png/apple-touch-icon.png"/>
 			<link rel="stylesheet" href="/static/styles/tokens.css"/>
 			<link rel="stylesheet" href="/static/styles/base.css"/>
 			<link rel="stylesheet" href="/static/styles/components.css"/>
@@ -79,7 +82,11 @@ templ App(p view.Page) {
 
 templ header(p view.Page) {
 	<header class="app-header">
-		<span class="app-brand">MyOwnPKI</span>
+		<span class="app-brand">
+			// The header is dark in every theme; below 48 px the small variant (brand/README.md).
+			<img class="app-logo" src="/static/brand/logo-small-on-dark.svg" alt="" width="30" height="32"/>
+			MyOwnPKI
+		</span>
 		<form class="app-tenant" action="/" method="get">
 			<label for="tenant">Tenant</label>
 			<select id="tenant" name="tenant">

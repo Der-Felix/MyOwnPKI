@@ -73,3 +73,27 @@ MIIB9TCCAZugAwIBAgIUTzqcIeB7XYgWovDDudR+FTAKBggqhkjOPQQDAjAaMRgw
 FgYDVQQDDA9ob21lbGFiLWlzc3VpbmcwHhcNMjYxMDEzMDAwMDAwWhcNMjcwMTA0
 … sample data – not a real certificate …
 -----END CERTIFICATE-----`
+
+// logoVariant is one file of assets/brand shown in the Brand section.
+type logoVariant struct {
+	File, Use string
+	Dark      bool // shown on the header background
+	Small     bool // shown at header size instead of sample size
+}
+
+var logoVariants = []logoVariant{
+	{File: "logo.svg", Use: "Light backgrounds, 64 px and larger (README, documents)"},
+	{File: "logo-on-dark.svg", Use: "Dark backgrounds, 64 px and larger", Dark: true},
+	{File: "logo-small.svg", Use: "Light backgrounds, 16–48 px: no document lines, larger seal", Small: true},
+	{File: "logo-small-on-dark.svg", Use: "Dark backgrounds, 16–48 px – the app header", Dark: true, Small: true},
+	{File: "logo-mono.svg", Use: "One color via currentColor (print, embossing); black when used as an image"},
+	{File: "favicon.svg", Use: "Browser tab; switches between navy and light with the color scheme", Small: true},
+}
+
+// brandColors are the logo colors. They are deliberately not CSS tokens:
+// gold is close to the fixed warning color and must never become a UI color.
+var brandColors = []view.KV{
+	{Key: "Navy", Value: "#1B2B45 – shield and document on light backgrounds"},
+	{Key: "Light", Value: "#E6ECF5 – shield and document on dark backgrounds"},
+	{Key: "Gold", Value: "#C27F12 – the seal, logo only"},
+}

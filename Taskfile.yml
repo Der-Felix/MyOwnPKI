@@ -92,6 +92,12 @@ tasks:
     cmds:
       - CGO_ENABLED=0 go run ./cmd/myownpki serve --dev
 
+  screenshots:
+    desc: Regenerate the README screenshots in docs/screenshots – at milestones only (browser via -- -browser PATH or MYOWNPKI_BROWSER)
+    deps: [generate]
+    cmds:
+      - CGO_ENABLED=0 go run ./internal/tools/screenshots {{.CLI_ARGS}}
+
   cross:
     desc: Build all binaries for every release platform into bin/<os>-<arch>/ (pure Go, verified)
     cmds:
