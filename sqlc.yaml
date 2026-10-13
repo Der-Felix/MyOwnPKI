@@ -1,0 +1,19 @@
+# sqlc: type-safe Go for the SQL queries (PLAN §4). Run via `task generate`.
+#
+# One block and one Go package per database type: a package only knows the
+# tables of its own file, so a query can't reach into another database
+# ("one transaction = one database", ADR-06). The schema is the migration
+# set itself – the same files the runner applies.
+#
+# New database type (e.g. acme in phase 2): add a block like the one below
+# once the type has queries.
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/store/schema/system
+    queries: internal/store/queries/system
+    gen:
+      go:
+        package: systemdb
+        out: internal/store/systemdb
+        emit_empty_slices: true

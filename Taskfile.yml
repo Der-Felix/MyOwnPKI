@@ -161,7 +161,7 @@ tasks:
       - go tool govulncheck ./...
 
   generate:
-    desc: Regenerate generated code (templ, later sqlc and OpenAPI)
+    desc: Regenerate generated code (templ, sqlc)
     cmds:
       - go generate ./...
 
