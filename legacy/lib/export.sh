@@ -145,7 +145,7 @@ howto_sec() {
 
 # Writes detailed, tailored deployment documentation (GUIDE.txt & ANLEITUNG.txt)
 write_howto() {
-    local d=$1 f="$1/GUIDE.txt" fanl="$1/ANLEITUNG.txt" name pre ca cn dns ip fam host tgt root rootder enc=no
+    local d=$1 f="$1/GUIDE.txt" fanl="$1/ANLEITUNG.txt" name pre ca cn dns ip fam host tgt root enc=no
     local srvnames="" main="" aliases="" caddyhost x what files clientca orgslug script_cmd
     name=$(basename "$d")
     pre=$(meta_get "$d" PRESET)
@@ -155,7 +155,6 @@ write_howto() {
     ip=$(meta_get "$d" IP)
     fam=$(preset_family "$pre")
     root="$PKI_DIR/publish/root.pem"
-    rootder="$PKI_DIR/publish/root.crt"
     tgt="/etc/ssl/$name"
     key_is_encrypted "$d/key.pem" && enc=yes
     orgslug=$(name_from_cn "${PKI_ORG:-pki}")

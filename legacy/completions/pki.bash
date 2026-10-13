@@ -41,28 +41,34 @@ _pki_completion() {
         fi
     }
 
+    # Offer the words of $1 that match the current word, one per line
+    # (mapfile instead of word splitting: safe for names with spaces)
+    _pki_reply() {
+        mapfile -t COMPREPLY < <(compgen -W "$1" -- "$cur")
+    }
+
     # First word: Command completion
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+        _pki_reply "$commands"
         return 0
     fi
 
     local cmd="${words[1]}"
     case "$prev" in
         --key|--leaf-key)
-            COMPREPLY=( $(compgen -W "$keys" -- "$cur") )
+            _pki_reply "$keys"
             return 0
             ;;
         --ca)
-            COMPREPLY=( $(compgen -W "$(_pki_get_cas) selfsigned" -- "$cur") )
+            _pki_reply "$(_pki_get_cas) selfsigned"
             return 0
             ;;
         --reason)
-            COMPREPLY=( $(compgen -W "$revoke_reasons" -- "$cur") )
+            _pki_reply "$revoke_reasons"
             return 0
             ;;
         --preset)
-            COMPREPLY=( $(compgen -W "$presets" -- "$cur") )
+            _pki_reply "$presets"
             return 0
             ;;
         --dir)
@@ -74,59 +80,59 @@ _pki_completion() {
     case "$cmd" in
         issue|template)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "$presets" -- "$cur") )
+                _pki_reply "$presets"
                 return 0
             fi
-            COMPREPLY=( $(compgen -W "--cn --dns --ip --email --uri --domain --ca --key --days --name --ou --key-pass --p12 --p12-legacy --der --force" -- "$cur") )
+            _pki_reply "--cn --dns --ip --email --uri --domain --ca --key --days --name --ou --key-pass --p12 --p12-legacy --der --force"
             ;;
         show|verify|renew|export|guide|anleitung|howto|ocsp-check)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "$(_pki_get_issued)" -- "$cur") )
+                _pki_reply "$(_pki_get_issued)"
                 return 0
             fi
             if [[ "$cmd" == "verify" ]]; then
-                COMPREPLY=( $(compgen -W "--host" -- "$cur") )
+                _pki_reply "--host"
             elif [[ "$cmd" == "renew" ]]; then
-                COMPREPLY=( $(compgen -W "--keep-key --revoke-old --days" -- "$cur") )
+                _pki_reply "--keep-key --revoke-old --days"
             elif [[ "$cmd" == "export" ]]; then
-                COMPREPLY=( $(compgen -W "--p12 --p12-legacy --der" -- "$cur") )
+                _pki_reply "--p12 --p12-legacy --der"
             fi
             ;;
         renew-ca)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "$(_pki_get_cas)" -- "$cur") )
+                _pki_reply "$(_pki_get_cas)"
                 return 0
             fi
-            COMPREPLY=( $(compgen -W "--days" -- "$cur") )
+            _pki_reply "--days"
             ;;
         revoke)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "$(_pki_get_issued) $(_pki_get_cas)" -- "$cur") )
+                _pki_reply "$(_pki_get_issued) $(_pki_get_cas)"
                 return 0
             fi
-            COMPREPLY=( $(compgen -W "--reason" -- "$cur") )
+            _pki_reply "--reason"
             ;;
         crl)
-            COMPREPLY=( $(compgen -W "--ca" -- "$cur") )
+            _pki_reply "--ca"
             ;;
         update|upgrade)
-            COMPREPLY=( $(compgen -W "-y --yes" -- "$cur") )
+            _pki_reply "-y --yes"
             ;;
         quick)
-            COMPREPLY=( $(compgen -W "--dns --ip --ca --days --no-lookup" -- "$cur") )
+            _pki_reply "--dns --ip --ca --days --no-lookup"
             ;;
         init)
-            COMPREPLY=( $(compgen -W "--org --country --state --locality --ou --cn --key --days --leaf-key --crl-days --aia-url --no-pass --intermediate" -- "$cur") )
+            _pki_reply "--org --country --state --locality --ou --cn --key --days --leaf-key --crl-days --aia-url --no-pass --intermediate"
             ;;
         ca-new)
-            COMPREPLY=( $(compgen -W "--cn --key --days --no-pass --pathlen --permit-dns --permit-ip --eku-limit --ocsp-url --default" -- "$cur") )
+            _pki_reply "--cn --key --days --no-pass --pathlen --permit-dns --permit-ip --eku-limit --ocsp-url --default"
             ;;
         sign-csr)
             if [[ $cword -eq 2 ]]; then
                 _filedir '@(csr|req)'
                 return 0
             fi
-            COMPREPLY=( $(compgen -W "--preset --ca --cn --dns --ip --days --no-csr-san" -- "$cur") )
+            _pki_reply "--preset --ca --cn --dns --ip --days --no-csr-san"
             ;;
         batch)
             _filedir
@@ -135,7 +141,7 @@ _pki_completion() {
             _filedir
             ;;
         search)
-            COMPREPLY=( $(compgen -W "$(_pki_get_issued)" -- "$cur") )
+            _pki_reply "$(_pki_get_issued)"
             ;;
         *)
             ;;

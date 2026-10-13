@@ -14,6 +14,8 @@
 #   - bash 4.x / 5.x
 #   - OpenSSL 3.x
 ###############################################################################
+# The "source=lib/..." hints below are relative to this script's directory:
+# shellcheck source-path=SCRIPTDIR
 
 # Restrict default file creation mask to owner-only
 umask 077

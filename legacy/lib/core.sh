@@ -30,13 +30,11 @@ setup_colors() {
         C_GRN=$'\033[32m'
         C_YEL=$'\033[33m'
         C_BLU=$'\033[34m'
-        C_MAG=$'\033[35m'
-        C_CYN=$'\033[36m'
         C_BLD=$'\033[1m'
         C_DIM=$'\033[2m'
         C_RST=$'\033[0m'
     else
-        C_RED="" C_GRN="" C_YEL="" C_BLU="" C_MAG="" C_CYN="" C_BLD="" C_DIM="" C_RST=""
+        C_RED="" C_GRN="" C_YEL="" C_BLU="" C_BLD="" C_DIM="" C_RST=""
     fi
 }
 setup_colors
