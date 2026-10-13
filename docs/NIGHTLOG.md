@@ -4,8 +4,8 @@
 > only approved dependencies (templ, govulncheck, go.yaml.in/yaml/v3), no ADR changes,
 > reversible choices documented here.
 >
-> This file is written in English (ADR-17); the morning summary for the owner is in German
-> at the end.
+> Written in English (ADR-17). The decisions and their reasons were carried over to
+> docs/PLAN.md §13–§14; this file keeps the step-by-step record and how to reverse each choice.
 
 ## Step 4 – CI (GitHub Actions) and Dependabot
 
@@ -174,78 +174,3 @@ On the compiled standalone script only 3 warnings remain:
 - `docs/PHASE1.md`: written proposal for phase 1 (data model, step order, dependencies, open questions).
   No phase 1 code was written.
 
----
-
-# Morgenbericht (Deutsch)
-
-## Was fertig ist
-
-Phase 0 ist abgeschlossen. Alle Commits sind lokal, **nichts wurde gepusht**.
-
-| Commit | Inhalt |
-|---|---|
-| `da49e0f` | Projektplan, Legacy-Suite und Skill importiert (gestern mit dir) |
-| `da70e43` | Go-Modul und drei Binaries (gestern mit dir) |
-| `ae24c5e` | Taskfile, Go 1.27.2, templ/govulncheck fest eingebunden (gestern mit dir) |
-| `2da5807` | golangci-lint-Konfiguration (gestern mit dir) |
-| `627e8ae` | **Schritt 4:** CI (GitHub Actions) und Dependabot |
-| `371494d` | **Schritt 5:** 12 Presets als YAML, Ladecode mit Prüfregeln, Paritätstest gegen Legacy, OpenSSL-Gegenprobe |
-| `adb324a` | **Schritt 6:** OpenAPI-3.1-Entwurf (49 Operationen) mit Strukturtest |
-| `39e9f59` | **Schritt 7:** Design-Tokens, Komponenten-CSS, `/design`, `serve --dev` |
-| `398d0c5` | **Schritt 8:** PLAN.md, README, CLAUDE.md aktualisiert |
-| (letzter Commit) | Dieses Protokoll und `docs/PHASE1.md` |
-
-Nach jedem Schritt war `task check` grün. `task vuln` meldet keine Schwachstellen.
-
-## Was nicht geklappt hat
-
-- **Die CI ist nie gelaufen.** Sie startet erst nach einem Push, und den entscheidest du. Lokal
-  nachgestellt habe ich alle Befehle, die YAML-Syntax, die festgelegten Action-Hashes und den
-  ShellCheck-Schritt. Tippfehler in den Shell-Zeilen des Workflows würden sich erst beim ersten Lauf zeigen.
-- **ShellCheck läuft vorerst nur mit Schweregrad „error“.** Das Legacy-Skript hat 25 Warnungen,
-  meist unbenutzte Variablen. Mit „warning“ wäre die CI vom ersten Tag an rot. Den Legacy-Code
-  habe ich nicht angefasst.
-- **Screenshots im eingebauten Browser** gingen nur zeitweise (App-Fenster im Hintergrund). Die Seite
-  habe ich deshalb überwiegend über berechnete Styles geprüft: hell, dunkel, kompakt, Handybreite,
-  keine CSP-Fehler. Einige Screenshots sind gelungen und sahen gut aus.
-
-Keinen Schritt musste ich verwerfen.
-
-## Entscheidungen, die ich allein getroffen habe
-
-Die vollständigen Tabellen mit Begründung und „wie rückgängig machen“ stehen oben pro Schritt.
-Die wichtigsten:
-
-1. **CI-Sicherheit:** Fremde Actions per Commit-Hash statt Tag, Werkzeuge mit SHA-256-Prüfung,
-   Token nur lesend.
-2. **Presets:** strengere Regeln als Legacy, alle 12 Presets erfüllen sie bereits. Zum Beispiel:
-   serverAuth braucht eine DNS/IP-SAN, timeStamping muss allein und kritisch sein, CA-Key-Usages sind
-   in Presets verboten. `keyAgreement` ist vorerst gesperrt.
-3. **API:** Fehlertypen als URN (`urn:myownpki:problem:…`), weil es noch keine Projekt-Domain gibt.
-   Schlüssel-Export per POST, damit Passwörter nie in der URL stehen. `certificateHold` wird nicht angeboten.
-4. **UI:** kein JavaScript in Phase 0, Dunkelmodus als zweite Vorschau auf der Seite, Systemschriften,
-   US-Schreibweise („color“), Log-Zeiten in UTC (der erste Lauf hatte Ortszeit, das ist korrigiert).
-5. **Dev-Modus:** wie von dir vorgegeben, zusätzlich auch Port 0 und IPv6-Zonen abgelehnt. `task dev` startet ihn.
-
-## Wichtigster Fund für Phase 1
-
-`crypto/x509` schreibt die Extended Key Usage **immer als nicht kritisch**. Das Preset `timestamp`
-braucht nach RFC 3161 aber eine kritische EKU. Die CA-Engine muss diese Extension deshalb selbst
-bauen. Der Testcode in `internal/ca/preset/x509_test.go` zeigt bereits, wie das geht.
-
-## Offene Fragen an dich
-
-Ausführlich mit Empfehlungen in `docs/PHASE1.md` §4. Kurz:
-1. Soll der Server Schlüssel selbst erzeugen (wie pki.sh), oder nur CSRs signieren?
-2. Wo liegen Schlüssel: verschlüsselt in `pki.db` (Empfehlung) oder im Ordner `keys/` (PLAN §4)?
-3. Ersten Admin per `myownpki init` anlegen?
-4. TLS beim ersten Start: selbstsigniertes Bootstrap-Zertifikat und/oder eigenes Zertifikat?
-5. OpenAPI-Generator: ogen oder oapi-codegen?
-6. Standardlaufzeiten (397/730 Tage) beibehalten oder schon Richtung SC-081 kürzen?
-7. Standardalgorithmus ECDSA (P-256/P-384) statt RSA?
-8. Die 25 ShellCheck-Warnungen im Legacy-Code beheben?
-9. Wann soll der erste Push kommen, damit die CI einmal läuft?
-10. Projekt-Domain für Fehlertypen jetzt festlegen oder bei der URN bleiben?
-
-Dazu Vorschläge für neue Abhängigkeiten (nicht hinzugefügt): `actionlint` und `vacuum` als CI-Werkzeuge
-sowie die Phase-1-Liste in `docs/PHASE1.md` §3.

@@ -411,3 +411,57 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
 | CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13) |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` |
+
+---
+
+## 14. Phase 0 decision record
+
+Detailed choices made while building phase 0 (most of them during the autonomous run documented
+in docs/NIGHTLOG.md, which also lists how to reverse each one). §13 has the summary; this section
+keeps the reasons. None of them changes an ADR.
+
+### CI and build
+| Decision | Why |
+|---|---|
+| Third-party actions pinned to a full commit SHA, not a tag | A tag can be moved to other code later; a SHA can't. The CI builds a CA |
+| Only GitHub's own actions; golangci-lint, ShellCheck, sqlc (and later actionlint, vacuum) downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
+| `permissions: contents: read`, `persist-credentials: false` | Least privilege – a compromised step can't push or read a token from `.git/config` |
+| Runner images pinned (`ubuntu-24.04`, `windows-2025`, `macos-15`) | `*-latest` changes underneath; failures should come from our changes |
+| sqlc is installed in CI only when `sqlc.yaml` exists | Not used before phase 1 |
+| `CGO_ENABLED` written directly in front of every Go command in `Taskfile.yml`; only the `race` job enables CGO; `task build:verify` checks the build info of every binary | Task doesn't override variables already set in the environment, so a top-level `env:` could be silently overruled (first CI run: `-race requires cgo`; locally `CGO_ENABLED=1` produced CGO binaries). Release binaries must stay pure Go (ADR-01) |
+
+### Presets
+| Decision | Why |
+|---|---|
+| Key usages split into `key_usage.rsa` and `key_usage.other` (ECDSA, Ed25519) | Legacy only knew RSA and Ed25519; non-RSA keys can't encrypt, so `keyEncipherment` is RSA-only |
+| `subject_alt_names.required_any_of` as a list (legacy: `"dns\|ip"`) | Unambiguous and validated per element |
+| EKUs by name; a dotted OID only for EKUs without a name (e.g. `1.3.6.1.5.5.8.2.2`); `ipsecIKE` names 1.3.6.1.5.5.7.3.17 | One spelling per usage, so duplicates are detectable |
+| `keyAgreement`, `encipherOnly`, `decipherOnly` rejected | `other` also covers Ed25519, which can't do key agreement; no legacy preset uses them |
+| Cross-field rules: serverAuth ⇒ DNS/IP SAN required; emailProtection ⇒ e-mail SAN required; timeStamping only and critical (RFC 3161); `ocsp_no_check` ⇒ OCSPSigning; `openssl_purpose` matches the EKUs; `customizable` only for family `custom` | Each encodes an RFC / CA-B Forum requirement; all 12 legacy presets already satisfy them |
+| `validity_days` 1–3650, files ≤ 64 KiB, one YAML document per file, names sorted alphabetically | Sanity bounds and cheap hardening for later uploads; display order is a UI decision |
+
+**Finding for the CA engine:** `crypto/x509` always writes extendedKeyUsage as non-critical, so the
+`timestamp` preset's critical EKU (and `id-pkix-ocsp-nocheck`) must be built as extra extensions –
+`internal/ca/preset/x509_test.go` shows how. keyUsage and basicConstraints are always critical, as required.
+
+### API draft
+| Decision | Why |
+|---|---|
+| `x-required-role` and `x-step-up` on every operation | RBAC and step-up become reviewable and testable in the spec |
+| `/health` unauthenticated and returns only `{"status":"ok"}`; version and seal state only via `/system/status` | Load balancers need a check; anonymous endpoints must not reveal versions |
+| Key export is `POST /certificates/{id}/export` with the password in the body | Secrets in URLs end up in proxy logs and browser history |
+| `certificateHold` not offered | Temporary revocation is poorly supported; CA/B Baseline Requirements forbid it |
+| Role scopes `tenant` and `ca` only; no tenant in any path | Domain/agent-group scopes come with phases 2/3; the tenant comes from the authenticated context |
+| Not in the draft: batch upload, encrypted backup download, ACME, domains, agents | Not in the phase 1 row or belong to later phases |
+
+### Web UI and dev mode
+| Decision | Why |
+|---|---|
+| `serve` refuses to start without `--dev` until TLS and login exist; dev mode rejects host names, IPv6 zones and port 0 | Nothing unauthenticated may reach the network |
+| Dev default `127.0.0.1:9443` (the future admin port), plain HTTP; banner on stderr and sticky on every page | Same URL habit as later, unmistakable mode |
+| CSP from security.md plus `img-src 'self'; form-action 'self'`; COOP/CORP, X-Frame-Options, Permissions-Policy; HSTS only with TLS (phase 1) | Strict defaults from the first page |
+| Static assets: explicit Content-Type for `.css`/`.svg`, `Cache-Control: no-cache`, no directory listings | On Windows Go takes MIME types from the registry, and with `nosniff` a wrong type breaks the page; asset URLs aren't fingerprinted yet |
+| No htmx and no JavaScript yet; dark mode demonstrated with `data-theme="dark"` on a preview block | Not needed for a static gallery; htmx is vendored with approval in phase 1 |
+| Status colors fixed per light/dark mode | Themes can't change them (ADR-12), but dark mode needs other shades for contrast |
+| Log timestamps converted to UTC | "UTC everywhere" – the first dev run logged local time |
+| Demo data without real names (`it-admin@homelab.lan`) | Public repository |
