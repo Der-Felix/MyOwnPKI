@@ -197,7 +197,10 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   with write access to the file, so its head (seq + hash) is also kept elsewhere:
   - phase 1: written to the process log at start and daily, recorded in the backup manifest, and
     checked with `myownpki audit verify --expect-head`;
-  - after step 6: **signed checkpoints** with a key bound to the unseal passphrase (PHASE1 step 6a) –
+  - step 6a: **signed checkpoints** – Ed25519, key derived from the root key (exists only while
+    unsealed); a checkpoint is a normal chain entry signing the entry before it, made at unseal,
+    before seal, daily and every 1000 entries; its public key fingerprint is shown at init, logged at
+    unseal and pinned with `audit verify --checkpoint-key` –
     rewriting the chain then needs the passphrase;
   - phase 5: **SIEM/syslog export** of every entry – the strongest anchor, because the copy lives
     outside the CA's control.
@@ -526,6 +529,7 @@ keeps the reasons. None of them changes an ADR.
 | Outbox per producing database (`AUTOINCREMENT` ids), delivered exactly once: append (dedup by `outbox_id`, also `UNIQUE` in the schema), then mark delivered; delivered rows deleted after 30 days, undelivered never | A crash between the two steps leads to a recognized duplicate, never to a lost or double entry |
 | Details are validated: no secret-looking keys (password, passphrase, secret, private, credential, token …), IP addresses only, ≤ 8 KiB | Second line of defense against logging secrets; data minimization (GDPR note in §5) |
 | `myownpki audit verify [--scope] [--expect-head SEQ:HASH]` (read-only; exit 0/1/3); the deliverer logs every chain head at start and daily | The head in the process log is the anchor until signed checkpoints (step 6a) and SIEM export (phase 5) |
+| Signed checkpoints (step 6a): Ed25519 instead of HMAC, key derived from the root key via HKDF; checkpoints are chain entries (`audit.checkpoint`); `verify` checks signature, coverage and one key per log, and pins the key with `--checkpoint-key` | Verification needs only the public key – offline, without unseal; pinning stops an attacker who re-signs everything with an own key |
 
 ### Keys and unseal (phase 1 step 6, design approved 2026-10-13)
 | Decision | Why |
