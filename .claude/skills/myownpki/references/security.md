@@ -76,7 +76,12 @@ The http-01 and tls-alpn-01 validators connect to hostnames an ACME client chose
 
 - Append-only table in `audit.db`; each entry stores the hash of the previous entry (hash chain).
 - Log who, what, when, from where, target object, result – never secrets or key material.
-- Export to syslog/SIEM. Provide a verification command that walks the chain.
+- Entries hold personal data (user name, source IP): store only what security needs, no user agent
+  or request free text; single entries can't be deleted (hash chain) – see PLAN §5 for the GDPR note.
+- Business changes reach the audit log through the outbox of their own database (same transaction);
+  never write an audit entry and a business change "one after the other" across two databases.
+- Export to syslog/SIEM (phase 5). `myownpki audit verify` walks every chain; `internal/audit` has
+  `Enqueue` (in the business transaction), `Append` (direct events) and `Verify`.
 
 ## Transport and headers (admin listener)
 

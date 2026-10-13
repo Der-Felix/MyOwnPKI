@@ -98,11 +98,12 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 
 ```
 /var/lib/myownpki/
-├─ system.db                     tenants, global admins, settings, sessions
+├─ system.db                     tenants, global admins, settings, sessions, outbox
+├─ audit.db                      instance audit log: logins, users, unseal (append-only, hash chain)
 └─ tenants/<tenant>/
-   ├─ pki.db                     CAs, certificates, encrypted private keys, domains, agents, policies, deploy profiles
+   ├─ pki.db                     CAs, certificates, encrypted private keys, domains, agents, policies, deploy profiles, outbox
    ├─ acme.db                    ACME accounts, orders, authorizations, challenges, nonces
-   ├─ audit.db                   append-only, hash chain (tamper-evident)
+   ├─ audit.db                   tenant audit log (append-only, hash chain, tamper-evident)
    ├─ metrics.db                 time series for dashboards, retention + downsampling
    └─ keys/                      HSM references only (PKCS#11 URIs) – no key material
 ```
@@ -120,8 +121,10 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   migration file stops the server instead of silently diverging *(decided 2026-10-13, instead of goose)*.
 - Backup/export/delete of a tenant = one directory.
 - **`myownpki backup` / `myownpki restore`** *(phase 1)*: consistent online backup of `system.db`
-  and all tenant databases (`VACUUM INTO` / SQLite online backup, `audit.db` last) with a SHA-256
-  manifest; restore with integrity, migration-version, manifest and audit-chain checks.
+  and all tenant databases (`VACUUM INTO` / SQLite online backup; the audit databases – instance and
+  tenants – **last**) with a SHA-256
+  manifest that also records the head (seq + hash) of every audit chain; restore with integrity,
+  migration-version and manifest checks and a full verification of every audit chain against those heads.
   Litestream (ADR-07) adds continuous replication later.
 - No transactions across database boundaries → design flows so each transaction stays in one DB (outbox pattern where needed).
 
@@ -170,7 +173,28 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   certificate. After setup the admin certificate is issued by the own CA.
 
 ### Audit & supply chain
-- Audit log as a hash chain, export to SIEM/syslog
+- Audit log as a hash chain: `<data>/audit.db` for instance events (logins, users, unseal),
+  `tenants/<t>/audit.db` per tenant. Entries of a business change arrive via the outbox of the same
+  database (exactly once, deduplicated by `outbox_id`); events without a business change (failed
+  login, denied request) are appended directly. `myownpki audit verify` walks every chain.
+- **Anchors** – a hash chain alone can't detect a cut-off end or a fully recomputed chain by someone
+  with write access to the file, so its head (seq + hash) is also kept elsewhere:
+  - phase 1: written to the process log at start and daily, recorded in the backup manifest, and
+    checked with `myownpki audit verify --expect-head`;
+  - after step 6: **signed checkpoints** with a key bound to the unseal passphrase (PHASE1 step 6a) –
+    rewriting the chain then needs the passphrase;
+  - phase 5: **SIEM/syslog export** of every entry – the strongest anchor, because the copy lives
+    outside the CA's control.
+- **Personal data (GDPR):** audit entries contain personal data – user names and source IP
+  addresses. Only what security needs is stored (who, what, when, from where, target, result; no
+  user agent, no free text from requests). Operators document the retention period and the legal
+  basis in their records of processing (Art. 30 GDPR) – typically the security of the PKI and the
+  ability to prove who issued or revoked a certificate for as long as certificates of the CA can be
+  relied upon. **Single entries can't be deleted or changed**: that is what makes the chain
+  tamper-evident. Erasure requests are therefore handled at the level of whole logs (e.g. archiving
+  and starting a new chain after the retention period) and must be assessed by the operator's data
+  protection officer. *(Owner request 2026-10-13; not legal advice.)*
+- Export to SIEM/syslog (phase 5)
 - Signed releases (cosign), SBOM (syft), reproducible builds (GoReleaser)
 - Container: distroless, non-root, read-only filesystem, works with rootless Podman
 
@@ -475,6 +499,16 @@ keeps the reasons. None of them changes an ADR.
 | `myownpki db status` (read-only; exit 0 = up to date, 1 = problem, 3 = missing/pending) and `myownpki db migrate` | Scriptable check for monitoring; a problem outranks "pending" because migrating would not fix it |
 | sqlc: one block and one Go package per database type (`systemdb`, later `pkidb`, `auditdb` …); schema = the migration files | A package only knows the tables of its own file – a query across databases doesn't compile |
 | SQL files (schema and queries) are ASCII only, enforced by a test | sqlc 1.31.1 miscounts positions after multi-byte characters in SQLite files and cuts statements short (found in step 4) |
+
+### Audit log (phase 1 step 5, design approved 2026-10-13)
+| Decision | Why |
+|---|---|
+| Two kinds of log: `<data>/audit.db` (instance: logins, users, unseal) and `tenants/<t>/audit.db`; each file records its scope in `db_info`, a file in the wrong place is refused | A global admin's login doesn't belong in a tenant's log; swapped files are caught |
+| `hash = SHA-256("MYOWNPKI-AUDIT-V1", prev_hash, seq, outbox_id, time, actor…, details_json)`, every field length-prefixed; first `prev_hash` = SHA-256 of a genesis tag and the scope | No ambiguity between fields (unlike concatenation or JSON); a log can't be passed off as another scope's |
+| Append-only enforced twice: no UPDATE/DELETE in the code, and triggers in the schema; tampering is detected by `Verify` at the exact `seq` (modified, missing, link broken) | Triggers stop bugs, the chain catches file edits |
+| Outbox per producing database (`AUTOINCREMENT` ids), delivered exactly once: append (dedup by `outbox_id`, also `UNIQUE` in the schema), then mark delivered; delivered rows deleted after 30 days, undelivered never | A crash between the two steps leads to a recognized duplicate, never to a lost or double entry |
+| Details are validated: no secret-looking keys (password, passphrase, secret, private, credential, token …), IP addresses only, ≤ 8 KiB | Second line of defense against logging secrets; data minimization (GDPR note in §5) |
+| `myownpki audit verify [--scope] [--expect-head SEQ:HASH]` (read-only; exit 0/1/3); the deliverer logs every chain head at start and daily | The head in the process log is the anchor until signed checkpoints (step 6a) and SIEM export (phase 5) |
 
 ### Web UI and dev mode
 | Decision | Why |
