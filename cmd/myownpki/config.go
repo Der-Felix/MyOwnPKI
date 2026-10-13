@@ -32,8 +32,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("config", "", "config file (default: $"+config.EnvConfigFile+", then "+
-		config.DefaultPath(runtime.GOOS, os.Getenv)+")")
+	path := configFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -44,20 +43,31 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%s config check: unexpected argument %q\n", binary, fs.Arg(0))
 		return 2
 	}
-	if *path == "" {
-		*path = lookupEnv(environ, config.EnvConfigFile)
-	}
-	if *path == "" {
-		*path = config.DefaultPath(runtime.GOOS, os.Getenv)
-	}
-
-	cfg, src, err := config.Load(*path, environ)
+	cfg, src, err := config.Load(configPath(*path, environ), environ)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
 	printConfig(stdout, cfg, src)
 	return 0
+}
+
+// configFlag registers --config on a subcommand's flag set.
+func configFlag(fs *flag.FlagSet) *string {
+	return fs.String("config", "", "config file (default: $"+config.EnvConfigFile+", then "+
+		config.DefaultPath(runtime.GOOS, os.Getenv)+")")
+}
+
+// configPath picks the config file: --config, then MYOWNPKI_CONFIG, then
+// the platform default.
+func configPath(flagValue string, environ []string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if p := lookupEnv(environ, config.EnvConfigFile); p != "" {
+		return p
+	}
+	return config.DefaultPath(runtime.GOOS, os.Getenv)
 }
 
 func lookupEnv(environ []string, name string) string {
