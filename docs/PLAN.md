@@ -325,6 +325,8 @@ MyOwnPKI/
 │  ├─ keys/                unseal, encryption, PKCS#11
 │  ├─ policy/              policies
 │  ├─ notify/              notifications
+│  ├─ config/              config file + MYOWNPKI_* overrides (myownpki config check)
+│  ├─ clock/               injectable clock (UTC)
 │  ├─ web/                 templ components, layouts A/B/C
 │  └─ tools/screenshots/   dev tool: README screenshots (task screenshots)
 ├─ assets/brand/           logo, favicons, app.ico (source of truth: SVGs); assets.go embeds what the UI serves
@@ -334,7 +336,7 @@ MyOwnPKI/
 ├─ api/openapi.yaml        spec first (ADR-05); api.Spec embeds it
 ├─ presets/*.yaml          ported from legacy/lib/presets.sh (+ README.md: file format)
 ├─ guides/*.tmpl           ported from legacy/lib/export.sh (GUIDE.txt)
-├─ deploy/                 Dockerfile, Compose, LXC, systemd, Homebrew, Windows
+├─ deploy/                 config.example.yaml; later Dockerfile, Compose, LXC, systemd, Homebrew, Windows
 ├─ legacy/                 pki.sh + lib/ (offline root tool)
 ├─ .github/                CI workflow, shared setup action, Dependabot
 ├─ Taskfile.yml            build, test, lint, dev, cross, vuln
@@ -402,7 +404,8 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 |---|---|
 | Go version | Toolchain pinned in `go.mod` (`toolchain go1.27.2`); `GOTOOLCHAIN=auto` downloads it, CI uses `GOTOOLCHAIN=local` |
 | Task runner | Taskfile (`task check` before every commit; `task dev`, `task cross`, `task vuln`) |
-| Configuration | One YAML file, strict decoding (unknown keys are errors) + `MYOWNPKI_*` env overrides; library `go.yaml.in/yaml/v3` |
+| Configuration | One YAML file, strict decoding (unknown keys are errors) + `MYOWNPKI_*` env overrides; library `go.yaml.in/yaml/v3`. Phase 1 step 2: `internal/config`, example `deploy/config.example.yaml`, `myownpki config check`; unknown `MYOWNPKI_*` variables are errors; listeners take IP literals only (no host names); admin listener defaults to `127.0.0.1:9443` (remote access is opted into); no secrets in the file (the unseal passphrase is entered at runtime) |
+| Clock | `internal/clock`: `Clock` interface, `System` (UTC) – the only code allowed to call `time.Now` (lint rule) – and `Fake` for tests |
 | Dev mode | `myownpki serve --dev` – CLI flag only, never in the config file; binds only to the IP literals `127.0.0.1`/`::1`; "DEV MODE – no TLS, no auth" on start and on every page |
 | Tools in `go.mod` (`go tool`) | templ (generator = runtime version), govulncheck |
 | Tools as pinned binaries | golangci-lint 2.14.0 (GPL – must not enter `go.mod`), sqlc 1.31.1 (from phase 1), ShellCheck 0.11.0 (CI) |

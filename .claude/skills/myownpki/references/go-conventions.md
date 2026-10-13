@@ -25,13 +25,17 @@
 ## Configuration
 
 - One config file in **YAML** (decided in phase 0; strict decoding, unknown keys are errors) plus environment overrides (`MYOWNPKI_*`). Dev mode is a CLI flag only, never a config key.
+- `internal/config`: `config.Load(path, os.Environ())` returns a validated `Config`; every key has a
+  variable named after its path (`admin.listen` → `MYOWNPKI_ADMIN_LISTEN`), unknown `MYOWNPKI_*` names are
+  errors. New keys go into the struct, `envFields`, `deploy/config.example.yaml` and the tests together.
 - Parse into typed structs, validate at startup, fail fast with a clear message.
 - No shell sourcing, no templating of config.
 
 ## Time
 
 - UTC everywhere. Inject a clock (`interface{ Now() time.Time }`) into anything that checks validity,
-  schedules renewals or writes audit entries, so tests can control time.
+  schedules renewals or writes audit entries, so tests can control time: `internal/clock`
+  (`clock.System{}` in production, `clock.NewFake(t)` in tests). `time.Now` is a lint error elsewhere.
 
 ## SQLite (ADR-06)
 

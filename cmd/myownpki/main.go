@@ -1,6 +1,6 @@
 // Command myownpki is the MyOwnPKI server: web UI, REST API, ACME server and CA engine.
 //
-// Phase 0: --version, and `serve --dev` for the component gallery (/design).
+// Commands so far: --version, `config check` and `serve --dev` (UI prototype).
 package main
 
 import (
@@ -32,7 +32,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(fs.Output(), "Usage:\n  %s --version\n  %s serve --dev [--listen 127.0.0.1:9443]\n\nFlags:\n", binary, binary)
+		_, _ = fmt.Fprintf(fs.Output(), "Usage:\n  %s --version\n  %s config check [--config FILE]\n  %s serve --dev [--listen 127.0.0.1:9443]\n\nFlags:\n", binary, binary, binary)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -48,6 +48,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch fs.Arg(0) {
+	case "config":
+		return runConfig(fs.Args()[1:], stdout, stderr)
 	case "serve":
 		return runServe(ctx, fs.Args()[1:], stderr)
 	case "":
