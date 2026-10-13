@@ -1,14 +1,20 @@
 # Dependabot opens pull requests for dependency updates (nothing is merged automatically).
 #
 # Not covered – update by hand, keep in sync with Taskfile.yml:
-#   GO_VERSION, TASK_VERSION, GOLANGCI_LINT_*, SQLC_*, SHELLCHECK_* in .github/workflows/ci.yml
-#   and the `toolchain` line in go.mod.
+#   GO_VERSION, TASK_VERSION, GOLANGCI_LINT_*, SQLC_*, SHELLCHECK_*, ACTIONLINT_*, VACUUM_*
+#   in .github/workflows/ci.yml
+#   and the `toolchain` line in go.mod. Same rule by hand: only releases at least 14 days old.
+#
+# cooldown: a new version is proposed only once it has been public for 14 days, so a broken
+# or hijacked release has time to be noticed (PLAN §14). Security updates are not delayed.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     commit-message:
       prefix: "build(deps)"
     groups:
@@ -21,6 +27,8 @@ updates:
       - /.github/actions/setup
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     commit-message:
       prefix: "ci(deps)"
     groups:
