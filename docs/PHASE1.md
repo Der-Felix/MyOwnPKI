@@ -1,7 +1,7 @@
-# Phase 1 – proposal (draft for discussion)
+# Phase 1 – plan
 
-> Written at the end of phase 0 (2026-10-13). Nothing here is implemented or decided yet –
-> it is a basis for the kickoff of phase 1. Open questions to the owner are in §4.
+> Written at the end of phase 0; the owner answered the open questions on 2026-10-13 (§4).
+> §2 is the agreed work plan. The data model (§1) is still a proposal that each step refines.
 
 Goal of phase 1 (PLAN §10): data model, CA engine, importer, REST API, login with 2FA, RBAC,
 unseal, audit log, UI for issue / revoke / upload / download in layout B –
@@ -41,6 +41,7 @@ cas
   public_base_url  TEXT               -- immutable once the first certificate is issued
   crl_days         INTEGER
   crl_number       INTEGER            -- strictly increasing; preserved by the importer
+  max_validity_days INTEGER           -- caps every issuance (presets, API, ACME default 90 days)
   created_at, updated_at TEXT
 
 ca_name_constraints
@@ -100,7 +101,7 @@ vs. the injected clock. Nothing can get out of sync, and "expired" needs no nigh
 ### 1.2 `system.db`
 
 ```
-tenants(id, name, created_at)
+tenants(id, name, allow_server_keygen /*default 1, switchable per tenant*/, created_at)
 users(id, username UNIQUE, display_name, email, password_hash /*Argon2id PHC string*/,
       must_change_password, disabled, created_at, last_login_at)
 user_roles(user_id, tenant_id, role, scope_type /*tenant|ca*/, scope_id NULL)
@@ -137,65 +138,66 @@ be lost or duplicated even though they live in different files.
 
 ---
 
-## 2. Order of steps (each one small, testable, committable)
 
-| # | Step | Verifies with |
-|---|---|---|
-| 1 | `internal/clock` (injectable clock) and `internal/config` (YAML, strict, `MYOWNPKI_*` env) | unit tests; `myownpki serve --config …` prints the validated config |
-| 2 | Store foundation: SQLite open with pragmas, one writer + read pool, goose migrations per DB type, sqlc setup | migration tests on a temp dir; `sqlite3`-free inspection via `myownpki-ctl --offline db status` |
-| 3 | Keys + unseal: Argon2id KEK, envelope encryption, seal/unseal in memory | round-trip tests; wrong passphrase rejected; no plaintext in DB (test greps the file) |
-| 4 | CA engine: serials (159-bit), leaf template from preset (incl. critical EKU, ocsp-nocheck – see NIGHTLOG step 5), CSR checks, name constraints **before** signing, AIA/CDP, validity capped by CA `notAfter` | crypto/x509 + `openssl verify -purpose` per preset; NC violation tests |
-| 5 | Root/intermediate creation and the offline-signing flow (CSR out, certificate in) | chain verifies with OpenSSL; pathlen/NC present |
-| 6 | CRL generation (number +1, AKI, nextUpdate) | `openssl crl -text`, `openssl verify -crl_check` |
-| 7 | Audit log with hash chain + outbox worker | tampering test breaks verification at the right `seq` |
-| 8 | Legacy importer, CI builds a fixture PKI with `legacy/pki.sh` | serials, revocations and CRL numbers identical before/after |
-| 9 | Auth: users (Argon2id), TOTP, WebAuthn, sessions, CSRF, step-up, RBAC in the service layer, first-admin bootstrap | tests per rule in security.md; rate limit/lockout tests |
-| 10 | Admin listener with TLS (bootstrap certificate, then one from the own CA) | `curl -v`, `openssl s_client`; headers incl. HSTS |
-| 11 | REST API from `api/openapi.yaml` | contract tests generated from the spec |
-| 12 | UI (layout B): login, unseal, certificates (list, detail, issue, revoke, download/export), CAs, presets, audit, import | htmx flows without JS fallback broken; screenshot tests light/dark |
+## 2. Work plan
 
-Steps 1–8 need no UI and no login – the CA core can be finished and verified first.
+Each step ends with: summary for the owner (German), verification commands, a commit proposal;
+commit only after the owner's OK, never push. `task check` must be green after every step.
+"Approval" marks a step that needs a new dependency – it is asked for at that step, not earlier.
 
----
+| # | Step | Approval needed | Verifies with |
+|---|---|---|---|
+| 0 | Fix the ShellCheck warnings in `legacy/` (own commit, behaviour unchanged), then CI ShellCheck at severity `warning` | – | `shellcheck --severity=warning …` clean; `legacy/build.sh` + a smoke run of `pki.sh` in a temp dir |
+| 1 | actionlint (workflows) and vacuum (OpenAPI) as pinned CI tools, `task lint:ci` / `task lint:api`, fix their findings | – (approved) | both tools clean locally and in CI |
+| 2 | `internal/clock` (injectable clock) and `internal/config` (YAML, strict, `MYOWNPKI_*` env overrides); `myownpki config check` | – | unit tests; `myownpki config check --config example.yaml` |
+| 3 | **ogen trial** on two endpoints (`GET /health`, `GET /presets`) on a separate branch; comparison with a hand-written version – result shown to the owner, then decided | ogen (trial) | generated server answers like the spec; diff size, readability, router fit |
+| 4 | Store foundation: SQLite (pure Go), WAL pragmas, one writer + read pool, goose migrations per DB type (`system`, `pki`, `audit`), sqlc; tenant directory layout | modernc.org/sqlite, goose; owner installs sqlc 1.31.1 | migration tests in a temp dir; `myownpki db status` |
+| 5 | Keys + unseal: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
+| 6 | CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected |
+| 7 | CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); CA import | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root |
+| 8 | CRL generation (number +1, AKI, nextUpdate) and serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
+| 9 | Audit log (`audit.db`, hash chain) + outbox worker | – | tampering test breaks verification at the right `seq` |
+| 10 | Legacy importer; CI builds a fixture PKI with `legacy/pki.sh` and imports it | – | serials, revocations (time + reason) and CRL numbers identical before/after |
+| 11 | `myownpki init`: first admin + unseal passphrase, **prominent warning to keep the passphrase separate from backups** | – | init on an empty data dir; refuses to run twice |
+| 12 | Auth core: Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer, API tokens | – | one test per rule in security.md; RFC 6238 test vectors |
+| 13 | Passkeys / WebAuthn | go-webauthn/webauthn | registration + login with a virtual authenticator in tests |
+| 14 | Listeners with TLS: admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA | – | `openssl s_client`, `curl -v`; fingerprint matches the console |
+| 15 | REST API per `api/openapi.yaml` (generator per step 3), RFC 9457 errors, contract tests | ogen (if chosen) | contract tests; vacuum clean; `curl` examples in the summary |
+| 16 | UI (shell B), in sub-steps: a) login/2FA/unseal, b) certificates list/detail/download, c) issue (CSR default, server key if allowed) / revoke / renew / export, d) CAs (create, import, offline flow), e) import, audit, presets, tenant settings | htmx (vendored, at 16a) | handler tests incl. no-inline-style checks; screenshots light/dark |
+| 17 | Phase 1 wrap-up: end-to-end test "pki.sh replaced" (import legacy PKI → issue → revoke → CRL check with OpenSSL), operations guide (incl. backup/passphrase warning), PLAN.md | – | the end-to-end test; `task check`; CI green |
 
-## 3. Dependencies phase 1 will need (all need owner approval)
-
-| Module | License | For |
-|---|---|---|
-| `modernc.org/sqlite` | BSD-3 | pure-Go SQLite (ADR-06) |
-| `github.com/pressly/goose/v3` | MIT | migrations |
-| `golang.org/x/crypto` | BSD-3 | `argon2`, `ocsp` (phase 4), `cryptobyte` |
-| `github.com/go-webauthn/webauthn` | BSD-3 | passkeys |
-| OpenAPI generator (`ogen` or `oapi-codegen`) | Apache-2.0 | handlers from the spec |
-| htmx (vendored JS file) | 0BSD | UI interactions |
-| sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) |
-
-TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – proposed as own code with RFC test vectors
-instead of a dependency.
+Steps 0–10 need no login and no UI: the CA core is finished and verified first.
 
 ---
 
-## 4. Open questions to the owner
+## 3. Dependencies and their approval status
 
-1. **Server-side key generation** (legacy workflow, key stored encrypted, download with step-up)
-   in addition to CSR signing? *Recommendation: yes, but switchable off per tenant; CSR is the default in the UI.*
-2. **Where do CA/leaf keys live?** PLAN §4 says `keys/` directory; the proposal above puts the
-   encrypted blobs into `pki.db` (one backup, Litestream replicates it, atomic with issuance).
-   *Recommendation: DB; `keys/` only for HSM references.*
-3. **First admin:** `myownpki init` on the console (asks for username + password, forces 2FA
-   enrollment at first login) or a one-time setup token printed at first start?
-   *Recommendation: `myownpki init`.*
-4. **TLS for the admin listener at first start:** self-signed bootstrap certificate (fingerprint
-   printed on the console, like Proxmox), user-provided certificate, or both?
-   *Recommendation: both; after setup, issue the admin certificate from the own CA.*
-5. **OpenAPI generator:** ogen (full 3.1 support, generates its own router) or oapi-codegen
-   (3.0-focused, plain net/http)? *Recommendation: try ogen on two endpoints first, decide after.*
-6. **Default lifetimes:** keep the legacy 397/730 days in the presets, or move towards CA/B SC-081
-   (200 days from 2026, 100 from 2027) now? *Recommendation: keep presets; add a per-CA maximum.*
-7. **Default key algorithm** for server-generated keys and new CAs: ECDSA P-256 (leaves) / P-384
-   (CAs) as in pki-rules.md, or RSA 3072 like many legacy setups? *Recommendation: ECDSA.*
-8. **Legacy ShellCheck warnings** (25, mostly unused variables): fix them so CI can use severity
-   `warning`? *Recommendation: yes, in a small separate commit.*
-9. **When is the first push?** The CI has never run. *Recommendation: create the GitHub repository
-   private, push, let CI run once before phase 1 starts.*
-10. **Problem-type URIs:** keep `urn:myownpki:problem:*`, or decide the project domain now (PLAN §12)?
+| Module / tool | License | For | Status |
+|---|---|---|---|
+| actionlint, vacuum (CI tools, pinned binaries) | MIT | lint workflows / OpenAPI | **approved** 2026-10-13 |
+| ogen | Apache-2.0 | OpenAPI code generation | **trial approved** (step 3), final decision after the trial |
+| `modernc.org/sqlite` | BSD-3 | pure-Go SQLite (ADR-06) | ask at step 4 |
+| `github.com/pressly/goose/v3` | MIT | migrations | ask at step 4 |
+| sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) | approved in phase 0; owner installs at step 4 |
+| `golang.org/x/crypto` | BSD-3 | `argon2`, `cryptobyte`, later `ocsp` | ask at step 5 |
+| `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 13 |
+| htmx (vendored JS file) | 0BSD | UI interactions | ask at step 16a |
+
+TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test vectors, no dependency.
+
+---
+
+## 4. Decisions of the owner (2026-10-13)
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Server-side key generation | **Yes**, switchable off per tenant; CSR stays the default |
+| 2 | Key storage | **Encrypted in `pki.db`**; `keys/` only for HSM references (PLAN §4 updated). Setup and docs must warn clearly: **keep the unseal passphrase separate from the backups** |
+| 3 | First admin | **`myownpki init`** |
+| 4 | Admin TLS at first start | **Both**: self-signed bootstrap certificate with fingerprint on the console, or an operator certificate; after setup an admin certificate from the own CA |
+| 5 | OpenAPI generator | **Trial of ogen on two endpoints**, result shown to the owner, then decide |
+| 6 | Lifetimes | **Keep presets + maximum validity per CA**; ACME issuances default to **90 days** (phase 2) |
+| 7 | Algorithms | **ECDSA P-256 for leaves, P-384 for CAs** |
+| 8 | Legacy ShellCheck warnings | **Fix in a separate commit**, then CI at severity `warning` |
+| 9 | First push | Owner pushes; repository visibility still to be confirmed |
+| 10 | Problem types | **Keep `urn:myownpki:problem:*`** |

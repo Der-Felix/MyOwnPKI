@@ -100,12 +100,19 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 /var/lib/myownpki/
 ├─ system.db                     tenants, global admins, settings, sessions
 └─ tenants/<tenant>/
-   ├─ pki.db                     CAs, certificates, domains, agents, policies, deploy profiles
+   ├─ pki.db                     CAs, certificates, encrypted private keys, domains, agents, policies, deploy profiles
    ├─ acme.db                    ACME accounts, orders, authorizations, challenges, nonces
    ├─ audit.db                   append-only, hash chain (tamper-evident)
    ├─ metrics.db                 time series for dashboards, retention + downsampling
-   └─ keys/                      encrypted CA keys (or HSM references)
+   └─ keys/                      HSM references only (PKCS#11 URIs) – no key material
 ```
+
+- **Private keys (CA and server-generated leaf keys) are stored encrypted in `pki.db`**
+  (envelope encryption, see §5): one backup and one Litestream replica contain everything, and a
+  key is written in the same transaction as its certificate. *(Decided 2026-10-13.)*
+- **The unseal passphrase must be kept separate from the backups.** A backup of `pki.db`
+  plus the passphrase is a complete CA; a backup alone is useless to a thief. Setup (`myownpki init`)
+  and the operations docs say this prominently.
 
 - SQLite in **WAL mode**, one writer per file → the split prevents cross-blocking.
 - Type-safe queries with `sqlc`, migrations with `goose` (per database type).
@@ -140,11 +147,21 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 | Mode | Description |
 |---|---|
 | Offline | CA key not on the server; signing via CSR export → offline signature → import |
-| Online, encrypted | Server starts **sealed**, unlocked with a passphrase (unseal), key afterwards only in RAM |
-| HSM / KMS | PKCS#11 (YubiHSM, Nitrokey, SoftHSM), later cloud KMS/TPM – separate build with CGO |
+| Online, encrypted | Key encrypted in `pki.db`; server starts **sealed**, unlocked with a passphrase (unseal), key afterwards only in RAM |
+| HSM / KMS | PKCS#11 (YubiHSM, Nitrokey, SoftHSM), later cloud KMS/TPM – separate build with CGO; only a reference in `keys/` |
 
 - The UI clearly warns about "root online" (root certificates are practically impossible to revoke).
 - Minimum key standards configurable (e.g. per BSI TR-02102).
+- **Default algorithms:** ECDSA P-256 for leaf keys, ECDSA P-384 for CA keys *(decided 2026-10-13)*.
+- **Server-side key generation** for leaves is available but **switchable off per tenant**; CSR
+  signing is the default in UI and API *(decided 2026-10-13)*.
+
+### Setup and admin access
+- First administrator via **`myownpki init`** on the console (username, password; second factor
+  enrolled at first login) – also sets the unseal passphrase, with the backup warning from §4.
+- Admin listener TLS: at first start a **self-signed bootstrap certificate**, its SHA-256
+  fingerprint printed on the console for verification; alternatively an operator-provided
+  certificate. After setup the admin certificate is issued by the own CA.
 
 ### Audit & supply chain
 - Audit log as a hash chain, export to SIEM/syslog
@@ -189,6 +206,8 @@ ZIP including deployment guide · CRL · CA bundle · encrypted backup
 - **http-01 via the agent** directly on the target host
 - **CNAME delegation** for `_acme-challenge` (no full DNS API token needed)
 - Staging toggle, rate-limit monitoring, account key management
+- **Validity:** ACME issuances default to **90 days**; presets keep their own defaults for UI/API
+  issuance; every CA has a **maximum validity** that caps both *(decided 2026-10-13)*.
 
 **Approvals in the ACME server (optional, for more security):**
 
@@ -361,8 +380,10 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [ ] Which notification channels first?
 - [x] Task runner: Taskfile (phase 0, see §13)
 - [x] Configuration format: YAML (phase 0, see §13)
-- [ ] OpenAPI code generator for phase 1 (oapi-codegen has partial 3.1 support, ogen full) – see docs/PHASE1.md
-- [ ] Server-side key generation in the UI/API, or CSR signing only? – see docs/PHASE1.md
+- [ ] OpenAPI code generator: trial of `ogen` on two endpoints in phase 1, then decide (docs/PHASE1.md)
+- [x] Server-side key generation: yes, switchable per tenant, CSR is the default (§5)
+- [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
+- [ ] Repository visibility (public/private) before the first push
 
 ---
 
@@ -383,4 +404,6 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | Lint | golangci-lint v2 with security and project rules (`.golangci.yml`): e.g. no `math/rand`, no `time.Now` outside tests, no `//nolint` without reason |
 | Presets | `presets/*.yaml`, embedded; strict validation; parity test against `legacy/lib/presets.sh` |
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
-| API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (no domain chosen yet) |
+| API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
+| CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13) |
+| Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` |
