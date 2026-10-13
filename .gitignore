@@ -48,5 +48,6 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Claude Code local settings
+# Claude Code: personal, machine-specific files (never commit)
 .claude/settings.local.json
+CLAUDE.local.md

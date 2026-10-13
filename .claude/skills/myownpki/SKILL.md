@@ -10,17 +10,16 @@ platform: secure web UI, REST API, ACME server for the internal CA, ACME client 
 Let's Encrypt, and an optional agent that deploys and monitors certificates.
 The full plan, all ADRs and the roadmap are in `docs/PLAN.md` – that file is the source of truth.
 
-## Who you are working with
+## How to work in this repository
 
-The owner is a systems integrator (German "Fachinformatiker für Systemintegration"), not a
-software developer. They make the product and operations decisions; you write the code.
+The maintainer makes the product and operations decisions. Personal preferences (conversation
+language, level of explanation, local environment) are in `CLAUDE.local.md` if present – follow it.
 
-- **Talk to them in German**, but write all code, comments, commit messages, UI text and docs in **English** (ADR-17).
-- Explain decisions in **operations terms** (what changes for an admin, how to verify it, what can break).
-- They want to **learn about certificates and PKI**, not about Go. When a task touches a PKI
-  concept (why a KU is critical, why a root can't be revoked, what ARI does), take the chance to
-  explain it briefly. Don't lecture about Go syntax.
-- Give them **commands to verify** each step (`go test ./...`, `openssl x509 -in … -text`, `curl …`).
+- Write all code, comments, commit messages, UI text and docs in **English** (ADR-17).
+- Explain decisions in **operations terms**: what changes for an admin, how to verify it, what can break.
+- Give **commands to verify** each step (`task check`, `go test ./...`, `openssl x509 -in … -text`, `curl …`).
+- When a change rests on a PKI rule (why a key usage is critical, why a root can't be revoked),
+  name the rule and its source (RFC, CA/B Forum) – reviewers check against it.
 
 ## Before starting any task
 
@@ -29,7 +28,7 @@ software developer. They make the product and operations decisions; you write th
    interface, a TODO with an ADR reference) is fine – a half-built feature is not.
 2. **Check the ADRs** (`docs/PLAN.md` §2). If the task conflicts with one, stop and say so.
    Propose an ADR change instead of silently deviating – the ADRs exist because each was a
-   deliberate trade-off discussed with the owner.
+   deliberate, documented trade-off.
 3. **Read the reference file** for the area you are touching (table below). They are short.
 4. **Ask before**: adding a dependency, changing an ADR, changing a released DB schema or API,
    anything that publishes (git push, releases, container pushes).
@@ -61,13 +60,13 @@ software developer. They make the product and operations decisions; you write th
 
 ## Definition of done (every change)
 
-- `gofmt`/`goimports` clean, `go vet ./...`, `golangci-lint run`, `govulncheck ./...`
+- `task check` green (formatting, `golangci-lint` incl. vet, tests, build); `task vuln` clean
 - Tests for the change: unit tests, plus an integration test when certificates are produced
   (parse the output with `crypto/x509` **and**, when available, cross-check with `openssl verify`)
-- Generated code is regenerated and committed (`templ generate`, `sqlc generate`, OpenAPI codegen)
+- Generated code is regenerated and committed (`task generate`: templ, later sqlc and OpenAPI codegen)
 - API changes are in `api/openapi.yaml` first, then implemented
 - `docs/PLAN.md` updated if a decision or the scope changed
-- A short summary for the owner in German: what changed, how to verify it, what's next
+- A short summary: what changed, how to verify it, what's next
 - A proposed commit message (Conventional Commits, English) – commit only when asked, never push without asking
 
 ## Legacy script

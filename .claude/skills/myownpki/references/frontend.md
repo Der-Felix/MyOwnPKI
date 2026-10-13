@@ -41,7 +41,7 @@ emitted as a small CSS block. Higher levels decide which tokens lower levels may
 
 ## Look and feel
 
-The owner found an early mockup "too AI-looking". Aim for a calm, professional admin tool:
+An early mockup was rejected as "too AI-looking". Aim for a calm, professional admin tool:
 - Prefer **tables over cards** for lists; cards only for KPIs and dashboard widgets.
 - **Icons sparingly** – navigation and a few actions; not in every row or heading. One icon set
   (an SVG sprite embedded in the binary), outline style.
