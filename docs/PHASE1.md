@@ -149,7 +149,7 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 0 | Fix the ShellCheck warnings in `legacy/` (own commit, behaviour unchanged), then CI ShellCheck at severity `warning` | – | `shellcheck --severity=warning …` clean; `legacy/build.sh` + a smoke run of `pki.sh` in a temp dir |
 | 1 | actionlint (workflows) and vacuum (OpenAPI) as pinned CI tools, `task lint:ci` / `task lint:api`, fix their findings | – (approved) | both tools clean locally and in CI |
 | 2 | `internal/clock` (injectable clock) and `internal/config` (YAML, strict, `MYOWNPKI_*` env overrides); `myownpki config check` | – | unit tests; `myownpki config check --config example.yaml` |
-| 3 | **ogen trial** on two endpoints (`GET /health`, `GET /presets`) on a separate branch; comparison with a hand-written version – result shown to the owner, then decided | ogen (trial) | generated server answers like the spec; diff size, readability, router fit |
+| 3 | ~~ogen trial~~ **done 2026-10-13:** hand-written handlers chosen, no generator (`docs/trials/ogen.md`) | – | – |
 | 4 | Store foundation: SQLite (pure Go), WAL pragmas, one writer + read pool, goose migrations per DB type (`system`, `pki`, `audit`), sqlc; tenant directory layout | modernc.org/sqlite, goose; owner installs sqlc 1.31.1 | migration tests in a temp dir; `myownpki db status` |
 | 5 | **Audit log** (`audit.db`, hash chain) + **outbox** worker – before any CA code, so steps 7–11 audit from the start | – | tampering test breaks verification at the right `seq`; outbox delivers exactly once after a crash between commit and delivery |
 | 6 | Keys + unseal: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
@@ -162,7 +162,7 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 13 | Auth core: Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer, API tokens | – | one test per rule in security.md; RFC 6238 test vectors |
 | 14 | Passkeys / WebAuthn | go-webauthn/webauthn | registration + login with a virtual authenticator in tests |
 | 15 | Listeners with TLS: admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA | – | `openssl s_client`, `curl -v`; fingerprint matches the console |
-| 16 | REST API per `api/openapi.yaml` (generator per step 3), RFC 9457 errors, contract tests | ogen (if chosen) | contract tests; vacuum clean; `curl` examples in the summary |
+| 16 | REST API per `api/openapi.yaml`, **hand-written** (`net/http` ServeMux, `encoding/json`, no generator – step 3), RFC 9457 errors; **contract tests** read the spec and check every operation: route + method, role (`x-required-role`), step-up, problem responses, response schema | JSON Schema validator for the tests only (ask at this step) | contract tests; vacuum clean; `curl` examples in the summary |
 | 17 | UI (shell B), in sub-steps: a) login/2FA/unseal, b) certificates list/detail/download, c) issue (CSR default, server key if allowed) / revoke / renew / export, d) CAs (create, import, offline flow), e) import, audit, presets, tenant settings | htmx (vendored, at 17a) | handler tests incl. no-inline-style checks; screenshots light/dark |
 | 18 | Phase 1 wrap-up: end-to-end test "pki.sh replaced" (import legacy PKI → issue → revoke → CRL check with OpenSSL → backup → restore), operations guide (incl. backup/passphrase warning), PLAN.md | – | the end-to-end test; `task check`; CI green |
 
@@ -203,7 +203,7 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 | Module / tool | License | For | Status |
 |---|---|---|---|
 | actionlint, vacuum (CI tools, pinned binaries) | MIT | lint workflows / OpenAPI | **approved** 2026-10-13 |
-| ogen | Apache-2.0 | OpenAPI code generation | **trial approved** (step 3), final decision after the trial |
+| ogen | Apache-2.0 | OpenAPI code generation | **not used** – decided after the trial (2026-10-13) |
 | `modernc.org/sqlite` | BSD-3 | pure-Go SQLite (ADR-06) | ask at step 4 |
 | `github.com/pressly/goose/v3` | MIT | migrations | ask at step 4 |
 | sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) | approved in phase 0; owner installs at step 4 |
@@ -224,7 +224,7 @@ TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test v
 | 2 | Key storage | **Encrypted in `pki.db`**; `keys/` only for HSM references (PLAN §4 updated). Setup and docs must warn clearly: **keep the unseal passphrase separate from the backups** |
 | 3 | First admin | **`myownpki init`** |
 | 4 | Admin TLS at first start | **Both**: self-signed bootstrap certificate with fingerprint on the console, or an operator certificate; after setup an admin certificate from the own CA |
-| 5 | OpenAPI generator | **Trial of ogen on two endpoints**, result shown to the owner, then decide |
+| 5 | OpenAPI generator | **Trial of ogen on two endpoints**, result shown to the owner, then decide → **hand-written, no generator** (2026-10-13) |
 | 6 | Lifetimes | **Keep presets + maximum validity per CA**; ACME issuances default to **90 days** (phase 2) |
 | 7 | Algorithms | **ECDSA P-256 for leaves, P-384 for CAs** |
 | 8 | Legacy ShellCheck warnings | **Fix in a separate commit**, then CI at severity `warning` |

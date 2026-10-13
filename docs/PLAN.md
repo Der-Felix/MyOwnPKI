@@ -319,7 +319,7 @@ MyOwnPKI/
 │  ├─ acme/server/         ACME server
 │  ├─ acme/client/         lego integration
 │  ├─ agent/               agent protocol, gateway, deploy profiles
-│  ├─ api/                 REST handlers (generated from OpenAPI)
+│  ├─ api/                 REST handlers (hand-written, checked against the spec by contract tests)
 │  ├─ auth/                login, WebAuthn, TOTP, OIDC, RBAC
 │  ├─ store/               SQLite, migrations, sqlc queries
 │  ├─ keys/                unseal, encryption, PKCS#11
@@ -388,7 +388,7 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [ ] Which notification channels first?
 - [x] Task runner: Taskfile (phase 0, see §13)
 - [x] Configuration format: YAML (phase 0, see §13)
-- [ ] OpenAPI code generator: trial of `ogen` on two endpoints in phase 1, then decide (docs/PHASE1.md)
+- [x] OpenAPI code generator: none – hand-written handlers + contract tests (trial of ogen, 2026-10-13, §14 "API draft")
 - [x] Server-side key generation: yes, switchable per tenant, CSR is the default (§5)
 - [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
 - [x] Repository visibility: public (2026-10-13)
@@ -459,6 +459,7 @@ keeps the reasons. None of them changes an ADR.
 | `certificateHold` not offered | Temporary revocation is poorly supported; CA/B Baseline Requirements forbid it |
 | Role scopes `tenant` and `ca` only; no tenant in any path | Domain/agent-group scopes come with phases 2/3; the tenant comes from the authenticated context |
 | Not in the draft: batch upload, encrypted backup download, ACME, domains, agents | Not in the phase 1 row or belong to later phases |
+| **No code generator: API handlers are written by hand** with `net/http` (ServeMux patterns) and `encoding/json`; the spec stays the source of truth through **contract tests** (step 16) that check every operation for route, method, role (`x-required-role`), RFC 9457 errors and response schema (owner decision 2026-10-13, trial in `docs/trials/ogen.md`) | ogen would add 27 runtime modules (+18 % binary for 3 endpoints), can't generate `issueCertificate` and the legacy import, gives handlers no access to cookies/headers and leaks internal error text by default; its strength – schema-driven input validation – is covered by the contract tests |
 
 ### Web UI and dev mode
 | Decision | Why |

@@ -63,7 +63,7 @@ language, level of explanation, local environment) are in `CLAUDE.local.md` if p
 - `task check` green (formatting, `golangci-lint` incl. vet, tests, build); `task vuln` clean
 - Tests for the change: unit tests, plus an integration test when certificates are produced
   (parse the output with `crypto/x509` **and**, when available, cross-check with `openssl verify`)
-- Generated code is regenerated and committed (`task generate`: templ, later sqlc and OpenAPI codegen)
+- Generated code is regenerated and committed (`task generate`: templ, later sqlc). API handlers are hand-written – contract tests keep them in line with `api/openapi.yaml`
 - API changes are in `api/openapi.yaml` first, then implemented
 - `docs/PLAN.md` updated if a decision or the scope changed
 - A short summary: what changed, how to verify it, what's next
