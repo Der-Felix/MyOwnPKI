@@ -109,7 +109,7 @@ jobs:
       - run: task vuln
 
   shellcheck:
-    name: shellcheck (legacy Bash suite)
+    name: legacy Bash suite (shellcheck, smoke test)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     steps:
@@ -126,11 +126,16 @@ jobs:
           tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/shellcheck"
           install -m 0755 "$(find "$RUNNER_TEMP/shellcheck" -type f -name shellcheck)" "$RUNNER_TEMP/bin/"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # Severity "error" for now: the legacy suite still has warnings
-      # (see docs/NIGHTLOG.md); raise to "warning" once they are fixed.
+      # The lib/*.sh modules share globals: a variable set in one module is
+      # read in another. Checked one by one, every such variable looks
+      # unused (SC2034), so the modules skip that check; the standalone
+      # script contains all modules in one file and runs it for real.
       - name: ShellCheck sources and compiled standalone script
         run: |
           bash legacy/build.sh
-          shellcheck --severity=error \
-            legacy/*.sh legacy/lib/*.sh legacy/completions/*.bash \
+          shellcheck --severity=warning --external-sources \
+            legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
             legacy/dist/pki-standalone.sh
+          shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
+      - name: Smoke test (modular and standalone script, completion)
+        run: bash legacy/tests/smoke.sh

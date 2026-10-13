@@ -410,7 +410,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
 | CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13) |
-| Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` |
+| Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
 
 ---
 
