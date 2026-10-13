@@ -179,6 +179,20 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 
 ---
 
+### Notes for later steps
+
+- **Public base URL is independent of the listener port (steps 7/8, owner 2026-10-13).** The CRL
+  distribution point and AIA URLs in every certificate are built from the CA's `public_base_url`,
+  never from `public.listen`. They are baked into each certificate for its whole lifetime (and, for
+  a CA, into every certificate it issues), so a port that changes later breaks revocation checking.
+  - Docs: run the public listener on its default `:8080` behind a reverse proxy or port forwarding
+    and publish it as `http://<name>/` on **port 80**.
+  - CA creation (API/UI) and – once a default base URL exists in the config – `myownpki config check`
+    **warn when the base URL contains a non-standard port** (anything but 80 for `http`, 443 for
+    `https`), and name the consequence: the URL stays in every certificate until it expires.
+  - Proposal to decide at step 8: also warn on `https://` base URLs – RFC 5280 recommends HTTP for
+    CRL and AIA, and a client that needs a CRL to check the TLS certificate of the CRL server is stuck.
+
 ### Planned for the end of phase 1
 
 - **Live demo on GitHub Pages**: a static export of the UI prototype on sample data (no server,
