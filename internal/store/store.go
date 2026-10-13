@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/store/auditdb"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/migrate"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
@@ -30,20 +31,28 @@ func Migrations(kind Kind) ([]migrate.Migration, error) {
 	return migrate.Load(sub)
 }
 
-// target is one database file and its kind.
+// target is one database file, its kind and (for audit logs) its scope.
 type target struct {
-	Kind Kind
-	Path string
+	Kind  Kind
+	Path  string
+	Scope string // audit logs only
 }
 
 func (l Layout) targets(tenant string) ([]target, error) {
-	ts := []target{{KindSystem, l.SystemDB()}}
+	ts := []target{
+		{Kind: KindSystem, Path: l.SystemDB()},
+		{Kind: KindAudit, Path: l.InstanceAuditDB(), Scope: InstanceScope},
+	}
 	for _, k := range TenantKinds {
 		p, err := l.TenantDB(tenant, k)
 		if err != nil {
 			return nil, err
 		}
-		ts = append(ts, target{k, p})
+		t := target{Kind: k, Path: p}
+		if k == KindAudit {
+			t.Scope = TenantScope(tenant)
+		}
+		ts = append(ts, t)
 	}
 	return ts, nil
 }
@@ -121,11 +130,52 @@ func migrateFile(ctx context.Context, t target, now func() time.Time) ([]int, er
 	if err = checkKind(ctx, db.Read, t); err != nil {
 		return nil, err
 	}
+	if err = checkScope(ctx, db.Read, t); err != nil {
+		return nil, err
+	}
 	versions, err := migrate.Apply(ctx, db.Write, set, now)
 	if err != nil {
 		return versions, fmt.Errorf("%s: %w", t.Path, err)
 	}
-	return versions, checkKind(ctx, db.Read, t)
+	if err = checkKind(ctx, db.Read, t); err != nil {
+		return versions, err
+	}
+	if t.Scope != "" {
+		if err = auditdb.New(db.Write).SetScope(ctx, t.Scope); err != nil {
+			return versions, fmt.Errorf("%s: set audit scope: %w", t.Path, err)
+		}
+	}
+	return versions, checkScope(ctx, db.Read, t)
+}
+
+// ErrWrongScope means an audit log belongs to another scope than its place
+// in the layout, e.g. a tenant's audit.db copied to <data>/audit.db.
+var ErrWrongScope = errors.New("audit log has the wrong scope")
+
+// checkScope compares db_info.audit_scope with the expected scope. A log
+// whose scope isn't recorded yet (new file) passes.
+func checkScope(ctx context.Context, q *sql.DB, t target) error {
+	if t.Scope == "" {
+		return nil
+	}
+	var exists int
+	if err := q.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'db_info'`).Scan(&exists); err != nil {
+		return fmt.Errorf("%s: %w", t.Path, err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	scope, err := auditdb.New(q).GetScope(ctx)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("%s: read audit scope: %w", t.Path, err)
+	case scope != t.Scope:
+		return fmt.Errorf("%w: %s belongs to %q, expected %q", ErrWrongScope, t.Path, scope, t.Scope)
+	}
+	return nil
 }
 
 // checkKind compares db_info.db_type with the expected kind. A file without
@@ -197,10 +247,24 @@ func fileStatus(ctx context.Context, t target) FileStatus {
 		st.Err = err
 		return st
 	}
-	if err := checkKind(ctx, db.Read, t); err != nil {
+	if err := errors.Join(checkKind(ctx, db.Read, t), checkScope(ctx, db.Read, t)); err != nil {
 		st.Err = err
 		return st
 	}
 	st.Report, st.Err = migrate.Check(ctx, db.Read, set)
 	return st
+}
+
+// OpenAuditLog opens an existing audit log read-only and checks that it is
+// an audit database of the expected scope.
+func OpenAuditLog(ctx context.Context, log AuditLog) (*DB, error) {
+	db, err := OpenReadOnly(ctx, log.Path)
+	if err != nil {
+		return nil, err
+	}
+	t := target{Kind: KindAudit, Path: log.Path, Scope: log.Scope}
+	if err := errors.Join(checkKind(ctx, db.Read, t), checkScope(ctx, db.Read, t)); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	return db, nil
 }

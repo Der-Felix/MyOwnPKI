@@ -17,3 +17,11 @@ sql:
         package: systemdb
         out: internal/store/systemdb
         emit_empty_slices: true
+  - engine: sqlite
+    schema: internal/store/schema/audit
+    queries: internal/store/queries/audit
+    gen:
+      go:
+        package: auditdb
+        out: internal/store/auditdb
+        emit_empty_slices: true

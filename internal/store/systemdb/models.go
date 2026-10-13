@@ -4,9 +4,21 @@
 
 package systemdb
 
+import (
+	"database/sql"
+)
+
 type DbInfo struct {
 	Key   string
 	Value string
+}
+
+type Outbox struct {
+	ID          int64
+	CreatedAt   string
+	Topic       string
+	PayloadJson string
+	DeliveredAt sql.NullString
 }
 
 type Tenant struct {

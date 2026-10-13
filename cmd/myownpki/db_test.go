@@ -41,7 +41,7 @@ func TestDBStatusAndMigrate(t *testing.T) {
 	if code := runDBMigrate(t.Context(), []string{"--config", cfg}, nil, &stdout, &stderr); code != exitOK {
 		t.Fatalf("migrate: exit %d\n%s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "applied 1 migration(s)") {
+	if !strings.Contains(stdout.String(), "applied 2 migration(s), now version 2") {
 		t.Errorf("migrate output:\n%s", stdout.String())
 	}
 
@@ -49,13 +49,13 @@ func TestDBStatusAndMigrate(t *testing.T) {
 	if code := runDBStatus(t.Context(), []string{"--config", cfg}, nil, &stdout, &stderr); code != exitOK {
 		t.Fatalf("status after migrate: exit %d\n%s", code, stdout.String())
 	}
-	if strings.Count(stdout.String(), "up to date") != 3 || !strings.Contains(stdout.String(), "journal wal") {
+	if strings.Count(stdout.String(), "up to date") != 4 || !strings.Contains(stdout.String(), "journal wal") {
 		t.Errorf("status output:\n%s", stdout.String())
 	}
 
 	stdout.Reset()
 	if code := runDBMigrate(t.Context(), []string{"--config", cfg}, nil, &stdout, &stderr); code != exitOK ||
-		strings.Count(stdout.String(), "already up to date") != 3 {
+		strings.Count(stdout.String(), "already up to date") != 4 {
 		t.Errorf("second migrate: exit %d\n%s", code, stdout.String())
 	}
 }

@@ -70,8 +70,8 @@ func TestMigrateAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(applied) != 3 {
-		t.Fatalf("applied to %d files, want 3", len(applied))
+	if len(applied) != 4 {
+		t.Fatalf("applied to %d files, want 4 (system, instance audit, tenant pki, tenant audit)", len(applied))
 	}
 	for _, a := range applied {
 		if len(a.Versions) == 0 {
@@ -322,5 +322,31 @@ func TestSQLFilesAreASCII(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestSwappedAuditScopeIsRejected(t *testing.T) {
+	t.Parallel()
+	l := Layout{DataDir: t.TempDir()}
+	if _, err := Migrate(t.Context(), l, DefaultTenant, now); err != nil {
+		t.Fatal(err)
+	}
+	tenantAudit, _ := l.TenantDB(DefaultTenant, KindAudit)
+	data, err := os.ReadFile(tenantAudit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(l.InstanceAuditDB(), data, 0o600); err != nil { //nolint:gosec // temp dir of the test
+		t.Fatal(err)
+	}
+	if _, err = Migrate(t.Context(), l, DefaultTenant, now); !errors.Is(err, ErrWrongScope) {
+		t.Errorf("Migrate: err = %v, want ErrWrongScope", err)
+	}
+	sts, err := Status(t.Context(), l, DefaultTenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(sts[1].Err, ErrWrongScope) {
+		t.Errorf("Status of %s: err = %v, want ErrWrongScope", sts[1].Path, sts[1].Err)
 	}
 }

@@ -44,6 +44,34 @@ func (l Layout) SystemDB() string {
 	return filepath.Join(l.DataDir, "system.db")
 }
 
+// InstanceAuditDB returns <data>/audit.db: the audit log of instance events
+// (logins, users, unseal). Tenant events go to the tenant's own audit.db.
+func (l Layout) InstanceAuditDB() string {
+	return filepath.Join(l.DataDir, "audit.db")
+}
+
+// InstanceScope is the audit scope of <data>/audit.db.
+const InstanceScope = "instance"
+
+// TenantScope is the audit scope of tenants/<tenant>/audit.db.
+func TenantScope(tenant string) string { return "tenant:" + tenant }
+
+// AuditLog is one audit database and its scope; the scope is part of the
+// chain's starting value, so a log can't be moved to another scope.
+type AuditLog struct {
+	Scope string
+	Path  string
+}
+
+// AuditLogs returns the instance log and the log of tenant.
+func (l Layout) AuditLogs(tenant string) ([]AuditLog, error) {
+	p, err := l.TenantDB(tenant, KindAudit)
+	if err != nil {
+		return nil, err
+	}
+	return []AuditLog{{InstanceScope, l.InstanceAuditDB()}, {TenantScope(tenant), p}}, nil
+}
+
 // TenantDir returns <data>/tenants/<tenant>.
 func (l Layout) TenantDir(tenant string) (string, error) {
 	if !tenantID.MatchString(tenant) {
