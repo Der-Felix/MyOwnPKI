@@ -2,8 +2,10 @@ package keys
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -672,4 +674,86 @@ func mustBytes(t *testing.T, k *ecdsa.PrivateKey) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestCheckpointKey(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	if _, _, err := e.k.SignCheckpoint([]byte("m")); !errors.Is(err, ErrSealed) || !errors.Is(err, audit.ErrNoSigner) {
+		t.Errorf("sealed: %v, want ErrSealed and audit.ErrNoSigner", err)
+	}
+	e.unseal(t)
+	first, err := e.k.CheckpointKeyFingerprint()
+	if err != nil || len(first) != 32 {
+		t.Fatalf("fingerprint %q, %v", first, err)
+	}
+	sig, pub, err := e.k.SignCheckpoint([]byte("checkpoint"))
+	if err != nil || !ed25519.Verify(pub, []byte("checkpoint"), sig) {
+		t.Fatalf("signature: %v", err)
+	}
+	if err := e.k.Seal(t.Context(), admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.k.UnsealWithRecovery(t.Context(), e.recovery, admin); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := e.k.CheckpointKeyFingerprint(); again != first {
+		t.Error("checkpoint key changed across seal/unseal – it must follow from the root key alone")
+	}
+
+	other := newEnv(t)
+	other.init(t)
+	other.unseal(t)
+	if fp, _ := other.k.CheckpointKeyFingerprint(); fp == first {
+		t.Error("two root keys give the same checkpoint key")
+	}
+}
+
+func TestUnsealAndSealMakeCheckpoints(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	tenantLog, _ := e.l.TenantDB(store.DefaultTenant, store.KindAudit)
+	tdb, err := store.Open(t.Context(), tenantLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tdb.Close() }()
+	cp := &audit.Checkpointer{
+		Logs:   []audit.CheckpointLog{{DB: e.ia, Scope: store.InstanceScope}, {DB: tdb.Write, Scope: store.TenantScope(store.DefaultTenant)}},
+		Signer: e.k, Clock: e.clk, Log: slog.New(slog.DiscardHandler),
+	}
+	var hooks []string
+	e.k.OnUnseal = func(ctx context.Context) {
+		hooks = append(hooks, "unseal")
+		if mErr := cp.MakeAll(ctx, "unseal"); mErr != nil {
+			t.Error(mErr)
+		}
+	}
+	e.k.BeforeSeal = func(ctx context.Context) {
+		hooks = append(hooks, "seal")
+		if mErr := cp.MakeAll(ctx, "seal"); mErr != nil {
+			t.Error(mErr)
+		}
+	}
+	e.init(t)
+	e.deliver()
+	e.unseal(t) // checkpoint covers keys_init + unseal
+	e.clk.Advance(time.Hour)
+	fp, _ := e.k.CheckpointKeyFingerprint()
+	if err = e.k.Seal(t.Context(), admin); err != nil { // checkpoint before the key leaves
+		t.Fatal(err)
+	}
+	if strings.Join(hooks, ",") != "unseal,seal" {
+		t.Errorf("hooks = %v", hooks)
+	}
+	r, err := audit.VerifyWith(t.Context(), e.ia, store.InstanceScope, audit.VerifyOptions{CheckpointKey: fp})
+	if err != nil || r.Break != nil {
+		t.Fatalf("verify: %+v, %v", r.Break, err)
+	}
+	// keys_init, unseal, checkpoint – then the seal hook found nothing new;
+	// the seal entry itself comes after the key is gone.
+	if r.Checkpoints != 1 || r.LastCheckpoint.Seq != 3 || r.Entries != 4 {
+		t.Errorf("report = %+v", r)
+	}
 }

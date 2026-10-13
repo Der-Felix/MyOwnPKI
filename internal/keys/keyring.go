@@ -2,6 +2,9 @@ package keys
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -61,6 +64,9 @@ type Keyring struct {
 	// Wake, if set, is called after an audit event was written to the
 	// outbox, so the deliverer picks it up at once.
 	Wake func()
+	// OnUnseal and BeforeSeal, if set, run right after an unseal and right
+	// before a seal – the server makes audit checkpoints there (step 6a).
+	OnUnseal, BeforeSeal func(context.Context)
 
 	mu          sync.RWMutex // read: signing in progress; write: unseal, seal
 	root        []byte       // nil = sealed
@@ -185,7 +191,13 @@ func (k *Keyring) unseal(ctx context.Context, action string, who Who, open func(
 	k.mu.Lock()
 	k.root, k.rootVersion = root, version
 	k.mu.Unlock()
-	return k.direct(ctx, who, action, audit.ResultSuccess, nil)
+	if err := k.direct(ctx, who, action, audit.ResultSuccess, nil); err != nil {
+		return err
+	}
+	if k.OnUnseal != nil {
+		k.OnUnseal(ctx)
+	}
+	return nil
 }
 
 // checkSecret runs open under the rate limit and audits failures. The caller
@@ -214,6 +226,12 @@ func (k *Keyring) checkSecret(ctx context.Context, action string, who Who, open 
 // Seal removes the root key from memory. It waits for running signing
 // operations to finish. Sealing a sealed keyring does nothing.
 func (k *Keyring) Seal(ctx context.Context, who Who) error {
+	if k.Status().Sealed {
+		return nil
+	}
+	if k.BeforeSeal != nil {
+		k.BeforeSeal(ctx) // last checkpoint while the key is still here
+	}
 	k.mu.Lock()
 	if k.root == nil {
 		k.mu.Unlock()
@@ -461,3 +479,41 @@ func (l *limiter) failure(now time.Time) {
 }
 
 func (l *limiter) success() { *l = limiter{} }
+
+// SignCheckpoint signs an audit checkpoint (PHASE1 step 6a) with an Ed25519
+// key derived from the root key. The key exists only for this call; sealed,
+// it fails with an error that wraps audit.ErrNoSigner.
+func (k *Keyring) SignCheckpoint(msg []byte) ([]byte, ed25519.PublicKey, error) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.root == nil {
+		return nil, nil, fmt.Errorf("%w (%w)", ErrSealed, audit.ErrNoSigner)
+	}
+	priv, err := k.checkpointKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer clear(priv)
+	pub := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	copy(pub, priv[ed25519.SeedSize:])
+	return ed25519.Sign(priv, msg), pub, nil
+}
+
+// CheckpointKeyFingerprint is the fingerprint of the checkpoint key to note
+// down (shown by init, logged at unseal; `audit verify --checkpoint-key`).
+func (k *Keyring) CheckpointKeyFingerprint() (string, error) {
+	_, pub, err := k.SignCheckpoint(nil)
+	if err != nil {
+		return "", err
+	}
+	return audit.KeyFingerprint(pub), nil
+}
+
+func (k *Keyring) checkpointKey() (ed25519.PrivateKey, error) {
+	seed, err := hkdf.Key(sha256.New, k.root, nil, "myownpki/v1/audit-checkpoint-ed25519", ed25519.SeedSize)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(seed)
+	return ed25519.NewKeyFromSeed(seed), nil
+}
