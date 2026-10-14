@@ -70,42 +70,50 @@ func loadIssuer(ctx context.Context, q *pkidb.Queries, name string) (*issuer, er
 		return nil, deny("CA %q has no signed certificate yet", name)
 	}
 
-	is := &issuer{ca: ca}
-	caID, genNo := ca.ID, ca.CurrentGeneration.Int64
+	gen, err := q.GetCAGeneration(ctx, pkidb.GetCAGenerationParams{CaID: ca.ID, Generation: ca.CurrentGeneration.Int64})
+	if err != nil {
+		return nil, fmt.Errorf("load CA %q generation %d: %w", name, ca.CurrentGeneration.Int64, err)
+	}
+	certs, constraints, err := loadChain(ctx, q, ca, gen)
+	if err != nil {
+		return nil, err
+	}
+	return &issuer{ca: ca, gen: gen, certs: certs, constraints: constraints}, nil
+}
+
+// loadChain returns certificates and constraints from the signed generation
+// gen of ca up to the root: gen first, root last.
+func loadChain(ctx context.Context, q *pkidb.Queries, ca pkidb.Ca, gen pkidb.CaGeneration) ([]*x509.Certificate, []caConstraints, error) {
+	var certs []*x509.Certificate
+	var constraints []caConstraints
+	row := ca
 	for depth := 0; ; depth++ {
 		if depth == maxChainDepth {
-			return nil, fmt.Errorf("CA %q: chain is longer than %d – issuer references are broken", name, maxChainDepth)
-		}
-		row := ca
-		if depth > 0 {
-			if row, err = q.GetCA(ctx, caID); err != nil {
-				return nil, fmt.Errorf("load parent CA %s: %w", caID, err)
-			}
-		}
-		gen, err := q.GetCAGeneration(ctx, pkidb.GetCAGenerationParams{CaID: caID, Generation: genNo})
-		if err != nil {
-			return nil, fmt.Errorf("load CA %q generation %d: %w", row.Name, genNo, err)
+			return nil, nil, fmt.Errorf("CA %q: chain is longer than %d – issuer references are broken", ca.Name, maxChainDepth)
 		}
 		if gen.CertDer == nil {
-			return nil, deny("CA %q generation %d has no certificate yet", row.Name, genNo)
+			return nil, nil, deny("CA %q generation %d has no certificate yet", row.Name, gen.Generation)
 		}
 		cert, err := x509.ParseCertificate(gen.CertDer)
 		if err != nil {
-			return nil, fmt.Errorf("CA %q generation %d: stored certificate: %w", row.Name, genNo, err)
+			return nil, nil, fmt.Errorf("CA %q generation %d: stored certificate: %w", row.Name, gen.Generation, err)
 		}
 		cc, err := loadConstraints(ctx, q, row)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if depth == 0 {
-			is.gen = gen
-		}
-		is.certs = append(is.certs, cert)
-		is.constraints = append(is.constraints, cc)
+		certs = append(certs, cert)
+		constraints = append(constraints, cc)
 		if !gen.IssuerCaID.Valid {
-			return is, nil
+			return certs, constraints, nil
 		}
-		caID, genNo = gen.IssuerCaID.String, gen.IssuerGeneration.Int64
+		parentGen := gen.IssuerGeneration.Int64
+		if row, err = q.GetCA(ctx, gen.IssuerCaID.String); err != nil {
+			return nil, nil, fmt.Errorf("load parent CA %s: %w", gen.IssuerCaID.String, err)
+		}
+		if gen, err = q.GetCAGeneration(ctx, pkidb.GetCAGenerationParams{CaID: row.ID, Generation: parentGen}); err != nil {
+			return nil, nil, fmt.Errorf("load CA %q generation %d: %w", row.Name, parentGen, err)
+		}
 	}
 }
 

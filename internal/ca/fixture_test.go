@@ -151,10 +151,6 @@ type fixtureCA struct {
 	key  crypto.Signer
 }
 
-func (f *fixtureCA) pem() []byte {
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.cert.Raw})
-}
-
 type caOpts struct {
 	parent              *fixtureCA
 	key                 crypto.Signer // nil = new ECDSA P-384
@@ -378,6 +374,16 @@ type auditRow struct {
 // clock's time. Skipped when OpenSSL is not installed (it is in CI).
 func opensslVerify(t *testing.T, chain []*fixtureCA, leafDER []byte, purpose string) {
 	t.Helper()
+	ders := make([][]byte, len(chain))
+	for i, c := range chain {
+		ders[i] = c.cert.Raw
+	}
+	opensslVerifyAt(t, t0, ders, leafDER, purpose)
+}
+
+// opensslBin returns the openssl binary; skipped locally, fatal in CI.
+func opensslBin(t *testing.T) string {
+	t.Helper()
 	bin, err := exec.LookPath("openssl")
 	if err != nil {
 		// In CI the cross-check must not disappear silently.
@@ -386,6 +392,14 @@ func opensslVerify(t *testing.T, chain []*fixtureCA, leafDER []byte, purpose str
 		}
 		t.Skip("openssl not on PATH – skipping cross-check")
 	}
+	return bin
+}
+
+// opensslVerifyAt verifies leafDER against chain (issuer first, root last)
+// at the given time.
+func opensslVerifyAt(t *testing.T, at time.Time, chain [][]byte, leafDER []byte, purpose string) {
+	t.Helper()
+	bin := opensslBin(t)
 	dir := t.TempDir()
 	write := func(name string, data []byte) string {
 		p := filepath.Join(dir, name)
@@ -394,18 +408,19 @@ func opensslVerify(t *testing.T, chain []*fixtureCA, leafDER []byte, purpose str
 		}
 		return p
 	}
-	args := []string{"verify", "-x509_strict", "-attime", strconv.FormatInt(t0.Unix(), 10), "-CAfile", write("root.pem", chain[len(chain)-1].pem())}
+	pemOf := func(der []byte) []byte { return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}) }
+	args := []string{"verify", "-x509_strict", "-attime", strconv.FormatInt(at.Unix(), 10), "-CAfile", write("root.pem", pemOf(chain[len(chain)-1]))}
 	if len(chain) > 1 {
 		var b bytes.Buffer
 		for _, c := range chain[:len(chain)-1] {
-			b.Write(c.pem())
+			b.Write(pemOf(c))
 		}
 		args = append(args, "-untrusted", write("inter.pem", b.Bytes()))
 	}
 	if purpose != "any" {
 		args = append(args, "-purpose", purpose)
 	}
-	args = append(args, write("leaf.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})))
+	args = append(args, write("leaf.pem", pemOf(leafDER)))
 	out, err := exec.CommandContext(t.Context(), bin, args...).CombinedOutput()
 	if err != nil || !bytes.Contains(out, []byte(": OK")) {
 		t.Errorf("openssl %s: %v\n%s", strings.Join(args, " "), err, out)

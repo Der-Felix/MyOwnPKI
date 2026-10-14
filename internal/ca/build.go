@@ -1,11 +1,13 @@
 package ca
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/asn1"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
 var (
@@ -192,3 +195,18 @@ func sanStrings(n Names, budget int) []string {
 
 // joinNonEmpty is for the comma lists of custom usages (legacy cert.meta form).
 func joinNonEmpty(v []string) string { return strings.Join(v, ",") }
+
+// checkSerialFree makes sure no certificate the issuer signed – leaf or CA –
+// has this serial yet. With 159 random bits a clash is practically
+// impossible for our own serials, but CA certificates signed offline bring
+// serials from another tool.
+func checkSerialFree(ctx context.Context, q *pkidb.Queries, issuerID, serialHex string) error {
+	n, err := q.SerialTaken(ctx, pkidb.SerialTakenParams{IssuerID: sql.NullString{String: issuerID, Valid: true}, SerialHex: serialHex})
+	if err != nil {
+		return fmt.Errorf("check serial: %w", err)
+	}
+	if n > 0 {
+		return fmt.Errorf("serial %s is already used by a certificate of this issuer", serialHex)
+	}
+	return nil
+}

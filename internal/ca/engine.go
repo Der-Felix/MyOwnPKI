@@ -514,6 +514,9 @@ func (e *Engine) store(ctx context.Context, req Request, now time.Time, is *issu
 			return nil, fmt.Errorf("store key: %w", err)
 		}
 	}
+	if err := checkSerialFree(ctx, q, is.ca.ID, out.SerialHex); err != nil {
+		return nil, err
+	}
 	if err := q.InsertCertificate(ctx, row); err != nil {
 		return nil, fmt.Errorf("store certificate: %w", err)
 	}
@@ -552,6 +555,12 @@ func (e *Engine) logRefusal(ctx context.Context, req Request, now time.Time, cau
 	if req.CSR == nil {
 		details["key_source"] = "server"
 	}
+	return e.refuse(ctx, now, ActionIssue, req.Who, audit.Target{Type: "ca", ID: short(req.CA)}, details, cause)
+}
+
+// refuse writes a refused or failed action to the tenant audit log: denied
+// (with every reason) for policy refusals, failure for everything else.
+func (e *Engine) refuse(ctx context.Context, now time.Time, action string, who keys.Who, target audit.Target, details map[string]any, cause error) error {
 	result := audit.ResultFailure
 	var d *DeniedError
 	if errors.As(cause, &d) {
@@ -564,8 +573,8 @@ func (e *Engine) logRefusal(ctx context.Context, req Request, now time.Time, cau
 		details["error"] = capText(cause.Error(), 512)
 	}
 	_, _, err := audit.Append(ctx, e.Audit, e.Scope, audit.Entry{
-		Time: now, Actor: req.Who.Actor, Action: ActionIssue, Target: audit.Target{Type: "ca", ID: short(req.CA)},
-		Result: result, SourceIP: req.Who.SourceIP, Details: details,
+		Time: now, Actor: who.Actor, Action: action, Target: target,
+		Result: result, SourceIP: who.SourceIP, Details: details,
 	}, "")
 	return err
 }
