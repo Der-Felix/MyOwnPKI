@@ -27,3 +27,39 @@ SELECT * FROM ca_generations WHERE ca_id = ? AND generation = ?;
 
 -- name: ListNameConstraints :many
 SELECT kind, value, permitted FROM ca_name_constraints WHERE ca_id = ? ORDER BY kind, permitted DESC, value;
+
+-- name: ListCAs :many
+SELECT * FROM cas ORDER BY name;
+
+-- name: ListCAGenerations :many
+SELECT * FROM ca_generations WHERE ca_id = ? ORDER BY generation;
+
+-- name: GetPendingGeneration :one
+SELECT * FROM ca_generations WHERE ca_id = ? AND cert_der IS NULL ORDER BY generation DESC LIMIT 1;
+
+-- name: MaxGeneration :one
+SELECT CAST(coalesce(max(generation), 0) AS INTEGER) AS generation FROM ca_generations WHERE ca_id = ?;
+
+-- Two CAs with the same subject DN confuse chain building in clients;
+-- generations of one CA share their DN on purpose.
+-- name: CountSubjectElsewhere :one
+SELECT count(*) FROM ca_generations WHERE subject_dn = ? AND ca_id <> ?;
+
+-- Issuer name + serial must identify one certificate (RFC 5280): a serial is
+-- taken by a leaf of the CA or by a CA certificate the CA signed.
+-- name: SerialTaken :one
+SELECT (SELECT count(*) FROM certificates WHERE certificates.ca_id = sqlc.arg(issuer_id) AND certificates.serial_hex = sqlc.arg(serial_hex))
+     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = sqlc.arg(issuer_id) AND ca_generations.serial_hex = sqlc.arg(serial_hex)) AS taken;
+
+-- Sets the certificate of a pending generation (offline signing); a signed
+-- generation can't be changed (trigger), the WHERE makes that explicit.
+-- name: InstallCAGenerationCert :execrows
+UPDATE ca_generations
+SET serial_hex = ?, not_before = ?, not_after = ?, cert_der = ?, fingerprint_sha256 = ?, ski_hex = ?
+WHERE ca_id = ? AND generation = ? AND cert_der IS NULL;
+
+-- name: SetCAStatus :exec
+UPDATE cas SET status = ?, updated_at = ? WHERE id = ?;
+
+-- name: UpdateCALimits :exec
+UPDATE cas SET crl_days = ?, max_validity_days = ?, updated_at = ? WHERE id = ?;

@@ -10,6 +10,24 @@ import (
 	"database/sql"
 )
 
+const countSubjectElsewhere = `-- name: CountSubjectElsewhere :one
+SELECT count(*) FROM ca_generations WHERE subject_dn = ? AND ca_id <> ?
+`
+
+type CountSubjectElsewhereParams struct {
+	SubjectDn string
+	CaID      string
+}
+
+// Two CAs with the same subject DN confuse chain building in clients;
+// generations of one CA share their DN on purpose.
+func (q *Queries) CountSubjectElsewhere(ctx context.Context, arg CountSubjectElsewhereParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSubjectElsewhere, arg.SubjectDn, arg.CaID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getCA = `-- name: GetCA :one
 SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at FROM cas WHERE id = ?
 `
@@ -77,6 +95,33 @@ type GetCAGenerationParams struct {
 
 func (q *Queries) GetCAGeneration(ctx context.Context, arg GetCAGenerationParams) (CaGeneration, error) {
 	row := q.db.QueryRowContext(ctx, getCAGeneration, arg.CaID, arg.Generation)
+	var i CaGeneration
+	err := row.Scan(
+		&i.CaID,
+		&i.Generation,
+		&i.KeyID,
+		&i.KeyAlgorithm,
+		&i.SubjectDn,
+		&i.SerialHex,
+		&i.NotBefore,
+		&i.NotAfter,
+		&i.CertDer,
+		&i.CsrDer,
+		&i.FingerprintSha256,
+		&i.SkiHex,
+		&i.IssuerCaID,
+		&i.IssuerGeneration,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPendingGeneration = `-- name: GetPendingGeneration :one
+SELECT ca_id, generation, key_id, key_algorithm, subject_dn, serial_hex, not_before, not_after, cert_der, csr_der, fingerprint_sha256, ski_hex, issuer_ca_id, issuer_generation, created_at FROM ca_generations WHERE ca_id = ? AND cert_der IS NULL ORDER BY generation DESC LIMIT 1
+`
+
+func (q *Queries) GetPendingGeneration(ctx context.Context, caID string) (CaGeneration, error) {
+	row := q.db.QueryRowContext(ctx, getPendingGeneration, caID)
 	var i CaGeneration
 	err := row.Scan(
 		&i.CaID,
@@ -209,6 +254,129 @@ func (q *Queries) InsertNameConstraint(ctx context.Context, arg InsertNameConstr
 	return err
 }
 
+const installCAGenerationCert = `-- name: InstallCAGenerationCert :execrows
+UPDATE ca_generations
+SET serial_hex = ?, not_before = ?, not_after = ?, cert_der = ?, fingerprint_sha256 = ?, ski_hex = ?
+WHERE ca_id = ? AND generation = ? AND cert_der IS NULL
+`
+
+type InstallCAGenerationCertParams struct {
+	SerialHex         sql.NullString
+	NotBefore         sql.NullString
+	NotAfter          sql.NullString
+	CertDer           []byte
+	FingerprintSha256 sql.NullString
+	SkiHex            sql.NullString
+	CaID              string
+	Generation        int64
+}
+
+// Sets the certificate of a pending generation (offline signing); a signed
+// generation can't be changed (trigger), the WHERE makes that explicit.
+func (q *Queries) InstallCAGenerationCert(ctx context.Context, arg InstallCAGenerationCertParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, installCAGenerationCert,
+		arg.SerialHex,
+		arg.NotBefore,
+		arg.NotAfter,
+		arg.CertDer,
+		arg.FingerprintSha256,
+		arg.SkiHex,
+		arg.CaID,
+		arg.Generation,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const listCAGenerations = `-- name: ListCAGenerations :many
+SELECT ca_id, generation, key_id, key_algorithm, subject_dn, serial_hex, not_before, not_after, cert_der, csr_der, fingerprint_sha256, ski_hex, issuer_ca_id, issuer_generation, created_at FROM ca_generations WHERE ca_id = ? ORDER BY generation
+`
+
+func (q *Queries) ListCAGenerations(ctx context.Context, caID string) ([]CaGeneration, error) {
+	rows, err := q.db.QueryContext(ctx, listCAGenerations, caID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CaGeneration{}
+	for rows.Next() {
+		var i CaGeneration
+		if err := rows.Scan(
+			&i.CaID,
+			&i.Generation,
+			&i.KeyID,
+			&i.KeyAlgorithm,
+			&i.SubjectDn,
+			&i.SerialHex,
+			&i.NotBefore,
+			&i.NotAfter,
+			&i.CertDer,
+			&i.CsrDer,
+			&i.FingerprintSha256,
+			&i.SkiHex,
+			&i.IssuerCaID,
+			&i.IssuerGeneration,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCAs = `-- name: ListCAs :many
+SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at FROM cas ORDER BY name
+`
+
+func (q *Queries) ListCAs(ctx context.Context) ([]Ca, error) {
+	rows, err := q.db.QueryContext(ctx, listCAs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Ca{}
+	for rows.Next() {
+		var i Ca
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.ParentID,
+			&i.Status,
+			&i.KeyMode,
+			&i.CurrentGeneration,
+			&i.PathLen,
+			&i.NcCritical,
+			&i.EkuLimit,
+			&i.PublicBaseUrl,
+			&i.CrlDays,
+			&i.CrlNumber,
+			&i.MaxValidityDays,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNameConstraints = `-- name: ListNameConstraints :many
 SELECT kind, value, permitted FROM ca_name_constraints WHERE ca_id = ? ORDER BY kind, permitted DESC, value
 `
@@ -242,6 +410,51 @@ func (q *Queries) ListNameConstraints(ctx context.Context, caID string) ([]ListN
 	return items, nil
 }
 
+const maxGeneration = `-- name: MaxGeneration :one
+SELECT CAST(coalesce(max(generation), 0) AS INTEGER) AS generation FROM ca_generations WHERE ca_id = ?
+`
+
+func (q *Queries) MaxGeneration(ctx context.Context, caID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, maxGeneration, caID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
+const serialTaken = `-- name: SerialTaken :one
+SELECT (SELECT count(*) FROM certificates WHERE certificates.ca_id = ?1 AND certificates.serial_hex = ?2)
+     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = ?1 AND ca_generations.serial_hex = ?2) AS taken
+`
+
+type SerialTakenParams struct {
+	IssuerID  sql.NullString
+	SerialHex string
+}
+
+// Issuer name + serial must identify one certificate (RFC 5280): a serial is
+// taken by a leaf of the CA or by a CA certificate the CA signed.
+func (q *Queries) SerialTaken(ctx context.Context, arg SerialTakenParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, serialTaken, arg.IssuerID, arg.SerialHex)
+	var taken int64
+	err := row.Scan(&taken)
+	return taken, err
+}
+
+const setCAStatus = `-- name: SetCAStatus :exec
+UPDATE cas SET status = ?, updated_at = ? WHERE id = ?
+`
+
+type SetCAStatusParams struct {
+	Status    string
+	UpdatedAt string
+	ID        string
+}
+
+func (q *Queries) SetCAStatus(ctx context.Context, arg SetCAStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setCAStatus, arg.Status, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const setCurrentGeneration = `-- name: SetCurrentGeneration :exec
 UPDATE cas SET current_generation = ?, updated_at = ? WHERE id = ?
 `
@@ -254,5 +467,26 @@ type SetCurrentGenerationParams struct {
 
 func (q *Queries) SetCurrentGeneration(ctx context.Context, arg SetCurrentGenerationParams) error {
 	_, err := q.db.ExecContext(ctx, setCurrentGeneration, arg.CurrentGeneration, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const updateCALimits = `-- name: UpdateCALimits :exec
+UPDATE cas SET crl_days = ?, max_validity_days = ?, updated_at = ? WHERE id = ?
+`
+
+type UpdateCALimitsParams struct {
+	CrlDays         int64
+	MaxValidityDays int64
+	UpdatedAt       string
+	ID              string
+}
+
+func (q *Queries) UpdateCALimits(ctx context.Context, arg UpdateCALimitsParams) error {
+	_, err := q.db.ExecContext(ctx, updateCALimits,
+		arg.CrlDays,
+		arg.MaxValidityDays,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	return err
 }
