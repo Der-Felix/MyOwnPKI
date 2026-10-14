@@ -613,6 +613,16 @@ keeps the reasons. None of them changes an ADR.
 | 159-bit random serials, unique per CA across generations; issued certificates can't be updated or deleted (triggers) | RFC 5280: issuer name + serial identify one certificate, forever – a reused serial would make CRLs ambiguous |
 | SKI per RFC 7093 (SHA-256, 160 bits); lifetime counts both ends (notAfter = notBefore + days − 1 s); notBefore 5 minutes in the past, never before the CA's start | Modern SKI method; exact lifetimes for validity limits; clients with a slow clock |
 
+### CA lifecycle (phase 1 step 8, design approved 2026-10-14)
+| Decision | Why |
+|---|---|
+| Online root (key encrypted in pki.db, with a warning) or **imported offline root** (certificate only, fingerprint shown to compare) | Homelab convenience and best practice side by side; the import is the moment trust is decided |
+| Intermediate below an offline root: server creates key + CSR + an OpenSSL extension file; the root signs with exactly that file (`copy_extensions none`, digest matching the root key) – legacy `pki ca-sign` or plain OpenSSL; the upload is checked against the order (key, subject, CA:TRUE, KU, pathlen, name constraints, EKU, AKI = root SKI, serial unused, validity inside the root, SHA-2/Ed25519 only) | A CSR is attacker input even from our own server: what the CA certificate may do is decided by the server's order, and anything else signed offline is refused before it becomes trusted |
+| Renewal only with a new key → next generation; the old generation keeps its URL and its CRL; an offline root is renewed by importing its new certificate under the same name | Older chains and CRLs keep working (step 7 URL layout); same-key renewal would need a certificate history – only the importer needs that (step 10) |
+| Parent checks: pathlen of the parent allows the new level, EKU limit is a subset, DNS name constraints outside the parent's are warned about; subject DNs unique among CAs; CA names immutable | Mistakes are caught where they are made, not by clients months later |
+| New CA keys P-384/P-256/RSA 3072/4096; imported RSA 2048 and P-521 with a warning; Ed25519 never as CA | Browsers and Windows don't verify Ed25519 chains; Chrome rejects P-521 in TLS chains |
+| Every lifecycle action audited in the pki.db transaction (`ca.create`, `ca.import_root`, `ca.csr_create`, `ca.certificate_install`, `ca.renew`, `ca.retire`, `ca.update`); refusals as denied/failure in the tenant log | Same rule as issuance: nothing changes without its audit entry |
+
 ### Web UI and dev mode
 | Decision | Why |
 |---|---|

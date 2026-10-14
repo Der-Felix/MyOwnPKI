@@ -74,6 +74,20 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
 - A CA never issues beyond its own `notAfter`.
 - Root key modes: offline / online-encrypted / HSM (ADR-09). In offline mode the server only
   ever holds the root **certificate**.
+- **Offline signing** (step 8):
+  - The server writes an OpenSSL extension file. The offline root signs with exactly that file and
+    never copies the CSR's extensions (`copy_extensions none`); the digest matches the root key.
+  - The uploaded certificate is compared with the order, and every difference is refused: key,
+    subject, CA:TRUE, KU, pathlen, NC, EKU, AKI = root SKI, serial unused, validity inside the
+    root, SHA-2/Ed25519 signature.
+- **CA keys:**
+  - New CAs: P-384 (default), P-256, RSA 3072/4096.
+  - Imported CAs: RSA 2048 and P-521 only with a warning.
+  - Ed25519 is never a CA.
+- **Renewal** = new key = next generation. Never overwrite a signed generation; issuer name + serial
+  stay unique across leaves and CA certificates of one issuer.
+- **The offline root's CRL** can only be signed offline. It is uploaded and checked: right
+  signer, number strictly increasing, nextUpdate in the future (step 9).
 
 ## 4. Keys and algorithms
 
