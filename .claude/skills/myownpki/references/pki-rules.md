@@ -49,6 +49,14 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
 - AIA (`caIssuers`, `OCSP`) and CRL Distribution Point URLs come from the CA's **public base URL**.
   They are baked into every certificate and can never be changed afterwards – validate that a CA
   has a stable public base URL before it issues its first certificate.
+  Layout (owner decision, step 7): `<base>/ca/<ca-name>/<generation>.crt` and
+  `<base>/crl/<ca-name>/<generation>.crl` – the generation is the CA key (`ca_generations`), so a
+  renewed CA doesn't break older chains and CRLs. CA names never change. No OCSP URL until phase 4.
+- Subject DN: CN + optional O/OU/L/ST/C. CN at most 64 characters (RFC 5280 ub-common-name): a
+  derived CN that is longer is left out, never cut; an explicit one is refused. Control characters
+  and invisible formatting characters (bidi overrides) are refused in every DN field.
+- DNS names: LDH only, lower case, punycode (`xn--`) for international names – Unicode is refused
+  (look-alike names). Wildcards only in presets with `wildcard: true`.
 - Wildcards: only one label (`*.example.com`), never `*.*.x` or `*.com`; `*.example.com` does not
   cover `example.com`, so add both (legacy behaviour).
 - IP SANs: IPv4 and IPv6 in binary form, never as DNS SANs.
@@ -78,7 +86,9 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
 | Ed25519 | SSH, internal mTLS, signing | **browsers do not accept Ed25519 TLS server certificates** – warn in the UI |
 
 - Randomness only from `crypto/rand`.
-- Signature algorithm follows the issuer key (SHA-256 for RSA/P-256, SHA-384 for P-384, pure Ed25519).
+- Signature algorithm follows the issuer key (SHA-256 for RSA/P-256, SHA-384 for P-384, SHA-512 for P-521, pure Ed25519).
+- Key policy for requests (step 7): ECDSA P-256/P-384/P-521, RSA 2048–8192 with exponent 65537 only,
+  Ed25519. Warn (don't refuse) for Ed25519 and P-521 on TLS server presets – browsers (Chrome) reject them.
 - Minimum key policy is configurable per tenant.
 
 ## 5. Validity

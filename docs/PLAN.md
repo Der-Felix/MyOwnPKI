@@ -542,6 +542,17 @@ keeps the reasons. None of them changes an ADR.
 | Recovery key output and confirmation are prepared for `myownpki init` (step 12): terminal only if interactive, otherwise `--recovery-key-file` (0600, never overwritten); two random groups re-typed before anything is stored | Owner decision 2026-10-13 |
 | `golang.org/x/crypto/openpgp` is blocked by depguard | GO-2026-5932: unmaintained and unsafe by design; it ships in the same module as argon2 |
 
+### CA engine (phase 1 step 7, design approved 2026-10-13)
+| Decision | Why |
+|---|---|
+| A CA has generations (`ca_generations`): each key and its certificate is one generation; AIA/CDP URLs contain it (`<base>/ca/<name>/<n>.crt`, `<base>/crl/<name>/<n>.crl`); CA names are immutable | A renewal with a new key would otherwise break the chains and CRLs of every older certificate (AD CS uses `CAName(1).crt` for the same reason) |
+| Every check runs before signing: CSR signature, key policy, names (strict LDH/IP/e-mail/URI, punycode only, wildcards only in the wildcard preset), preset SAN rules, name constraints and EKU limits of every CA up to the root, validity | Clients are not relied on to reject; a refused request never reaches the key |
+| The CSR's names and subject are a wish list; its extensions are never read | Copying `CA:TRUE` or `keyCertSign` from a CSR would mint a rogue CA (tested) |
+| After signing, the certificate is parsed and verified against the chain with `crypto/x509` (name constraints, EKU nesting) before it is stored | Second, independent layer – a gap in the first check becomes a failure, not a certificate (tested by removing each layer) |
+| Certificate, names, server-generated key (encrypted) and the `certificate.issue` audit event in one pki.db transaction; refusals go to the tenant audit log as `denied` (policy) or `failure` (sealed, internal) | Nothing is stored without its audit entry; every refusal is visible |
+| 159-bit random serials, unique per CA across generations; issued certificates can't be updated or deleted (triggers) | RFC 5280: issuer name + serial identify one certificate, forever – a reused serial would make CRLs ambiguous |
+| SKI per RFC 7093 (SHA-256, 160 bits); lifetime counts both ends (notAfter = notBefore + days − 1 s); notBefore 5 minutes in the past, never before the CA's start | Modern SKI method; exact lifetimes for validity limits; clients with a slow clock |
+
 ### Web UI and dev mode
 | Decision | Why |
 |---|---|

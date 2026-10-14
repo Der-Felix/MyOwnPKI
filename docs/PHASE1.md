@@ -19,30 +19,33 @@ All times are stored as UTC (`TEXT`, RFC 3339 with `Z`); serials and fingerprint
 ### 1.1 `tenants/<t>/pki.db`
 
 ```
-cas
-  id               TEXT PK            -- ULID-like opaque ID
-  name             TEXT UNIQUE        -- legacy directory name (root, issuing, …)
+cas                                   -- the CA as configured (migration 0004, step 7)
+  id               TEXT PK            -- opaque ID (internal/ids: prefix + time-sortable Base32)
+  name             TEXT UNIQUE        -- legacy directory name (root, issuing, …); never changes (in every AIA/CRL URL)
   kind             TEXT               -- root | intermediate
   parent_id        TEXT NULL → cas.id
   status           TEXT               -- active | pending_signature | retired
   key_mode         TEXT               -- offline | online_encrypted | hsm (ADR-09)
-  key_id           TEXT NULL → keys.id
-  key_algorithm    TEXT
-  subject_dn       TEXT
-  serial_hex       TEXT
-  not_before, not_after TEXT
-  cert_der         BLOB NULL          -- NULL while pending_signature
-  csr_der          BLOB NULL          -- offline-signing flow
-  fingerprint_sha256 TEXT UNIQUE
-  ski_hex          TEXT
+  current_generation INTEGER NULL     -- the generation that signs new certificates
   path_len         INTEGER NULL
   nc_critical      INTEGER            -- name constraints critical (compat switch)
-  eku_limit        TEXT               -- JSON array of EKU names/OIDs (legacy EKU_LIMIT)
-  public_base_url  TEXT               -- immutable once the first certificate is issued
+  eku_limit        TEXT               -- JSON array of dotted EKU OIDs (legacy EKU_LIMIT); [] = no limit
+  public_base_url  TEXT               -- no trailing slash; immutable once the CA has signed anything
   crl_days         INTEGER
-  crl_number       INTEGER            -- strictly increasing; preserved by the importer
+  crl_number       INTEGER            -- strictly increasing across all generations; preserved by the importer
   max_validity_days INTEGER           -- caps every issuance (presets, API, ACME default 90 days)
   created_at, updated_at TEXT
+
+ca_generations                        -- one row per CA key and its certificate (AD CS "CAName(1).crt")
+  ca_id → cas.id, generation INTEGER  -- PK (ca_id, generation); 1, 2, … – a renewal with a new key adds one
+  key_id           TEXT NULL → keys.id -- NULL for offline keys
+  key_algorithm, subject_dn TEXT
+  serial_hex, not_before, not_after, ski_hex TEXT NULL
+  cert_der         BLOB NULL          -- NULL while pending_signature; set once, then immutable
+  csr_der          BLOB NULL          -- offline-signing flow
+  fingerprint_sha256 TEXT UNIQUE
+  issuer_ca_id, issuer_generation → ca_generations  -- the parent generation that signed it; NULL for a root
+  created_at       TEXT
 
 ca_name_constraints
   ca_id → cas.id, kind (dns|ip|email|uri), value, permitted (1) / excluded (0)
@@ -50,9 +53,10 @@ ca_name_constraints
 certificates
   id               TEXT PK
   ca_id            TEXT NULL → cas.id  -- NULL for external certificates
+  ca_generation    INTEGER NULL       -- (ca_id, ca_generation) → ca_generations: the key that signed it
   source           TEXT               -- issued | imported | external
   preset           TEXT NULL
-  serial_hex       TEXT               -- UNIQUE (ca_id, serial_hex)
+  serial_hex       TEXT               -- UNIQUE (ca_id, serial_hex): per CA across all generations (same issuer name)
   subject_dn, common_name TEXT
   not_before, not_after TEXT
   key_algorithm    TEXT
@@ -75,7 +79,7 @@ revocations
   revoked_by       TEXT
 
 crls
-  ca_id → cas.id, number, this_update, next_update, crl_der   -- PK (ca_id, number); keep last N
+  ca_id, generation → ca_generations, number, this_update, next_update, crl_der   -- one CRL per generation (its URL); keep last N
 
 keys
   id               TEXT PK
@@ -94,6 +98,13 @@ import_jobs
 outbox
   id INTEGER PK, created_at, topic (audit|notify), payload_json, delivered_at NULL
 ```
+
+**URLs in certificates** (owner 2026-10-13): `<public_base_url>/ca/<ca-name>/<generation>.crt`
+(AIA caIssuers) and `<public_base_url>/crl/<ca-name>/<generation>.crl` (CRL distribution point). A
+renewed CA (new key, same name) gets the next generation, so the chains and CRLs of older
+certificates keep working. No OCSP URL until phase 4. Triggers keep issued certificates, signed CA
+generations, CA names and used base URLs from ever changing; issued certificates are never deleted,
+so a serial stays taken forever.
 
 Status (`valid` / `expired` / `revoked`) is **derived**, not stored: `revocations` + `not_after`
 vs. the injected clock. Nothing can get out of sync, and "expired" needs no nightly job.
@@ -154,7 +165,7 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 5 | **done 2026-10-13** (server wiring of the deliverer with step 15) – **Audit log** (instance `<data>/audit.db` + `tenants/<t>/audit.db`, hash chain, append-only triggers, no secrets in details) + **outbox** worker (exactly once via `outbox_id`; delivered rows deleted after 30 days, undelivered never) + `myownpki audit verify [--expect-head]`; chain heads to the process log at start and daily – before any CA code, so steps 7–11 audit from the start | – | tampering test breaks verification at the right `seq`; outbox delivers exactly once after a crash between commit and delivery |
 | 6 | **done 2026-10-13** (API/UI wiring with steps 15–17) – Keys + unseal **+ recovery key**: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
 | 6a | **done 2026-10-13** – **Signed audit checkpoints** (Ed25519 from the root key, checkpoints are chain entries; made at unseal, before seal, daily, every 1000 entries; `audit verify --checkpoint-key`): at start, daily and every N entries a checkpoint (scope, seq, hash, time) is signed with a key derived from the unseal key and stored; `audit verify` checks the chain against the checkpoints – rewriting a chain then requires the passphrase (owner decision 2026-10-13) | – | recomputed chain without the key is detected; checkpoints survive restore |
-| 7 | CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
+| 7 | **done 2026-10-13** (`internal/ca`, pki.db migration 0004 with CA generations; API/UI wiring with steps 16–17) – CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
 | 8 | CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); CA import | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root |
 | 9 | Revocation + CRL generation (number +1, AKI, nextUpdate) – **a sealed server can't renew CRLs: status/warning "sealed since …, CRL of <CA> expires on …"** in `db status`, API and process log (owner 2026-10-13), serving on the public listener | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf |
 | 10 | Legacy importer; CI builds a fixture PKI with `legacy/pki.sh` and imports it | – | serials, revocations (time + reason) and CRL numbers identical before/after |
@@ -194,6 +205,22 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
   - Decided (owner 2026-10-13), implement at step 8: also warn on `https://` base URLs – RFC 5280 recommends HTTP for
     CRL and AIA, and a client that needs a CRL to check the TLS certificate of the CRL server is stuck.
 
+- **CA creation (step 8) on top of the step 7 schema.** A new CA writes `cas`, generation 1 in
+  `ca_generations` and then `current_generation`; a renewal with a new key adds the next generation
+  (never overwrite a signed one). Serials of CA certificates come from the same 159-bit generator;
+  uniqueness per issuer must also hold between `ca_generations` and `certificates` of the same
+  parent (check both before storing). Validate the CA name (`[a-z0-9][a-z0-9._-]{0,62}`, the schema
+  enforces it too) and the base URL (no trailing slash) at creation.
+- **CRLs (step 9) per generation:** each generation signs the CRL for the certificates it issued and
+  publishes it at its own URL (`/crl/<name>/<generation>.crl`); the CRL number stays one strictly
+  increasing counter per CA (`cas.crl_number`) across all generations.
+- **ACME (phase 2) is stricter than the CSR wish list of step 7** (owner 2026-10-13): at finalize the
+  CSR must name exactly the identifiers of the order – nothing missing, nothing extra – otherwise the
+  order fails with `badCSR` (RFC 8555 §7.4). Names are never dropped or added there; the ACME path
+  calls the engine with the order's identifiers and `IgnoreCSRNames` only after this exact match.
+- **Subject defaults per tenant (step 17e):** organization, country etc. as defaults for requests
+  (like legacy `pki.conf`); the engine already takes them from the request (`ca.Subject`).
+
 ### Planned for the end of phase 1
 
 - **Live demo on GitHub Pages**: a static export of the UI prototype on sample data (no server,
@@ -231,3 +258,11 @@ TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test v
 | 8 | Legacy ShellCheck warnings | **Fix in a separate commit**, then CI at severity `warning` |
 | 9 | First push | Repository **stays public**; owner pushes |
 | 10 | Problem types | **Keep `urn:myownpki:problem:*`** |
+| 11 | AIA/CDP URL layout (step 7) | **With key generation**: `<base>/ca/<ca-name>/<generation>.crt` and `<base>/crl/<ca-name>/<generation>.crl` (like AD CS `CAName(1).crt`); CA names immutable; no OCSP URL until phase 4 |
+| 12 | Validity (step 7) | **An explicit request is never changed silently** (beyond the CA maximum or the CA's end → denied); a preset default adapts to both, with a note |
+| 13 | Key policy for CSRs (step 7) | ECDSA P-256/P-384/P-521, RSA 2048–8192 **with exponent 65537 only** (2048 flagged "compatibility only"), Ed25519; **warning** for Ed25519 and P-521 on TLS server presets (browsers/Chrome reject them); DSA, P-224 and anything else denied |
+| 14 | Subject DN (step 7) | CN + optional O/OU/L/ST/C from the request (the CSR's subject as fallback); **CN at most 64 characters** – a derived CN that is longer is **left out, not cut**; an explicit one is denied; **control characters denied** in every DN field (also invisible formatting characters such as bidi overrides); tenant defaults at step 17 |
+| 15 | Internationalized domain names (step 7) | **Punycode (`xn--…`) only**; Unicode in DNS names denied (look-alike names) |
+| 16 | CSR names (step 7) | **Wish list**: names of a type the preset doesn't take are dropped and listed **in the response and in the audit entry** (also when the request is denied for another reason); explicit names of such a type are denied. **Not for ACME** (phase 2): there the CSR must match the order exactly (`badCSR`) |
+| 17 | CN that looks like a host name (step 7) | Checked against the DNS name constraints when the certificate has no DNS SAN (then clients fall back to the CN – RFC 6125); the denial names the fix: a display name without dots ("Max Mustermann" instead of "max.mustermann") or a DNS SAN within the permitted names |
+| 18 | Wildcards, single-label names, custom usages (step 7) | Wildcards only with preset flag `wildcard: true` (base domain added, as in legacy); single-label names like `nas` allowed (legacy); CN of DNS presets also becomes the first SAN (legacy `CN_AUTO`); at most 100 SANs; e-mail addresses ASCII only; a CA with an EKU limit issues no certificate without EKU |
