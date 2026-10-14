@@ -8,6 +8,15 @@ import (
 	"database/sql"
 )
 
+type BlockedKey struct {
+	SpkiSha256 string
+	Reason     string
+	SourceType string
+	SourceID   string
+	BlockedAt  string
+	BlockedBy  string
+}
+
 type Ca struct {
 	ID                string
 	Name              string
@@ -25,6 +34,7 @@ type Ca struct {
 	MaxValidityDays   int64
 	CreatedAt         string
 	UpdatedAt         string
+	LegacyUrls        int64
 }
 
 type CaGeneration struct {
@@ -50,6 +60,16 @@ type CaNameConstraint struct {
 	Kind      string
 	Value     string
 	Permitted int64
+}
+
+type CaRevocation struct {
+	CaID           string
+	Generation     int64
+	Reason         string
+	RevokedAt      string
+	InvalidityDate sql.NullString
+	RevokedBy      string
+	Source         string
 }
 
 type Certificate struct {
@@ -80,6 +100,17 @@ type CertificateSan struct {
 	Value         string
 }
 
+type Crl struct {
+	CaID       string
+	Generation int64
+	Number     int64
+	ThisUpdate string
+	NextUpdate string
+	CrlDer     []byte
+	Source     string
+	CreatedAt  string
+}
+
 type DbInfo struct {
 	Key   string
 	Value string
@@ -103,4 +134,12 @@ type Outbox struct {
 	Topic       string
 	PayloadJson string
 	DeliveredAt sql.NullString
+}
+
+type Revocation struct {
+	CertificateID  string
+	Reason         string
+	RevokedAt      string
+	InvalidityDate sql.NullString
+	RevokedBy      string
 }

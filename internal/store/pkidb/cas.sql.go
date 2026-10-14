@@ -29,7 +29,7 @@ func (q *Queries) CountSubjectElsewhere(ctx context.Context, arg CountSubjectEls
 }
 
 const getCA = `-- name: GetCA :one
-SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at FROM cas WHERE id = ?
+SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at, legacy_urls FROM cas WHERE id = ?
 `
 
 func (q *Queries) GetCA(ctx context.Context, id string) (Ca, error) {
@@ -52,12 +52,13 @@ func (q *Queries) GetCA(ctx context.Context, id string) (Ca, error) {
 		&i.MaxValidityDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyUrls,
 	)
 	return i, err
 }
 
 const getCAByName = `-- name: GetCAByName :one
-SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at FROM cas WHERE name = ?
+SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at, legacy_urls FROM cas WHERE name = ?
 `
 
 func (q *Queries) GetCAByName(ctx context.Context, name string) (Ca, error) {
@@ -80,6 +81,7 @@ func (q *Queries) GetCAByName(ctx context.Context, name string) (Ca, error) {
 		&i.MaxValidityDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyUrls,
 	)
 	return i, err
 }
@@ -334,7 +336,7 @@ func (q *Queries) ListCAGenerations(ctx context.Context, caID string) ([]CaGener
 }
 
 const listCAs = `-- name: ListCAs :many
-SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at FROM cas ORDER BY name
+SELECT id, name, kind, parent_id, status, key_mode, current_generation, path_len, nc_critical, eku_limit, public_base_url, crl_days, crl_number, max_validity_days, created_at, updated_at, legacy_urls FROM cas ORDER BY name
 `
 
 func (q *Queries) ListCAs(ctx context.Context) ([]Ca, error) {
@@ -363,6 +365,7 @@ func (q *Queries) ListCAs(ctx context.Context) ([]Ca, error) {
 			&i.MaxValidityDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyUrls,
 		); err != nil {
 			return nil, err
 		}
