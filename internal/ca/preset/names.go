@@ -104,3 +104,25 @@ func parseOID(s string) (asn1.ObjectIdentifier, bool) {
 	}
 	return oid, true
 }
+
+// LookupExtKeyUsage resolves an EKU name (serverAuth, …) or dotted OID with
+// the rules of preset files – used for the EKU limit of a CA as well.
+func LookupExtKeyUsage(token string) (asn1.ObjectIdentifier, error) {
+	return lookupExtKeyUsage(token)
+}
+
+// ExtKeyUsageName returns the name of a well-known EKU ("" for other OIDs).
+func ExtKeyUsageName(oid asn1.ObjectIdentifier) string {
+	for name, known := range extKeyUsageOID {
+		if oid.Equal(known) {
+			return name
+		}
+	}
+	return ""
+}
+
+// StdExtKeyUsage returns the crypto/x509 constant of a well-known EKU.
+func StdExtKeyUsage(oid asn1.ObjectIdentifier) (x509.ExtKeyUsage, bool) {
+	u, ok := extKeyUsageStd[ExtKeyUsageName(oid)]
+	return u, ok
+}
