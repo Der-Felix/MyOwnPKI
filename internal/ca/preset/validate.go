@@ -186,6 +186,12 @@ func (p *Preset) validateCrossRules(fail failFunc) {
 	if has("timeStamping") && (len(p.ExtKeyUsage.Usages) != 1 || !p.ExtKeyUsage.Critical) {
 		fail("ext_key_usage", "timeStamping must be the only extended key usage and critical: true (RFC 3161)")
 	}
+	if p.Wildcard && !slices.Contains(p.SubjectAltNames.Offered, SANDNS) {
+		fail("wildcard", "needs %q in subject_alt_names.offered", SANDNS)
+	}
+	if p.Wildcard && p.Customizable {
+		fail("wildcard", "not allowed for customizable presets")
+	}
 	// id-pkix-ocsp-nocheck only makes sense on a delegated OCSP responder certificate.
 	if p.OCSPNoCheck && !has("OCSPSigning") {
 		fail("ocsp_no_check", "only allowed together with the OCSPSigning extended key usage")

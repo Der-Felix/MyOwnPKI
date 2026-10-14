@@ -78,6 +78,10 @@ type Preset struct {
 	OCSPNoCheck bool `yaml:"ocsp_no_check"`
 	// Customizable allows key usage and EKU to be chosen per certificate.
 	Customizable bool `yaml:"customizable"`
+	// Wildcard: DNS names like *.example.com are allowed – and at least one
+	// is required; the base domain is added as a SAN (legacy behavior).
+	// Every other preset rejects wildcard names.
+	Wildcard bool `yaml:"wildcard"`
 
 	// Resolved during validation.
 	keyUsageRSA     x509.KeyUsage
@@ -126,6 +130,40 @@ func (p *Preset) ExtKeyUsages() ([]x509.ExtKeyUsage, []asn1.ObjectIdentifier) {
 func (p *Preset) ExtKeyUsageOIDs() []asn1.ObjectIdentifier {
 	return cloneOIDs(p.extKeyUsageAll)
 }
+
+// Customize returns a copy of a customizable preset with the key usages and
+// EKUs chosen for one certificate, checked by the same rules as a preset file.
+// keyUsage applies to RSA keys; ECDSA and Ed25519 keys get it without the
+// RSA-only usages (the caller rejects those for such keys first). An EKU list
+// of only timeStamping is marked critical (RFC 3161).
+func (p *Preset) Customize(keyUsage, extKeyUsage []string) (*Preset, error) {
+	if !p.Customizable {
+		return nil, fmt.Errorf("%w: preset %q is not customizable", ErrInvalid, p.Name)
+	}
+	c := Preset{
+		Name: p.Name, Description: p.Description, Usage: p.Usage, Family: p.Family,
+		ValidityDays: p.ValidityDays, SubjectAltNames: p.SubjectAltNames, CommonNameFrom: p.CommonNameFrom,
+		OpenSSLPurpose: p.OpenSSLPurpose, Customizable: true,
+		KeyUsage: KeyUsage{RSA: slices.Clone(keyUsage)},
+		ExtKeyUsage: ExtKeyUsage{
+			Usages:   slices.Clone(extKeyUsage),
+			Critical: len(extKeyUsage) == 1 && extKeyUsage[0] == "timeStamping",
+		},
+	}
+	for _, name := range keyUsage {
+		if !rsaOnlyKeyUsages[name] {
+			c.KeyUsage.Other = append(c.KeyUsage.Other, name)
+		}
+	}
+	if problems := c.validate(); len(problems) > 0 {
+		return nil, fmt.Errorf("%w: custom usages:\n  - %s", ErrInvalid, strings.Join(problems, "\n  - "))
+	}
+	return &c, nil
+}
+
+// RSAOnlyKeyUsage reports key usages that need an RSA key (encryption with
+// the subject's public key).
+func RSAOnlyKeyUsage(name string) bool { return rsaOnlyKeyUsages[name] }
 
 func cloneOIDs(in []asn1.ObjectIdentifier) []asn1.ObjectIdentifier {
 	if in == nil {

@@ -258,6 +258,10 @@ func opensslVerify(t *testing.T, caPEM, certPEM []byte, purpose string, wantOK b
 	t.Helper()
 	bin, err := exec.LookPath("openssl")
 	if err != nil {
+		// In CI the cross-check must not disappear silently.
+		if os.Getenv("CI") != "" {
+			t.Fatal("openssl not on PATH, but CI is set – the OpenSSL cross-check is required in CI")
+		}
 		t.Skip("openssl not on PATH – skipping cross-check")
 	}
 	dir := t.TempDir()

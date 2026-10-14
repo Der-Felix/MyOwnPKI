@@ -25,6 +25,7 @@ run; change the YAML only together with the legacy script (or deliberately, by a
 | `openssl_purpose` | `openssl verify -purpose` that certificates of this preset must pass (`any` = none) |
 | `ocsp_no_check` | Add `id-pkix-ocsp-nocheck` (only with `OCSPSigning`) |
 | `customizable` | Key usage and EKU may be chosen per certificate (only family `custom`) |
+| `wildcard` | Allow (and require) a `*.domain` DNS name and add the base domain as a SAN; every other preset rejects wildcard names |
 
 ## Rules the loader enforces
 
