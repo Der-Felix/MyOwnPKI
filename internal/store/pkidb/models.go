@@ -8,6 +8,78 @@ import (
 	"database/sql"
 )
 
+type Ca struct {
+	ID                string
+	Name              string
+	Kind              string
+	ParentID          sql.NullString
+	Status            string
+	KeyMode           string
+	CurrentGeneration sql.NullInt64
+	PathLen           sql.NullInt64
+	NcCritical        int64
+	EkuLimit          string
+	PublicBaseUrl     string
+	CrlDays           int64
+	CrlNumber         int64
+	MaxValidityDays   int64
+	CreatedAt         string
+	UpdatedAt         string
+}
+
+type CaGeneration struct {
+	CaID              string
+	Generation        int64
+	KeyID             sql.NullString
+	KeyAlgorithm      string
+	SubjectDn         string
+	SerialHex         sql.NullString
+	NotBefore         sql.NullString
+	NotAfter          sql.NullString
+	CertDer           []byte
+	CsrDer            []byte
+	FingerprintSha256 sql.NullString
+	SkiHex            sql.NullString
+	IssuerCaID        sql.NullString
+	IssuerGeneration  sql.NullInt64
+	CreatedAt         string
+}
+
+type CaNameConstraint struct {
+	CaID      string
+	Kind      string
+	Value     string
+	Permitted int64
+}
+
+type Certificate struct {
+	ID                string
+	CaID              sql.NullString
+	CaGeneration      sql.NullInt64
+	Source            string
+	Preset            sql.NullString
+	SerialHex         string
+	SubjectDn         string
+	CommonName        string
+	NotBefore         string
+	NotAfter          string
+	KeyAlgorithm      string
+	KeyID             sql.NullString
+	CertDer           []byte
+	FingerprintSha256 string
+	RenewalOf         sql.NullString
+	RequestedBy       string
+	CustomKu          sql.NullString
+	CustomEku         sql.NullString
+	CreatedAt         string
+}
+
+type CertificateSan struct {
+	CertificateID string
+	Type          string
+	Value         string
+}
+
 type DbInfo struct {
 	Key   string
 	Value string
