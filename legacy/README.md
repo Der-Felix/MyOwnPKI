@@ -136,6 +136,7 @@ Validates full chain, CRL revocation status, purpose, and private key matching:
 | `./pki.sh issue <preset> --cn <name>` | Issues a certificate matching a defined profile |
 | `./pki.sh selfsigned [preset] --cn <name>` | Generates a standalone self-signed certificate (no CA) |
 | `./pki.sh sign-csr <file.csr> --preset server` | Signs an external CSR |
+| `./pki.sh ca-sign <file.csr> --ext <file.ext> --days N` | Offline root for MyOwnPKI: signs an intermediate CA CSR with exactly the extension file MyOwnPKI created (never the CSR's extensions) |
 
 ### 3. Inspection & Management
 | Command | Description |

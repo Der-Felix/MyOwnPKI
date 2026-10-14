@@ -42,6 +42,20 @@ run_suite() {
     run revoke nas.smoke.lan --reason superseded
     openssl crl -in "$dir/publish/server-ca.crl.pem" -noout -text | grep -qi "$serial" \
         || fail "$label: revoked serial not in CRL"
+
+    # ca-sign (offline root for MyOwnPKI): extensions only from the file - the
+    # CSR asks for pathlen 5, the file says 0.
+    local sub="$WORK/$label-sub"
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$sub.key" \
+        -subj "/CN=Sub CA $label" -addext "basicConstraints=critical,CA:TRUE,pathlen:5" \
+        -out "$sub.csr" 2>/dev/null || fail "$label: test CSR"
+    printf '%s\n' '[ v3_myownpki_ca ]' 'basicConstraints = critical, CA:TRUE, pathlen:0' \
+        'keyUsage = critical, digitalSignature, keyCertSign, cRLSign' \
+        'subjectKeyIdentifier = hash' 'authorityKeyIdentifier = keyid:always' >"$sub.ext"
+    run ca-sign "$sub.csr" --ext "$sub.ext" --days 30 --out "$sub.crt"
+    openssl x509 -in "$sub.crt" -noout -ext basicConstraints | grep -q "pathlen:0" \
+        || fail "$label: ca-sign did not take the extensions from the file"
+    openssl verify -CAfile "$root" "$sub.crt" >/dev/null || fail "$label: ca-sign result does not verify"
     echo "ok    $label"
 }
 

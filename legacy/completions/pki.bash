@@ -12,7 +12,7 @@ _pki_completion() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="init ca-new issue quick selfsigned sign-csr list ls status dashboard search show verify renew renew-ca revoke crl export guide anleitung howto template batch backup restore doctor presets version update upgrade help"
+    local commands="init ca-new issue quick selfsigned sign-csr ca-sign list ls status dashboard search show verify renew renew-ca revoke crl export guide anleitung howto template batch backup restore doctor presets version update upgrade help"
     local presets="server wildcard client server-client user vpn-server vpn-client smime codesign ocsp timestamp custom"
     local keys="rsa2048 rsa3072 rsa4096 ed25519"
     local revoke_reasons="unspecified keyCompromise CACompromise affiliationChanged superseded cessationOfOperation certificateHold"
@@ -133,6 +133,13 @@ _pki_completion() {
                 return 0
             fi
             _pki_reply "--preset --ca --cn --dns --ip --days --no-csr-san"
+            ;;
+        ca-sign)
+            if [[ $cword -eq 2 ]]; then
+                _filedir '@(csr|req)'
+                return 0
+            fi
+            _pki_reply "--ext --days --out"
             ;;
         batch)
             _filedir

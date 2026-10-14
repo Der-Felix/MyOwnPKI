@@ -158,6 +158,8 @@ COMMANDS BY CATEGORY:
                                  --p12, --p12-legacy, --der, --force
   selfsigned           Shortcut: pki issue <preset> --ca selfsigned
   sign-csr FILE        Sign an external CSR (same options as 'issue', plus --no-csr-san)
+  ca-sign FILE.csr     Sign an Intermediate CA CSR from MyOwnPKI (offline root)
+                       Options: --ext FILE.ext (required), --days N (required), --out FILE.crt
 
 3. Inspection & Diagnostics
   list, ls             Tabular overview of all CAs & issued certificates with validity
@@ -352,6 +354,10 @@ dispatch_cli() {
             parse_issue_opts "$@"
             I_CA=selfsigned
             issue_cert
+            ;;
+        ca-sign)
+            require_pki
+            cmd_ca_sign "$@"
             ;;
         sign-csr)
             require_pki; reset_issue_vars; I_NO_CSR_SAN=0

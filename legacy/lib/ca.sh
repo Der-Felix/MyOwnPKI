@@ -323,3 +323,65 @@ create_intermediate() {
     log_action "INTERMEDIATE created name=$N_NAME CN='$N_CN' key=$N_KEY days=$N_DAYS"
     ok "Intermediate CA '$N_NAME' created successfully (valid until $(cert_end_date "$d/certs/ca.crt"))"
 }
+
+# Digest matching the Root CA key (P-384 -> sha384); OpenSSL's default would
+# be SHA-256 for every EC key.
+root_digest() {
+    local t
+    t=$("$OPENSSL" x509 -in "$PKI_DIR/root/certs/ca.crt" -noout -text 2>/dev/null) \
+        || die "Cannot read the Root CA certificate"
+    case $t in
+        *secp384r1*|*"NIST CURVE: P-384"*) printf 'sha384' ;;
+        *secp521r1*|*"NIST CURVE: P-521"*) printf 'sha512' ;;
+        *ED25519*) printf 'default' ;;
+        *) printf 'sha256' ;;
+    esac
+}
+
+# Signs the CSR of an Intermediate CA that MyOwnPKI created - this script is
+# then the offline root. The extensions come only from the extension file
+# MyOwnPKI wrote, never from the CSR (ca.cnf: copy_extensions = none).
+cmd_ca_sign() {
+    local csr=${1:-} ext="" days="" out="" md left d="$PKI_DIR/root"
+    if [ -n "$csr" ]; then shift; else
+        die "Usage: pki ca-sign <file.csr> --ext <file.ext> --days N [--out <file.crt>]"
+    fi
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --ext)  need_arg "$@"; ext=$2; shift ;;
+            --days) need_arg "$@"; days=$2; shift ;;
+            --out)  need_arg "$@"; out=$2; shift ;;
+            *) die "Unknown option for ca-sign: $1" ;;
+        esac
+        shift
+    done
+    [ -f "$csr" ] || die "CSR not found: $csr"
+    [ -n "$ext" ] && [ -f "$ext" ] \
+        || die "Extension file not found: ${ext:-(none)} - use the .ext file MyOwnPKI created together with the CSR"
+    grep -q '^\[ v3_myownpki_ca \]' "$ext" \
+        || die "$ext has no [ v3_myownpki_ca ] section - use the .ext file MyOwnPKI created"
+    is_int "$days" && [ "$days" -gt 0 ] || die "--days N is required (MyOwnPKI shows the value)"
+    [ -n "$out" ] || out="${csr%.*}.crt"
+    [ -e "$out" ] && die "Output file exists already: $out"
+    grep -Eq '^copy_extensions[[:space:]]*=[[:space:]]*none' "$d/ca.cnf" \
+        || die "$d/ca.cnf must contain 'copy_extensions = none' - extensions are never copied from a CSR"
+    "$OPENSSL" req -in "$csr" -noout -verify >/dev/null 2>&1 || die "The CSR signature is invalid: $csr"
+    left=$(cert_days_left "$d/certs/ca.crt")
+    [ "$days" -lt "$left" ] || die "--days $days would end after the Root CA (valid for $left more days)"
+    md=$(root_digest)
+
+    banner "Signing an Intermediate CA for MyOwnPKI"
+    kv "CSR" "$csr"
+    kv "Subject" "$("$OPENSSL" req -in "$csr" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
+    kv "Extensions" "$ext"
+    kv "Validity" "$days days"
+    kv "Digest" "$md"
+    ca_passin root
+    ssl ca -batch -config "$d/ca.cnf" "${PASSIN[@]}" -extfile "$ext" -extensions v3_myownpki_ca \
+        -days "$days" -md "$md" -notext -preserveDN -in "$csr" -out "$out" \
+        || die "Signing by Root CA failed"
+    chmod 644 "$out"
+    log_action "CA-SIGN csr=$csr days=$days out=$out"
+    ok "Signed: $out - upload it to MyOwnPKI"
+    info "The Root CRL is only published after you upload it to MyOwnPKI: pki crl --ca root, then upload publish/root.crl"
+}
