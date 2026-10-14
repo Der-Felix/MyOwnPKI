@@ -114,6 +114,11 @@ func runDBStatus(ctx context.Context, args, environ []string, stdout, stderr io.
 			_, _ = fmt.Fprintf(stdout, "\n  Tenants in system.db: %s\n", strings.Join(names, ", "))
 		}
 	}
+	for _, st := range sts {
+		if st.Kind == store.KindPKI && st.Exists && st.Err == nil && st.Report.Pending() == 0 {
+			printCRLStatus(ctx, stdout, st.Path)
+		}
+	}
 	// A problem outranks pending migrations: migrating would not fix it.
 	switch {
 	case problem:

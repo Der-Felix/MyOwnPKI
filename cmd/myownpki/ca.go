@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 )
@@ -90,6 +91,12 @@ func loadCAs(ctx context.Context, name string, args, environ []string, positiona
 		_, _ = fmt.Fprintf(stderr, "read CAs: %v (run `%s db status`)\n", err, binary)
 		return nil, nil, exitProblem
 	}
+	crls, err := ca.CRLStatuses(ctx, db.Read, clock.System{}.Now())
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "read CRLs: %v\n", err)
+		return nil, nil, exitProblem
+	}
+	ca.AttachCRLStatus(cas, crls)
 	return cas, rest, -1
 }
 
@@ -107,8 +114,11 @@ func runCAList(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 	for _, c := range cas {
 		gen, until, note := "-", "-", ""
 		for _, g := range c.Generations {
-			if len(g.Warnings) > 0 {
+			if len(g.Warnings) > 0 || (g.CRL != nil && g.CRL.Message(false) != "") {
 				note = "WARNING – see ca show"
+			}
+			if g.Current && g.Revoked != "" {
+				note = "REVOKED – see ca show"
 			}
 			if g.Current {
 				gen, until = fmt.Sprint(g.Generation), dateOnly(g.NotAfter)
@@ -177,6 +187,12 @@ func showCA(out io.Writer, c ca.CAInfo) {
 			_, _ = fmt.Fprintf(out, "       issued by %s\n", g.Issuer)
 		}
 		_, _ = fmt.Fprintf(out, "       published at %s and %s\n", g.CertURL, g.CRLURL)
+		if g.Revoked != "" {
+			_, _ = fmt.Fprintf(out, "       REVOKED: %s – it can't issue any more\n", g.Revoked)
+		}
+		if g.CRL != nil {
+			_, _ = fmt.Fprintf(out, "       CRL: %s\n", strings.ReplaceAll(crlLine(*g.CRL), "\n"+strings.Repeat(" ", 29), "\n       "))
+		}
 		for _, w := range g.Warnings {
 			_, _ = fmt.Fprintf(out, "       WARNING: %s\n", w)
 		}
@@ -195,4 +211,41 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// printCRLStatus shows the newest CRL of every CA generation that needs one
+// (db status). A CRL warning doesn't change the exit code of db status – it
+// is about the CA, not the database files; the alarm comes in phase 4.
+func printCRLStatus(ctx context.Context, out io.Writer, pkiPath string) {
+	db, err := store.OpenReadOnly(ctx, pkiPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "\n  CRLs: PROBLEM: %v\n", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+	sts, err := ca.CRLStatuses(ctx, db.Read, clock.System{}.Now())
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "\n  CRLs: PROBLEM: %v\n", err)
+		return
+	}
+	if len(sts) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(out, "\n  CRLs (newest per CA generation):")
+	for _, s := range sts {
+		_, _ = fmt.Fprintf(out, "    %-24s %s\n", fmt.Sprintf("%s/%d", s.CA, s.Generation), crlLine(s))
+	}
+}
+
+// crlLine is one CRL status in words; the db status run can't know whether
+// the server is sealed, so the sealed hint comes from the server itself.
+func crlLine(s ca.CRLStatus) string {
+	line := "none yet"
+	if s.State != ca.CRLMissing {
+		line = fmt.Sprintf("#%d (%s), next update %s – %s", s.Number, s.Source, s.NextUpdate.UTC().Format("2006-01-02 15:04 UTC"), s.State)
+	}
+	if msg := s.Message(false); msg != "" {
+		line += "\n" + strings.Repeat(" ", 29) + "WARNING: " + msg
+	}
+	return line
 }

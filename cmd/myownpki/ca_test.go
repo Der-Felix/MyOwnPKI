@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +43,15 @@ func rootPEM(t *testing.T, cn string, notBefore time.Time) []byte {
 func TestCAListAndShow(t *testing.T) {
 	t.Parallel()
 	cfg, dataDir := dbConfig(t)
+	// No environment: the test must not depend on MYOWNPKI_* variables of
+	// the machine it runs on (the configuration refuses unknown ones).
 	run := func(args ...string) (int, string, string) {
 		var stdout, stderr bytes.Buffer
-		code := runCA(t.Context(), append(args, "--config", cfg), &stdout, &stderr)
+		cmd, rest := runCAList, slices.Concat(args[1:], []string{"--config", cfg})
+		if args[0] == "show" {
+			cmd = runCAShow
+		}
+		code := cmd(t.Context(), rest, nil, &stdout, &stderr)
 		return code, stdout.String(), stderr.String()
 	}
 	if code, out, _ := run("list"); code != exitPending || !strings.Contains(out, "db migrate") {
@@ -95,6 +102,15 @@ func TestCAListAndShow(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("show lacks %q (exit %d):\n%s", want, code, out)
 		}
+	}
+	if !strings.Contains(out, "CRL: none yet") || !strings.Contains(out, "WARNING: no CRL published yet – sign it on the offline root and upload it") {
+		t.Errorf("ca show without a root CRL:\n%s", out)
+	}
+	var status bytes.Buffer
+	runDBStatus(t.Context(), []string{"--config", cfg}, nil, &status, &status)
+	if !strings.Contains(status.String(), "CRLs (newest per CA generation):") || !strings.Contains(status.String(), "root/2") ||
+		!strings.Contains(status.String(), "WARNING: no CRL published yet") {
+		t.Errorf("db status:\n%s", status.String())
 	}
 	if code, _, errOut := run("show", "nope"); code != exitProblem || !strings.Contains(errOut, "no CA named") {
 		t.Errorf("unknown CA: exit %d %s", code, errOut)
