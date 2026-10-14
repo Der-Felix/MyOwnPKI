@@ -3,7 +3,9 @@ package ca
 import (
 	"context"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -38,6 +40,10 @@ type GenerationInfo struct {
 	// Warnings are found in the certificate itself, e.g. AIA/CDP URLs that
 	// differ from what MyOwnPKI serves (an offline-signed certificate).
 	Warnings []string
+	// Revoked is "<reason> on <date>" for a revoked generation.
+	Revoked string
+	// CRL is the newest CRL; filled by AttachCRLStatus (it needs the time).
+	CRL *CRLStatus
 }
 
 // ListCAs reads every CA of the tenant. q may be a read connection.
@@ -107,6 +113,11 @@ func ListCAs(ctx context.Context, q pkidb.DBTX) ([]CAInfo, error) {
 					gi.Warnings = urlWarnings(cert, byID[g.IssuerCaID.String], g.IssuerGeneration.Int64)
 				}
 			}
+			if r, rerr := db.GetCARevocation(ctx, pkidb.GetCARevocationParams{CaID: c.ID, Generation: g.Generation}); rerr == nil {
+				gi.Revoked = r.Reason + " on " + dateOf(r.RevokedAt)
+			} else if !errors.Is(rerr, sql.ErrNoRows) {
+				return nil, rerr
+			}
 			info.Generations = append(info.Generations, gi)
 		}
 		out = append(out, info)
@@ -115,3 +126,17 @@ func ListCAs(ctx context.Context, q pkidb.DBTX) ([]CAInfo, error) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// AttachCRLStatus puts each generation's CRL status into the CA list.
+func AttachCRLStatus(cas []CAInfo, statuses []CRLStatus) {
+	for i := range cas {
+		for j := range cas[i].Generations {
+			g := &cas[i].Generations[j]
+			for k := range statuses {
+				if statuses[k].CA == cas[i].Name && statuses[k].Generation == g.Generation {
+					g.CRL = &statuses[k]
+				}
+			}
+		}
+	}
+}

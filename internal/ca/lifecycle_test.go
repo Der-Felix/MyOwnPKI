@@ -566,17 +566,17 @@ func TestSealedCreationFails(t *testing.T) {
 // TestLegacyPkiShAsOfflineRoot runs the offline flow end to end with
 // legacy/pki.sh as the offline root (PHASE1 step 8). It needs bash and
 // OpenSSL; in CI on Linux it must run. On Windows (Git Bash) it runs when
-// MYOWNPKI_LEGACY_OPENSSL names an OpenSSL that understands POSIX paths,
+// LEGACY_TEST_OPENSSL names an OpenSSL that understands POSIX paths,
 // e.g. /usr/bin/openssl.
 func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 	t.Parallel()
 	bash, err := exec.LookPath("bash")
-	legacyOpenSSL := os.Getenv("MYOWNPKI_LEGACY_OPENSSL")
+	legacyOpenSSL := os.Getenv("LEGACY_TEST_OPENSSL")
 	if err != nil || (runtime.GOOS != "linux" && legacyOpenSSL == "") {
 		if runtime.GOOS == "linux" && os.Getenv("CI") != "" {
 			t.Fatal("bash missing in CI")
 		}
-		t.Skip("the legacy offline root test needs bash and POSIX paths: Linux, or MYOWNPKI_LEGACY_OPENSSL=/usr/bin/openssl in Git Bash")
+		t.Skip("the legacy offline root test needs bash and POSIX paths: Linux, or LEGACY_TEST_OPENSSL=/usr/bin/openssl in Git Bash")
 	}
 	opensslBin(t)
 	script, err := filepath.Abs("../../legacy/pki.sh")
@@ -626,14 +626,32 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 	}
 	cert := parse(t, pemBytes(t, certPEM))
 	v.clk.Set(cert.NotBefore.Add(time.Minute))
-	if _, err := v.e.InstallCACertificate(t.Context(), "issuing", certPEM, tester); err != nil {
-		t.Fatalf("install the certificate signed by pki.sh: %v", err)
+	if _, ierr := v.e.InstallCACertificate(t.Context(), "issuing", certPEM, tester); ierr != nil {
+		t.Fatalf("install the certificate signed by pki.sh: %v", ierr)
 	}
 	if cert.SignatureAlgorithm != x509.SHA256WithRSA {
 		t.Errorf("signature %v", cert.SignatureAlgorithm)
 	}
 	out := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"nas.homelab.lan"}, IPAddresses: []string{"10.0.0.5"}})
 	opensslVerifyAt(t, v.clk.Now(), out.Chain, out.CertDER, "sslserver")
+
+	// Step 9: the root CRL from pki.sh is uploaded; with the CRL the server
+	// signs for the intermediate, the whole chain passes -crl_check_all.
+	pki("crl", "--ca", "root")
+	rootCRL, err := os.ReadFile(filepath.Join(dir, "pki", "publish", "root.crl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, uerr := v.e.UploadCRL(t.Context(), "root", rootCRL, tester); uerr != nil {
+		t.Fatalf("upload the CRL of pki.sh: %v", uerr)
+	}
+	signed, err := v.e.RenewCRLs(t.Context(), "test")
+	if err != nil || len(signed) != 1 {
+		t.Fatalf("intermediate CRL: %+v %v", signed, err)
+	}
+	if res, ok := opensslWithCRLs(t, v.clk.Now(), out.Chain, [][]byte{rootCRL, signed[0].DER}, out.CertDER, "-crl_check_all"); !ok {
+		t.Errorf("chain with both CRLs:\n%s", res)
+	}
 }
 
 // posixPath turns C:\x\y into /c/x/y for Git Bash; other systems keep it.

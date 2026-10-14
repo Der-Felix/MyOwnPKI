@@ -282,6 +282,9 @@ func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM 
 		return nil, err
 	}
 	reasons, warnings := checkOrdered(cert, csr, plan, now)
+	if berr := checkKeyNotBlocked(ctx, q, cert.PublicKey); berr != nil {
+		reasons = append(reasons, berr.Error())
+	}
 	if serr := checkSerialFree(ctx, q, parent.ca.ID, SerialHex(cert.SerialNumber)); serr != nil {
 		reasons = append(reasons, serr.Error()+" – sign again with a new serial")
 	}

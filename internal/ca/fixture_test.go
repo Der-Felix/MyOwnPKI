@@ -426,3 +426,47 @@ func opensslVerifyAt(t *testing.T, at time.Time, chain [][]byte, leafDER []byte,
 		t.Errorf("openssl %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+// opensslWithCRLs runs `openssl verify` with CRL checking and returns the
+// output and whether OpenSSL said OK. flags: e.g. -crl_check_all,
+// -extended_crl.
+func opensslWithCRLs(t *testing.T, at time.Time, chain, crls [][]byte, leafDER []byte, flags ...string) (string, bool) {
+	t.Helper()
+	bin := opensslBin(t)
+	dir := t.TempDir()
+	write := func(name, typ string, ders ...[]byte) string {
+		var b bytes.Buffer
+		for _, d := range ders {
+			b.Write(pem.EncodeToMemory(&pem.Block{Type: typ, Bytes: d}))
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	args := []string{"verify", "-x509_strict", "-attime", strconv.FormatInt(at.Unix(), 10), "-CAfile", write("root.pem", "CERTIFICATE", chain[len(chain)-1])}
+	if len(chain) > 1 {
+		args = append(args, "-untrusted", write("inter.pem", "CERTIFICATE", chain[:len(chain)-1]...))
+	}
+	args = append(args, "-CRLfile", write("crls.pem", "X509 CRL", crls...))
+	args = append(args, flags...)
+	args = append(args, write("leaf.pem", "CERTIFICATE", leafDER))
+	out, err := exec.CommandContext(t.Context(), bin, args...).CombinedOutput()
+	return string(out), err == nil && bytes.Contains(out, []byte(": OK"))
+}
+
+// opensslText runs `openssl <kind> -noout -text` on a DER object.
+func opensslText(t *testing.T, kind string, der []byte) string {
+	t.Helper()
+	bin := opensslBin(t)
+	p := filepath.Join(t.TempDir(), "obj.der")
+	if err := os.WriteFile(p, der, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), bin, kind, "-inform", "DER", "-in", p, "-noout", "-text").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl %s -text: %v\n%s", kind, err, out)
+	}
+	return string(out)
+}

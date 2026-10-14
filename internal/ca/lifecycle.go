@@ -447,6 +447,9 @@ func (e *Engine) signAndStore(ctx context.Context, now time.Time, plan *caPlan, 
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
 	}
+	if err = checkKeyNotBlocked(ctx, pkidb.New(e.PKI), priv.Public()); err != nil {
+		return nil, err
+	}
 	pkcs8, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return nil, err
@@ -705,6 +708,9 @@ func (e *Engine) importRoot(ctx context.Context, req ImportRootRequest, now time
 		reasons = append(reasons, fmt.Sprintf("the certificate is signed with %v – only SHA-2 (RSA, ECDSA) and Ed25519 signatures are accepted; SHA-1 and MD5 can be forged", cert.SignatureAlgorithm))
 	}
 	reasons = append(reasons, checkCACertBasics(cert, now)...)
+	if berr := checkKeyNotBlocked(ctx, q, cert.PublicKey); berr != nil {
+		reasons = append(reasons, berr.Error())
+	}
 	if alg, kerr := keyAlgorithm(cert.PublicKey); kerr != nil {
 		reasons = append(reasons, kerr.Error())
 	} else if w, werr := importedCAKey(alg); werr != nil {

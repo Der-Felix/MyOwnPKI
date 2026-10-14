@@ -98,6 +98,9 @@ func loadChain(ctx context.Context, q *pkidb.Queries, ca pkidb.Ca, gen pkidb.CaG
 		if err != nil {
 			return nil, nil, fmt.Errorf("CA %q generation %d: stored certificate: %w", row.Name, gen.Generation, err)
 		}
+		if rerr := checkNotRevoked(ctx, q, row, gen); rerr != nil {
+			return nil, nil, rerr
+		}
 		cc, err := loadConstraints(ctx, q, row)
 		if err != nil {
 			return nil, nil, err

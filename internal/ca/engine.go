@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"slices"
 	"strings"
@@ -62,6 +63,8 @@ type Engine struct {
 	Wake func()
 	// Rand is the randomness for serials and keys; nil = crypto/rand.
 	Rand io.Reader
+	// Log, if set, gets CRL renewals and CRL warnings (process log).
+	Log *slog.Logger
 }
 
 // Request is one certificate request. Every field is untrusted input.
@@ -163,6 +166,9 @@ func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued
 			return nil, deny("%v", err)
 		}
 		l.pub = csr.PublicKey
+		if err = checkKeyNotBlocked(ctx, q, l.pub); err != nil {
+			return nil, err
+		}
 	} else {
 		allowed, kerr := e.ServerKeygen(ctx)
 		if kerr != nil {
@@ -213,6 +219,9 @@ func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued
 			return nil, fmt.Errorf("generate key: %w", err)
 		}
 		l.pub = priv.Public()
+		if err = checkKeyNotBlocked(ctx, q, l.pub); err != nil {
+			return nil, err
+		}
 		if pkcs8, err = x509.MarshalPKCS8PrivateKey(priv); err != nil {
 			return nil, fmt.Errorf("generate key: %w", err)
 		}
