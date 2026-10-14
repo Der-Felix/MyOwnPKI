@@ -1,7 +1,7 @@
 # Trial: ogen vs. hand-written API handlers (phase 1, step 3)
 
 **Decision (owner, 2026-10-13): hand-written handlers with `net/http`, no generator.** The spec
-stays the source of truth through contract tests (PHASE1 step 16, PLAN §14 "API draft"). The trial
+stays the source of truth through contract tests (PHASE1 steps 13 and 18, PLAN §14 "API draft"). The trial
 code lived on the branch `trial/ogen`, which was deleted after the decision; this page keeps the
 results.
 

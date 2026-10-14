@@ -411,6 +411,66 @@ MyOwnPKI/
 | **5 – Enterprise** | Tenant UI, OIDC, HSM build, SIEM export, CT monitoring, network scan, **Shamir split of the recovery key (m of n, four-eyes principle)** | Enterprise feature set |
 | **Later** | Plugins (WASM sandbox), SSH CA, SCEP/EST, Terraform provider | – |
 
+The phases describe the architecture's building blocks; **what ships when** is decided by the
+release plan below – v1.0 takes parts of phases 2–4 and leaves others for later.
+
+### 10.1 Release plan to a stable v1.0 (owner decision 2026-10-14)
+
+| Version | Content | Outcome |
+|---|---|---|
+| **v0.1** | Phase 1 complete, as planned in `docs/PHASE1.md` | Bash script replaced in the browser |
+| **v0.2** | ACME server with **http-01 and dns-01** (the server only *reads* the TXT record, through a **configurable DNS resolver** – internal DNS, split DNS); domain model and approval levels | certbot/Traefik/Caddy against the own CA |
+| **v0.3** | **Linux agent** (with the DNS provider integration for dns-01) and **monitoring** (details below) | Certificates deployed and watched |
+| **Beta** | Feature freeze; release pipeline, demo, guides, upgrade tests; only fixes | Tested by others before 1.0 |
+| **v1.0** | Everything above, stable | – |
+
+**v1.0 contains:**
+
+- **Phase 1 complete.**
+- **ACME server:** http-01 and dns-01; domain model and approval levels (§6.3, §6.4).
+  - With dns-01 the *client* sets the TXT record; the server only reads it. So the server needs no
+    DNS provider, but a **configurable DNS resolver** (e.g. the internal DNS, also for split DNS).
+  - Until the agent brings provider support (v0.3), the docs show `certbot-dns-rfc2136` and
+    `certbot-dns-cloudflare`.
+- **Linux agent:** enrollment with proof of control (ADR-18), issuance via ACME (ADR-19), deploy
+  profiles **nginx, Apache, HAProxy, file + hook**, reload with rollback, heartbeat/inventory.
+  - DNS providers for dns-01 through the lego providers: **RFC 2136 and Cloudflare** first.
+  - The ACME directory URL is configurable from the start, so Let's Encrypt later is only configuration.
+  - It can optionally add the root to the system trust store.
+- **Monitoring:**
+  - dashboard: expiry, agent status, sealed warning;
+  - TLS scan of the endpoints (integration level 2, §6.3a);
+  - notifications by **e-mail and webhook**, including the alarm when the server stays sealed.
+- **Trust store, small form:**
+  - root download as PEM, DER and `.mobileconfig` (Apple);
+  - a guide per system in the web guide: Windows, macOS, iOS, Android, Linux, Firefox;
+  - the Linux agent can add the root to the system trust store (optional).
+- **Guide in the web UI:**
+  - a "first steps" assistant after `init`;
+  - embedded guides: building a CA, offline root, connecting certbot, installing the agent,
+    backup/restore.
+- **Live test:**
+  - `deploy/demo/docker-compose.yml` with MyOwnPKI, nginx with the agent, and a certbot container –
+    one command shows http-01 end to end;
+  - additionally, the static UI demo on GitHub Pages.
+- **Release:**
+  - GoReleaser, cosign signatures, SBOM;
+  - Docker image (distroless, non-root);
+  - an upgrade test between versions;
+  - a beta phase before 1.0.
+
+  The tools are asked for when the release step comes up, and every publication needs the owner's
+  go (CLAUDE.md).
+
+**After v1.0:**
+- layouts A and C, themes;
+- OCSP, Prometheus, Litestream;
+- tls-alpn-01 and EAB;
+- Windows and FreeBSD agent;
+- ACME client for Let's Encrypt in the agent (only configuration then, see above);
+- trust-store distribution by GPO, MDM and into Java trust stores;
+- phase 5 (enterprise).
+
 ---
 
 ## 11. Backlog: plugins (deferred)
@@ -429,8 +489,8 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [x] Agent approval: proof of control, otherwise manual (ADR-18)
 - [x] Repository: new repo `Der-Felix/MyOwnPKI` (ADR-20)
 - [ ] Check name availability: domains (`.io`, `.de`, `.dev`), trademark registers (DPMA/EUIPO)
-- [ ] Which DNS providers and deploy profiles have priority for phases 2/3?
-- [ ] Which notification channels first?
+- [x] DNS providers first: RFC 2136 and Cloudflare, in the agent (v0.3); the ACME server only needs a configurable resolver. Deploy profiles first: nginx, Apache, HAProxy, file + hook (v1.0, §10.1)
+- [x] Notification channels first: e-mail and webhook (v1.0, §10.1)
 - [x] Task runner: Taskfile (phase 0, see §13)
 - [x] Configuration format: YAML (phase 0, see §13)
 - [x] OpenAPI code generator: none – hand-written handlers + contract tests (trial of ogen, 2026-10-13, §14 "API draft")
@@ -505,7 +565,7 @@ keeps the reasons. None of them changes an ADR.
 | `certificateHold` not offered | Temporary revocation is poorly supported; CA/B Baseline Requirements forbid it |
 | Role scopes `tenant` and `ca` only; no tenant in any path | Domain/agent-group scopes come with phases 2/3; the tenant comes from the authenticated context |
 | Not in the draft: batch upload, encrypted backup download, ACME, domains, agents | Not in the phase 1 row or belong to later phases |
-| **No code generator: API handlers are written by hand** with `net/http` (ServeMux patterns) and `encoding/json`; the spec stays the source of truth through **contract tests** (step 16) that check every operation for route, method, role (`x-required-role`), RFC 9457 errors and response schema (owner decision 2026-10-13, trial in `docs/trials/ogen.md`) | ogen would add 27 runtime modules (+18 % binary for 3 endpoints), can't generate `issueCertificate` and the legacy import, gives handlers no access to cookies/headers and leaks internal error text by default; its strength – schema-driven input validation – is covered by the contract tests |
+| **No code generator: API handlers are written by hand** with `net/http` (ServeMux patterns) and `encoding/json`; the spec stays the source of truth through **contract tests** (steps 13 and 18) that check every operation for route, method, role (`x-required-role`), RFC 9457 errors and response schema (owner decision 2026-10-13, trial in `docs/trials/ogen.md`) | ogen would add 27 runtime modules (+18 % binary for 3 endpoints), can't generate `issueCertificate` and the legacy import, gives handlers no access to cookies/headers and leaks internal error text by default; its strength – schema-driven input validation – is covered by the contract tests |
 
 ### Storage foundation (phase 1 step 4)
 | Decision | Why |
@@ -539,7 +599,7 @@ keeps the reasons. None of them changes an ADR.
 | One secret check at a time; 3 free failures, then 1 min doubling to 1 h; every attempt audited (success, failure, denied) in the instance log; nothing about the secret is logged | Each attempt costs 256 MiB – no memory exhaustion by parallel guesses; guessing is slowed and visible |
 | Stored Argon2id parameters are bounds-checked before use | A tampered row can't turn an unseal attempt into a denial of service |
 | Recovery key: Crockford Base32, 9 groups of 6, 2 check characters (typos are caught before a real attempt); redacted in `%v`, JSON and slog – only `Reveal()` prints it | It can't reach a log by accident |
-| Recovery key output and confirmation are prepared for `myownpki init` (step 12): terminal only if interactive, otherwise `--recovery-key-file` (0600, never overwritten); two random groups re-typed before anything is stored | Owner decision 2026-10-13 |
+| Recovery key output and confirmation are prepared for `myownpki init` (step 11): terminal only if interactive, otherwise `--recovery-key-file` (0600, never overwritten); two random groups re-typed before anything is stored | Owner decision 2026-10-13 |
 | `golang.org/x/crypto/openpgp` is blocked by depguard | GO-2026-5932: unmaintained and unsafe by design; it ships in the same module as argon2 |
 
 ### CA engine (phase 1 step 7, design approved 2026-10-13)
