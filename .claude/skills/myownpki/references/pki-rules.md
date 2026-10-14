@@ -131,6 +131,27 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
 - Serve OCSP from the database; pre-sign and cache responses, rebuild on revocation (no restart –
   this fixes the legacy limitation in `lib/ocsp.sh`).
 - Revocation reasons per RFC 5280 (keyCompromise, superseded, cessationOfOperation, …).
+- **Revocation** (step 9):
+  - Final only: no certificateHold.
+  - "unspecified" is written without a reasonCode extension.
+  - keyCompromise/cACompromise put the key's SPKI hash into `blocked_keys`; the engine refuses that
+    key in every later request.
+- **CRL per CA generation:**
+  - Signed by the generation's key.
+  - thisUpdate backdated 5 minutes.
+  - Renew after ⅓ of the lifetime; warn from ½.
+  - Keep an entry until notAfter + crl_days (RFC 5280 §3.3).
+  - A generation signs CRLs until its own notAfter and until the latest notAfter below it plus
+    crl_days – imported legacy certificates may outlive their CA.
+- **No issuingDistributionPoint yet.** OpenSSL refuses such a CRL for certificates without a CDP.
+- **Offline root CRLs are uploaded and checked:**
+  - signer generation via signature + AKI;
+  - number strictly increasing;
+  - thisUpdate not in the future, nextUpdate in the future;
+  - no delta CRL.
+  - Our intermediates on it are marked revoked for good; certificateHold is not supported (warning
+    says so), lifting the hold later changes nothing.
+- **Serving:** DER over HTTP, short max-age (15 min) with ETag/304, never cached until nextUpdate.
 
 ## 8. ACME specifics
 

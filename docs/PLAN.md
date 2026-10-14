@@ -623,6 +623,16 @@ keeps the reasons. None of them changes an ADR.
 | New CA keys P-384/P-256/RSA 3072/4096; imported RSA 2048 and P-521 with a warning; Ed25519 never as CA | Browsers and Windows don't verify Ed25519 chains; Chrome rejects P-521 in TLS chains |
 | Every lifecycle action audited in the pki.db transaction (`ca.create`, `ca.import_root`, `ca.csr_create`, `ca.certificate_install`, `ca.renew`, `ca.retire`, `ca.update`); refusals as denied/failure in the tenant log | Same rule as issuance: nothing changes without its audit entry |
 
+### Revocation and CRLs (phase 1 step 9, design approved 2026-10-14)
+| Decision | Why |
+|---|---|
+| Revocations are final and stored at once (also while sealed); the CRL of the issuing generation is signed right after – or at unseal; until then "N revocation(s) not yet published" | An urgent revocation must not wait for a passphrase, but nobody should believe it is effective before a CRL lists it |
+| One CRL per CA generation, number strictly increasing per CA across generations, AKI = SKI of the generation, renewed after ⅓ of the lifetime, warning from ½, entries kept until notAfter + crl_days (RFC 5280 §3.3) | Older chains keep a working CRL; caches always prefer the newest number; a warning means a renewal was missed, with half the lifetime left to act |
+| keyCompromise/cACompromise block the key (SHA-256 of the SubjectPublicKeyInfo) for every new certificate and CA of the tenant | A key reported stolen must never come back in a new CSR |
+| The offline root's CRL is uploaded and checked (signer generation, number, times, no delta, no unknown critical extension); intermediates it lists are marked revoked and stop issuing | The server can't sign it, but must neither serve a stale or foreign CRL nor keep using a CA its root has revoked |
+| Serving: DER over plain HTTP, `max-age=900` with ETag/Last-Modified/304 and HEAD; legacy aliases only for imported CAs | A new CRL gets through proxies within minutes; unchanged files cost nothing |
+| No issuingDistributionPoint for now | OpenSSL refuses a CRL with IDP for certificates without a CDP ("different CRL scope") – legacy certificates without AIA_BASE_URL have none (tested) |
+
 ### Web UI and dev mode
 | Decision | Why |
 |---|---|

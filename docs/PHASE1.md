@@ -71,16 +71,25 @@ certificates
 certificate_sans
   certificate_id → certificates.id, type (dns|ip|email|uri), value   -- INDEX (type, value)
 
-revocations
+revocations                           -- migration 0005 (step 9); final: no update, no delete
   certificate_id   TEXT PK → certificates.id
-  reason           TEXT               -- RFC 5280 names
+  reason           TEXT               -- RFC 5280 names, final reasons only (no certificateHold)
   revoked_at       TEXT
-  invalidity_date  TEXT NULL
+  invalidity_date  TEXT NULL          -- keyCompromise/cACompromise
   revoked_by       TEXT
 
-crls                                  -- migration 0005 (step 9)
-  ca_id, generation → ca_generations, number, this_update, next_update, crl_der   -- one CRL per generation (its URL); keep last N
+ca_revocations                        -- revoked CA generations; final
+  ca_id, generation → ca_generations, reason (+ cACompromise), revoked_at, invalidity_date, revoked_by
+  source           TEXT               -- server (online parent) | root_crl (found in an uploaded offline root CRL)
+
+crls                                  -- every CRL ever published, kept as evidence; immutable
+  ca_id, generation → ca_generations, number, this_update, next_update, crl_der   -- PK (ca_id, number): strictly increasing per CA
   source           TEXT               -- signed (by the server) | uploaded (offline root: signed offline, checked on upload)
+
+blocked_keys                          -- keys reported compromised; immutable, per tenant
+  spki_sha256 PK, reason (keyCompromise|cACompromise), source_type (certificate|ca), source_id, blocked_at, blocked_by
+
+cas.legacy_urls  INTEGER              -- set by the importer: serve <base>/<name>.crt|.crl as aliases of generation 1
 
 keys
   id               TEXT PK
@@ -167,8 +176,8 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 6 | **done 2026-10-13** (API/UI wiring with steps 12–14) – Keys + unseal **+ recovery key**: Argon2id KEK, AES-256-GCM envelope encryption into `pki.db`, seal/unseal in memory, passphrase verifier; seal/unseal audited | golang.org/x/crypto | round trip; wrong passphrase rejected; test proves no plaintext key bytes in the DB file |
 | 6a | **done 2026-10-13** – **Signed audit checkpoints** (Ed25519 from the root key, checkpoints are chain entries; made at unseal, before seal, daily, every 1000 entries; `audit verify --checkpoint-key`): at start, daily and every N entries a checkpoint (scope, seq, hash, time) is signed with a key derived from the unseal key and stored; `audit verify` checks the chain against the checkpoints – rewriting a chain then requires the passphrase (owner decision 2026-10-13) | – | recomputed chain without the key is detected; checkpoints survive restore |
 | 7 | **done 2026-10-13** (`internal/ca`, pki.db migration 0004 with CA generations; API/UI wiring with steps 13–14 and 18–19) – CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
-| 8 | **done 2026-10-14** (`internal/ca`: lifecycle, offline flow; `myownpki ca list/show`; legacy `pki ca-sign`; API/UI with steps 18–19, `init` uses it in step 11) – CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); offline root import; renewal with a new key (next generation); retire; limits | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root (CI on Linux; locally with `MYOWNPKI_LEGACY_OPENSSL=/usr/bin/openssl` in Git Bash) and with the plain OpenSSL command of the instructions |
-| 9 | Revocation + CRL generation (number +1, AKI, nextUpdate) – **a sealed server can't renew CRLs: status/warning "sealed since …, CRL of <CA> expires on …"** in `db status`, API and process log (owner 2026-10-13), **from half of the CRL lifetime on** (owner 2026-10-14); **upload of the offline root's CRL** (signed by exactly that root generation, CRL number strictly increasing, thisUpdate not in the future, nextUpdate in the future; same half-lifetime warning); serving on the public listener, **including the legacy URLs `<base>/<name>.crt|.crl` as permanent aliases of generation 1 of imported CAs** | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf; uploaded root CRL with a wrong signer, an old number or a past nextUpdate is refused |
+| 8 | **done 2026-10-14** (`internal/ca`: lifecycle, offline flow; `myownpki ca list/show`; legacy `pki ca-sign`; API/UI with steps 18–19, `init` uses it in step 11) – CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); offline root import; renewal with a new key (next generation); retire; limits | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root (CI on Linux; locally with `LEGACY_TEST_OPENSSL=/usr/bin/openssl` in Git Bash) and with the plain OpenSSL command of the instructions |
+| 9 | **done 2026-10-14** (`internal/ca`: revoke, CRL, upload; `internal/publish`: serving, wired with step 12; CRL status in `db status` and `ca show`) – Revocation + CRL generation (number +1, AKI, nextUpdate) – **a sealed server can't renew CRLs: status/warning "sealed since …, CRL of <CA> expires on …"** in `db status`, API and process log (owner 2026-10-13), **from half of the CRL lifetime on** (owner 2026-10-14); **upload of the offline root's CRL** (signed by exactly that root generation, CRL number strictly increasing, thisUpdate not in the future, nextUpdate in the future; same half-lifetime warning); serving on the public listener, **including the legacy URLs `<base>/<name>.crt|.crl` as permanent aliases of generation 1 of imported CAs** | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf; uploaded root CRL with a wrong signer, an old number or a past nextUpdate is refused |
 | 10 | **Auth core** (was 13): Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer. Comes **before `init`**, which creates the first admin with it. API tokens move to step 18 | – | one test per rule in security.md; RFC 6238 test vectors |
 | 11 | **`myownpki init`** (was 12): first admin (password + TOTP from step 10) + unseal passphrase + **recovery key** + **checkpoint key fingerprint to note down** (`Keyring.CheckpointKeyFingerprint` after a first unseal) (`keys.NewRecoveryKey` → show → confirm → `keys.Init`), **prominent warning to keep passphrase, recovery key and backups apart**. Recovery key only on an interactive terminal (`keys.RecoveryKeyOutput`); otherwise (Docker, systemd, pipe) init refuses and requires `--recovery-key-file <path>`, written with 0600 and never overwriting (`keys.WriteRecoveryKeyFile`), with the hint to store it safely and remove it from the server. Before init finishes the user re-types two random groups (`keys.ConfirmIndexes`/`CheckGroups`); the same for `recovery-key rotate` (owner 2026-10-13). Optionally init also creates an online root + intermediate with the step 8 functions (no second path, like legacy `pki init --intermediate`), so the browser test in step 14 has a CA; it must run without any input (Docker demo) and warns clearly "online root – for tests and homelab" (owner 2026-10-14) | – | init on an empty data dir; refuses to run twice; non-terminal without file refused; wrong confirmation aborts without writing anything |
 | 12 | **Server wiring + listeners with TLS** (was 15): admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA (handlers from step 9); `serve` runs the audit deliverer, the checkpoint hooks (`OnUnseal`/`BeforeSeal`) and the daily heads | – | `openssl s_client`, `curl -v`; fingerprint matches the console; `audit verify` shows the checkpoints of unseal and seal |
@@ -235,6 +244,14 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
   newest certificate in the generation; older certificates of the same key go into a history table
   created then (phase 1 renews only with a new key, owner 2026-10-14). Imported CAs are generation 1,
   so the legacy URL aliases of step 9 point there forever – also after later renewals.
+- **Wiring for step 12 (from step 9):** `serve` runs `Engine.RenewCRLs` on a timer (e.g. every 15
+  minutes) and at unseal (together with the audit checkpoint hook), logs `crl attention` warnings
+  with "sealed since …", and mounts `publish.New` on the public listener.
+- **issuingDistributionPoint – later, not now (step 9 finding, 2026-10-14):** a critical IDP with the
+  generation's URL would bind each CRL to its URL. Tested and dropped: OpenSSL then refuses the CRL
+  for certificates **without** a CRL distribution point ("different CRL scope", even without
+  `-extended_crl`) – legacy certificates issued without `AIA_BASE_URL` have none. Revisit after the
+  importer (step 10) knows which certificates lack a CDP; uploaded CRLs with an IDP are accepted.
 - **ACME (phase 2) is stricter than the CSR wish list of step 7** (owner 2026-10-13): at finalize the
   CSR must name exactly the identifiers of the order – nothing missing, nothing extra – otherwise the
   order fails with `badCSR` (RFC 8555 §7.4). Names are never dropped or added there; the ACME path
@@ -294,3 +311,16 @@ TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test v
 | 23 | CA defaults (step 8) | Root 7300 days, intermediate 3650 days (never beyond the parent), pathlen 0; CRL lifetime: offline root 180, online root 30, intermediate 7 days; maximum leaf validity 397 days. **CRL expiry warning (also while sealed) from half of the CRL lifetime on** |
 | 24 | CLI for CAs (step 8) | Only `ca list` / `ca show`; creating and renewing via API/UI (steps 18–19) and `init` (step 11) |
 | 25 | CA at `init` (step 11) | Optional online root + intermediate with the step 8 functions (no second path), **non-interactive possible** (Docker demo), warning "online root – for tests and homelab" |
+| 26 | Revocation while sealed (step 9) | Allowed: stored and audited at once, the CRL is signed at unseal. Until then `db status` and `ca show` show "N revocation(s) not yet published in a CRL" – a revocation takes effect only with the CRL |
+| 27 | CRL timing (step 9) | Renewed after a third of the lifetime; warning from half of it (also while sealed, also for the uploaded offline root CRL); "expired" after nextUpdate |
+| 28 | Expired certificates in CRLs (step 9) | RFC 5280 §3.3: an entry stays until it was on a regular CRL after the certificate expired – removed only from notAfter + crl_days on |
+| 29 | Revocation reasons (step 9) | Final reasons only (no certificateHold); "unspecified" without reasonCode extension; optional invalidity date for keyCompromise/cACompromise. **keyCompromise / cACompromise put the SHA-256 of the SubjectPublicKeyInfo into `blocked_keys`** (per tenant, immutable); the engine denies CSRs, server-generated keys, new and imported CA keys with a blocked key |
+| 30 | CRL history (step 9) | Every CRL is kept (evidence); clean-up later if ever needed |
+| 31 | Legacy aliases (step 9) | Only for CAs with `legacy_urls` (set by the importer) |
+| 32 | CLI (step 9) | No revocation or upload by CLI; API/UI in steps 18/19; status read-only in `db status` and `ca show` |
+| 33 | Serving CRLs and CA certificates (step 9) | `Cache-Control: public, max-age=900` (15 minutes) plus ETag and Last-Modified with 304 answers and HEAD – not until nextUpdate, so a new CRL after a revocation gets through proxies quickly |
+| 34 | issuingDistributionPoint (step 9) | Not written for now – see the note "issuingDistributionPoint – later" (breaks certificates without a CRL distribution point in OpenSSL) |
+| 35 | How long a generation needs CRLs (step 9) | Until its own notAfter **and** until the latest notAfter of everything it signed plus crl_days (RFC 5280 §3.3) – imported legacy certificates may outlive their CA |
+| 36 | Unsupported reasons on the offline root's CRL (step 9) | certificateHold, removeFromCRL and unknown codes mark our intermediate as revoked (recorded as unspecified) with the warning "certificateHold is not supported – for MyOwnPKI this CA is revoked for good"; lifting the hold later changes nothing |
+| 37 | Revocation edge cases (step 9) | An expired certificate can be revoked (with a warning; keyCompromise still blocks the key). If the CRL can't be signed after a revocation, the revocation stays stored, with a warning and `crl.sign/failure` in the audit log; `RenewCRLs` signs it later. A root can't be revoked (remove it from the trust stores); a CA below an offline root is revoked on the root's CRL and recognized at upload |
+| 38 | CRL limits (step 9) | Upload at most 4 MiB, CRL number at most 63 bits; CRL warnings don't change the exit code of `db status` (alerting in phase 4) |
