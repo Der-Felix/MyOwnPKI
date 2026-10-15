@@ -1,0 +1,458 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"io"
+	"log/slog"
+	"math/big"
+	"net"
+	"net/http"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/auth"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/clock"
+	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/setup"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
+)
+
+var t0 = time.Date(2026, 10, 16, 8, 0, 0, 0, time.UTC)
+
+var console = keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "console:test"}, Principal: authz.Console()}
+
+// logBuf collects log lines from several goroutines.
+type logBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func testConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDir = filepath.Join(t.TempDir(), "data")
+	cfg.Admin.Listen, cfg.Public.Listen = "127.0.0.1:0", "127.0.0.1:0"
+	return cfg
+}
+
+// initialized runs init --demo with a test CA and returns the passphrase.
+func initialized(t *testing.T, cfg config.Config) string {
+	t.Helper()
+	res, err := setup.Run(t.Context(), setup.Options{
+		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console,
+	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(res.DemoSecretsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if p, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "unseal passphrase: "); ok {
+			return p
+		}
+	}
+	t.Fatal("no passphrase in the demo file")
+	return ""
+}
+
+func TestBootstrapCertificate(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	cfg.Admin.Listen, cfg.Admin.TLSNames = "192.0.2.5:9443", "pki.homelab.lan, 198.51.100.7"
+	c, in, err := adminCertificate(cfg, "WIN-PKI01", t0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := c.Leaf
+	if !in.Created || in.Source != "bootstrap" || leaf.IsCA || !leaf.BasicConstraintsValid || leaf.KeyUsage != x509.KeyUsageDigitalSignature ||
+		len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth || !leaf.NotAfter.Equal(t0.Add(397*24*time.Hour)) {
+		t.Errorf("bootstrap certificate: %+v\n%+v", in, leaf)
+	}
+	for _, name := range []string{"win-pki01", "localhost", "pki.homelab.lan"} {
+		roots := x509.NewCertPool()
+		roots.AddCert(leaf)
+		if _, verr := leaf.Verify(x509.VerifyOptions{DNSName: name, Roots: roots, CurrentTime: t0, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); verr != nil {
+			t.Errorf("%s: %v", name, verr)
+		}
+	}
+	for _, ip := range []string{"127.0.0.1", "::1", "192.0.2.5", "198.51.100.7"} {
+		if !covers(leaf, nil, []netip.Addr{netip.MustParseAddr(ip)}) {
+			t.Errorf("IP %s missing", ip)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if fi, serr := os.Stat(filepath.Join(cfg.DataDir, "tls", bootstrapKey)); serr != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("key file: %v %v", fi.Mode(), serr)
+		}
+	}
+
+	// Next start: the same certificate.
+	_, again, err := adminCertificate(cfg, "WIN-PKI01", t0.Add(24*time.Hour), nil)
+	if err != nil || again.Created || again.Fingerprint != in.Fingerprint {
+		t.Errorf("second start: %+v %v", again, err)
+	}
+	// 30 days before the end: a new one, with a reason.
+	_, renewed, err := adminCertificate(cfg, "WIN-PKI01", leaf.NotAfter.Add(-29*24*time.Hour), nil)
+	if err != nil || !renewed.Created || renewed.Fingerprint == in.Fingerprint || !strings.Contains(renewed.Reason, "30 days") {
+		t.Errorf("renewal: %+v %v", renewed, err)
+	}
+	// A new name: a new certificate.
+	cfg.Admin.TLSNames += ", ca.homelab.lan"
+	_, named, err := adminCertificate(cfg, "WIN-PKI01", leaf.NotAfter.Add(-29*24*time.Hour), nil)
+	if err != nil || !named.Created || !strings.Contains(named.Reason, "names changed") {
+		t.Errorf("new name: %+v %v", named, err)
+	}
+}
+
+func TestOperatorCertificate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "pki.homelab.lan"}, NotBefore: t0, NotAfter: t0.AddDate(1, 0, 0)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	pk, _ := x509.MarshalPKCS8PrivateKey(key)
+	cfg := testConfig(t)
+	cfg.Admin.TLSCertFile, cfg.Admin.TLSKeyFile = filepath.Join(dir, "c.pem"), filepath.Join(dir, "k.pem")
+	_ = os.WriteFile(cfg.Admin.TLSCertFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600)
+	_ = os.WriteFile(cfg.Admin.TLSKeyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pk}), 0o600)
+	_, in, err := adminCertificate(cfg, "host", t0, nil)
+	if err != nil || in.Source != "operator" || in.Fingerprint != Fingerprint(der) || in.Created {
+		t.Errorf("operator certificate: %+v %v", in, err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "tls")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a bootstrap certificate was made although the operator has one")
+	}
+}
+
+func TestAllowList(t *testing.T) {
+	t.Parallel()
+	var logs logBuf
+	refused := newRefusalLog(slog.New(slog.NewJSONHandler(&logs, nil)), clock.NewFake(t0))
+	try := func(allowed string) (net.Conn, error) {
+		t.Helper()
+		nets, err := config.ParseNetworks(allowed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln := &allowListener{Listener: raw, allowed: nets, refused: refused}
+		t.Cleanup(func() { _ = ln.Close() })
+		accepted := make(chan net.Conn, 1)
+		go func() {
+			if c, aerr := ln.Accept(); aerr == nil {
+				accepted <- c
+			}
+		}()
+		c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", raw.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		select {
+		case a := <-accepted:
+			return a, nil
+		case <-time.After(500 * time.Millisecond):
+			_ = c.SetReadDeadline(time.Now().Add(time.Second))
+			_, rerr := c.Read(make([]byte, 1))
+			return nil, rerr
+		}
+	}
+	if c, err := try("127.0.0.0/8"); c == nil {
+		t.Errorf("allowed peer refused: %v", err)
+	}
+	if c, err := try("10.0.0.0/8, 192.0.2.0/24"); c != nil || !errors.Is(err, io.EOF) && !isReset(err) {
+		t.Errorf("peer outside the list: accepted=%v, read %v", c != nil, err)
+	}
+	if c, _ := try(""); c == nil {
+		t.Error("an empty list must allow everybody")
+	}
+	if !strings.Contains(logs.String(), `"msg":"admin connections refused (not in admin.allowed_networks)"`) {
+		t.Errorf("refusal not logged: %s", logs.String())
+	}
+	if got := peerIP(&net.TCPAddr{IP: net.ParseIP("::ffff:10.1.2.3"), Port: 1}); got.String() != "10.1.2.3" {
+		t.Errorf("IPv4-mapped peer: %s", got)
+	}
+}
+
+func isReset(err error) bool {
+	var ne net.Error
+	return err != nil && (errors.As(err, &ne) || strings.Contains(err.Error(), "forcibly closed") || strings.Contains(err.Error(), "reset"))
+}
+
+// TestRefusalLogIsThrottled: a scanner can't flood the log – at most one
+// summary a minute.
+func TestRefusalLogIsThrottled(t *testing.T) {
+	t.Parallel()
+	var logs logBuf
+	clk := clock.NewFake(t0)
+	r := newRefusalLog(slog.New(slog.NewJSONHandler(&logs, nil)), clk)
+	lines := func() int { return strings.Count(logs.String(), "admin connections refused") }
+	for i := range 500 {
+		r.add(netip.AddrFrom4([4]byte{203, 0, 113, byte(i)}))
+	}
+	if lines() != 1 {
+		t.Fatalf("%d lines for a burst, want 1 (the first refusal)", lines())
+	}
+	clk.Advance(30 * time.Second)
+	r.add(netip.MustParseAddr("203.0.113.1"))
+	r.flush()
+	if lines() != 1 {
+		t.Errorf("%d lines within a minute", lines())
+	}
+	clk.Advance(31 * time.Second)
+	r.flush()
+	if lines() != 2 || !strings.Contains(logs.String(), `"count":500`) {
+		t.Errorf("summary after a minute:\n%s", logs.String())
+	}
+}
+
+func TestExposureWarning(t *testing.T) {
+	t.Parallel()
+	for listen, loop := range map[string]bool{"127.0.0.1:9443": true, "[::1]:9443": true, ":9443": false, "0.0.0.0:9443": false, "192.0.2.5:9443": false} {
+		if loopbackOnly(listen) != loop {
+			t.Errorf("%s: loopback %v", listen, !loop)
+		}
+	}
+}
+
+func TestServerStartUnsealAndStop(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	pass := initialized(t, cfg)
+	var logs logBuf
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.NewJSONHandler(&logs, nil)), Hostname: "pki01", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lerr := srv.Listen(t.Context()); lerr != nil {
+		t.Fatal(lerr)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+
+	// Admin: TLS with the logged certificate, /healthz only, HSTS and CSP.
+	var peer string
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		InsecureSkipVerify: true, // #nosec G402 -- the test compares the fingerprint instead
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			peer = Fingerprint(cs.PeerCertificates[0].Raw)
+			return nil
+		},
+	}}}
+	get := func(url string) (int, string, http.Header) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		resp, derr := client.Do(req)
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b), resp.Header
+	}
+	code, body, h := get("https://" + srv.AdminAddr() + "/healthz")
+	if code != http.StatusOK || body != "ok\n" || h.Get("Strict-Transport-Security") != "max-age=31536000" || h.Get("Content-Security-Policy") == "" {
+		t.Errorf("healthz: %d %q %v", code, body, h)
+	}
+	if peer != srv.CertInfo.Fingerprint {
+		t.Errorf("served certificate %s, logged %s", peer, srv.CertInfo.Fingerprint)
+	}
+	if code, _, _ := get("https://" + srv.AdminAddr() + "/certificates"); code != http.StatusNotFound {
+		t.Errorf("admin page before step 13: %d", code)
+	}
+	// Public: CRLs and CA certificates, nothing of the admin side.
+	if code, _, _ := get(srv.PublicAddr() + "/ca/root/1.crt"); code != http.StatusOK {
+		t.Errorf("public CA certificate: %d", code)
+	}
+	if code, _, _ := get(srv.PublicAddr() + "/healthz"); code != http.StatusNotFound {
+		t.Errorf("public /healthz: %d", code)
+	}
+
+	// A wrong passphrase leaves the server running sealed.
+	if uerr := srv.Unseal(t.Context(), []byte("wrong passphrase, long enough"), console); !errors.Is(uerr, keys.ErrWrongSecret) || !srv.Sealed() {
+		t.Errorf("wrong passphrase: %v, sealed %v", uerr, srv.Sealed())
+	}
+	if code, _, _ := get("https://" + srv.AdminAddr() + "/healthz"); code != http.StatusOK {
+		t.Error("the server stopped after a wrong passphrase")
+	}
+	if uerr := srv.Unseal(t.Context(), []byte(pass), console); uerr != nil || srv.Sealed() {
+		t.Fatalf("unseal: %v", uerr)
+	}
+	// Something happens while unsealed: the checkpoint before the seal must
+	// cover it.
+	if _, cerr := srv.auth.CreateUser(t.Context(), auth.NewUserRequest{Username: "carol", Password: "a long password for the test", Who: console}); cerr != nil {
+		t.Fatal(cerr)
+	}
+
+	start := time.Now()
+	cancel()
+	if serr := <-done; serr != nil {
+		t.Fatal(serr)
+	}
+	if took := time.Since(start); took > ShutdownBudget {
+		t.Errorf("shutdown took %v", took)
+	}
+
+	// The audit log: checkpoint after the unseal, checkpoint before the seal.
+	ia, err := store.OpenReadOnly(t.Context(), store.Layout{DataDir: cfg.DataDir}.InstanceAuditDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ia.Close() }()
+	rows, err := ia.Read.QueryContext(t.Context(), `SELECT action, result FROM audit_entries ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var actions []string
+	for rows.Next() {
+		var a, r string
+		if err := rows.Scan(&a, &r); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, a+"/"+r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(actions, " ")
+	if !strings.Contains(got, "system.unseal/failure system.unseal/success audit.checkpoint/success") ||
+		!strings.HasSuffix(got, "user.create/success audit.checkpoint/success system.seal/success") {
+		t.Errorf("audit: %s", got)
+	}
+	// While sealed, the CRL job names the CRLs nobody can sign now (the test
+	// CA has none yet).
+	for _, want := range []string{`"msg":"admin TLS certificate"`, `"msg":"audit head"`, `"msg":"crl attention"`, `"msg":"` + setup.DemoWarning + `"`, `"msg":"stopped"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %s", want)
+		}
+	}
+}
+
+func TestServerRefusesToStart(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	if _, err := store.Migrate(t.Context(), store.Layout{DataDir: cfg.DataDir}, store.DefaultTenant, clock.NewFake(t0).Now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), Options{Config: cfg}); !errors.Is(err, ErrNotInitialized) {
+		t.Errorf("before init: %v", err)
+	}
+	cfg2 := testConfig(t)
+	initialized(t, cfg2)
+	if err := os.Remove(cfg2.AuthKeyFile()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), Options{Config: cfg2}); err == nil || !strings.Contains(err.Error(), "auth key") {
+		t.Errorf("without auth key: %v", err)
+	}
+}
+
+// TestOutboxPilesUpLoudly: when the audit log can't be written, business
+// changes still succeed (their entries wait in the outbox) and the server
+// warns with count and age; nothing is lost.
+func TestOutboxPilesUpLoudly(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	initialized(t, cfg)
+	var logs logBuf
+	clk := clock.NewFake(t0)
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.NewJSONHandler(&logs, nil)), Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Shutdown(t.Context()) }()
+	ro, err := store.OpenReadOnly(t.Context(), store.Layout{DataDir: cfg.DataDir}.InstanceAuditDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ro.Close() }()
+	srv.deliverer.Routes[0].To = ro.Read
+
+	if _, err := srv.auth.CreateUser(t.Context(), auth.NewUserRequest{Username: "bob", Password: "a long password for the test", Who: console}); err != nil {
+		t.Fatalf("a business change must not wait for the audit log: %v", err)
+	}
+	clk.Advance(90 * time.Second)
+	srv.deliver(t.Context())
+	if !strings.Contains(logs.String(), `"msg":"audit delivery failing – entries wait in the outbox"`) ||
+		!strings.Contains(logs.String(), `"system":{"pending":1,"oldest_age":"1m30s"}`) {
+		t.Errorf("no loud warning:\n%s", logs.String())
+	}
+	// Once the audit log works again, the entry arrives.
+	srv.deliverer.Routes[0].To = srv.ia.Write
+	srv.deliver(t.Context())
+	if backlog, _ := srv.deliverer.Backlog(t.Context()); backlog[0].Pending != 0 {
+		t.Errorf("still pending: %+v", backlog)
+	}
+}
+
+func TestJobs(t *testing.T) {
+	t.Parallel()
+	var logs logBuf
+	clk := clock.NewFake(t0)
+	s := &scheduler{clk: clk, log: slog.New(slog.NewJSONHandler(&logs, nil))}
+	runs := map[string]int{}
+	s.add("now", time.Minute, 0, func(context.Context) error { runs["now"]++; return nil })
+	s.add("later", time.Hour, time.Hour, func(context.Context) error { runs["later"]++; return errors.New("boom") })
+	s.runDue(t.Context())
+	clk.Advance(time.Hour)
+	s.runDue(t.Context())
+	s.runDue(t.Context())
+	clk.Advance(time.Hour)
+	s.runDue(t.Context())
+	if runs["now"] != 3 || runs["later"] != 2 {
+		t.Errorf("runs %v", runs)
+	}
+	if strings.Count(logs.String(), `"job":"later"`) != 2 {
+		t.Errorf("failing job not logged each time:\n%s", logs.String())
+	}
+}
+
+func TestBootstrapNamesHaveNoDuplicates(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	cfg.Admin.Listen, cfg.Admin.TLSNames = "127.0.0.1:9443", "localhost, 127.0.0.1, ::1"
+	names, ips, err := wantedNames(cfg, "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || len(ips) != 2 {
+		t.Errorf("duplicates: %v %v", names, ips)
+	}
+}

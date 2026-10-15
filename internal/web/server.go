@@ -68,7 +68,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 	// CSRF tokens for logged-in sessions follow in phase 1 (security.md).
 	csrf := http.NewCrossOriginProtection()
 
-	return recoverer(opts.Logger, logRequests(opts.Logger, securityHeaders(csrf.Handler(mux)))), nil
+	return recoverer(opts.Logger, logRequests(opts.Logger, SecurityHeaders(csrf.Handler(mux)))), nil
 }
 
 // staticFiles serves the embedded assets. Content types are set explicitly:
@@ -113,7 +113,9 @@ func render(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int
 	_, _ = w.Write(buf.Bytes())
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+// SecurityHeaders sets the headers of every admin response (security.md
+// "Transport and headers"); the server adds HSTS on the TLS listener.
+func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", ContentSecurityPolicy)
@@ -123,7 +125,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-		// HSTS is only meaningful over TLS; it is added together with TLS in phase 1.
+		// HSTS is only meaningful over TLS: internal/server adds it there.
 		next.ServeHTTP(w, r)
 	})
 }
