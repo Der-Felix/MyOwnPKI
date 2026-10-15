@@ -21,6 +21,33 @@ type Outbox struct {
 	DeliveredAt sql.NullString
 }
 
+type RecoveryCode struct {
+	UserID    string
+	CodeHash  string
+	UsedAt    sql.NullString
+	CreatedAt string
+}
+
+type RoleBinding struct {
+	UserID    string
+	TenantID  string
+	Ca        string
+	Role      string
+	CreatedAt string
+	CreatedBy string
+}
+
+type Session struct {
+	IDHash     string
+	UserID     string
+	State      string
+	CsrfToken  string
+	CreatedAt  string
+	LastSeenAt string
+	ExpiresAt  string
+	StepupAt   sql.NullString
+}
+
 type Tenant struct {
 	ID                string
 	Name              string
@@ -37,4 +64,21 @@ type Unseal struct {
 	WrappedRootKey []byte
 	CreatedAt      string
 	UpdatedAt      string
+}
+
+type User struct {
+	ID                string
+	Username          string
+	PasswordHash      string
+	PasswordChangedAt string
+	TotpSecret        []byte
+	TotpConfirmedAt   sql.NullString
+	TotpLastStep      int64
+	TotpPending       []byte
+	InstanceAdmin     int64
+	DisabledAt        sql.NullString
+	FailedLogins      int64
+	LockedUntil       sql.NullString
+	CreatedAt         string
+	UpdatedAt         string
 }
