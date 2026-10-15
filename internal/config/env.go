@@ -16,13 +16,15 @@ const EnvConfigFile = EnvPrefix + "CONFIG"
 // the YAML path in upper case with "_" for ".".
 func envFields(c *Config) map[string]*string {
 	return map[string]*string{
-		EnvPrefix + "DATA_DIR":            &c.DataDir,
-		EnvPrefix + "LOG_LEVEL":           &c.Log.Level,
-		EnvPrefix + "LOG_FORMAT":          &c.Log.Format,
-		EnvPrefix + "ADMIN_LISTEN":        &c.Admin.Listen,
-		EnvPrefix + "ADMIN_TLS_CERT_FILE": &c.Admin.TLSCertFile,
-		EnvPrefix + "ADMIN_TLS_KEY_FILE":  &c.Admin.TLSKeyFile,
-		EnvPrefix + "PUBLIC_LISTEN":       &c.Public.Listen,
+		EnvPrefix + "DATA_DIR":             &c.DataDir,
+		EnvPrefix + "LOG_LEVEL":            &c.Log.Level,
+		EnvPrefix + "LOG_FORMAT":           &c.Log.Format,
+		EnvPrefix + "ADMIN_LISTEN":         &c.Admin.Listen,
+		EnvPrefix + "ADMIN_TLS_CERT_FILE":  &c.Admin.TLSCertFile,
+		EnvPrefix + "ADMIN_TLS_KEY_FILE":   &c.Admin.TLSKeyFile,
+		EnvPrefix + "PUBLIC_LISTEN":        &c.Public.Listen,
+		EnvPrefix + "AUTH_KEY_FILE":        &c.Auth.KeyFile,
+		EnvPrefix + "AUTH_TRUSTED_PROXIES": &c.Auth.TrustedProxies,
 	}
 }
 

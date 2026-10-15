@@ -41,6 +41,7 @@ type Config struct {
 	Log     Log    `yaml:"log"`
 	Admin   Admin  `yaml:"admin"`
 	Public  Public `yaml:"public"`
+	Auth    Auth   `yaml:"auth"`
 }
 
 // Log configures the process log (not the audit log).
@@ -63,6 +64,19 @@ type Admin struct {
 type Public struct {
 	// Listen is IP:port; empty disables the listener.
 	Listen string `yaml:"listen"`
+}
+
+// Auth configures sign-in (PHASE1 step 10).
+type Auth struct {
+	// KeyFile holds the key that encrypts the TOTP secrets and keys the
+	// recovery code hashes. Empty: <data_dir>/auth.key. It may live outside
+	// the data directory (Docker secret, systemd credential): then a copy of
+	// the databases alone holds no usable TOTP secret.
+	KeyFile string `yaml:"key_file"`
+	// TrustedProxies lists reverse proxies (IPs or CIDRs, comma-separated)
+	// whose X-Forwarded-For header is believed. Empty: the direct peer is
+	// the client – the safe default.
+	TrustedProxies string `yaml:"trusted_proxies"`
 }
 
 // Allowed values.
@@ -163,10 +177,60 @@ func (c Config) Validate() error {
 		}
 	}
 
+	if c.Auth.KeyFile != "" && !filepath.IsAbs(c.Auth.KeyFile) {
+		add("auth.key_file: must be an absolute path, got %q", c.Auth.KeyFile)
+	}
+	if _, err := ParseProxies(c.Auth.TrustedProxies); err != nil {
+		add("auth.trusted_proxies: %w", err)
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("%w:\n  %w", ErrInvalid, joinIndented(errs))
 	}
 	return nil
+}
+
+// AuthKeyFile returns the path of the auth key: auth.key_file or
+// <data_dir>/auth.key.
+func (c Config) AuthKeyFile() string {
+	if c.Auth.KeyFile != "" {
+		return c.Auth.KeyFile
+	}
+	return filepath.Join(c.DataDir, "auth.key")
+}
+
+// ParseProxies parses a comma-separated list of IPs and CIDRs. A single IP
+// becomes a /32 or /128. Zones and host bits in a CIDR are refused – a typo
+// like 10.0.0.1/8 must not silently trust a whole network.
+func ParseProxies(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for item := range strings.SplitSeq(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			p, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, fmt.Errorf("%q is not an IP or CIDR", item)
+			}
+			if p != p.Masked() {
+				return nil, fmt.Errorf("%q has host bits set – did you mean %s?", item, p.Masked())
+			}
+			if p.Addr().Is4In6() {
+				return nil, fmt.Errorf("%q: write IPv4 networks as IPv4 (for example 10.0.0.0/8)", item)
+			}
+			out = append(out, p)
+			continue
+		}
+		ip, err := netip.ParseAddr(item)
+		if err != nil || ip.Zone() != "" {
+			return nil, fmt.Errorf("%q is not an IP or CIDR", item)
+		}
+		ip = ip.Unmap()
+		out = append(out, netip.PrefixFrom(ip, ip.BitLen()))
+	}
+	return out, nil
 }
 
 func joinIndented(errs []error) error {

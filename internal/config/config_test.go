@@ -184,7 +184,8 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 	if _, err := cfg.ApplyEnv(env); err != nil {
 		t.Fatal(err)
 	}
-	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker"}, Public: Public{"marker"}}
+	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker"}, Public: Public{"marker"},
+		Auth: Auth{"marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -209,5 +210,40 @@ func TestLoad(t *testing.T) {
 	}
 	if _, _, err := Load(filepath.Join(dir, "missing.yaml"), nil); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("missing file: %v", err)
+	}
+}
+
+func TestAuthSettings(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	cfg.DataDir = absDir(t)
+	if got := cfg.AuthKeyFile(); got != filepath.Join(cfg.DataDir, "auth.key") {
+		t.Errorf("default key file: %s", got)
+	}
+	got, err := ParseProxies(" 10.0.0.5, 192.168.1.0/24,fd00::/8 ,::ffff:10.0.0.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.0.0.5/32", "192.168.1.0/24", "fd00::/8", "10.0.0.7/32"}
+	for i, p := range got {
+		if i >= len(want) || p.String() != want[i] {
+			t.Errorf("proxies: %v, want %v", got, want)
+			break
+		}
+	}
+	for in, msg := range map[string]string{
+		"10.0.0.1/8":          "did you mean 10.0.0.0/8",
+		"proxy.lan":           "is not an IP or CIDR",
+		"fe80::1%eth0":        "is not an IP or CIDR",
+		"::ffff:10.0.0.0/104": "write IPv4 networks as IPv4",
+	} {
+		if _, err := ParseProxies(in); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: %v, want %q", in, err, msg)
+		}
+	}
+	cfg.Auth = Auth{KeyFile: "auth.key", TrustedProxies: "10.0.0.1/8"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "auth.key_file: must be an absolute path") ||
+		!strings.Contains(err.Error(), "auth.trusted_proxies") {
+		t.Errorf("validate: %v", err)
 	}
 }
