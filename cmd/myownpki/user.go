@@ -26,7 +26,9 @@ import (
 type userIO struct {
 	stdin                         io.Reader
 	stdinTerminal, stdoutTerminal bool
-	stdout, stderr                io.Writer
+	// hidden reads a secret at the terminal without echo.
+	hidden         func(prompt string) ([]byte, error)
+	stdout, stderr io.Writer
 }
 
 // runUser handles the console emergencies `myownpki user unlock` and
@@ -42,7 +44,8 @@ func runUser(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		usage()
 		return exitUsage
 	}
-	uio := userIO{stdin: os.Stdin, stdinTerminal: keys.IsTerminal(os.Stdin), stdoutTerminal: keys.IsTerminal(os.Stdout), stdout: stdout, stderr: stderr}
+	uio := userIO{stdin: os.Stdin, stdinTerminal: keys.IsTerminal(os.Stdin), stdoutTerminal: keys.IsTerminal(os.Stdout), stdout: stdout, stderr: stderr,
+		hidden: func(p string) ([]byte, error) { return readHidden(p, stderr) }}
 	switch args[0] {
 	case "unlock":
 		return runUserUnlock(ctx, args[1:], os.Environ(), uio)
@@ -186,14 +189,17 @@ func runUserReset2FA(ctx context.Context, args, environ []string, uio userIO) in
 			return exitUsage
 		}
 	}
+	var secret []byte
+	var err error
 	if uio.stdinTerminal {
-		// Typing the passphrase visibly is not an option; hidden input needs
-		// golang.org/x/term (asked for with init, step 11).
-		_, _ = fmt.Fprintf(uio.stderr, "%s user reset-2fa reads the proof from standard input, not from a terminal (it would be shown while typing).\n"+
-			"Pipe it in, for example from a password manager or a file only you can read:  %s user reset-2fa %s < passphrase.txt\n", binary, binary, name)
-		return exitUsage
+		prompt := "Unseal passphrase: "
+		if *withRecovery {
+			prompt = "Recovery key: "
+		}
+		secret, err = uio.hidden(prompt)
+	} else {
+		secret, err = readSecretLine(uio.stdin)
 	}
-	secret, err := readSecretLine(uio.stdin)
 	if err != nil {
 		_, _ = fmt.Fprintf(uio.stderr, "%v\n", err)
 		return exitUsage

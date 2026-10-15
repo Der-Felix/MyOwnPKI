@@ -59,7 +59,8 @@ func TestUserConsoleCommands(t *testing.T) {
 
 	run := func(cmd string, stdin string, stdinTerminal, stdoutTerminal bool, args ...string) (int, string) {
 		var out bytes.Buffer
-		uio := userIO{stdin: strings.NewReader(stdin), stdinTerminal: stdinTerminal, stdoutTerminal: stdoutTerminal, stdout: &out, stderr: &out}
+		uio := userIO{stdin: strings.NewReader(stdin), stdinTerminal: stdinTerminal, stdoutTerminal: stdoutTerminal, stdout: &out, stderr: &out,
+			hidden: func(string) ([]byte, error) { return []byte(stdin), nil }}
 		args = append(args, "--config", cfg)
 		if cmd == "unlock" {
 			return runUserUnlock(t.Context(), args, nil, uio), out.String()
@@ -84,7 +85,7 @@ func TestUserConsoleCommands(t *testing.T) {
 		code               int
 		msg                string
 	}{
-		{"passphrase typed on a terminal", testPassphrase, true, true, []string{"alice"}, exitUsage, "not from a terminal"},
+		{"passphrase typed hidden on a terminal", testPassphrase, true, true, []string{"alice"}, exitOK, "otpauth://totp/MyOwnPKI:alice?"},
 		{"secret to a log", testPassphrase, false, false, []string{"alice"}, exitUsage, "--otpauth-file"},
 		{"no proof", "", false, true, []string{"alice"}, exitUsage, "no passphrase"},
 		{"wrong passphrase", "wrong passphrase, long enough", false, true, []string{"alice"}, exitProblem, "wrong passphrase"},
@@ -141,7 +142,7 @@ func TestUserConsoleCommands(t *testing.T) {
 			t.Errorf("audit lacks %s: %s", want, got)
 		}
 	}
-	if strings.Count(got, "user.totp_reset/success") != 3 {
-		t.Errorf("three resets expected: %s", got)
+	if strings.Count(got, "user.totp_reset/success") != 4 {
+		t.Errorf("four resets expected: %s", got)
 	}
 }

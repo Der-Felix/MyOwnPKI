@@ -12,6 +12,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 )
 
@@ -113,6 +114,7 @@ func runDBStatus(ctx context.Context, args, environ []string, stdout, stderr io.
 			}
 			_, _ = fmt.Fprintf(stdout, "\n  Tenants in system.db: %s\n", strings.Join(names, ", "))
 		}
+		printInstance(ctx, stdout, sys.Path)
 	}
 	for _, st := range sts {
 		if st.Kind == store.KindPKI && st.Exists && st.Err == nil && st.Report.Pending() == 0 {
@@ -152,4 +154,25 @@ func runDBMigrate(ctx context.Context, args, environ []string, stdout, stderr io
 		return exitProblem
 	}
 	return exitOK
+}
+
+// printInstance says whether init ran – and warns about a demo instance.
+func printInstance(ctx context.Context, stdout io.Writer, path string) {
+	db, err := store.OpenReadOnly(ctx, path)
+	if err != nil {
+		_, _ = fmt.Fprintf(stdout, "  Instance: PROBLEM: %v\n", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+	inst, err := setup.ReadInstance(ctx, db.Read)
+	switch {
+	case err != nil:
+		_, _ = fmt.Fprintf(stdout, "  Instance: PROBLEM: %v\n", err)
+	case !inst.Initialized:
+		_, _ = fmt.Fprintf(stdout, "  Instance: not initialized yet – run `%s init`\n", binary)
+	case inst.Demo:
+		_, _ = fmt.Fprintf(stdout, "  Instance: initialized %s\n  WARNING: %s\n", inst.InitializedAt, setup.DemoWarning)
+	default:
+		_, _ = fmt.Fprintf(stdout, "  Instance: initialized %s\n", inst.InitializedAt)
+	}
 }
