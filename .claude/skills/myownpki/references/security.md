@@ -17,22 +17,47 @@ Separate `http.ServeMux` per listener so a route can't leak across.
 
 ## Authentication
 
-- Passwords: Argon2id with OWASP-recommended parameters or stronger; constant-time compare.
-- Second factor mandatory: WebAuthn/passkeys (preferred) or TOTP. Recovery codes hashed.
+Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–48.
+
+- Passwords: Argon2id (64 MiB, t=3, p=1, parameters in the hash); constant-time compare; at most 4
+  hashes at once, the throttle is checked **before** a hash; unknown users cost a full hash too.
+  12–256 characters, checked against the common password list, no composition rules, no expiry.
+- Second factor mandatory: WebAuthn/passkeys (step 17) or TOTP (RFC 6238, 160-bit secret, a code
+  works once). TOTP secrets are encrypted with the **auth key** (`auth.key_file`, outside the
+  databases), bound to purpose and user ID. Recovery codes: ≥ 80 random bits (we use 100), single use,
+  stored as HMAC keyed from the auth key.
+- The second factor is fixed **at creation** (init on the console, reset-2fa): the first code only
+  confirms it – never "enroll at first login", which would let whoever knows the password enroll.
 - OIDC optional (Authentik, Keycloak, Entra ID): validate issuer, audience, nonce, PKCE.
-- Sessions: server-side in `system.db`, random 256-bit IDs, cookie `HttpOnly; Secure; SameSite=Strict; Path=/`,
-  `__Host-` prefix, idle + absolute timeout, rotate on login and privilege change.
-- CSRF: synchronizer token for all state-changing requests (htmx sends it via a header set from a `<meta>` tag).
-- Rate limiting and lockout on login, TOTP and API token endpoints.
-- **Step-up auth** (fresh 2FA within N minutes) for: private key download, revocation, CA create/renew,
-  unseal, role/permission changes, API token creation.
+- Sessions: server-side in `system.db` (only the SHA-256 of the ID), random 256-bit IDs, cookie
+  `HttpOnly; Secure; SameSite=Strict; Path=/`, `__Host-` prefix, idle 30 min + absolute 12 h, new ID
+  after the second factor; role changes, password change and disabling end sessions.
+- CSRF: `http.CrossOriginProtection` (Sec-Fetch-Site/Origin) plus a synchronizer token for all
+  state-changing requests (htmx sends it via a header set from a `<meta>` tag).
+- Throttle (in memory, per IP+user and per user; unknown names one counter per IP; IPv6 per /64;
+  pruning never drops a braking entry) and a time-limited lockout (never permanent: that would let
+  anybody lock the admin out); `myownpki user unlock` ends it early; device cookies follow in
+  step 13. Client IPs from `X-Forwarded-For` only behind `auth.trusted_proxies`.
+- The last active instance admin and the last active admin of a tenant can't be disabled or lose
+  the role.
+- **Step-up auth** (fresh 2FA within 5 minutes) for: private key download, revocation, CA
+  create/renew/retire/revoke, CRL upload, user/role changes, 2FA reset, API token creation (step 18).
+- **Unseal = a signed-in instance admin + the passphrase** – the passphrase is the stronger proof,
+  no extra step-up. Changing your own password, authenticator or recovery codes needs the current
+  password.
+- Console emergencies (`user reset-2fa`) need the unseal passphrase or the recovery key: shell access
+  to the server alone is not enough.
+- Never log a typed user name of a failed login with an unknown user (it may be a password).
 - API tokens: random, shown once, stored hashed, scoped (tenant, actions), expiring.
 
 ## Authorization (RBAC)
 
-- Roles admin / operator / viewer, scoped by tenant, CA, domain, agent group.
+- Roles admin / operator / viewer, scoped by tenant, CA, domain, agent group (`internal/authz`;
+  phase 1: tenant or one CA). Instance admins manage users and unseal – that gives no tenant rights.
+  Viewers don't read the audit log (user names and IPs are personal data).
 - Check permissions in the **service layer**, not only in HTTP handlers – the API, UI, ACME and agent
-  paths all call the same services.
+  paths all call the same services. `keys.Who.Principal` carries the caller; nil is denied; the
+  console and system jobs have their own principals.
 - Tenant ID comes from the authenticated context, never from a request parameter alone.
 
 ## Key storage (ADR-09)

@@ -182,8 +182,18 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   warning (whoever takes file and database together has the CA). Not in phase 1.
 
 ### Setup and admin access
-- First administrator via **`myownpki init`** on the console (username, password; second factor
-  enrolled at first login) – also sets the unseal passphrase, with the backup warning from §4.
+- First administrator via **`myownpki init`** on the console (username, password and the **TOTP
+  second factor, set up and confirmed right there**) – also sets the unseal passphrase, with the
+  backup warning from §4. Without a terminal (Docker demo) init writes the otpauth link to a file
+  (0600, never overwritten) and the first login confirms exactly that secret – there is no window in
+  which somebody else could enroll *(owner 2026-10-15)*. The first user is instance admin and
+  `admin` of the default tenant.
+- **Users are never deleted** (their ID is in the audit log), only disabled. For GDPR erasure
+  requests a later "anonymize" replaces the name with `deleted-<id>`, removes password hash, TOTP
+  secret and recovery codes; the audit log then keeps only the ID *(owner 2026-10-15)*.
+- The **auth key** (`auth.key_file`) encrypts the TOTP secrets; it may live outside the data
+  directory. Losing it means every user's second factor must be reset (`myownpki user reset-2fa`,
+  which needs the unseal passphrase or the recovery key).
 - Admin listener TLS: at first start a **self-signed bootstrap certificate**, its SHA-256
   fingerprint printed on the console for verification; alternatively an operator-provided
   certificate. After setup the admin certificate is issued by the own CA.
@@ -632,6 +642,17 @@ keeps the reasons. None of them changes an ADR.
 | The offline root's CRL is uploaded and checked (signer generation, number, times, no delta, no unknown critical extension); intermediates it lists are marked revoked and stop issuing | The server can't sign it, but must neither serve a stale or foreign CRL nor keep using a CA its root has revoked |
 | Serving: DER over plain HTTP, `max-age=900` with ETag/Last-Modified/304 and HEAD; legacy aliases only for imported CAs | A new CRL gets through proxies within minutes; unchanged files cost nothing |
 | No issuingDistributionPoint for now | OpenSSL refuses a CRL with IDP for certificates without a CDP ("different CRL scope") – legacy certificates without AIA_BASE_URL have none (tested) |
+
+### Auth core (phase 1 step 10, design approved 2026-10-15)
+| Decision | Why |
+|---|---|
+| Argon2id 64 MiB/t=3, at most 4 at once, throttle before the hash, "busy" after 2 s | A login flood can't take the memory; guessing is slowed before it costs anything |
+| Passwords 12–256 characters, no composition rules or expiry, checked against 46,145 common passwords (Xato 1M, filtered to ≥ 12) | NIST SP 800-63B; a 10k list would hold only 10 entries of that length |
+| TOTP secret fixed at creation, encrypted with a separate auth key (AAD = purpose + user); codes work once; recovery codes 100 bits, HMAC-keyed | A copy of `system.db` alone holds no usable second factor; no window to enroll a foreign authenticator |
+| Sessions: SHA-256 of the ID stored, `__Host-` cookie, new ID after the second factor, idle 30 min / absolute 12 h; CSRF = `http.CrossOriginProtection` + token | A stolen database holds no session; standard browser protections first, the token for older browsers |
+| Lockout time-limited (10 failures → 15 min), `user unlock` on the console | A permanent lockout is a switch for attackers to turn the admin off |
+| Roles checked in the CA engine and the keyring (`internal/authz`); instance admin separate from tenant roles; viewers don't read the audit log; the last active instance admin and tenant admin always stay | No handler can forget a check; managing users is not the same as running the PKI; audit entries are personal data |
+| `user reset-2fa` needs the unseal passphrase or the recovery key | Losing the auth key or a phone must be recoverable – but not by shell access alone |
 
 ### Web UI and dev mode
 | Decision | Why |

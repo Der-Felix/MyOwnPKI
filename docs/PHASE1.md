@@ -123,15 +123,19 @@ vs. the injected clock. Nothing can get out of sync, and "expired" needs no nigh
 
 ```
 tenants(id, name, allow_server_keygen /*default 1, switchable per tenant*/, created_at)
-users(id, username UNIQUE, display_name, email, password_hash /*Argon2id PHC string*/,
-      must_change_password, disabled, created_at, last_login_at)
-user_roles(user_id, tenant_id, role, scope_type /*tenant|ca*/, scope_id NULL)
-totp_secrets(user_id PK, secret_ciphertext, confirmed_at)       -- encrypted like keys
-recovery_codes(user_id, code_hash, used_at NULL)
-webauthn_credentials(id, user_id, credential_id UNIQUE, public_key, sign_count, aaguid, name, created_at)
-sessions(id_hash PK, user_id, created_at, last_seen_at, expires_at, step_up_until NULL,
-         csrf_token_hash, ip, user_agent)
-api_tokens(id, user_id, name, token_hash UNIQUE, scopes_json, created_at, expires_at, last_used_at)
+-- step 10 (migration 0004):
+users(id, username UNIQUE /*lower case a-z0-9._@-, refused otherwise*/, password_hash /*Argon2id PHC*/,
+      password_changed_at, totp_secret /*AES-GCM with the auth key, AAD = purpose + user id*/,
+      totp_confirmed_at NULL, totp_last_step /*a code works once*/, totp_pending NULL,
+      instance_admin, disabled_at NULL, failed_logins, locked_until NULL, created_at, updated_at)
+      -- never deleted (trigger): the id is in audit entries
+recovery_codes(user_id, code_hash /*HMAC-SHA256, key from the auth key*/, used_at NULL, created_at)
+role_bindings(user_id, tenant_id, ca /*'' = whole tenant*/, role /*viewer|operator|admin*/, created_at, created_by)
+sessions(id_hash PK /*SHA-256 of the cookie*/, user_id, state /*password|full*/, csrf_token,
+         created_at, last_seen_at, expires_at, stepup_at NULL)   -- no IP: that is in the audit entry
+-- later:
+webauthn_credentials(id, user_id, credential_id UNIQUE, public_key, sign_count, aaguid, name, created_at)  -- step 17
+api_tokens(id, user_id, name, token_hash UNIQUE, scopes_json, created_at, expires_at, last_used_at)         -- step 18
 unseal(slot PK /*passphrase|recovery*/, root_key_version, kdf, kdf_params, salt, wrapped_root_key)  -- the GCM tag proves the secret
 settings(key PK, value_json)
 ```
@@ -178,8 +182,8 @@ commit only after the owner's OK, never push. `task check` must be green after e
 | 7 | **done 2026-10-13** (`internal/ca`, pki.db migration 0004 with CA generations; API/UI wiring with steps 13–14 and 18–19) – CA engine – leaf issuance: 159-bit serials, extensions from the preset (critical EKU, ocsp-nocheck), CSR checks, name constraints **before** signing, per-CA max validity, AIA/CDP, ECDSA P-256 default, server-side key generation behind the tenant switch; every issuance audited | – | crypto/x509 + `openssl verify -purpose` per preset; NC and max-validity violations rejected (and audited as denied) |
 | 8 | **done 2026-10-14** (`internal/ca`: lifecycle, offline flow; `myownpki ca list/show`; legacy `pki ca-sign`; API/UI with steps 18–19, `init` uses it in step 11) – CA lifecycle: create root/intermediate (ECDSA P-384 default), pathlen, name constraints, EKU limit; offline-signing flow (CSR out, certificate in); offline root import; renewal with a new key (next generation); retire; limits | – | chain verifies with OpenSSL; offline flow round trip with `legacy/pki.sh` as the offline root (CI on Linux; locally with `LEGACY_TEST_OPENSSL=/usr/bin/openssl` in Git Bash) and with the plain OpenSSL command of the instructions |
 | 9 | **done 2026-10-14** (`internal/ca`: revoke, CRL, upload; `internal/publish`: serving, wired with step 12; CRL status in `db status` and `ca show`) – Revocation + CRL generation (number +1, AKI, nextUpdate) – **a sealed server can't renew CRLs: status/warning "sealed since …, CRL of <CA> expires on …"** in `db status`, API and process log (owner 2026-10-13), **from half of the CRL lifetime on** (owner 2026-10-14); **upload of the offline root's CRL** (signed by exactly that root generation, CRL number strictly increasing, thisUpdate not in the future, nextUpdate in the future; same half-lifetime warning); serving on the public listener, **including the legacy URLs `<base>/<name>.crt|.crl` as permanent aliases of generation 1 of imported CAs** | – | `openssl crl -text`; `openssl verify -crl_check` with a revoked leaf; uploaded root CRL with a wrong signer, an old number or a past nextUpdate is refused |
-| 10 | **Auth core** (was 13): Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer. Comes **before `init`**, which creates the first admin with it. API tokens move to step 18 | – | one test per rule in security.md; RFC 6238 test vectors |
-| 11 | **`myownpki init`** (was 12): first admin (password + TOTP from step 10) + unseal passphrase + **recovery key** + **checkpoint key fingerprint to note down** (`Keyring.CheckpointKeyFingerprint` after a first unseal) (`keys.NewRecoveryKey` → show → confirm → `keys.Init`), **prominent warning to keep passphrase, recovery key and backups apart**. Recovery key only on an interactive terminal (`keys.RecoveryKeyOutput`); otherwise (Docker, systemd, pipe) init refuses and requires `--recovery-key-file <path>`, written with 0600 and never overwriting (`keys.WriteRecoveryKeyFile`), with the hint to store it safely and remove it from the server. Before init finishes the user re-types two random groups (`keys.ConfirmIndexes`/`CheckGroups`); the same for `recovery-key rotate` (owner 2026-10-13). Optionally init also creates an online root + intermediate with the step 8 functions (no second path, like legacy `pki init --intermediate`), so the browser test in step 14 has a CA; it must run without any input (Docker demo) and warns clearly "online root – for tests and homelab" (owner 2026-10-14) | – | init on an empty data dir; refuses to run twice; non-terminal without file refused; wrong confirmation aborts without writing anything |
+| 10 | **done 2026-10-15** (`internal/auth`, `internal/authz`, system.db migration 0004; `myownpki user unlock`/`reset-2fa`; HTTP wiring with steps 12–13) – **Auth core** (was 13): Argon2id passwords, TOTP (own RFC 6238 code), sessions, CSRF, step-up, rate limit/lockout, RBAC in the service layer. Comes **before `init`**, which creates the first admin with it. API tokens move to step 18 | – | one test per rule in security.md; RFC 6238 test vectors |
+| 11 | **`myownpki init`** (was 12): first admin (password + TOTP from step 10) + unseal passphrase + **recovery key** + **checkpoint key fingerprint to note down** (`Keyring.CheckpointKeyFingerprint` after a first unseal) (`keys.NewRecoveryKey` → show → confirm → `keys.Init`), **prominent warning to keep passphrase, recovery key and backups apart**. Recovery key only on an interactive terminal (`keys.RecoveryKeyOutput`); otherwise (Docker, systemd, pipe) init refuses and requires `--recovery-key-file <path>`, written with 0600 and never overwriting (`keys.WriteRecoveryKeyFile`), with the hint to store it safely and remove it from the server. Before init finishes the user re-types two random groups (`keys.ConfirmIndexes`/`CheckGroups`); the same for `recovery-key rotate` (owner 2026-10-13). Optionally init also creates an online root + intermediate with the step 8 functions (no second path, like legacy `pki init --intermediate`), so the browser test in step 14 has a CA; it must run without any input (Docker demo) and warns clearly "online root – for tests and homelab" (owner 2026-10-14). **From step 10 (owner 2026-10-15):** the first user gets **instance admin and `admin` in the default tenant**; init creates the auth key (`auth.CreateKeyFile`, path `auth.key_file`), the user (`auth.Service.CreateUser`) and confirms TOTP **on the console** (`ConfirmTOTP`); without a terminal it writes the otpauth link and the recovery codes to `--otpauth-file` (`auth.WriteEnrollmentFile`, 0600, never overwriting) and the first login confirms it – no window, the secret is fixed at init. Hidden input of passphrase and password with `golang.org/x/term` (approved 2026-10-15, two-week rule) | – | init on an empty data dir; refuses to run twice; non-terminal without file refused; wrong confirmation aborts without writing anything |
 | 12 | **Server wiring + listeners with TLS** (was 15): admin listener with self-signed bootstrap certificate (fingerprint on the console) or operator certificate, later admin certificate from the own CA; HSTS; public listener for CRL/AIA (handlers from step 9); `serve` runs the audit deliverer, the checkpoint hooks (`OnUnseal`/`BeforeSeal`) and the daily heads | – | `openssl s_client`, `curl -v`; fingerprint matches the console; `audit verify` shows the checkpoints of unseal and seal |
 | 13 | **REST API, part 1** (from 16) – only what the browser test needs: login/logout/session with TOTP, unseal/seal/status, CAs list/show, certificates issue (CSR or server key)/list/show/download (certificate, chain), presets list. Hand-written (`net/http` ServeMux, `encoding/json`, no generator – step 3), RFC 9457 errors; **contract tests** read the spec and check each of these operations: route + method, role (`x-required-role`), step-up, problem responses, response schema | JSON Schema validator for the tests only (ask at this step) | contract tests; vacuum clean; `curl` examples in the summary |
 | 14 | **UI, part 1** (shell B, from 17): login with TOTP, unseal, CA list, issue (CSR default, server key if allowed), certificates list/detail/download → **milestone M1: the owner tests a running server in the browser** | htmx (vendored, ask at this step) | handler tests incl. no-inline-style checks; screenshots light/dark; owner's browser test |
@@ -240,7 +244,7 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 
   Warnings start at half of the lifetime up to nextUpdate. The offline bundle of step 8 already
   shows how to create it (legacy `pki crl --ca root`, or `openssl ca -gencrl`).
-- **Legacy import (step 10):** CAs that legacy renewed with the *same* key (`renew-ca`) keep their
+- **Legacy import (step 15):** CAs that legacy renewed with the *same* key (`renew-ca`) keep their
   newest certificate in the generation; older certificates of the same key go into a history table
   created then (phase 1 renews only with a new key, owner 2026-10-14). Imported CAs are generation 1,
   so the legacy URL aliases of step 9 point there forever – also after later renewals.
@@ -251,7 +255,30 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
   generation's URL would bind each CRL to its URL. Tested and dropped: OpenSSL then refuses the CRL
   for certificates **without** a CRL distribution point ("different CRL scope", even without
   `-extended_crl`) – legacy certificates issued without `AIA_BASE_URL` have none. Revisit after the
-  importer (step 10) knows which certificates lack a CDP; uploaded CRLs with an IDP are accepted.
+  importer (step 15) knows which certificates lack a CDP; uploaded CRLs with an IDP are accepted.
+- **Wiring for step 12 (from step 10):** `serve` loads the auth key (`auth.LoadKey`, warnings to the
+  log) and refuses to start without it; the admin mux is wrapped in `auth.CSRF` (session token from
+  `Authenticate`); the client address comes from `auth.ClientIP` with `auth.trusted_proxies`; the
+  session cookie is `auth.SessionCookie` (`__Host-` prefix, so the admin listener needs TLS – dev mode
+  on plain HTTP keeps its own login-free prototype); `PruneSessions` runs on a timer. Step 13 maps
+  `authz.ErrStepUpRequired` (also inside `ca.DeniedError`) to a step-up prompt, `auth.LockedError`
+  to 429 with Retry-After and `auth.ErrBusy` to 503.
+- **Device cookies (step 13, owner 2026-10-15):** the lockout of step 10 lets an attacker who knows a
+  user name lock that user out again every 15 minutes. Step 13 adds OWASP "device cookies": a
+  browser that signed in successfully gets a signed cookie, and failures from such a known device
+  don't count against the lock that strangers trigger – the real admin keeps getting in. The docs
+  recommend not to expose the admin listener to the internet at all, and to restrict it with an IP
+  allowlist (ADR-08).
+- **Read paths check permissions with the API (step 13):** the engine checks every change now;
+  listing and showing (today only the console's `ca list`/`ca show`) get `authz.ReadPKI` /
+  `authz.ReadAudit` checks when the API exposes them – viewers never read the audit log.
+- **Backup (step 16) and the auth key:** `myownpki backup` copies `auth.key` when it is inside the
+  data directory and says so; when `auth.key_file` points elsewhere (Docker secret, systemd
+  credential) it prints that the key is **not** in the backup. Restoring without the key works, but
+  every user then needs `myownpki user reset-2fa` (TOTP secrets and recovery codes are unreadable).
+- **User names are never deleted (owner 2026-10-15):** for GDPR erasure requests a later
+  "anonymize" replaces the name with `deleted-<id>`, drops password hash, TOTP secret and recovery
+  codes, and the audit log keeps only the ID (PLAN §5).
 - **ACME (phase 2) is stricter than the CSR wish list of step 7** (owner 2026-10-13): at finalize the
   CSR must name exactly the identifiers of the order – nothing missing, nothing extra – otherwise the
   order fails with `badCSR` (RFC 8555 §7.4). Names are never dropped or added there; the ACME path
@@ -275,10 +302,12 @@ ID (unique in `audit.db`). The reverse order could silently lose audit entries.
 | sqlc binary 1.31.1 | MIT | query code generation (tool, not linked) | approved in phase 0; owner installs at step 4 |
 | `golang.org/x/crypto` | BSD-3 | `argon2` (step 6), later `cryptobyte`, `ocsp` | **approved** 2026-10-13; v0.58.0 – already selected in the module graph via x/net (govulncheck); `argon2`/`blake2b` identical to the approved v0.57.0 on our platforms (diff checked: only LoongArch additions) |
 | `github.com/go-webauthn/webauthn` | BSD-3 | passkeys | ask at step 17 |
+| `golang.org/x/term` | BSD-3 | hidden input of passphrase and password on the console (`init`, `user reset-2fa`) | **approved** 2026-10-15 for step 11 (two-week rule for the version); until then `reset-2fa` reads the proof from a pipe only |
 | htmx (vendored JS file) | 0BSD | UI interactions | ask at step 14 |
 | goversioninfo (or similar, build tool) | MIT | embed `assets/brand/app.ico` and version info in the Windows binaries | noted 2026-10-13 – ask before release packaging |
 
 TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test vectors, no dependency.
+The common password list (step 10) is data, not a module: origin and license in `THIRD_PARTY.md`.
 
 ---
 
@@ -324,3 +353,13 @@ TOTP (RFC 6238) is ~60 lines with `crypto/hmac` – own code with the RFC test v
 | 36 | Unsupported reasons on the offline root's CRL (step 9) | certificateHold, removeFromCRL and unknown codes mark our intermediate as revoked (recorded as unspecified) with the warning "certificateHold is not supported – for MyOwnPKI this CA is revoked for good"; lifting the hold later changes nothing |
 | 37 | Revocation edge cases (step 9) | An expired certificate can be revoked (with a warning; keyCompromise still blocks the key). If the CRL can't be signed after a revocation, the revocation stays stored, with a warning and `crl.sign/failure` in the audit log; `RenewCRLs` signs it later. A root can't be revoked (remove it from the trust stores); a CA below an offline root is revoked on the root's CRL and recognized at upload |
 | 38 | CRL limits (step 9) | Upload at most 4 MiB, CRL number at most 63 bits; CRL warnings don't change the exit code of `db status` (alerting in phase 4) |
+| 39 | Passwords (step 10) | Argon2id 64 MiB, t=3, p=1 (parameters in the hash, upgraded at the next login); **at most 4 hashes at once** – the throttle answers **before** a hash slot is taken, a caller who gets no slot waits up to 2 s and gets "busy"; 12–256 characters, no composition rules, no expiry (NIST SP 800-63B); refused: the user name inside, the product name, one repeated character or a plain sequence, and the **common password list** (Xato 1 million via SecLists, filtered to 12–256 characters, compared without case – `THIRD_PARTY.md`, built by `internal/tools/commonpasswords`); unknown users cost a full hash run too |
+| 40 | TOTP (step 10) | RFC 6238: SHA-1, 6 digits, 30 s, ±1 step; **160-bit secret**; a code works once (last step stored, checked in Go **and** in the SQL update); secret encrypted with the auth key, AAD = purpose + user ID |
+| 41 | Auth key (step 10) | `auth.key_file` (default `<data>/auth.key`), may live outside the data directory (Docker secret, systemd credential); created by init with 0600, never overwritten; readable by others → warning (Docker secrets are 0444), **writable by others → refused**. Limits stated openly: whoever has the databases **and** the key file has the TOTP secrets. **Losing the key = every user needs `user reset-2fa`** |
+| 42 | Recovery codes (step 10) | 10 per user, 100 random bits each (20 Crockford characters), usable once, stored as **HMAC with a key from the auth key**; use is audited with the number left (warning at ≤ 3); failures count for throttle and lockout |
+| 43 | Throttle and lockout (step 10) | In memory: per (IP, user) 5 free failures, per user 20, then 1 s doubling to 15 min; checked before any hash. **Unknown user names share one counter per address** – invented names never get entries of their own; **IPv6 counts per /64**, IPv4-mapped IPv6 as IPv4 (owner 2026-10-15). At most 100,000 entries: pruning drops forgotten entries first, then those with the fewest failures, **never one that is braking**. In the database: 10 failures in a row lock the account for 15 min, **never for good**; `myownpki user unlock <name>` ends it early (audited). Client IP: the direct peer, `X-Forwarded-For` only from `auth.trusted_proxies` (read from the right) |
+| 44 | Sessions and CSRF (step 10) | Cookie `__Host-myownpki_session` (`HttpOnly; Secure; SameSite=Strict; Path=/`), only the SHA-256 stored; after the password a 5-minute pending session, after the second factor a **new** session ID; idle 30 min, absolute 12 h, activity written at most once a minute; no IP in the session table. CSRF: Go's `http.CrossOriginProtection` (Sec-Fetch-Site/Origin) plus the session token (header or form field) |
+| 45 | Step-up and own changes (step 10) | Fresh second factor within 5 min for key download, revocation, CA management, CRL upload and user management (the second factor at login counts). **Unseal = signed-in instance admin + passphrase** (no step-up). Own password, authenticator and recovery codes need the **current password**; other sessions end. API token creation gets step-up in step 18 |
+| 46 | Roles (step 10) | Instance admin (users, unseal) separate from tenant roles: viewer (read, **no audit log** – personal data), operator (issue, revoke, download keys), admin (+ CAs, CRL upload, tenant settings); a role for the whole tenant or one CA. A CA is revoked by whoever manages its **issuer**; a revocation is published with the revoker's right, without `ca.manage`. The engine and the keyring check permissions themselves; refusals are audited as denied. Role changes and disabling end the user's sessions. **The last active instance admin and the last active (tenant-wide) admin of a tenant can't be disabled or lose that role** – also not by another admin; nobody disables themselves (owner 2026-10-15) |
+| 47 | User names and audit (step 10) | Lower case `a-z 0-9 . _ @ -`, 1–64 characters, anything else **refused, not converted**; users are disabled, never deleted. Failed logins with an unknown name are logged as "unknown user" **without the typed name** (it may be a password) |
+| 48 | Console emergencies (step 10) | `myownpki user reset-2fa <name>` needs the **unseal passphrase or the recovery key** (shell access alone is not enough), reads it from a pipe, gives a new TOTP secret and new recovery codes (terminal or `--otpauth-file`), ends all sessions; the next login confirms exactly that secret. `--new-auth-key` creates a lost key file anew (never over an existing one) |
