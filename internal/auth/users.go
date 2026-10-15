@@ -37,7 +37,10 @@ type NewUserRequest struct {
 	Password      string
 	InstanceAdmin bool
 	Roles         []authz.Binding
-	Who           keys.Who
+	// Draft, if set, is the second factor made beforehand (init); nil = a
+	// new secret and new recovery codes.
+	Draft *Draft
+	Who   keys.Who
 }
 
 // CreateUser stores the user and returns the enrollment to show once: the
@@ -79,16 +82,19 @@ func (s *Service) CreateUser(ctx context.Context, req NewUserRequest) (*Enrollme
 	if err != nil {
 		return nil, err
 	}
-	secret, err := newTOTPSecret(s.Rand)
+	draft := req.Draft
+	if draft == nil {
+		if draft, err = s.NewDraft(req.Username); err != nil {
+			return nil, err
+		}
+		defer draft.Clear()
+	}
+	sealed, err := s.Key.sealTOTP(s.Rand, id, draft.secret)
 	if err != nil {
 		return nil, err
 	}
-	defer clear(secret)
-	sealed, err := s.Key.sealTOTP(s.Rand, id, secret)
-	if err != nil {
-		return nil, err
-	}
-	enr := newEnrollment(s.issuer(), id, req.Username, secret)
+	enr := *draft.Enrollment
+	enr.UserID = id
 	admin := int64(0)
 	if req.InstanceAdmin {
 		admin = 1
@@ -105,18 +111,27 @@ func (s *Service) CreateUser(ctx context.Context, req NewUserRequest) (*Enrollme
 				return terr
 			}
 		}
-		var terr error
-		if enr.RecoveryCodes, terr = s.replaceRecoveryCodes(ctx, q, id, now); terr != nil {
+		if terr := s.storeRecoveryCodes(ctx, q, id, enr.RecoveryCodes, now); terr != nil {
 			return terr
+		}
+		if draft.confirmedStep > 0 {
+			n, terr := q.UseTOTPStep(ctx, systemdb.UseTOTPStepParams{
+				TotpLastStep: draft.confirmedStep, TotpConfirmedAt: sql.NullString{String: formatTime(now), Valid: true},
+				UpdatedAt: formatTime(now), ID: id, TotpLastStep_2: draft.confirmedStep,
+			})
+			if terr != nil || n != 1 {
+				return errors.Join(errors.New("confirm the authenticator"), terr)
+			}
 		}
 		return s.enqueueTarget(ctx, tx, req.Who, "user.create", id, map[string]any{
 			"username": req.Username, "instance_admin": req.InstanceAdmin, "roles": bindingNames(req.Roles),
+			"totp_confirmed": draft.confirmedStep > 0,
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
-	return enr, nil
+	return &enr, nil
 }
 
 // ConfirmTOTP confirms the authenticator of a new user right away (init on

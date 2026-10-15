@@ -546,16 +546,24 @@ func (s *Service) replaceRecoveryCodes(ctx context.Context, q *systemdb.Queries,
 	if err != nil {
 		return nil, err
 	}
+	return codes, s.storeRecoveryCodes(ctx, q, userID, codes, now)
+}
+
+// storeRecoveryCodes replaces the codes of userID with codes (hashed).
+func (s *Service) storeRecoveryCodes(ctx context.Context, q *systemdb.Queries, userID string, codes []string, now time.Time) error {
 	if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
-		return nil, err
+		return err
 	}
 	for _, c := range codes {
-		canon, _ := normalizeRecoveryCode(c)
+		canon, ok := normalizeRecoveryCode(c)
+		if !ok {
+			return fmt.Errorf("malformed recovery code")
+		}
 		if err := q.InsertRecoveryCode(ctx, systemdb.InsertRecoveryCodeParams{UserID: userID, CodeHash: s.Key.recoveryHash(userID, canon), CreatedAt: formatTime(now)}); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return codes, nil
+	return nil
 }
 
 func lockedFor(u systemdb.User, now time.Time) time.Duration {
