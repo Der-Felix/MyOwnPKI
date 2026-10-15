@@ -101,6 +101,7 @@ type CAResult struct {
 	CertDER          []byte // nil while the generation waits for its offline signature
 	Fingerprint      string // SHA-256 of CertDER, upper-case hex
 	Offline          *OfflineBundle
+	CRL              *CRLResult // the first CRL of a generation whose key is on this server
 	Notes, Warnings  []string
 }
 
@@ -561,10 +562,18 @@ func (e *Engine) signAndStore(ctx context.Context, now time.Time, plan *caPlan, 
 				return terr
 			}
 		}
-		return audit.Enqueue(ctx, tx, now, audit.Entry{
+		if terr := audit.Enqueue(ctx, tx, now, audit.Entry{
 			Time: now, Actor: who.Actor, Action: plan.action, Target: audit.Target{Type: "ca", ID: plan.caID},
 			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
-		})
+		}); terr != nil || cert == nil {
+			return terr
+		}
+		// The first CRL of the new generation, in the same transaction:
+		// relying parties that check revocation strictly refuse every
+		// certificate below a CA whose CRL URL answers 404.
+		var terr error
+		out.CRL, terr = e.writeCRL(ctx, q, tx, plan.caID, plan.generation, cert, func(fn func(crypto.Signer) error) error { return fn(priv) }, plan.action, who, now)
+		return terr
 	})
 	if err != nil {
 		return nil, err

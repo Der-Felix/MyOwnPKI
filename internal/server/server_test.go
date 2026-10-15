@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
 )
 
 var t0 = time.Date(2026, 10, 16, 8, 0, 0, 0, time.UTC)
@@ -356,12 +358,88 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 		!strings.HasSuffix(got, "user.create/success audit.checkpoint/success system.seal/success") {
 		t.Errorf("audit: %s", got)
 	}
-	// While sealed, the CRL job names the CRLs nobody can sign now (the test
-	// CA has none yet).
-	for _, want := range []string{`"msg":"admin TLS certificate"`, `"msg":"audit head"`, `"msg":"crl attention"`, `"msg":"` + setup.DemoWarning + `"`, `"msg":"stopped"`} {
+	for _, want := range []string{`"msg":"admin TLS certificate"`, `"msg":"audit head"`, `"msg":"` + setup.DemoWarning + `"`, `"msg":"stopped"`} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("log lacks %s", want)
 		}
+	}
+	// The test CAs came with their first CRLs: nothing to warn about.
+	if strings.Contains(logs.String(), `"msg":"crl attention"`) {
+		t.Errorf("CRL warning right after init:\n%s", logs.String())
+	}
+}
+
+// TestCRLsRightAfterInit: the CAs of init --with-ca have CRL number 1, so a
+// server started sealed publishes both (owner finding 2026-10-16: they were
+// 404 until the first unseal, and strict relying parties refused every
+// certificate below). While sealed, the CRL job warns from half of the
+// lifetime on.
+func TestCRLsRightAfterInit(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	initialized(t, cfg)
+	clk := clock.NewFake(time.Now().UTC())
+	var logs logBuf
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.NewJSONHandler(&logs, nil)), Clock: clk, Hostname: "pki01", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lerr := srv.Listen(t.Context()); lerr != nil {
+		t.Fatal(lerr)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	defer func() {
+		cancel()
+		if serr := <-done; serr != nil {
+			t.Error(serr)
+		}
+	}()
+	if !srv.Sealed() {
+		t.Fatal("not sealed")
+	}
+
+	for name, days := range map[string]int{"root": 30, "issuing": 7} {
+		url := srv.PublicAddr() + "/crl/" + name + "/1.crl"
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		der, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: %d", url, resp.StatusCode)
+			continue
+		}
+		crl, perr := x509.ParseRevocationList(der)
+		if perr != nil {
+			t.Fatalf("%s: %v", url, perr)
+		}
+		if want := clk.Now().AddDate(0, 0, days); crl.Number.Int64() != 1 || crl.NextUpdate.Sub(want).Abs() > time.Hour {
+			t.Errorf("%s: number %v, nextUpdate %v (want about %v)", name, crl.Number, crl.NextUpdate, want)
+		}
+		// Cross-check with OpenSSL: number and nextUpdate as a client sees them.
+		p := filepath.Join(t.TempDir(), name+".crl")
+		if werr := os.WriteFile(p, der, 0o600); werr != nil {
+			t.Fatal(werr)
+		}
+		out, oerr := exec.CommandContext(t.Context(), testutil.OpenSSL(t), "crl", "-inform", "DER", "-in", p, "-noout", "-crlnumber", "-nextupdate").CombinedOutput() // #nosec G204 -- test binary and temp file
+		if oerr != nil || !strings.Contains(string(out), "crlNumber=0x01") || !strings.Contains(string(out), "nextUpdate="+crl.NextUpdate.UTC().Format("Jan _2 15:04:05 2006 GMT")) {
+			t.Errorf("openssl crl %s: %v\n%s", name, oerr, out)
+		}
+	}
+
+	// Four days later the 7-day CRL of the intermediate is past half its
+	// lifetime: the sealed server says so, the root's is still fine.
+	clk.Advance(4 * 24 * time.Hour)
+	if werr := srv.warnSealedCRLs(t.Context()); werr != nil {
+		t.Fatal(werr)
+	}
+	l := logs.String()
+	if !strings.Contains(l, `"msg":"crl attention","ca":"issuing","generation":1,"state":"warning"`) || strings.Contains(l, `"ca":"root","generation":1,"state"`) {
+		t.Errorf("sealed CRL warnings:\n%s", l)
 	}
 }
 

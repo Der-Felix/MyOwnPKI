@@ -248,8 +248,12 @@ func TestRevocationWhileSealedIsPublishedAtUnseal(t *testing.T) {
 func TestCRLNumbersAndRenewalTiming(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
-	v.root(t, "root", nil)
-	v.intermediate(t, "issuing", "root", nil)
+	// A new online CA comes with CRL number 1 (root 30 days, issuing 7).
+	for _, res := range []*CAResult{v.root(t, "root", nil), v.intermediate(t, "issuing", "root", nil)} {
+		if c := res.CRL; c == nil || c.Number != 1 || c.Generation != 1 || c.Entries != 0 || !c.NextUpdate.After(v.clk.Now()) {
+			t.Errorf("%s: first CRL %+v", res.Name, c)
+		}
+	}
 	renew := func(want int) []CRLResult {
 		t.Helper()
 		got, err := v.e.RenewCRLs(t.Context(), "timer")
@@ -258,7 +262,7 @@ func TestCRLNumbersAndRenewalTiming(t *testing.T) {
 		}
 		return got
 	}
-	renew(2) // root (30 days) and issuing (7 days): both missing
+	renew(0) // both fresh
 	v.clk.Advance(2 * day)
 	renew(0) // less than a third of 7 days
 	v.clk.Advance(12 * time.Hour)
@@ -266,13 +270,16 @@ func TestCRLNumbersAndRenewalTiming(t *testing.T) {
 		t.Errorf("issuing after 2.5 days: %+v", got)
 	}
 
-	// A renewal of the CA adds generation 2: its CRL continues the CA's numbers.
-	if _, err := v.e.RenewCA(t.Context(), RenewRequest{Name: "issuing", Who: tester}); err != nil {
+	// A renewal of the CA adds generation 2 with its first CRL at once: it
+	// continues the CA's numbers.
+	res, err := v.e.RenewCA(t.Context(), RenewRequest{Name: "issuing", Who: tester})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := renew(1); got[0].Generation != 2 || got[0].Number != 3 {
-		t.Errorf("generation 2: %+v", got)
+	if c := res.CRL; c == nil || c.Generation != 2 || c.Number != 3 || parseCRL(t, c.DER).CheckSignatureFrom(parse(t, res.CertDER)) != nil {
+		t.Errorf("generation 2: %+v", c)
 	}
+	renew(0)
 	// Without renewals: warning from half of the lifetime, then expired.
 	states := func() map[string]string {
 		all, _ := CRLStatuses(t.Context(), v.pki, v.clk.Now())

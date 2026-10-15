@@ -164,11 +164,49 @@ func (e *Engine) signCRL(ctx context.Context, caID string, generation int64, tri
 		return nil, deny("CA %q generation %d needs no CRL any more – it and every certificate it signed expired more than %d days (crl_days) ago",
 			ca.Name, generation, ca.CrlDays)
 	}
+	key, err := keys.LoadKey(ctx, e.PKI, gen.KeyID.String)
+	if err != nil {
+		return nil, err
+	}
+	var out *CRLResult
+	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		var werr error
+		out, werr = e.writeCRL(ctx, q, tx, ca.ID, generation, cert, func(fn func(crypto.Signer) error) error {
+			return e.Keys.WithSigner(key.ID, key.Purpose, key.Algorithm, key.Envelope, fn)
+		}, trigger, who, now)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// writeCRL signs the CRL of a generation inside a pki.db transaction:
+// entries, number, signature, the crls row, the number on the CA and the
+// crl.sign audit entry; withSigner hands over the generation's key. A new
+// online CA (or generation) calls it in the transaction that creates it,
+// so it is never published without a CRL.
+func (e *Engine) writeCRL(ctx context.Context, q *pkidb.Queries, tx *sql.Tx, caID string, generation int64, cert *x509.Certificate,
+	withSigner func(func(crypto.Signer) error) error, trigger string, who keys.Who, now time.Time,
+) (*CRLResult, error) {
+	// Read inside the transaction: the single writer makes the number
+	// strictly increasing even with concurrent revocations, and a CA created
+	// in the same transaction is visible.
+	ca, err := q.GetCA(ctx, caID)
+	if err != nil {
+		return nil, err
+	}
+	maxNo, err := q.MaxCRLNumber(ctx, ca.ID)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := crlEntries(ctx, q, ca, generation, now)
 	if err != nil {
 		return nil, err
 	}
 	tmpl := &x509.RevocationList{
+		Number:     big.NewInt(max(maxNo, ca.CrlNumber) + 1),
 		ThisUpdate: now.Add(-Backdate),
 		NextUpdate: now.Add(time.Duration(ca.CrlDays) * day),
 	}
@@ -185,56 +223,37 @@ func (e *Engine) signCRL(ctx context.Context, caID string, generation int64, tri
 		}
 		tmpl.RevokedCertificateEntries = append(tmpl.RevokedCertificateEntries, entry)
 	}
-
-	key, err := keys.LoadKey(ctx, e.PKI, gen.KeyID.String)
+	out := &CRLResult{CA: ca.Name, Generation: generation, Number: tmpl.Number.Int64(), ThisUpdate: tmpl.ThisUpdate, NextUpdate: tmpl.NextUpdate, Entries: len(entries)}
+	err = withSigner(func(s crypto.Signer) error {
+		if !publicKeyEqual(s.Public(), cert.PublicKey) {
+			return fmt.Errorf("CA %q: the key doesn't belong to generation %d", ca.Name, generation)
+		}
+		var serr error
+		out.DER, serr = x509.CreateRevocationList(e.rand(), tmpl, cert, s)
+		return serr
+	})
 	if err != nil {
+		return nil, fmt.Errorf("sign CRL: %w", err)
+	}
+	if _, err = x509.ParseRevocationList(out.DER); err != nil {
+		return nil, fmt.Errorf("signed CRL doesn't parse: %w", err)
+	}
+	stamp := now.Format(audit.TimeFormat)
+	if err = q.InsertCRL(ctx, pkidb.InsertCRLParams{
+		CaID: ca.ID, Generation: generation, Number: out.Number, ThisUpdate: tmpl.ThisUpdate.UTC().Format(dbTime),
+		NextUpdate: tmpl.NextUpdate.UTC().Format(dbTime), CrlDer: out.DER, Source: "signed", CreatedAt: stamp,
+	}); err != nil {
 		return nil, err
 	}
-	out := &CRLResult{CA: ca.Name, Generation: generation, ThisUpdate: tmpl.ThisUpdate, NextUpdate: tmpl.NextUpdate, Entries: len(entries)}
-	stamp := now.Format(audit.TimeFormat)
-	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
-		// The number is taken inside the transaction: the single writer
-		// makes it strictly increasing even with concurrent revocations.
-		maxNo, terr := q.MaxCRLNumber(ctx, ca.ID)
-		if terr != nil {
-			return terr
-		}
-		current, terr := q.GetCA(ctx, ca.ID)
-		if terr != nil {
-			return terr
-		}
-		out.Number = max(maxNo, current.CrlNumber) + 1
-		tmpl.Number = big.NewInt(out.Number)
-		terr = e.Keys.WithSigner(key.ID, key.Purpose, key.Algorithm, key.Envelope, func(s crypto.Signer) error {
-			if !publicKeyEqual(s.Public(), cert.PublicKey) {
-				return fmt.Errorf("CA %q: key %s doesn't belong to generation %d", ca.Name, key.ID, generation)
-			}
-			var serr error
-			out.DER, serr = x509.CreateRevocationList(e.rand(), tmpl, cert, s)
-			return serr
-		})
-		if terr != nil {
-			return fmt.Errorf("sign CRL: %w", terr)
-		}
-		if _, terr = x509.ParseRevocationList(out.DER); terr != nil {
-			return fmt.Errorf("signed CRL doesn't parse: %w", terr)
-		}
-		if terr = q.InsertCRL(ctx, pkidb.InsertCRLParams{
-			CaID: ca.ID, Generation: generation, Number: out.Number, ThisUpdate: tmpl.ThisUpdate.UTC().Format(dbTime),
-			NextUpdate: tmpl.NextUpdate.UTC().Format(dbTime), CrlDer: out.DER, Source: "signed", CreatedAt: stamp,
-		}); terr != nil {
-			return terr
-		}
-		if terr = q.SetCRLNumber(ctx, pkidb.SetCRLNumberParams{CrlNumber: out.Number, UpdatedAt: stamp, ID: ca.ID}); terr != nil {
-			return terr
-		}
-		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: who.Actor, Action: ActionCRLSign, Target: audit.Target{Type: "ca", ID: ca.ID},
-			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: map[string]any{
-				"name": ca.Name, "generation": generation, "number": out.Number, "entries": len(entries),
-				"next_update": tmpl.NextUpdate.UTC().Format(dbTime), "trigger": trigger,
-			},
-		})
+	if err = q.SetCRLNumber(ctx, pkidb.SetCRLNumberParams{CrlNumber: out.Number, UpdatedAt: stamp, ID: ca.ID}); err != nil {
+		return nil, err
+	}
+	err = audit.Enqueue(ctx, tx, now, audit.Entry{
+		Time: now, Actor: who.Actor, Action: ActionCRLSign, Target: audit.Target{Type: "ca", ID: ca.ID},
+		Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: map[string]any{
+			"name": ca.Name, "generation": generation, "number": out.Number, "entries": len(entries),
+			"next_update": tmpl.NextUpdate.UTC().Format(dbTime), "trigger": trigger,
+		},
 	})
 	if err != nil {
 		return nil, err

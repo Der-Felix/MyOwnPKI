@@ -115,9 +115,20 @@ func TestOnlineRootAndIntermediate(t *testing.T) {
 		t.Error("intermediate: AKI must be the root's SKI, signature by the P-384 root")
 	}
 
-	// The new CAs issue right away, and the chain holds for OpenSSL.
+	// Both come with CRL number 1 at once, signed by their own key.
+	for _, res := range []*CAResult{r, ir} {
+		if c := res.CRL; c == nil || c.Number != 1 || c.Generation != 1 || parseCRL(t, c.DER).CheckSignatureFrom(certOf(t, res)) != nil {
+			t.Errorf("%s: first CRL %+v", res.Name, c)
+		}
+	}
+
+	// The new CAs issue right away, and the chain holds for OpenSSL – also
+	// with strict revocation checking on every level.
 	out := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"nas.homelab.lan"}, IPAddresses: []string{"fd00::5"}})
 	opensslVerifyAt(t, t0, [][]byte{ir.CertDER, r.CertDER}, out.CertDER, "sslserver")
+	if res, ok := opensslWithCRLs(t, t0, out.Chain, [][]byte{r.CRL.DER, ir.CRL.DER}, out.CertDER, "-crl_check_all"); !ok {
+		t.Errorf("chain with the first CRLs:\n%s", res)
+	}
 	if got := v.denied(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"x.secret.homelab.lan"}}); !strings.Contains(got, "excluded") {
 		t.Errorf("NC of a created CA: %q", got)
 	}
@@ -137,12 +148,16 @@ func TestOnlineRootAndIntermediate(t *testing.T) {
 	if c := cas[1]; c.Name != "root" || c.CRLDays != DefaultCRLDaysOnlineRoot || c.PathLen != nil || c.KeyMode != KeyModeOnlineEncrypted {
 		t.Errorf("list: %+v", c)
 	}
-	actions := map[string]int{}
+	var seq []string
 	for _, row := range v.auditRows(t) {
-		actions[row.action+"/"+row.result]++
+		seq = append(seq, row.action+"/"+row.result)
+		if row.action == ActionCRLSign && row.details["trigger"] != ActionCACreate {
+			t.Errorf("crl.sign details %v", row.details)
+		}
 	}
-	if actions["ca.create/success"] != 2 || actions["certificate.issue/success"] != 1 {
-		t.Errorf("audit %v", actions)
+	// The refusals above are direct entries; the outbox follows in order.
+	if got := strings.Join(seq, " "); !strings.HasSuffix(got, " ca.create/success crl.sign/success ca.create/success crl.sign/success certificate.issue/success") {
+		t.Errorf("audit %s", got)
 	}
 }
 
@@ -427,10 +442,20 @@ func TestOfflineSigningFlow(t *testing.T) {
 		t.Errorf("AKI: %q", got)
 	}
 
+	// While sealed the install waits: the new CA couldn't sign its CRL.
 	good := off.sign(t, b, nc, nil)
+	unsealed := v.e.Keys
+	v.e.Keys = keys.New(nil, nil, v.clk)
+	if _, ierr := v.e.InstallCACertificate(t.Context(), "issuing", good, tester); !errors.Is(ierr, keys.ErrSealed) {
+		t.Errorf("install while sealed: %v", ierr)
+	}
+	v.e.Keys = unsealed
 	res, err := v.e.InstallCACertificate(t.Context(), "issuing", good, tester)
 	if err != nil || res.Status != StatusActive || res.Generation != 1 {
 		t.Fatalf("install: %+v %v", res, err)
+	}
+	if c := res.CRL; c == nil || c.Number != 1 || c.Generation != 1 || parseCRL(t, c.DER).CheckSignatureFrom(certOf(t, res)) != nil {
+		t.Errorf("first CRL at the install: %+v", c)
 	}
 	if _, ierr := v.e.InstallCACertificate(t.Context(), "issuing", good, tester); !strings.Contains(deniedErr(t, ierr), "no generation waiting") {
 		t.Error("installed twice")
@@ -451,8 +476,12 @@ func TestOfflineSigningFlow(t *testing.T) {
 	if got := deniedErr(t, err); !strings.Contains(got, "already used") {
 		t.Errorf("reused serial: %q", got)
 	}
-	if _, err := v.e.InstallCACertificate(t.Context(), "issuing", off.sign(t, rr.Offline, nc, nil), tester); err != nil {
+	i2, err := v.e.InstallCACertificate(t.Context(), "issuing", off.sign(t, rr.Offline, nc, nil), tester)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if c := i2.CRL; c == nil || c.Generation != 2 || c.Number != 2 {
+		t.Errorf("first CRL of generation 2: %+v", c)
 	}
 	out = v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"c.homelab.lan"}})
 	if leaf := parse(t, out.CertDER); !slices.Equal(leaf.IssuingCertificateURL, []string{baseURL + "/ca/issuing/2.crt"}) {
@@ -463,7 +492,7 @@ func TestOfflineSigningFlow(t *testing.T) {
 	for _, row := range v.auditRows(t) {
 		actions[row.action+"/"+row.result]++
 	}
-	if actions["ca.csr_create/success"] != 1 || actions["ca.certificate_install/success"] != 2 || actions["ca.renew/success"] != 1 ||
+	if actions["ca.csr_create/success"] != 1 || actions["ca.certificate_install/success"] != 2 || actions["ca.renew/success"] != 1 || actions["crl.sign/success"] != 2 ||
 		actions["ca.certificate_install/denied"] != len(tests)+3 {
 		t.Errorf("audit %v", actions)
 	}
@@ -506,6 +535,15 @@ func TestOnlineRenewal(t *testing.T) {
 	i3, err := v.e.RenewCA(t.Context(), RenewRequest{Name: "issuing", Who: tester})
 	if err != nil || !slices.Equal(certOf(t, i3).IssuingCertificateURL, []string{baseURL + "/ca/root/2.crt"}) {
 		t.Fatalf("renew below the renewed root: %v", err)
+	}
+	// Every new generation has its first CRL at once; the numbers go on per CA.
+	for _, g := range []struct {
+		res    *CAResult
+		number int64
+	}{{i2, 2}, {r2, 2}, {i3, 3}} {
+		if c := g.res.CRL; c == nil || c.Generation != g.res.Generation || c.Number != g.number || parseCRL(t, c.DER).CheckSignatureFrom(certOf(t, g.res)) != nil {
+			t.Errorf("%s generation %d: first CRL %+v", g.res.Name, g.res.Generation, c)
+		}
 	}
 	if cas, _ := ListCAs(t.Context(), v.pki); len(cas[0].Generations) != 3 || cas[0].Generations[2].Issuer != "root/2" {
 		t.Errorf("generations %+v", cas[0].Generations)
@@ -626,7 +664,8 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 	}
 	cert := parse(t, pemBytes(t, certPEM))
 	v.clk.Set(cert.NotBefore.Add(time.Minute))
-	if _, ierr := v.e.InstallCACertificate(t.Context(), "issuing", certPEM, tester); ierr != nil {
+	installed, ierr := v.e.InstallCACertificate(t.Context(), "issuing", certPEM, tester)
+	if ierr != nil {
 		t.Fatalf("install the certificate signed by pki.sh: %v", ierr)
 	}
 	if cert.SignatureAlgorithm != x509.SHA256WithRSA {
@@ -636,7 +675,8 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 	opensslVerifyAt(t, v.clk.Now(), out.Chain, out.CertDER, "sslserver")
 
 	// Step 9: the root CRL from pki.sh is uploaded; with the CRL the server
-	// signs for the intermediate, the whole chain passes -crl_check_all.
+	// signed for the intermediate at the install, the whole chain passes
+	// -crl_check_all.
 	pki("crl", "--ca", "root")
 	rootCRL, err := os.ReadFile(filepath.Join(dir, "pki", "publish", "root.crl"))
 	if err != nil {
@@ -645,11 +685,10 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 	if _, _, uerr := v.e.UploadCRL(t.Context(), "root", rootCRL, tester); uerr != nil {
 		t.Fatalf("upload the CRL of pki.sh: %v", uerr)
 	}
-	signed, err := v.e.RenewCRLs(t.Context(), "test")
-	if err != nil || len(signed) != 1 {
-		t.Fatalf("intermediate CRL: %+v %v", signed, err)
+	if installed.CRL == nil || installed.CRL.Number != 1 {
+		t.Fatalf("intermediate CRL at the install: %+v", installed.CRL)
 	}
-	if res, ok := opensslWithCRLs(t, v.clk.Now(), out.Chain, [][]byte{rootCRL, signed[0].DER}, out.CertDER, "-crl_check_all"); !ok {
+	if res, ok := opensslWithCRLs(t, v.clk.Now(), out.Chain, [][]byte{rootCRL, installed.CRL.DER}, out.CertDER, "-crl_check_all"); !ok {
 		t.Errorf("chain with both CRLs:\n%s", res)
 	}
 }

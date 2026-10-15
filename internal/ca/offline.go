@@ -269,6 +269,10 @@ func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM 
 	if err := e.authorize(who, authz.ManageCA, short(name), now); err != nil {
 		return nil, err
 	}
+	// The generation's key is on this server: it signs its first CRL at once.
+	if e.Keys.Status().Sealed {
+		return nil, keys.ErrSealed
+	}
 	q := pkidb.New(e.PKI)
 	ca, pending, parent, err := loadPending(ctx, q, name, now)
 	if err != nil {
@@ -302,6 +306,13 @@ func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM 
 		return nil, &DeniedError{Reasons: reasons}
 	}
 
+	if !pending.KeyID.Valid {
+		return nil, fmt.Errorf("CA %q generation %d has no key on this server", ca.Name, pending.Generation)
+	}
+	key, err := keys.LoadKey(ctx, e.PKI, pending.KeyID.String)
+	if err != nil {
+		return nil, err
+	}
 	var gen pkidb.InsertCAGenerationParams
 	fillGeneration(&gen, cert)
 	out := &CAResult{ID: ca.ID, Name: ca.Name, Status: StatusActive, Generation: pending.Generation, CertDER: cert.Raw,
@@ -328,20 +339,26 @@ func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM 
 		if n != 1 {
 			return fmt.Errorf("CA %q generation %d was signed meanwhile", ca.Name, pending.Generation)
 		}
-		if terr := q.SetCurrentGeneration(ctx, pkidb.SetCurrentGenerationParams{
+		if terr = q.SetCurrentGeneration(ctx, pkidb.SetCurrentGenerationParams{
 			CurrentGeneration: sql.NullInt64{Int64: pending.Generation, Valid: true}, UpdatedAt: updated, ID: ca.ID,
 		}); terr != nil {
 			return terr
 		}
 		if ca.Status == StatusPendingSignature {
-			if terr := q.SetCAStatus(ctx, pkidb.SetCAStatusParams{Status: StatusActive, UpdatedAt: updated, ID: ca.ID}); terr != nil {
+			if terr = q.SetCAStatus(ctx, pkidb.SetCAStatusParams{Status: StatusActive, UpdatedAt: updated, ID: ca.ID}); terr != nil {
 				return terr
 			}
 		}
-		return audit.Enqueue(ctx, tx, now, audit.Entry{
+		if terr = audit.Enqueue(ctx, tx, now, audit.Entry{
 			Time: now, Actor: who.Actor, Action: ActionCACertInstall, Target: audit.Target{Type: "ca", ID: ca.ID},
 			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
-		})
+		}); terr != nil {
+			return terr
+		}
+		out.CRL, terr = e.writeCRL(ctx, q, tx, ca.ID, pending.Generation, cert, func(fn func(crypto.Signer) error) error {
+			return e.Keys.WithSigner(key.ID, key.Purpose, key.Algorithm, key.Envelope, fn)
+		}, ActionCACertInstall, who, now)
+		return terr
 	})
 	if err != nil {
 		return nil, err

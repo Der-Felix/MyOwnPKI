@@ -137,7 +137,8 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
   - keyCompromise/cACompromise put the key's SPKI hash into `blocked_keys`; the engine refuses that
     key in every later request.
 - **CRL per CA generation:**
-  - Signed by the generation's key.
+  - Signed by the generation's key; **the first CRL comes with the generation** (same transaction) –
+    a CDP that answers 404 makes strict clients refuse every certificate below.
   - thisUpdate backdated 5 minutes.
   - Renew after ⅓ of the lifetime; warn from ½.
   - Keep an entry until notAfter + crl_days (RFC 5280 §3.3).
