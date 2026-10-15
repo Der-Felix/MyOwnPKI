@@ -196,7 +196,11 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   which needs the unseal passphrase or the recovery key).
 - Admin listener TLS: at first start a **self-signed bootstrap certificate**, its SHA-256
   fingerprint printed on the console for verification; alternatively an operator-provided
-  certificate. After setup the admin certificate is issued by the own CA.
+  certificate. After setup the admin certificate is issued by the own CA. The bootstrap
+  certificate is an end-entity certificate (CA:FALSE, serverAuth), renewed 30 days before its end
+  or when its names change *(step 12)*.
+- The admin listener should never face the internet; `admin.allowed_networks` limits it to the
+  admin networks before any TLS handshake (ADR-08, step 12).
 
 ### Audit & supply chain
 - Audit log as a hash chain: `<data>/audit.db` for instance events (logins, users, unseal),
@@ -663,6 +667,15 @@ keeps the reasons. None of them changes an ADR.
 | A demo instance is marked for good; the warning in `db status`, the server log and the UI | All secrets in one file is the opposite of keeping them apart – nobody should drift into production with it |
 | Test CA names carry a random tag and the host name | Two test instances never produce roots with the same name in a trust store |
 | Admin password ≠ unseal passphrase (also ignoring case) | They protect different things and must not fall together |
+
+### Server (phase 1 step 12, design approved 2026-10-16)
+| Decision | Why |
+|---|---|
+| Bootstrap certificate as a self-signed end-entity certificate, key unencrypted, fingerprint at every start | Browsers accept an exception only for a non-CA certificate; the admin listener must work while sealed, and the fingerprint is the check |
+| Allowlist before the TLS handshake, refusals summed up once a minute | A scanner sees nothing and can't flood the log |
+| Listeners start sealed; `--unseal` asks only afterwards; a wrong passphrase keeps the server running | CRLs and CA certificates are served from the first second, whatever the operator types |
+| Shutdown within 8 s, seal with the last checkpoint at the end | Container runtimes kill after 10 s; the audit log must be signed up to the end |
+| Direct audit entries fail-closed, outbox entries may pile up (warned with count and age) | No unseal or sign-in without a trace; business changes are never lost, only delayed |
 
 ### Web UI and dev mode
 | Decision | Why |

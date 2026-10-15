@@ -13,6 +13,8 @@ operator decide, so the product must be safe in the worst case).
 | Admin (:9443) | Web UI + REST API | session (2FA) or API token; optional mTLS + IP allowlist |
 
 Never mount admin routes on the public listener, not even "just for health checks".
+The admin listener takes `admin.allowed_networks` (checked against the direct peer before TLS, refusals
+logged at most once a minute) and warns at start when it is reachable from other machines without one.
 Separate `http.ServeMux` per listener so a route can't leak across.
 
 ## Authentication
@@ -105,6 +107,9 @@ The http-01 and tls-alpn-01 validators connect to hostnames an ACME client chose
 - Log who, what, when, from where, target object, result – never secrets or key material.
 - Entries hold personal data (user name, source IP): store only what security needs, no user agent
   or request free text; single entries can't be deleted (hash chain) – see PLAN §5 for the GDPR note.
+- **Direct entries are fail-closed** (`internal/keys`, `internal/auth`): no unseal, sign-in or step-up whose
+  entry can't be written – except actions that reduce power (seal, logout), which happen and report the error.
+  **Outbox entries may pile up** while delivery fails; the server warns with count and age.
 - Business changes reach the audit log through the outbox of their own database (same transaction);
   never write an audit entry and a business change "one after the other" across two databases.
 - Export to syslog/SIEM (phase 5). `myownpki audit verify` walks every chain; `internal/audit` has
@@ -112,7 +117,7 @@ The http-01 and tls-alpn-01 validators connect to hostnames an ACME client chose
 
 ## Transport and headers (admin listener)
 
-- TLS 1.2+ (prefer 1.3), HSTS, `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`
+- TLS 1.2+ (1.3 preferred, Go negotiates the hybrid post-quantum key exchange), HSTS `max-age=31536000` without includeSubDomains/preload, `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`
   (relax only for documented needs, e.g. sandboxed plugin iframes later).
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Permissions-Policy` minimal.
 
