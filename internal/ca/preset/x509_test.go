@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
 )
 
 // These tests issue throw-away certificates with the extensions of every
@@ -253,17 +255,11 @@ func TestPresetCertificatesWrongPurpose(t *testing.T) {
 }
 
 // opensslVerify runs `openssl verify -purpose` and checks the outcome.
-// Skipped when OpenSSL is not installed.
+// Skipped locally when OpenSSL 3 is not installed, fatal in CI.
 func opensslVerify(t *testing.T, caPEM, certPEM []byte, purpose string, wantOK bool) {
 	t.Helper()
-	bin, err := exec.LookPath("openssl")
-	if err != nil {
-		// In CI the cross-check must not disappear silently.
-		if os.Getenv("CI") != "" {
-			t.Fatal("openssl not on PATH, but CI is set – the OpenSSL cross-check is required in CI")
-		}
-		t.Skip("openssl not on PATH – skipping cross-check")
-	}
+	bin := testutil.OpenSSL(t)
+	var err error
 	dir := t.TempDir()
 	caFile, certFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "leaf.pem")
 	if err = os.WriteFile(caFile, caPEM, 0o600); err != nil {

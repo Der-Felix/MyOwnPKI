@@ -32,6 +32,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
 )
 
 // Step 7 has no CA creation yet (step 8), so these tests build root and
@@ -381,18 +382,11 @@ func opensslVerify(t *testing.T, chain []*fixtureCA, leafDER []byte, purpose str
 	opensslVerifyAt(t, t0, ders, leafDER, purpose)
 }
 
-// opensslBin returns the openssl binary; skipped locally, fatal in CI.
+// opensslBin returns the openssl binary (OpenSSL 3 or newer); skipped
+// locally, fatal in CI.
 func opensslBin(t *testing.T) string {
 	t.Helper()
-	bin, err := exec.LookPath("openssl")
-	if err != nil {
-		// In CI the cross-check must not disappear silently.
-		if os.Getenv("CI") != "" {
-			t.Fatal("openssl not on PATH, but CI is set – the OpenSSL cross-check is required in CI")
-		}
-		t.Skip("openssl not on PATH – skipping cross-check")
-	}
-	return bin
+	return testutil.OpenSSL(t)
 }
 
 // opensslVerifyAt verifies leafDER against chain (issuer first, root last)

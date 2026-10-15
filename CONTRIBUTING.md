@@ -39,7 +39,9 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
   tests enforce this.
 - **Certificates**: extensions come from presets and policy, never from the CSR; CSRs, uploads
   and ACME payloads are untrusted input. Tests that produce certificates parse them with
-  `crypto/x509` and, where available, cross-check with `openssl verify`.
+  `crypto/x509` and, where available, cross-check with `openssl verify`. The cross-checks need
+  **OpenSSL 3.0 or newer** (skipped locally without it, required in CI) – macOS ships LibreSSL,
+  there: `brew install openssl@3` and put it first on `PATH`.
 - **Time**: UTC everywhere, with an injected clock in tests – no sleeping, no wall time.
 - **Generated code** (templ, sqlc) is regenerated with `task generate`
   and committed.

@@ -89,8 +89,16 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go.sum
+      # macOS ships LibreSSL as /usr/bin/openssl; the tests need OpenSSL 3
+      # (x509 -req -copy_extensions, as in the offline signing instructions).
+      - name: OpenSSL 3 from Homebrew (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
       # The tests cross-check certificates with `openssl verify` (required
-      # in CI); the log shows which OpenSSL (or LibreSSL) that is.
+      # in CI); the log shows which OpenSSL that is.
       - name: OpenSSL used by the tests
         shell: bash
         run: command -v openssl && openssl version
