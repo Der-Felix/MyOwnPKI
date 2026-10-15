@@ -184,7 +184,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 	if _, err := cfg.ApplyEnv(env); err != nil {
 		t.Fatal(err)
 	}
-	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker"}, Public: Public{"marker"},
+	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
 		Auth: Auth{"marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
@@ -220,7 +220,7 @@ func TestAuthSettings(t *testing.T) {
 	if got := cfg.AuthKeyFile(); got != filepath.Join(cfg.DataDir, "auth.key") {
 		t.Errorf("default key file: %s", got)
 	}
-	got, err := ParseProxies(" 10.0.0.5, 192.168.1.0/24,fd00::/8 ,::ffff:10.0.0.7")
+	got, err := ParseNetworks(" 10.0.0.5, 192.168.1.0/24,fd00::/8 ,::ffff:10.0.0.7")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,13 +237,32 @@ func TestAuthSettings(t *testing.T) {
 		"fe80::1%eth0":        "is not an IP or CIDR",
 		"::ffff:10.0.0.0/104": "write IPv4 networks as IPv4",
 	} {
-		if _, err := ParseProxies(in); err == nil || !strings.Contains(err.Error(), msg) {
+		if _, err := ParseNetworks(in); err == nil || !strings.Contains(err.Error(), msg) {
 			t.Errorf("%q: %v, want %q", in, err, msg)
 		}
 	}
 	cfg.Auth = Auth{KeyFile: "auth.key", TrustedProxies: "10.0.0.1/8"}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "auth.key_file: must be an absolute path") ||
 		!strings.Contains(err.Error(), "auth.trusted_proxies") {
+		t.Errorf("validate: %v", err)
+	}
+}
+
+func TestAdminTLSNamesAndAllowlist(t *testing.T) {
+	t.Parallel()
+	names, ips, err := ParseTLSNames(" pki.homelab.lan, 192.0.2.5 ,::ffff:10.0.0.1, ca01")
+	if err != nil || strings.Join(names, ",") != "pki.homelab.lan,ca01" || len(ips) != 2 || ips[1].String() != "10.0.0.1" {
+		t.Errorf("tls names: %v %v %v", names, ips, err)
+	}
+	for _, bad := range []string{"*.homelab.lan", "PKI.lan", "-x.lan", "a..b", "fe80::1%eth0", "host_name"} {
+		if _, _, err := ParseTLSNames(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	cfg := Default()
+	cfg.DataDir = absDir(t)
+	cfg.Admin.AllowedNetworks, cfg.Admin.TLSNames = "10.0.0.1/8", "*.lan"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "admin.allowed_networks") || !strings.Contains(err.Error(), "admin.tls_names") {
 		t.Errorf("validate: %v", err)
 	}
 }

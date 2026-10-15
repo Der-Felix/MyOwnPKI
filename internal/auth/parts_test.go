@@ -314,7 +314,7 @@ func TestRecoveryCodes(t *testing.T) {
 
 func TestClientIP(t *testing.T) {
 	t.Parallel()
-	proxies, err := config.ParseProxies("10.0.0.5, 10.1.0.0/16")
+	proxies, err := config.ParseNetworks("10.0.0.5, 10.1.0.0/16")
 	if err != nil {
 		t.Fatal(err)
 	}

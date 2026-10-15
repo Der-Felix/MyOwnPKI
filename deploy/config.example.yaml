@@ -30,6 +30,14 @@ admin:
   # certificate; its SHA-256 fingerprint is printed on the console at start.
   tls_cert_file: ""
   tls_key_file: ""
+  # Further names in the bootstrap certificate (comma-separated DNS names or
+  # IPs) – the names you type into the browser. Host name, the listen IP and
+  # loopback are always in it.
+  tls_names: ""
+  # Who may connect at all (IPs or CIDRs, comma-separated), checked before
+  # TLS. Empty: everybody. Strongly recommended when listen is not loopback –
+  # better still, never expose the admin listener to the internet.
+  allowed_networks: ""
 
 # Public listener: CRLs now, OCSP and ACME later. Must be reachable by every
 # client that checks revocation. Empty disables it.

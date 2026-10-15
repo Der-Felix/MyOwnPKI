@@ -58,6 +58,13 @@ type Admin struct {
 	// empty: a self-signed bootstrap certificate is created (PLAN §5).
 	TLSCertFile string `yaml:"tls_cert_file"`
 	TLSKeyFile  string `yaml:"tls_key_file"`
+	// TLSNames are further DNS names or IPs (comma-separated) for the
+	// bootstrap certificate, besides the host name, the listen IP and
+	// loopback – the names admins type into the browser.
+	TLSNames string `yaml:"tls_names"`
+	// AllowedNetworks limits who may connect (IPs or CIDRs, comma-separated);
+	// empty: everybody. Checked against the direct peer before TLS (ADR-08).
+	AllowedNetworks string `yaml:"allowed_networks"`
 }
 
 // Public is the public listener: CRL now, OCSP, AIA and ACME later (ADR-08).
@@ -180,7 +187,13 @@ func (c Config) Validate() error {
 	if c.Auth.KeyFile != "" && !filepath.IsAbs(c.Auth.KeyFile) {
 		add("auth.key_file: must be an absolute path, got %q", c.Auth.KeyFile)
 	}
-	if _, err := ParseProxies(c.Auth.TrustedProxies); err != nil {
+	if _, err := ParseNetworks(c.Admin.AllowedNetworks); err != nil {
+		add("admin.allowed_networks: %w", err)
+	}
+	if _, _, err := ParseTLSNames(c.Admin.TLSNames); err != nil {
+		add("admin.tls_names: %w", err)
+	}
+	if _, err := ParseNetworks(c.Auth.TrustedProxies); err != nil {
 		add("auth.trusted_proxies: %w", err)
 	}
 
@@ -199,10 +212,11 @@ func (c Config) AuthKeyFile() string {
 	return filepath.Join(c.DataDir, "auth.key")
 }
 
-// ParseProxies parses a comma-separated list of IPs and CIDRs. A single IP
+// ParseNetworks parses a comma-separated list of IPs and CIDRs (trusted
+// proxies, the admin allowlist). A single IP
 // becomes a /32 or /128. Zones and host bits in a CIDR are refused – a typo
 // like 10.0.0.1/8 must not silently trust a whole network.
-func ParseProxies(s string) ([]netip.Prefix, error) {
+func ParseNetworks(s string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for item := range strings.SplitSeq(s, ",") {
 		item = strings.TrimSpace(item)
@@ -320,4 +334,47 @@ func readLimited(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	return data, nil
+}
+
+// ParseTLSNames splits admin.tls_names into DNS names and IPs. DNS names are
+// LDH labels in lower case (a wildcard is not allowed: the bootstrap
+// certificate names exactly the hosts admins use).
+func ParseTLSNames(s string) ([]string, []netip.Addr, error) {
+	var names []string
+	var ips []netip.Addr
+	for item := range strings.SplitSeq(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if ip, err := netip.ParseAddr(item); err == nil {
+			if ip.Zone() != "" {
+				return nil, nil, fmt.Errorf("%q: an IP with a zone can't be in a certificate", item)
+			}
+			ips = append(ips, ip.Unmap())
+			continue
+		}
+		if !validDNSName(item) {
+			return nil, nil, fmt.Errorf("%q is neither an IP nor a DNS name (lower case letters, digits, hyphens, dots)", item)
+		}
+		names = append(names, item)
+	}
+	return names, ips, nil
+}
+
+func validDNSName(s string) bool {
+	if len(s) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(s, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
