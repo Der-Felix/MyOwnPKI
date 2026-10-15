@@ -13,6 +13,12 @@ type DbInfo struct {
 	Value string
 }
 
+type Instance struct {
+	ID            int64
+	Demo          int64
+	InitializedAt string
+}
+
 type Outbox struct {
 	ID          int64
 	CreatedAt   string
