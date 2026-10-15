@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"time"
 
@@ -23,7 +24,8 @@ var (
 	devLoopbackV6 = netip.MustParseAddr("::1")
 )
 
-// runServe starts the admin listener. Phase 0 only supports --dev: plain HTTP,
+// runServe starts the server (runServer: TLS, both listeners, jobs) or, with
+// --dev, the UI prototype: plain HTTP,
 // no login, bound to the loopback address. --dev exists only as a command-line
 // flag – never as a config file setting – so it can't be switched on by
 // accident through a copied config.
@@ -32,6 +34,8 @@ func runServe(ctx context.Context, args []string, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dev := fs.Bool("dev", false, "development mode: plain HTTP, no authentication, loopback only")
 	listen := fs.String("listen", defaultDevListen, "listen address in dev mode: 127.0.0.1:<port> or [::1]:<port>")
+	path := configFlag(fs)
+	unseal := fs.Bool("unseal", false, "ask for the unseal passphrase on this terminal once the listeners run")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -42,8 +46,17 @@ func runServe(ctx context.Context, args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%s serve: unexpected argument %q\n", binary, fs.Arg(0))
 		return 2
 	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if !*dev {
-		_, _ = fmt.Fprintf(stderr, "%s serve: only --dev is available in phase 0 (TLS and login follow in phase 1)\n", binary)
+		if set["listen"] {
+			_, _ = fmt.Fprintf(stderr, "%s serve: --listen is for --dev only; the listeners come from admin.listen and public.listen\n", binary)
+			return 2
+		}
+		return runServer(ctx, *path, *unseal, os.Environ(), stderr)
+	}
+	if set["config"] || set["unseal"] {
+		_, _ = fmt.Fprintf(stderr, "%s serve --dev: no --config or --unseal – dev mode shows the prototype on sample data\n", binary)
 		return 2
 	}
 	if err := validateDevListen(*listen); err != nil {

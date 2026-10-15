@@ -1,7 +1,7 @@
 // Command myownpki is the MyOwnPKI server: web UI, REST API, ACME server and CA engine.
 //
 // Commands so far: --version, `config check`, `db status`/`db migrate`,
-// `audit verify`, `init`, `ca list`/`ca show`, `user unlock`/`user reset-2fa` and `serve --dev` (UI prototype).
+// `audit verify`, `init`, `ca list`/`ca show`, `user unlock`/`user reset-2fa`, `serve` and `serve --dev` (UI prototype).
 package main
 
 import (
@@ -33,7 +33,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(fs.Output(), "Usage:\n  %s --version\n  %s config check [--config FILE]\n  %s init [--config FILE] [--stdin|--demo] [--with-ca --ca-base-url URL] [...]\n  %s db status|migrate [--config FILE]\n  %s audit verify [--config FILE] [--scope S] [--expect-head SEQ:HASH] [--checkpoint-key FP]\n  %s ca list [--config FILE]\n  %s ca show NAME [--config FILE]\n  %s user unlock|reset-2fa NAME [--config FILE] [...]\n  %s serve --dev [--listen 127.0.0.1:9443]\n\nFlags:\n", binary, binary, binary, binary, binary, binary, binary, binary, binary)
+		_, _ = fmt.Fprintf(fs.Output(), "Usage:\n  %s --version\n  %s config check [--config FILE]\n  %s init [--config FILE] [--stdin|--demo] [--with-ca --ca-base-url URL] [...]\n  %s db status|migrate [--config FILE]\n  %s audit verify [--config FILE] [--scope S] [--expect-head SEQ:HASH] [--checkpoint-key FP]\n  %s ca list [--config FILE]\n  %s ca show NAME [--config FILE]\n  %s user unlock|reset-2fa NAME [--config FILE] [...]\n  %s serve [--config FILE] [--unseal]\n  %s serve --dev [--listen 127.0.0.1:9443]\n\nFlags:\n", binary, binary, binary, binary, binary, binary, binary, binary, binary, binary)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
