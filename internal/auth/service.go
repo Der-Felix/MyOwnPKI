@@ -277,6 +277,10 @@ func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session,
 	if !ok {
 		return nil, s.failed(ctx, u, ip, "user.step_up", "wrong code", ErrInvalidCode)
 	}
+	// Fail-closed: no step-up without its audit entry.
+	if err := s.direct(ctx, &u, ip, "user.step_up", audit.ResultSuccess, nil); err != nil {
+		return nil, fmt.Errorf("step-up refused – the audit entry can't be written: %w", err)
+	}
 	if err := q.SetStepUp(ctx, systemdb.SetStepUpParams{StepupAt: sql.NullString{String: formatTime(now), Valid: true}, IDHash: sess.idHash}); err != nil {
 		return nil, err
 	}
@@ -284,9 +288,6 @@ func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session,
 		return nil, err
 	}
 	s.Throttle.Success(ip, u.Username)
-	if err := s.direct(ctx, &u, ip, "user.step_up", audit.ResultSuccess, nil); err != nil {
-		return nil, err
-	}
 	return s.Authenticate(ctx, token)
 }
 

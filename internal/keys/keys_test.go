@@ -823,3 +823,40 @@ func TestVerifyKeepsTheSealState(t *testing.T) {
 		t.Errorf("audit: %s", got)
 	}
 }
+
+// TestUnsealIsFailClosed: when the audit entry can't be written, there is no
+// unseal (owner 2026-10-16); a seal still happens and reports the error.
+func TestUnsealIsFailClosed(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	ro, err := store.OpenReadOnly(t.Context(), e.l.InstanceAuditDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+	k := New(e.system, ro.Read, e.clk)
+	k.params = testParams
+	if err := k.Unseal(t.Context(), []byte(e.passphrase), admin); err == nil || !strings.Contains(err.Error(), "audit entry can't be written") {
+		t.Errorf("unseal without audit: %v", err)
+	}
+	if !k.Status().Sealed {
+		t.Fatal("unsealed although the audit entry failed")
+	}
+	if _, err := k.CheckpointKeyFingerprint(); err == nil {
+		t.Error("the root key is usable after a refused unseal")
+	}
+	// Seal: the key goes even when the entry fails.
+	w := New(e.system, e.ia, e.clk)
+	w.params = testParams
+	if err := w.Unseal(t.Context(), []byte(e.passphrase), admin); err != nil {
+		t.Fatal(err)
+	}
+	w.audit = ro.Read
+	if err := w.Seal(t.Context(), admin); err == nil {
+		t.Error("seal without audit reported no error")
+	}
+	if !w.Status().Sealed {
+		t.Error("the key stayed in memory because the audit entry failed")
+	}
+}

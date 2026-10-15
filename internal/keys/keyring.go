@@ -197,12 +197,15 @@ func (k *Keyring) unseal(ctx context.Context, action string, who Who, open func(
 	if err != nil {
 		return err
 	}
+	// Fail-closed (owner 2026-10-16): without its audit entry there is no
+	// unseal – the entry is written before the key is kept.
+	if err := k.direct(ctx, who, action, audit.ResultSuccess, nil); err != nil {
+		clear(root)
+		return fmt.Errorf("unseal refused – the audit entry can't be written: %w", err)
+	}
 	k.mu.Lock()
 	k.root, k.rootVersion = root, version
 	k.mu.Unlock()
-	if err := k.direct(ctx, who, action, audit.ResultSuccess, nil); err != nil {
-		return err
-	}
 	if k.OnUnseal != nil {
 		k.OnUnseal(ctx)
 	}
@@ -252,6 +255,9 @@ func (k *Keyring) Seal(ctx context.Context, who Who) error {
 	clear(k.root)
 	k.root, k.sealedSince = nil, k.clock.Now()
 	k.mu.Unlock()
+	// Sealing is never refused for a failed audit entry: refusing would keep
+	// the key in memory – the opposite of fail-closed. The error is returned
+	// (and logged by the server) after the key is gone.
 	return k.direct(ctx, who, "system.seal", audit.ResultSuccess, nil)
 }
 

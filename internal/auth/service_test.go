@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -602,5 +603,44 @@ func TestLastAdminsStay(t *testing.T) {
 	}
 	if err := v.s.RemoveRole(t.Context(), pkiID, store.DefaultTenant, "", console); err != nil {
 		t.Errorf("remove with another tenant admin: %v", err)
+	}
+}
+
+// TestSignInIsFailClosed: when the audit entry can't be written, there is no
+// session and no step-up (owner 2026-10-16).
+func TestSignInIsFailClosed(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.create(t, "alice", false, authz.Admin)
+	token := v.login(t, "alice")
+	ro, err := store.OpenReadOnly(t.Context(), store.Layout{DataDir: filepath.Dir(v.sysPath)}.InstanceAuditDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+	v.s.Audit = ro.Read
+
+	v.clk.Advance(totpPeriod * time.Second)
+	res, err := v.s.Login(t.Context(), "alice", password, ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, lerr := v.s.LoginTOTP(t.Context(), res.Token, v.code("alice"), ip); lerr == nil {
+		t.Error("signed in without an audit entry")
+	}
+	var full int
+	if cerr := v.sys.QueryRowContext(t.Context(), `SELECT count(*) FROM sessions WHERE state = 'full'`).Scan(&full); cerr != nil || full != 1 {
+		t.Errorf("%d full sessions (only the one from before), %v", full, cerr)
+	}
+	v.clk.Advance(authz.StepUpWindow + totpPeriod*time.Second)
+	if _, serr := v.s.StepUp(t.Context(), token, v.code("alice"), ip); serr == nil {
+		t.Error("step-up without an audit entry")
+	}
+	sess, err := v.s.Authenticate(t.Context(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Principal.Check(authz.ManageCA, authz.Resource{Tenant: store.DefaultTenant}, v.clk.Now()); !errors.Is(err, authz.ErrStepUpRequired) {
+		t.Errorf("step-up took effect without its audit entry: %v", err)
 	}
 }
