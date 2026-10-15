@@ -273,3 +273,35 @@ func (d *Deliverer) Run(ctx context.Context, wake <-chan struct{}, pollInterval 
 		}
 	}
 }
+
+// Backlog is the undelivered part of one outbox.
+type Backlog struct {
+	Source  string
+	Pending int64
+	Oldest  time.Time // zero when nothing is pending
+}
+
+// Backlog reports what waits in each route's outbox – the server warns with
+// count and age while deliveries fail (owner 2026-10-16: outbox entries may
+// pile up, they are never lost; direct entries are fail-closed instead).
+func (d *Deliverer) Backlog(ctx context.Context) ([]Backlog, error) {
+	out := make([]Backlog, 0, len(d.Routes))
+	for _, r := range d.Routes {
+		var (
+			n      int64
+			oldest sql.NullString
+		)
+		if err := r.From.QueryRowContext(ctx, `SELECT count(*), min(created_at) FROM outbox WHERE delivered_at IS NULL AND topic = ?`,
+			topicAudit).Scan(&n, &oldest); err != nil {
+			return out, fmt.Errorf("outbox %s: %w", r.Source, err)
+		}
+		b := Backlog{Source: r.Source, Pending: n}
+		if oldest.Valid {
+			if t, err := time.Parse(TimeFormat, oldest.String); err == nil {
+				b.Oldest = t
+			}
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
