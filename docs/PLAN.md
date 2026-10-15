@@ -530,6 +530,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
 | CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13); added in phase 1 step 1: actionlint 1.7.12, vacuum 0.30.6 (newest release older than two weeks), rules in `api/vacuum.yaml` – snake_case and per-property examples switched off with reasons, every other warning fails CI |
+| Two-week rule, exceptions | A module version already selected by the graph through approved modules is taken as it is, never forced down by downgrading those (§14 "CI and build"): `golang.org/x/crypto` v0.58.0 (2026-10-13), `golang.org/x/term` v0.47.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; owner 2026-10-16) |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
 
 ---
@@ -546,7 +547,7 @@ keeps the reasons. None of them changes an ADR.
 | Third-party actions pinned to a full commit SHA, not a tag | A tag can be moved to other code later; a SHA can't. The CI builds a CA |
 | Only GitHub's own actions; golangci-lint, ShellCheck, sqlc, actionlint and vacuum downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
 | Two-week rule: dependencies and tools are only updated to releases that have been public for at least 14 days – Dependabot `cooldown: 14` days, the same rule by hand for pinned binaries; security updates are not delayed | A broken or hijacked release usually surfaces within days; a CA should not be among the first to run it |
-| Two-week rule, exception: if an approved tool already pulls a newer version of a module into the graph (Go picks the highest), we don't downgrade the tool – the diff of the packages we actually use is checked against the approved version and the exception recorded (first case: x/crypto v0.58.0 via govulncheck, 2026-10-13) | Downgrading the vulnerability scanner would cost more safety than it buys |
+| Two-week rule, exception: if an approved tool already pulls a newer version of a module into the graph (Go picks the highest), we don't downgrade the tool – the diff of the packages we actually use is checked against the approved version and the exception recorded (cases: x/crypto v0.58.0 via govulncheck, 2026-10-13; x/term v0.47.0, required by x/crypto v0.58.0 and x/net v0.61.0 – v0.46.0 would downgrade x/crypto, x/net, x/tools and x/vuln, 2026-10-16) | Downgrading the vulnerability scanner would cost more safety than it buys |
 | `permissions: contents: read`, `persist-credentials: false` | Least privilege – a compromised step can't push or read a token from `.git/config` |
 | Runner images pinned (`ubuntu-24.04`, `windows-2025`, `macos-15`) | `*-latest` changes underneath; failures should come from our changes |
 | sqlc is installed in CI only when `sqlc.yaml` exists | Not used before phase 1 |
@@ -653,6 +654,15 @@ keeps the reasons. None of them changes an ADR.
 | Lockout time-limited (10 failures → 15 min), `user unlock` on the console | A permanent lockout is a switch for attackers to turn the admin off |
 | Roles checked in the CA engine and the keyring (`internal/authz`); instance admin separate from tenant roles; viewers don't read the audit log; the last active instance admin and tenant admin always stay | No handler can forget a check; managing users is not the same as running the PKI; audit entries are personal data |
 | `user reset-2fa` needs the unseal passphrase or the recovery key | Losing the auth key or a phone must be recoverable – but not by shell access alone |
+
+### Setup – `myownpki init` (phase 1 step 11, design approved 2026-10-15)
+| Decision | Why |
+|---|---|
+| Ask and confirm everything first, then write; secret files before the database; a broken-off run is finished by running init again with the passphrase as proof | A half-done init (root key, no user) must neither leave the operator locked out nor be repeatable by anybody without the passphrase |
+| Interactive, `--stdin` (two lines, only the line end removed) and `--demo` (all secrets generated into one file) | People, automation and a quick try-out need different things; spaces belong to a passphrase |
+| A demo instance is marked for good; the warning in `db status`, the server log and the UI | All secrets in one file is the opposite of keeping them apart – nobody should drift into production with it |
+| Test CA names carry a random tag and the host name | Two test instances never produce roots with the same name in a trust store |
+| Admin password ≠ unseal passphrase (also ignoring case) | They protect different things and must not fall together |
 
 ### Web UI and dev mode
 | Decision | Why |
