@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -265,6 +266,9 @@ func (e *Engine) InstallCACertificate(ctx context.Context, name string, certPEM 
 }
 
 func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM []byte, who keys.Who, now time.Time) (*CAResult, error) {
+	if err := e.authorize(who, authz.ManageCA, short(name), now); err != nil {
+		return nil, err
+	}
 	q := pkidb.New(e.PKI)
 	ca, pending, parent, err := loadPending(ctx, q, name, now)
 	if err != nil {

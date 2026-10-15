@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
@@ -35,7 +36,7 @@ var (
 )
 
 // SystemActor is who acts in background work (CRL renewal).
-var SystemActor = keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "crl-maintainer"}}
+var SystemActor = keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "crl-maintainer"}, Principal: authz.System("crl-maintainer")}
 
 // CRLResult describes a published CRL.
 type CRLResult struct {
@@ -108,9 +109,17 @@ func crlNeededUntil(ctx context.Context, q *pkidb.Queries, ca pkidb.Ca, generati
 }
 
 // SignCRL signs a new CRL for a CA generation whose key is on the server.
+// It needs ca.manage; the CRL renewal runs as the system.
 func (e *Engine) SignCRL(ctx context.Context, caID string, generation int64, trigger string, who keys.Who) (*CRLResult, error) {
+	return e.signCRLAs(ctx, caID, generation, trigger, who, authz.ManageCA)
+}
+
+// signCRLAs signs with the permission perm: a revocation publishes its CRL
+// with certificate.revoke – whoever may revoke must be able to make the
+// revocation effective, without managing the CA.
+func (e *Engine) signCRLAs(ctx context.Context, caID string, generation int64, trigger string, who keys.Who, perm authz.Permission) (*CRLResult, error) {
 	now := e.now()
-	out, err := e.signCRL(ctx, caID, generation, trigger, who, now)
+	out, err := e.signCRL(ctx, caID, generation, trigger, who, perm, now)
 	if err != nil {
 		if aerr := e.refuse(ctx, now, ActionCRLSign, who, audit.Target{Type: "ca", ID: caID},
 			map[string]any{"generation": generation, "trigger": trigger}, err); aerr != nil {
@@ -121,14 +130,17 @@ func (e *Engine) SignCRL(ctx context.Context, caID string, generation int64, tri
 	return out, nil
 }
 
-func (e *Engine) signCRL(ctx context.Context, caID string, generation int64, trigger string, who keys.Who, now time.Time) (*CRLResult, error) {
-	if e.Keys.Status().Sealed {
-		return nil, keys.ErrSealed
-	}
+func (e *Engine) signCRL(ctx context.Context, caID string, generation int64, trigger string, who keys.Who, perm authz.Permission, now time.Time) (*CRLResult, error) {
 	q := pkidb.New(e.PKI)
 	ca, err := q.GetCA(ctx, caID)
 	if err != nil {
 		return nil, err
+	}
+	if aerr := e.authorize(who, perm, ca.Name, now); aerr != nil {
+		return nil, aerr
+	}
+	if e.Keys.Status().Sealed {
+		return nil, keys.ErrSealed
 	}
 	gen, err := q.GetCAGeneration(ctx, pkidb.GetCAGenerationParams{CaID: caID, Generation: generation})
 	if err != nil {

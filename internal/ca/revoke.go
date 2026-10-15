@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
@@ -110,6 +111,13 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 	if row.Source == "external" || !row.CaID.Valid {
 		return nil, deny("certificate %s was not issued by this PKI – only its issuer can revoke it", row.ID)
 	}
+	issuerCA, err := q.GetCA(ctx, row.CaID.String)
+	if err != nil {
+		return nil, err
+	}
+	if aerr := e.authorize(req.Who, authz.RevokeCert, issuerCA.Name, now); aerr != nil {
+		return nil, aerr
+	}
 	if _, rerr := q.GetRevocation(ctx, row.ID); rerr == nil {
 		return nil, deny("certificate %s is revoked already – a revocation is final", row.ID)
 	} else if !errors.Is(rerr, sql.ErrNoRows) {
@@ -171,7 +179,7 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 // The revocation is stored either way; a CRL that can't be signed now
 // (sealed, offline key) is a warning, and the maintainer signs it later.
 func (e *Engine) publishAfterRevocation(ctx context.Context, out *RevokeResult, caID string, generation int64, who keys.Who) {
-	crl, err := e.SignCRL(ctx, caID, generation, "revocation", who)
+	crl, err := e.signCRLAs(ctx, caID, generation, "revocation", who, authz.RevokeCert)
 	switch {
 	case err == nil:
 		out.CRL, out.Published = crl, true
@@ -227,6 +235,10 @@ func (e *Engine) revokeCA(ctx context.Context, req RevokeCARequest, now time.Tim
 	parent, err := q.GetCA(ctx, gen.IssuerCaID.String)
 	if err != nil {
 		return nil, err
+	}
+	// Like a leaf, a CA is revoked by whoever manages its issuer.
+	if aerr := e.authorize(req.Who, authz.ManageCA, parent.Name, now); aerr != nil {
+		return nil, aerr
 	}
 	if parent.KeyMode == KeyModeOffline {
 		return nil, deny("CA %q was signed by the offline root %q – revoke it there and upload the root's new CRL", ca.Name, parent.Name)

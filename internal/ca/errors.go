@@ -17,6 +17,8 @@ type DeniedError struct {
 	// DroppedCSRNames: CSR names the preset doesn't take ("type:value"),
 	// reported even when the request is denied for another reason.
 	DroppedCSRNames []string
+	// Cause is the underlying refusal, e.g. authz.ErrStepUpRequired.
+	Cause error
 }
 
 func (e *DeniedError) Error() string {
@@ -26,7 +28,13 @@ func (e *DeniedError) Error() string {
 	return "request denied:\n  - " + strings.Join(e.Reasons, "\n  - ")
 }
 
-func (e *DeniedError) Unwrap() error { return ErrDenied }
+// Unwrap lets errors.Is find ErrDenied and the cause.
+func (e *DeniedError) Unwrap() []error {
+	if e.Cause != nil {
+		return []error{ErrDenied, e.Cause}
+	}
+	return []error{ErrDenied}
+}
 
 func deny(format string, args ...any) error {
 	return &DeniedError{Reasons: []string{fmt.Sprintf(format, args...)}}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
@@ -59,7 +60,7 @@ func setup(t *testing.T) (http.Handler, *store.DB, []byte, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}}
+	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}, Principal: authz.Console()}
 	if _, ierr := e.ImportRoot(t.Context(), ca.ImportRootRequest{
 		CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"},
 		CertPEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), Who: who,

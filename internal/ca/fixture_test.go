@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
@@ -43,7 +44,9 @@ var t0 = time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
 
 const baseURL = "http://pki.homelab.lan"
 
-var tester = keys.Who{Actor: audit.Actor{Type: audit.ActorUser, ID: "u-1", Name: "it-admin"}, SourceIP: "192.0.2.10"}
+// tester runs as the console: every permission, no step-up. The permission
+// rules themselves are tested with signed-in users in authz_test.go.
+var tester = keys.Who{Actor: audit.Actor{Type: audit.ActorUser, ID: "u-1", Name: "it-admin"}, SourceIP: "192.0.2.10", Principal: authz.Console()}
 
 // unsealed is one keyring for every test: Init and Unseal use the production
 // Argon2id parameters (256 MiB), so they run once. After unseal the keyring

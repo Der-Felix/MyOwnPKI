@@ -38,6 +38,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
@@ -133,6 +134,9 @@ func (e *Engine) rand() io.Reader {
 }
 
 func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued, error) {
+	if err := e.authorize(req.Who, authz.IssueCert, short(req.CA), now); err != nil {
+		return nil, err
+	}
 	p, ok := e.Presets.Get(req.Preset)
 	if !ok {
 		return nil, deny("there is no preset named %q", short(req.Preset))

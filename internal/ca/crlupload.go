@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
@@ -40,6 +41,9 @@ func (e *Engine) UploadCRL(ctx context.Context, name string, data []byte, who ke
 }
 
 func (e *Engine) uploadCRL(ctx context.Context, name string, data []byte, who keys.Who, now time.Time) (*CRLResult, []string, error) {
+	if err := e.authorize(who, authz.UploadCRL, short(name), now); err != nil {
+		return nil, nil, err
+	}
 	q := pkidb.New(e.PKI)
 	ca, err := q.GetCAByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {

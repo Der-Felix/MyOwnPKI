@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
@@ -25,6 +26,9 @@ func (e *Engine) RenewCA(ctx context.Context, req RenewRequest) (*CAResult, erro
 }
 
 func (e *Engine) renewCA(ctx context.Context, req RenewRequest, now time.Time) (*CAResult, error) {
+	if err := e.authorize(req.Who, authz.ManageCA, short(req.Name), now); err != nil {
+		return nil, err
+	}
 	q := pkidb.New(e.PKI)
 	ca, current, err := loadActive(ctx, q, req.Name)
 	if err != nil {
@@ -109,6 +113,9 @@ func (e *Engine) RetireCA(ctx context.Context, name string, who keys.Who) error 
 }
 
 func (e *Engine) retireCA(ctx context.Context, name string, who keys.Who, now time.Time) error {
+	if err := e.authorize(who, authz.ManageCA, short(name), now); err != nil {
+		return err
+	}
 	q := pkidb.New(e.PKI)
 	ca, err := q.GetCAByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -148,6 +155,9 @@ func (e *Engine) UpdateCA(ctx context.Context, req UpdateRequest) error {
 }
 
 func (e *Engine) updateCA(ctx context.Context, req UpdateRequest, now time.Time) error {
+	if err := e.authorize(req.Who, authz.ManageCA, short(req.Name), now); err != nil {
+		return err
+	}
 	q := pkidb.New(e.PKI)
 	ca, err := q.GetCAByName(ctx, req.Name)
 	if errors.Is(err, sql.ErrNoRows) {

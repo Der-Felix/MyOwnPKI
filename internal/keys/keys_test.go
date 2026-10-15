@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 )
@@ -32,7 +33,11 @@ var t0 = time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
 // testParams keep tests fast; the production values are checked separately.
 var testParams = argon2Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 
-var admin = Who{Actor: audit.Actor{Type: audit.ActorUser, ID: "u-1", Name: "it-admin"}, SourceIP: "192.0.2.10"}
+// admin is a signed-in instance admin (unseal needs no step-up).
+var admin = Who{
+	Actor: audit.Actor{Type: audit.ActorUser, ID: "u-1", Name: "it-admin"}, SourceIP: "192.0.2.10",
+	Principal: &authz.Principal{Kind: authz.KindUser, UserID: "u-1", Username: "it-admin", InstanceAdmin: true},
+}
 
 type env struct {
 	k                *Keyring
@@ -755,5 +760,66 @@ func TestUnsealAndSealMakeCheckpoints(t *testing.T) {
 	// the seal entry itself comes after the key is gone.
 	if r.Checkpoints != 1 || r.LastCheckpoint.Seq != 3 || r.Entries != 4 {
 		t.Errorf("report = %+v", r)
+	}
+}
+
+// TestOnlyInstanceAdminsUnseal: unseal = signed-in instance admin + passphrase
+// (PHASE1 step 10). A tenant admin with the right passphrase is refused, and
+// the refusal is audited without trying the passphrase.
+func TestOnlyInstanceAdminsUnseal(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	tenantAdmin := Who{
+		Actor: audit.Actor{Type: audit.ActorUser, ID: "u-2", Name: "pki-admin"}, SourceIP: "192.0.2.11",
+		Principal: &authz.Principal{Kind: authz.KindUser, UserID: "u-2", Username: "pki-admin",
+			Bindings: []authz.Binding{{Tenant: store.DefaultTenant, Role: authz.Admin}}},
+	}
+	for name, who := range map[string]Who{"tenant admin": tenantAdmin, "nobody": {Actor: tenantAdmin.Actor}} {
+		if err := e.k.Unseal(t.Context(), []byte(e.passphrase), who); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("%s unseals: %v", name, err)
+		}
+		if err := e.k.ResetPassphrase(t.Context(), e.recovery, []byte("another long passphrase"), who); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("%s resets the passphrase: %v", name, err)
+		}
+	}
+	if !e.k.Status().Sealed {
+		t.Fatal("unsealed by a tenant admin")
+	}
+	console := Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "console"}, Principal: authz.Console()}
+	if err := e.k.Unseal(t.Context(), []byte(e.passphrase), console); err != nil {
+		t.Errorf("console: %v", err)
+	}
+	got := strings.Join(e.actions(t), " ")
+	if strings.Count(got, "system.unseal/denied") != 2 || strings.Contains(got, "system.unseal/failure") {
+		t.Errorf("audit: %s", got)
+	}
+}
+
+// TestVerifyKeepsTheSealState: the console proof for reset-2fa checks the
+// secret, leaves the keyring as it is and is audited.
+func TestVerifyKeepsTheSealState(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	if err := e.k.VerifyPassphrase(t.Context(), []byte("wrong passphrase, long enough"), admin); !errors.Is(err, ErrWrongSecret) {
+		t.Errorf("wrong passphrase: %v", err)
+	}
+	if err := e.k.VerifyPassphrase(t.Context(), []byte(e.passphrase), admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.k.VerifyRecoveryKey(t.Context(), e.recovery, admin); err != nil {
+		t.Fatal(err)
+	}
+	if !e.k.Status().Sealed {
+		t.Error("verify unsealed the keyring")
+	}
+	e.unseal(t)
+	if err := e.k.VerifyPassphrase(t.Context(), []byte(e.passphrase), admin); err != nil || e.k.Status().Sealed {
+		t.Errorf("verify while unsealed: %v, sealed %v", err, e.k.Status().Sealed)
+	}
+	got := strings.Join(e.actions(t), " ")
+	if strings.Count(got, "system.secret_verify/success") != 3 || !strings.Contains(got, "system.secret_verify/failure") {
+		t.Errorf("audit: %s", got)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
@@ -83,7 +84,7 @@ func TestCAListAndShow(t *testing.T) {
 		PKI: open(store.KindPKI).Write, Audit: open(store.KindAudit).Write, Scope: store.TenantScope(store.DefaultTenant),
 		Keys: keys.New(nil, nil, clk), Presets: presets, Clock: clk,
 	}
-	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}}
+	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}, Principal: authz.Console()}
 	for _, cn := range []string{"Homelab Root", "Homelab Root"} {
 		if _, err := e.ImportRoot(t.Context(), ca.ImportRootRequest{
 			CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"}, CertPEM: rootPEM(t, cn, t0.Add(-time.Hour)), Who: who,

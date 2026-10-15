@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
@@ -48,10 +49,12 @@ const (
 	maxPassphraseBytes = 1024
 )
 
-// Who identifies the person or process behind an operation, for the audit log.
+// Who identifies the person or process behind an operation: the audit log
+// records Actor and SourceIP, the services check Principal (nil = denied).
 type Who struct {
-	Actor    audit.Actor
-	SourceIP string
+	Actor     audit.Actor
+	SourceIP  string
+	Principal *authz.Principal
 }
 
 // Keyring holds the root key while the server is unsealed.
@@ -128,6 +131,9 @@ func HasNonASCII(p []byte) bool {
 // before calling Init – nothing is stored before this call.
 func (k *Keyring) Init(ctx context.Context, passphrase []byte, recovery RecoveryKey, who Who) error {
 	defer clear(passphrase)
+	if err := k.authorize(ctx, who, "system.keys_init"); err != nil {
+		return err
+	}
 	if err := CheckPassphrase(passphrase); err != nil {
 		return err
 	}
@@ -179,6 +185,9 @@ func (k *Keyring) UnsealWithRecovery(ctx context.Context, recovery RecoveryKey, 
 }
 
 func (k *Keyring) unseal(ctx context.Context, action string, who Who, open func(context.Context) ([]byte, int64, error)) error {
+	if err := k.authorize(ctx, who, action); err != nil {
+		return err
+	}
 	k.attempt.Lock()
 	defer k.attempt.Unlock()
 	if !k.Status().Sealed {
@@ -226,6 +235,9 @@ func (k *Keyring) checkSecret(ctx context.Context, action string, who Who, open 
 // Seal removes the root key from memory. It waits for running signing
 // operations to finish. Sealing a sealed keyring does nothing.
 func (k *Keyring) Seal(ctx context.Context, who Who) error {
+	if err := k.authorize(ctx, who, "system.seal"); err != nil {
+		return err
+	}
 	if k.Status().Sealed {
 		return nil
 	}
@@ -250,6 +262,9 @@ func (k *Keyring) ChangePassphrase(ctx context.Context, current, next []byte, wh
 	defer clear(current)
 	defer clear(next)
 	const action = "system.passphrase_change"
+	if err := k.authorize(ctx, who, action); err != nil {
+		return err
+	}
 	if err := CheckPassphrase(next); err != nil {
 		return err
 	}
@@ -277,6 +292,9 @@ func (k *Keyring) ChangePassphrase(ctx context.Context, current, next []byte, wh
 func (k *Keyring) ResetPassphrase(ctx context.Context, recovery RecoveryKey, next []byte, who Who) error {
 	defer clear(next)
 	const action = "system.passphrase_reset"
+	if err := k.authorize(ctx, who, action); err != nil {
+		return err
+	}
 	if err := CheckPassphrase(next); err != nil {
 		return err
 	}
@@ -303,6 +321,9 @@ func (k *Keyring) ResetPassphrase(ctx context.Context, recovery RecoveryKey, nex
 func (k *Keyring) RotateRecoveryKey(ctx context.Context, passphrase []byte, next RecoveryKey, who Who) error {
 	defer clear(passphrase)
 	const action = "system.recovery_key_rotate"
+	if err := k.authorize(ctx, who, action); err != nil {
+		return err
+	}
 	k.attempt.Lock()
 	defer k.attempt.Unlock()
 	if k.Status().Sealed {
@@ -320,6 +341,38 @@ func (k *Keyring) RotateRecoveryKey(ctx context.Context, passphrase []byte, next
 		return err
 	}
 	return k.updateSlot(ctx, slot, who, action)
+}
+
+// VerifyPassphrase checks the unseal passphrase without changing the seal
+// state: the proof a console emergency needs (myownpki user reset-2fa) –
+// shell access alone is not enough. Rate-limited and audited like unseal.
+func (k *Keyring) VerifyPassphrase(ctx context.Context, passphrase []byte, who Who) error {
+	defer clear(passphrase)
+	return k.verify(ctx, who, func(ctx context.Context) ([]byte, int64, error) {
+		return k.openSlotWithPassphrase(ctx, passphrase)
+	})
+}
+
+// VerifyRecoveryKey is VerifyPassphrase with the recovery key.
+func (k *Keyring) VerifyRecoveryKey(ctx context.Context, recovery RecoveryKey, who Who) error {
+	return k.verify(ctx, who, func(ctx context.Context) ([]byte, int64, error) {
+		return k.openSlotWithRecovery(ctx, recovery)
+	})
+}
+
+func (k *Keyring) verify(ctx context.Context, who Who, open func(context.Context) ([]byte, int64, error)) error {
+	const action = "system.secret_verify"
+	if err := k.authorize(ctx, who, action); err != nil {
+		return err
+	}
+	k.attempt.Lock()
+	defer k.attempt.Unlock()
+	root, _, err := k.checkSecret(ctx, action, who, open)
+	if err != nil {
+		return err
+	}
+	clear(root)
+	return k.direct(ctx, who, action, audit.ResultSuccess, nil)
 }
 
 func (k *Keyring) updateSlot(ctx context.Context, s systemdb.InsertUnsealSlotParams, who Who, action string) error {
@@ -437,6 +490,19 @@ func (k *Keyring) entry(who Who, action string, result audit.Result, details map
 // enqueue writes the audit event of a system.db change into its outbox.
 func (k *Keyring) enqueue(ctx context.Context, tx *sql.Tx, who Who, action string, details map[string]any) error {
 	return audit.Enqueue(ctx, tx, k.clock.Now(), k.entry(who, action, audit.ResultSuccess, details))
+}
+
+// authorize: unsealing and everything around the root key is for instance
+// admins (and the console). A refusal is audited as denied.
+func (k *Keyring) authorize(ctx context.Context, who Who, action string) error {
+	err := who.Principal.Check(authz.Unseal, authz.Resource{}, k.clock.Now())
+	if err == nil {
+		return nil
+	}
+	if aerr := k.direct(ctx, who, action, audit.ResultDenied, map[string]any{"reason": err.Error()}); aerr != nil {
+		return errors.Join(err, aerr)
+	}
+	return err
 }
 
 // direct appends an event without a database change (unseal attempts, seal).

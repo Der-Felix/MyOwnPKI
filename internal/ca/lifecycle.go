@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -142,6 +143,9 @@ func (e *Engine) CreateRoot(ctx context.Context, req RootRequest) (*CAResult, er
 }
 
 func (e *Engine) createRoot(ctx context.Context, req RootRequest, now time.Time) (*CAResult, error) {
+	if err := e.authorize(req.Who, authz.ManageCA, "", now); err != nil {
+		return nil, err
+	}
 	q := pkidb.New(e.PKI)
 	plan := &caPlan{kind: KindRoot, name: req.Name, generation: 1, pathLen: -1, action: ActionCACreate}
 	var reasons []string
@@ -174,6 +178,9 @@ func (e *Engine) CreateIntermediate(ctx context.Context, req IntermediateRequest
 }
 
 func (e *Engine) createIntermediate(ctx context.Context, req IntermediateRequest, now time.Time) (*CAResult, error) {
+	if err := e.authorize(req.Who, authz.ManageCA, "", now); err != nil {
+		return nil, err
+	}
 	q := pkidb.New(e.PKI)
 	parent, err := loadParent(ctx, q, req.Parent, now)
 	if err != nil {
@@ -695,6 +702,9 @@ func (e *Engine) ImportRoot(ctx context.Context, req ImportRootRequest) (*CAResu
 }
 
 func (e *Engine) importRoot(ctx context.Context, req ImportRootRequest, now time.Time) (*CAResult, error) {
+	if err := e.authorize(req.Who, authz.ManageCA, "", now); err != nil {
+		return nil, err
+	}
 	cert, err := parseOneCertificate(req.CertPEM)
 	if err != nil {
 		return nil, err
