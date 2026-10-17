@@ -742,3 +742,22 @@ func TestRefusalAuditStaysSmall(t *testing.T) {
 		t.Error(rows[0])
 	}
 }
+
+// TestRefusedNameHasNoEcho: once a name is refused, "needs at least one
+// name" would only repeat it (owner 2026-10-17); without any name it stays.
+func TestRefusedNameHasNoEcho(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.chain(t, caOpts{})
+	got := v.denied(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"*.lan"}})
+	if strings.Contains(got, "needs at least one name") || got == "" {
+		t.Errorf("refused wildcard: %q", got)
+	}
+	got = v.denied(t, Request{CA: "issuing", Preset: "wildcard", DNSNames: []string{"*.*.homelab.lan"}})
+	if strings.Contains(got, "needs a wildcard name") {
+		t.Errorf("refused wildcard name: %q", got)
+	}
+	if got := v.denied(t, Request{CA: "issuing", Preset: "server", Subject: Subject{CommonName: "not a host name"}}); !strings.Contains(got, "needs at least one name of type dns or ip") {
+		t.Errorf("no name at all: %q", got)
+	}
+}

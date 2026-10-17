@@ -340,6 +340,9 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 
 	names, np := checkNames(in, p.Wildcard)
 	problems = append(problems, np...)
+	// Once a name was refused, "needs at least one name" is only its echo
+	// (owner 2026-10-17): the requester fixes the name, not the list.
+	refused := len(np) > 0
 	if p.Wildcard {
 		var bases []string
 		for _, d := range names.DNS {
@@ -347,7 +350,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 				bases = append(bases, base)
 			}
 		}
-		if !slices.ContainsFunc(names.DNS, func(d string) bool { return strings.HasPrefix(d, "*.") }) {
+		if !refused && !slices.ContainsFunc(names.DNS, func(d string) bool { return strings.HasPrefix(d, "*.") }) {
 			problems = append(problems, fmt.Sprintf("preset %q needs a wildcard name like *.homelab.lan", p.Name))
 		}
 		for _, b := range bases {
@@ -360,7 +363,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 			problems = append(problems, fmt.Sprintf("preset %q doesn't take %s names", p.Name, t))
 		}
 	}
-	if req := p.SubjectAltNames.RequiredAnyOf; len(req) > 0 && !slices.ContainsFunc(req, names.has) {
+	if req := p.SubjectAltNames.RequiredAnyOf; len(req) > 0 && !refused && !slices.ContainsFunc(req, names.has) {
 		problems = append(problems, fmt.Sprintf("preset %q needs at least one name of type %s", p.Name, joinTypes(req)))
 	}
 

@@ -144,3 +144,107 @@ func (q *Queries) ListCertificateSANs(ctx context.Context, certificateID string)
 	}
 	return items, nil
 }
+
+const listCertificates = `-- name: ListCertificates :many
+SELECT c.id, c.ca_id, c.ca_generation, c.source, c.preset, c.serial_hex, c.subject_dn, c.common_name, c.not_before, c.not_after, c.key_algorithm, c.key_id, c.cert_der, c.fingerprint_sha256, c.renewal_of, c.requested_by, c.custom_ku, c.custom_eku, c.created_at, r.reason AS revocation_reason, r.revoked_at, r.invalidity_date
+FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+WHERE (CAST(?1 AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
+  AND (CAST(?3 AS TEXT) = '' OR c.ca_id = CAST(?3 AS TEXT))
+  AND (CAST(?4 AS TEXT) = '' OR c.preset = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (CAST(?5 AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
+       OR (CAST(?5 AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > ?6)
+       OR (CAST(?5 AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= ?6))
+  AND (CAST(?7 AS TEXT) = '' OR c.not_after < CAST(?7 AS TEXT))
+  AND (CAST(?8 AS TEXT) = ''
+       OR instr(lower(c.common_name), CAST(?8 AS TEXT)) > 0
+       OR instr(lower(c.serial_hex), CAST(?8 AS TEXT)) > 0
+       OR EXISTS (SELECT 1 FROM certificate_sans s WHERE s.certificate_id = c.id AND instr(lower(s.value), CAST(?8 AS TEXT)) > 0))
+  AND (CAST(?9 AS TEXT) = '' OR c.id < CAST(?9 AS TEXT))
+ORDER BY c.id DESC
+LIMIT ?10
+`
+
+type ListCertificatesParams struct {
+	AllCas        int64
+	AllowedCas    string
+	CaID          string
+	Preset        string
+	Status        string
+	Now           string
+	ExpiresBefore string
+	Search        string
+	Cursor        string
+	PageSize      int64
+}
+
+type ListCertificatesRow struct {
+	Certificate      Certificate
+	RevocationReason sql.NullString
+	RevokedAt        sql.NullString
+	InvalidityDate   sql.NullString
+}
+
+// One page of certificates, newest first: IDs sort by creation time, so the
+// cursor is the last ID of the previous page. Every filter is optional
+// (empty = any). allowed_cas is a JSON array of the CA IDs the caller may read;
+// all_cas = 1 skips it (a tenant-wide role). search is a plain substring of
+// CN, serial or a SAN, compared in lower case with instr(): no wildcards, so
+// percent and underscore match only themselves (sqlc does not parse LIKE ...
+// ESCAPE); the caller passes search in lower case.
+func (q *Queries) ListCertificates(ctx context.Context, arg ListCertificatesParams) ([]ListCertificatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCertificates,
+		arg.AllCas,
+		arg.AllowedCas,
+		arg.CaID,
+		arg.Preset,
+		arg.Status,
+		arg.Now,
+		arg.ExpiresBefore,
+		arg.Search,
+		arg.Cursor,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCertificatesRow{}
+	for rows.Next() {
+		var i ListCertificatesRow
+		if err := rows.Scan(
+			&i.Certificate.ID,
+			&i.Certificate.CaID,
+			&i.Certificate.CaGeneration,
+			&i.Certificate.Source,
+			&i.Certificate.Preset,
+			&i.Certificate.SerialHex,
+			&i.Certificate.SubjectDn,
+			&i.Certificate.CommonName,
+			&i.Certificate.NotBefore,
+			&i.Certificate.NotAfter,
+			&i.Certificate.KeyAlgorithm,
+			&i.Certificate.KeyID,
+			&i.Certificate.CertDer,
+			&i.Certificate.FingerprintSha256,
+			&i.Certificate.RenewalOf,
+			&i.Certificate.RequestedBy,
+			&i.Certificate.CustomKu,
+			&i.Certificate.CustomEku,
+			&i.Certificate.CreatedAt,
+			&i.RevocationReason,
+			&i.RevokedAt,
+			&i.InvalidityDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

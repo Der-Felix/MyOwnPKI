@@ -15,3 +15,29 @@ SELECT * FROM certificates WHERE id = ?;
 
 -- name: ListCertificateSANs :many
 SELECT type, value FROM certificate_sans WHERE certificate_id = ? ORDER BY type, value;
+
+-- One page of certificates, newest first: IDs sort by creation time, so the
+-- cursor is the last ID of the previous page. Every filter is optional
+-- (empty = any). allowed_cas is a JSON array of the CA IDs the caller may read;
+-- all_cas = 1 skips it (a tenant-wide role). search is a plain substring of
+-- CN, serial or a SAN, compared in lower case with instr(): no wildcards, so
+-- percent and underscore match only themselves (sqlc does not parse LIKE ...
+-- ESCAPE); the caller passes search in lower case.
+-- name: ListCertificates :many
+SELECT sqlc.embed(c), r.reason AS revocation_reason, r.revoked_at, r.invalidity_date
+FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+WHERE (CAST(sqlc.arg(all_cas) AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(sqlc.arg(allowed_cas) AS TEXT))))
+  AND (CAST(sqlc.arg(ca_id) AS TEXT) = '' OR c.ca_id = CAST(sqlc.arg(ca_id) AS TEXT))
+  AND (CAST(sqlc.arg(preset) AS TEXT) = '' OR c.preset = CAST(sqlc.arg(preset) AS TEXT))
+  AND (CAST(sqlc.arg(status) AS TEXT) = ''
+       OR (CAST(sqlc.arg(status) AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
+       OR (CAST(sqlc.arg(status) AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > sqlc.arg(now))
+       OR (CAST(sqlc.arg(status) AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= sqlc.arg(now)))
+  AND (CAST(sqlc.arg(expires_before) AS TEXT) = '' OR c.not_after < CAST(sqlc.arg(expires_before) AS TEXT))
+  AND (CAST(sqlc.arg(search) AS TEXT) = ''
+       OR instr(lower(c.common_name), CAST(sqlc.arg(search) AS TEXT)) > 0
+       OR instr(lower(c.serial_hex), CAST(sqlc.arg(search) AS TEXT)) > 0
+       OR EXISTS (SELECT 1 FROM certificate_sans s WHERE s.certificate_id = c.id AND instr(lower(s.value), CAST(sqlc.arg(search) AS TEXT)) > 0))
+  AND (CAST(sqlc.arg(cursor) AS TEXT) = '' OR c.id < CAST(sqlc.arg(cursor) AS TEXT))
+ORDER BY c.id DESC
+LIMIT sqlc.arg(page_size);
