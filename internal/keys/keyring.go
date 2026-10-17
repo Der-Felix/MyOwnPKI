@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -76,8 +77,9 @@ type Keyring struct {
 	rootVersion int64
 	sealedSince time.Time
 
-	attempt sync.Mutex // one secret check at a time: each Argon2id run takes 256 MiB
-	lim     limiter
+	attempt sync.Mutex          // one secret check at a time: each Argon2id run takes 256 MiB
+	lim     limiter             // the whole instance (the console has no address)
+	ipLims  map[string]*limiter // per client address (owner 2026-10-17); under attempt
 }
 
 // New returns a sealed keyring. system and auditLog are the writers of
@@ -216,13 +218,15 @@ func (k *Keyring) unseal(ctx context.Context, action string, who Who, open func(
 // holds k.attempt.
 func (k *Keyring) checkSecret(ctx context.Context, action string, who Who, open func(context.Context) ([]byte, int64, error)) ([]byte, int64, error) {
 	now := k.clock.Now()
-	if wait := k.lim.wait(now); wait > 0 {
+	ipLim := k.ipLimiter(who.SourceIP, now)
+	if wait := max(k.lim.wait(now), ipLim.wait(now)); wait > 0 {
 		_ = k.direct(ctx, who, action, audit.ResultDenied, map[string]any{"reason": "locked", "retry_after_s": int(wait.Seconds())})
 		return nil, 0, &LockedError{RetryAfter: wait}
 	}
 	root, version, err := open(ctx)
 	if errors.Is(err, ErrDecrypt) {
 		k.lim.failure(now)
+		ipLim.failure(now)
 		if aerr := k.direct(ctx, who, action, audit.ResultFailure, nil); aerr != nil {
 			return nil, 0, errors.Join(ErrWrongSecret, aerr)
 		}
@@ -231,8 +235,48 @@ func (k *Keyring) checkSecret(ctx context.Context, action string, who Who, open 
 	if err != nil {
 		return nil, 0, err
 	}
+	// Success resets the instance and this address; other addresses keep
+	// what they built up.
 	k.lim.success()
+	ipLim.success()
 	return root, version, nil
+}
+
+// maxIPLimiters bounds the per-address map; addresses that brake nobody go
+// first when it is full.
+const maxIPLimiters = 10_000
+
+// ipLimiter returns the limiter of an address (IPv6 by its /64, IPv4-mapped
+// as IPv4). Without an address (the console) it is a throwaway one. The
+// caller holds k.attempt.
+func (k *Keyring) ipLimiter(ip string, now time.Time) *limiter {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return &limiter{}
+	}
+	a = a.Unmap()
+	key := a.String()
+	if a.Is6() {
+		if p, perr := a.WithZone("").Prefix(64); perr == nil {
+			key = p.String()
+		}
+	}
+	if k.ipLims == nil {
+		k.ipLims = map[string]*limiter{}
+	}
+	if l := k.ipLims[key]; l != nil {
+		return l
+	}
+	if len(k.ipLims) >= maxIPLimiters {
+		for kk, l := range k.ipLims {
+			if l.wait(now) == 0 {
+				delete(k.ipLims, kk)
+			}
+		}
+	}
+	l := &limiter{}
+	k.ipLims[key] = l
+	return l
 }
 
 // Seal removes the root key from memory. It waits for running signing

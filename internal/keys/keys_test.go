@@ -860,3 +860,45 @@ func TestUnsealIsFailClosed(t *testing.T) {
 		t.Error("the key stayed in memory because the audit entry failed")
 	}
 }
+
+// TestUnsealIsThrottledPerAddress (owner 2026-10-17): failures count for the
+// instance and for the address; a success resets both of them, and an
+// address that guessed keeps its own brake.
+func TestUnsealIsThrottledPerAddress(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	from := func(ip string) Who { w := admin; w.SourceIP = ip; return w }
+	a, b := from("192.0.2.1"), from("::ffff:198.51.100.9")
+	try := func(who Who, pass string) error { return e.k.Unseal(t.Context(), []byte(pass), who) }
+	var locked *LockedError
+
+	for range 2 {
+		if err := try(b, "this is not the passphrase"); !errors.Is(err, ErrWrongSecret) {
+			t.Fatal(err)
+		}
+	}
+	if err := try(a, "this is not the passphrase"); !errors.Is(err, ErrWrongSecret) {
+		t.Fatal(err)
+	}
+	if err := try(a, e.passphrase); !errors.As(err, &locked) {
+		t.Fatalf("three failures on the instance: %v", err)
+	}
+	e.clk.Advance(61 * time.Second)
+	if err := try(a, e.passphrase); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.k.Seal(t.Context(), a); err != nil {
+		t.Fatal(err)
+	}
+	// b had two failures; its third locks b, not the instance.
+	if err := try(b, "this is not the passphrase"); !errors.Is(err, ErrWrongSecret) {
+		t.Fatal(err)
+	}
+	if err := try(from("198.51.100.9"), e.passphrase); !errors.As(err, &locked) {
+		t.Errorf("b (as plain IPv4) after its third failure: %v", err)
+	}
+	if err := try(a, e.passphrase); err != nil {
+		t.Errorf("a must not suffer from b: %v", err)
+	}
+}
