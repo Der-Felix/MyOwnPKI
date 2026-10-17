@@ -270,7 +270,8 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 
 	// Admin: TLS with the logged certificate, /healthz only, HSTS and CSP.
 	var peer string
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	// Redirects are not followed: an answer must be the server's own.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // #nosec G402 -- the test compares the fingerprint instead
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			peer = Fingerprint(cs.PeerCertificates[0].Raw)
@@ -296,7 +297,14 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 		t.Errorf("served certificate %s, logged %s", peer, srv.CertInfo.Fingerprint)
 	}
 	if code, _, _ := get("https://" + srv.AdminAddr() + "/certificates"); code != http.StatusNotFound {
-		t.Errorf("admin page before step 13: %d", code)
+		t.Errorf("UI page before step 14: %d", code)
+	}
+	// The API is mounted; an unclean path is a 404 problem, not a redirect.
+	if code, _, h := get("https://" + srv.AdminAddr() + "/api/v1/certificates//download/fullchain"); code != http.StatusNotFound || h.Get("Content-Type") != "application/problem+json" {
+		t.Errorf("unclean API path: %d %s", code, h.Get("Content-Type"))
+	}
+	if code, _, h := get("https://" + srv.AdminAddr() + "/api/v1/system/status"); code != http.StatusUnauthorized || h.Get("X-Request-ID") == "" {
+		t.Errorf("API without a session: %d", code)
 	}
 	// Public: CRLs and CA certificates, nothing of the admin side.
 	if code, _, _ := get(srv.PublicAddr() + "/ca/root/1.crt"); code != http.StatusOK {
