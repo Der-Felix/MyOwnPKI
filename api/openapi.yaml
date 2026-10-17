@@ -1,27 +1,39 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   summary: REST API of the MyOwnPKI admin listener (phase 1 scope)
   description: |
-    Draft for phase 1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download,
-    revocation, legacy import, login with mandatory second factor, RBAC, unseal and audit log.
-    ACME (phase 2), domains/policies (phase 2) and agents (phase 3) are not part of this draft.
+    Phase 1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation,
+    legacy import, login with mandatory second factor, RBAC, unseal and audit log.
+    ACME (phase 2), domains/policies (phase 2) and agents (phase 3) are not part of it.
+    Step 13 implements the operations needed for the first browser test (see docs/PHASE1.md);
+    the others follow in step 18 and answer 404 until then.
 
     **Conventions**
-    - Served only on the admin listener (ADR-08), base path `/api/v1`.
+    - Served only on the admin listener (ADR-08), base path `/api/v1`. The listener's own
+      `GET /healthz` (outside the API) is the only health check.
     - JSON with `snake_case` fields; times are RFC 3339 in UTC; serial numbers and
       fingerprints are upper-case hex without separators.
+    - Requests with a body must send `Content-Type: application/json` (otherwise 415); unknown
+      fields and trailing data are refused (400). Bodies are limited to 128 KiB (413).
     - Errors use RFC 9457 `application/problem+json`. Problem `type` values are URNs
-      (`urn:myownpki:problem:<name>`), listed in the `Problem` schema.
-    - Authentication: a browser session (cookie + CSRF header) **or** an API token
-      (`Authorization: Bearer`). The tenant always comes from the authenticated context,
-      never from a request parameter.
-    - `x-required-role` on an operation names the minimum role (`viewer` < `operator` < `admin`)
-      within the scope of the target object. The service layer enforces it, not only the handler.
+      (`urn:myownpki:problem:<name>`), listed in the `Problem` schema. Every response carries
+      `X-Request-ID`; problems repeat it as `request_id`.
+    - Authentication: a browser session (cookie `__Host-myownpki_session` + `X-CSRF-Token` header
+      on state-changing requests) **or**, from step 18, an API token (`Authorization: Bearer`).
+      The tenant always comes from the authenticated context, never from a request parameter.
+    - `x-required-role` names who may call an operation: `none` (public), `signed-in` (any
+      signed-in user), `instance-admin`, or the minimum tenant role (`viewer` < `operator` <
+      `admin`) within the scope of the target object. The service layer enforces it, not only
+      the handler.
+    - Objects the caller may not read answer **404**, like unknown IDs – nobody can probe what
+      exists. Whoever may read an object but lacks the role for an action gets **403**.
     - `x-step-up: true` means a fresh second factor is required (see `POST /auth/step-up`);
       otherwise the request fails with `403` and problem type `step-up-required`.
-    - Lists use cursor pagination: `limit` + `cursor`, response field `next_cursor`.
+    - `x-passive: true`: the request doesn't count as activity – polling it doesn't keep a
+      session alive past its idle timeout (decided by the route, not by the client).
+    - Lists use cursor pagination: `limit` (at most 100) + `cursor`, response field `next_cursor`.
     - Certificate issuance through this API runs through the same policy engine as the
       ACME server of phase 2 (ADR-19). Extensions always come from the preset, never from a CSR.
   license:
@@ -39,7 +51,7 @@ security:
 
 tags:
   - name: system
-    description: Health, status, seal/unseal
+    description: Status, seal/unseal
   - name: auth
     description: Login, second factor, step-up, session
   - name: users
@@ -59,33 +71,14 @@ tags:
 
 paths:
   # ---------------------------------------------------------------- system
-  /health:
-    get:
-      tags: [system]
-      operationId: getHealth
-      summary: Liveness check for load balancers
-      description: Unauthenticated. Reveals nothing but "ok" – no version, no seal state.
-      security: []
-      x-required-role: none
-      responses:
-        "200":
-          description: Process is running
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    const: ok
-
   /system/status:
     get:
       tags: [system]
       operationId: getSystemStatus
       summary: Version, seal state and server time
-      x-required-role: viewer
+      description: Polled by the UI; it doesn't keep the session alive.
+      x-required-role: signed-in
+      x-passive: true
       responses:
         "200":
           description: Current status
@@ -101,9 +94,12 @@ paths:
       summary: Unlock the encrypted CA keys
       description: |
         The server starts sealed: online CA keys are stored encrypted and no signing is possible.
-        The passphrase derives the key-encryption key (Argon2id); the decrypted keys stay in memory only.
-      x-required-role: admin
-      x-step-up: true
+        The passphrase derives the key-encryption key (Argon2id); the decrypted keys stay in memory
+        only. A signed-in instance admin plus the passphrase – the passphrase is the stronger
+        proof, so no step-up. Wrong passphrases are slowed down per instance and per client
+        address (three free, then 1 minute doubling up to 1 hour); every attempt is audited and a
+        success resets the instance and that address.
+      x-required-role: instance-admin
       requestBody:
         description: "The unseal passphrase"
         required: true
@@ -111,11 +107,18 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/UnsealRequest" }
       responses:
-        "204": { description: Unsealed }
+        "200":
+          description: Unsealed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemStatus" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /system/seal:
@@ -123,10 +126,14 @@ paths:
       tags: [system]
       operationId: seal
       summary: Remove all CA keys from memory immediately
-      description: Emergency stop. Signing stops until the next unseal.
-      x-required-role: admin
+      description: Emergency stop. Signing stops until the next unseal. Sealing a sealed server does nothing.
+      x-required-role: instance-admin
       responses:
-        "204": { description: Sealed }
+        "200":
+          description: Sealed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemStatus" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -137,8 +144,11 @@ paths:
       operationId: login
       summary: First factor (username + password)
       description: |
-        On success a short-lived pre-auth cookie is set; the session only becomes valid after
-        the second factor (`/auth/totp` or `/auth/webauthn/finish`). Rate-limited with lockout.
+        On success the session cookie holds a **pending** session: valid for 5 minutes and only
+        for `/auth/totp`. Works while the server is sealed (the second factor is encrypted with
+        the auth key, not the unseal key). Throttled before any hash is computed; repeated
+        failures lock the account for a while. A browser that completed a sign-in before brings
+        its device cookie (`__Host-myownpki_device`) and is judged by its own counter instead.
       security: []
       x-required-role: none
       requestBody:
@@ -155,13 +165,22 @@ paths:
               schema: { $ref: "#/components/schemas/LoginResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Busy" }
 
   /auth/totp:
     post:
       tags: [auth]
       operationId: verifyTOTP
       summary: Second factor with a TOTP code (or a recovery code)
+      description: |
+        Needs the pending session of `/auth/login`. Failures count in the same throttle and
+        lockout as wrong passwords. A wrong code answers 422 `wrong-secret` (the pending session
+        stays – type it again); 401 means the pending session is missing or over – sign in again.
+        On success the pending session ends and a **new** session ID
+        is set (no session fixation), together with a renewed device cookie (one year).
       security: []
       x-required-role: none
       requestBody:
@@ -172,12 +191,15 @@ paths:
             schema: { $ref: "#/components/schemas/TOTPRequest" }
       responses:
         "200":
-          description: Logged in; session cookie set and rotated
+          description: Signed in; session cookie set with a new ID
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Session" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/webauthn/begin:
@@ -225,15 +247,16 @@ paths:
       operationId: stepUp
       summary: Confirm the second factor again for a sensitive action
       description: |
-        Refreshes `step_up_valid_until` of the current session. For WebAuthn, use
-        `/auth/webauthn/begin` + `/auth/webauthn/finish` while logged in instead.
-      x-required-role: viewer
+        Refreshes `step_up_valid_until` of the current session (5 minutes). TOTP only – recovery
+        codes are for signing in. For WebAuthn, use `/auth/webauthn/begin` + `/auth/webauthn/finish`
+        while signed in instead (step 17).
+      x-required-role: signed-in
       requestBody:
-        description: "A fresh TOTP code or recovery code"
+        description: "A fresh TOTP code"
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TOTPRequest" }
+            schema: { $ref: "#/components/schemas/StepUpRequest" }
       responses:
         "200":
           description: Step-up valid
@@ -242,6 +265,9 @@ paths:
               schema: { $ref: "#/components/schemas/Session" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/session:
@@ -249,7 +275,9 @@ paths:
       tags: [auth]
       operationId: getSession
       summary: Current user, roles and session state
-      x-required-role: viewer
+      description: Doesn't keep the session alive (the UI polls it for the idle countdown).
+      x-required-role: signed-in
+      x-passive: true
       responses:
         "200":
           description: Current session
@@ -263,9 +291,10 @@ paths:
       tags: [auth]
       operationId: logout
       summary: End the current session (server-side)
-      x-required-role: viewer
+      description: The device cookie stays – the browser remains a known device.
+      x-required-role: signed-in
       responses:
-        "204": { description: Logged out }
+        "204": { description: Signed out }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ---------------------------------------------------------------- users
@@ -399,7 +428,7 @@ paths:
       tags: [users]
       operationId: changeOwnPassword
       summary: Change the own password
-      x-required-role: viewer
+      x-required-role: signed-in
       x-step-up: true
       requestBody:
         description: "Current and new password"
@@ -418,7 +447,7 @@ paths:
       tags: [users]
       operationId: beginTOTPEnrollment
       summary: Start TOTP enrollment (returns the otpauth URI once)
-      x-required-role: viewer
+      x-required-role: signed-in
       responses:
         "200":
           description: Secret for the authenticator app – shown only now
@@ -433,7 +462,7 @@ paths:
       tags: [users]
       operationId: confirmTOTPEnrollment
       summary: Confirm TOTP enrollment with a first code; returns recovery codes once
-      x-required-role: viewer
+      x-required-role: signed-in
       requestBody:
         description: "First code from the authenticator app, proving the secret was stored"
         required: true
@@ -454,7 +483,7 @@ paths:
       tags: [users]
       operationId: beginWebAuthnRegistration
       summary: Start registering a passkey / security key
-      x-required-role: viewer
+      x-required-role: signed-in
       x-step-up: true
       responses:
         "200":
@@ -470,7 +499,7 @@ paths:
       tags: [users]
       operationId: finishWebAuthnRegistration
       summary: Complete passkey registration
-      x-required-role: viewer
+      x-required-role: signed-in
       requestBody:
         description: "Attestation returned by navigator.credentials.create()"
         required: true
@@ -544,7 +573,8 @@ paths:
       tags: [presets]
       operationId: listPresets
       summary: List the certificate presets
-      x-required-role: viewer
+      description: Built in and the same for everybody, so any signed-in user may read them.
+      x-required-role: signed-in
       responses:
         "200":
           description: Presets, sorted by name
@@ -560,7 +590,7 @@ paths:
       tags: [presets]
       operationId: getPreset
       summary: Get one preset
-      x-required-role: viewer
+      x-required-role: signed-in
       parameters:
         - name: presetName
           description: "Preset name, for example `server`"
@@ -681,7 +711,7 @@ paths:
       x-required-role: viewer
       parameters:
         - name: format
-          description: "`pem` = CA certificate, `der` = binary, `chain` = this CA and its issuers up to the root"
+          description: "`pem` = CA certificate, `der` = binary, `chain` = this CA and its issuers up to the root (for trust stores; a server sends `fullchain` of its certificate instead)"
           in: query
           schema:
             type: string
@@ -786,12 +816,13 @@ paths:
       tags: [certificates]
       operationId: listCertificates
       summary: List certificates
+      description: Only certificates of CAs the caller may read; newest first.
       x-required-role: viewer
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
         - name: ca_id
-          description: "Only certificates issued by this CA"
+          description: "Only certificates issued by this CA (404 if the caller may not read it)"
           in: query
           schema: { $ref: "#/components/schemas/ID" }
         - name: status
@@ -801,14 +832,16 @@ paths:
         - name: preset
           description: "Only certificates issued with this preset"
           in: query
-          schema: { type: string }
+          schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
         - name: expires_before
           in: query
           description: Only certificates whose notAfter is before this time
           schema: { type: string, format: date-time }
         - name: q
           in: query
-          description: Search in CN, SANs and serial number
+          description: |
+            Part of the CN, a SAN or the serial number, any case. A plain substring – `%` and `_`
+            are ordinary characters, not wildcards.
           schema: { type: string, maxLength: 253 }
       responses:
         "200":
@@ -818,6 +851,7 @@ paths:
               schema: { $ref: "#/components/schemas/CertificateList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     post:
       tags: [certificates]
       operationId: issueCertificate
@@ -827,8 +861,10 @@ paths:
         - With a CSR (preferred): the private key never leaves the requester. Only the names are
           taken from the CSR (unless `use_csr_sans` is false); extensions come from the preset.
         - With `key`: the server generates the key and stores it encrypted, so it can be
-          downloaded later (step-up + audit) – the legacy pki.sh workflow.
-        Names are checked against the CA's name constraints before signing.
+          downloaded later (step-up + audit) – the legacy pki.sh workflow; only if the tenant
+          allows server-side keys.
+        Names are checked against the CA's name constraints before signing. Needs an unsealed
+        server (503 `sealed` otherwise).
       x-required-role: operator
       requestBody:
         description: "CA, preset and names, plus either a CSR or the key algorithm for a server-generated key"
@@ -841,12 +877,13 @@ paths:
           description: Issued
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Certificate" }
+              schema: { $ref: "#/components/schemas/IssuedCertificate" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
 
@@ -874,8 +911,11 @@ paths:
         in: path
         required: true
         description: |
-          `pem` = certificate only, `chain` = issuing CAs, `fullchain` = certificate + chain
-          (what nginx/Traefik/Caddy want), `der` = binary certificate.
+          `pem` = certificate only; `chain` = the intermediates from the issuing CA up to just below
+          the root; `fullchain` = certificate + intermediates (like certbot – what nginx, Traefik and
+          Caddy serve); `der` = binary certificate. The root is never part of a chain: clients already
+          have it as trust anchor (RFC 8446 §4.4.2), and sending it costs bytes and gives SSL Labs'
+          "chain contains anchor". Get the root from `GET /cas/{caId}/certificate`.
         schema:
           type: string
           enum: [pem, chain, fullchain, der]
@@ -886,7 +926,7 @@ paths:
       x-required-role: viewer
       responses:
         "200":
-          description: File
+          description: File (Content-Disposition attachment)
           content:
             application/pem-certificate-chain:
               schema: { type: string }
@@ -901,33 +941,35 @@ paths:
     post:
       tags: [certificates]
       operationId: exportCertificateWithKey
-      summary: Download the private key (PKCS#12, PEM key, combined PEM or ZIP with guide)
+      summary: Download the private key of a server-generated key
       description: |
-        Only for certificates with a server-generated key. POST, because the export password
-        must never appear in a URL (proxy logs, browser history). Every export is audited.
+        Only for certificates with a server-generated key, only for an operator of the issuing CA
+        with a fresh second factor, only while unsealed. Step 13 offers `pkcs8-pem`: the key as
+        unencrypted PKCS#8 PEM over TLS. Every download is audited (`key.download`) before the key
+        leaves; the response is `Cache-Control: no-store` and an attachment.
+        **The key stays encrypted on the server.** PKCS#12 with a password and "delete the key
+        after the download" follow in step 18.
       x-required-role: operator
       x-step-up: true
       requestBody:
-        description: "Export format and the password that protects the key"
+        description: "Export format"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/ExportRequest" }
       responses:
         "200":
-          description: File (Content-Disposition attachment)
+          description: Private key (Content-Disposition attachment)
           content:
-            application/x-pkcs12:
-              schema: { type: string, contentEncoding: binary }
             application/x-pem-file:
               schema: { type: string }
-            application/zip:
-              schema: { type: string, contentEncoding: binary }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "503": { $ref: "#/components/responses/Sealed" }
 
   /certificates/{certificateId}/revoke:
@@ -1159,7 +1201,7 @@ components:
       description: "Maximum number of items per page"
       name: limit
       in: query
-      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
     Cursor:
       name: cursor
       in: query
@@ -1233,6 +1275,24 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMediaType:
+      description: A request body that is not `application/json`
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    WrongSecret:
+      description: The session (or the pending sign-in) is valid, but the passphrase or code is wrong (type `wrong-secret`)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Busy:
+      description: Too many password checks at once; see the Retry-After header
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
 
   schemas:
     ID:
@@ -1250,8 +1310,8 @@ components:
           format: uri
           description: |
             One of `about:blank` or `urn:myownpki:problem:` + bad-request, unauthorized,
-            forbidden, step-up-required, not-found, conflict, too-large, policy-violation,
-            rate-limited, sealed, internal
+            forbidden, step-up-required, not-found, conflict, too-large, unsupported-media-type,
+            policy-violation, wrong-secret, rate-limited, busy, sealed, internal
           examples: ["urn:myownpki:problem:step-up-required"]
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
@@ -1259,7 +1319,7 @@ components:
         instance: { type: string }
         request_id:
           type: string
-          description: Correlates with server logs
+          description: Correlates with server logs (also the X-Request-ID header)
 
     ValidationProblem:
       description: "Problem details with one entry per invalid field"
@@ -1281,16 +1341,24 @@ components:
     SystemStatus:
       description: "Server version, seal state and server time (UTC)"
       type: object
-      required: [version, sealed, server_time]
+      required: [version, sealed, demo, server_time]
       properties:
         version: { type: string }
         sealed: { type: boolean }
+        sealed_since:
+          type: [string, "null"]
+          format: date-time
+          description: Since when signing is impossible; null while unsealed
+        demo:
+          type: boolean
+          description: Made by `init --demo` – all secrets in one file, not for production
         server_time: { type: string, format: date-time }
 
     UnsealRequest:
       description: "Passphrase that unlocks the online CA keys"
       type: object
       required: [passphrase]
+      additionalProperties: false
       properties:
         passphrase: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
 
@@ -1298,6 +1366,7 @@ components:
       description: "First login factor"
       type: object
       required: [username, password]
+      additionalProperties: false
       properties:
         username: { type: string, minLength: 1, maxLength: 128 }
         password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
@@ -1305,25 +1374,45 @@ components:
     LoginResponse:
       description: "Result of the first factor – a second factor is always required"
       type: object
-      required: [mfa_required, mfa_methods]
+      required: [second_factor_required, methods, pending_expires_at]
       properties:
-        mfa_required: { type: boolean, const: true }
-        mfa_methods:
+        second_factor_required: { type: boolean, const: true }
+        methods:
           type: array
+          description: "Phase 1: totp (a recovery code works in its place); webauthn follows in step 17"
           items: { type: string, enum: [totp, webauthn] }
-        mfa_enrollment_required:
+        first_totp:
           type: boolean
-          description: User has no second factor yet and must enroll one before anything else
+          description: The authenticator was never confirmed – this sign-in completes the setup from init or reset-2fa
+        pending_expires_at:
+          type: string
+          format: date-time
+          description: The second factor must follow before this time (5 minutes)
 
     TOTPRequest:
-      description: "TOTP or recovery code for the second factor, step-up or enrollment"
+      description: "TOTP or recovery code for the second factor"
       type: object
       required: [code]
+      additionalProperties: false
       properties:
         code:
           type: string
-          description: 6-digit TOTP code or a recovery code
-          pattern: "^([0-9]{6}|[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})$"
+          description: |
+            6-digit TOTP code (a space in the middle is fine) or a recovery code
+            (20 characters in groups of five, any case, hyphens or spaces optional)
+          pattern: "^([0-9]{3} ?[0-9]{3}|[0-9A-Za-z]{5}([- ]?[0-9A-Za-z]{5}){3})$"
+          writeOnly: true
+
+    StepUpRequest:
+      description: "A fresh TOTP code for a sensitive action"
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          description: 6-digit TOTP code (a space in the middle is fine)
+          pattern: "^[0-9]{3} ?[0-9]{3}$"
           writeOnly: true
 
     TOTPEnrollment:
@@ -1354,21 +1443,46 @@ components:
       additionalProperties: true
 
     Session:
-      description: "The logged-in user, roles and session lifetimes"
+      description: "The signed-in user, roles and session lifetimes"
       type: object
-      required: [user, roles, expires_at]
+      required: [user, roles, idle_expires_at, absolute_expires_at, step_up_valid_until, csrf_token]
       properties:
-        user: { $ref: "#/components/schemas/User" }
+        user: { $ref: "#/components/schemas/SessionUser" }
         roles:
           type: array
           items: { $ref: "#/components/schemas/RoleBinding" }
-        expires_at: { type: string, format: date-time }
+        idle_expires_at:
+          type: string
+          format: date-time
+          description: The session ends at this time without activity (30 minutes idle)
+        absolute_expires_at:
+          type: string
+          format: date-time
+          description: The session ends at this time in any case (12 hours after sign-in)
         step_up_valid_until:
           type: [string, "null"]
           format: date-time
         csrf_token:
           type: string
-          description: Only for cookie sessions; send it as X-CSRF-Token
+          description: Send it as X-CSRF-Token on every state-changing request
+        recovery_codes_left:
+          type: integer
+          minimum: 0
+          description: Only after a sign-in with a recovery code
+        warnings:
+          type: array
+          items: { type: string }
+
+    SessionUser:
+      description: "Who is signed in"
+      type: object
+      required: [id, username, instance_admin]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        username: { type: string }
+        instance_admin:
+          type: boolean
+          description: May unseal and manage users – gives no rights in a tenant
 
     Role:
       description: "Role, from least to most rights – viewer, operator, admin"
@@ -1535,13 +1649,22 @@ components:
         openssl_purpose: { type: string }
         ocsp_no_check: { type: boolean }
         customizable: { type: boolean }
+        wildcard:
+          type: boolean
+          description: DNS names like *.example.com are allowed and at least one is required
 
     KeyAlgorithm:
       type: string
       description: |
-        ecdsa-p256 is the default for leaves. Ed25519 server certificates are not accepted by
-        browsers; rsa-2048 is flagged by the compliance view (BSI TR-02102 recommends ≥ 3000 bit).
-      enum: [ecdsa-p256, ecdsa-p384, rsa-2048, rsa-3072, rsa-4096, ed25519]
+        Key type and size of a certificate's key. ecdsa-p256 is the default for leaves. Ed25519
+        server certificates are not accepted by browsers; rsa-2048 is flagged as compatibility only
+        (BSI TR-02102 recommends 3000 bit or more). RSA keys from a CSR may have other sizes (2048-8192).
+      pattern: "^(ecdsa-p256|ecdsa-p384|ecdsa-p521|ed25519|rsa-[0-9]{4})$"
+
+    GeneratedKeyAlgorithm:
+      type: string
+      description: Key algorithms the server generates (server-side keys)
+      enum: [ecdsa-p256, ecdsa-p384, ecdsa-p521, ed25519, rsa-2048, rsa-3072, rsa-4096]
 
     Subject:
       description: "Distinguished name parts of a certificate subject"
@@ -1606,32 +1729,78 @@ components:
       enum: [offline, online_encrypted, hsm]
 
     CA:
-      description: "A certificate authority of this tenant"
+      description: "A certificate authority of this tenant with its generations (one per key)"
       type: object
-      required: [id, name, kind, status, key_mode, subject, not_before, not_after, serial, fingerprint_sha256]
+      required: [id, name, kind, status, key_mode, parent, public_base_url, crl_days, max_validity_days,
+                 path_len, name_constraints, name_constraints_critical, eku_limit, current_generation, generations]
       properties:
         id: { $ref: "#/components/schemas/ID" }
         name: { type: string }
         kind: { $ref: "#/components/schemas/CAKind" }
         status: { $ref: "#/components/schemas/CAStatus" }
         key_mode: { $ref: "#/components/schemas/KeyMode" }
-        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
-        subject: { type: string, description: Subject DN of the CA as an RFC 4514 string }
-        issuer_ca_id: { type: [string, "null"] }
-        serial: { type: string, pattern: "^[0-9A-F]+$" }
-        not_before: { type: string, format: date-time }
-        not_after: { type: string, format: date-time }
-        fingerprint_sha256: { type: string, pattern: "^[0-9A-F]{64}$" }
-        path_len: { type: [integer, "null"], minimum: 0 }
-        name_constraints: { $ref: "#/components/schemas/NameConstraints" }
-        eku_limit:
-          type: array
-          description: EKUs this CA may issue (legacy EKU_LIMIT)
-          items: { type: string }
+        parent:
+          type: [string, "null"]
+          description: Name of the parent CA; null for a root
         public_base_url:
           type: string
           format: uri
           description: Base of AIA/CRL URLs in issued certificates – immutable after the first issuance
+        crl_days: { type: integer, minimum: 1 }
+        max_validity_days: { type: integer, minimum: 1 }
+        path_len: { type: [integer, "null"], minimum: 0 }
+        name_constraints:
+          type: array
+          items: { $ref: "#/components/schemas/NameConstraint" }
+        name_constraints_critical: { type: boolean }
+        eku_limit:
+          type: array
+          description: EKUs this CA may issue (names, or OIDs for unnamed ones); empty = no limit
+          items: { type: string }
+        current_generation:
+          type: [integer, "null"]
+          minimum: 1
+          description: The generation that signs; null while the first waits for its offline signature
+        generations:
+          type: array
+          items: { $ref: "#/components/schemas/CAGeneration" }
+
+    NameConstraint:
+      description: "One name constraint of a CA"
+      type: object
+      required: [mode, type, value]
+      properties:
+        mode: { type: string, enum: [permitted, excluded] }
+        type: { type: string, enum: [dns, ip, email] }
+        value: { type: string }
+
+    CAGeneration:
+      description: "One key and certificate of a CA"
+      type: object
+      required: [generation, current, pending, key_algorithm, subject, issuer, certificate_url, crl_url, warnings]
+      properties:
+        generation: { type: integer, minimum: 1 }
+        current: { type: boolean }
+        pending:
+          type: boolean
+          description: Waits for the certificate from the offline root
+        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+        subject: { type: string, description: Subject DN as an RFC 4514 string }
+        serial: { type: string, pattern: "^[0-9A-F]+$" }
+        fingerprint_sha256: { type: string, pattern: "^[0-9A-F]{64}$" }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        issuer:
+          type: [string, "null"]
+          description: Parent CA and generation, e.g. `root/1`; null for a root
+        certificate_url: { type: string, format: uri, description: Where MyOwnPKI publishes this certificate (AIA) }
+        crl_url: { type: string, format: uri, description: Where MyOwnPKI publishes its CRL (CDP) }
+        revoked:
+          type: [string, "null"]
+          description: "`<reason> on <date>` for a revoked generation"
+        warnings:
+          type: array
+          items: { type: string }
         crl: { $ref: "#/components/schemas/CRLInfo" }
 
     CACreate:
@@ -1687,14 +1856,25 @@ components:
         chain_pem: { type: string, maxLength: 262144 }
 
     CRLInfo:
-      description: "Metadata of the current CRL of a CA"
+      description: "The newest CRL of a CA generation and what it needs"
       type: object
-      required: [number, this_update, next_update]
+      required: [state, number, unpublished]
       properties:
-        number: { type: integer, minimum: 0, description: Strictly increasing per CA }
+        state:
+          type: string
+          enum: [ok, renew_due, warning, expired, missing]
+          description: renew_due after a third of the lifetime, warning from half, expired after nextUpdate
+        number: { type: integer, minimum: 0, description: "Strictly increasing per CA; 0 = none yet" }
+        source: { type: string, enum: [signed, uploaded] }
         this_update: { type: string, format: date-time }
         next_update: { type: string, format: date-time }
-        revoked_count: { type: integer, minimum: 0 }
+        unpublished:
+          type: integer
+          minimum: 0
+          description: Revocations not on the newest CRL yet – they take effect only once a CRL lists them
+        message:
+          type: string
+          description: What an admin should know; absent when all is well
 
     CertificateStatus:
       description: "Validity state of a certificate"
@@ -1709,17 +1889,20 @@ components:
     Certificate:
       description: "An end-entity certificate known to this tenant"
       type: object
-      required: [id, ca_id, status, source, subject, sans, serial, not_before, not_after, fingerprint_sha256, key_stored]
+      required: [id, ca_id, ca_name, status, source, subject, common_name, sans, serial, not_before, not_after,
+                 key_algorithm, fingerprint_sha256, key_stored, created_at]
       properties:
         id: { $ref: "#/components/schemas/ID" }
         ca_id: { type: [string, "null"], description: "null for external certificates" }
+        ca_name: { type: [string, "null"] }
+        ca_generation: { type: [integer, "null"], minimum: 1 }
         preset: { type: [string, "null"] }
         status: { $ref: "#/components/schemas/CertificateStatus" }
         source:
           type: string
           enum: [issued, imported, external]
         subject: { type: string, description: Subject DN as an RFC 4514 string }
-        common_name: { type: string }
+        common_name: { type: string, description: "Empty when the certificate has no CN" }
         sans: { $ref: "#/components/schemas/SANs" }
         serial: { type: string, pattern: "^[0-9A-F]+$" }
         not_before: { type: string, format: date-time }
@@ -1731,6 +1914,7 @@ components:
         fingerprint_sha256: { type: string, pattern: "^[0-9A-F]{64}$" }
         revocation:
           type: [object, "null"]
+          required: [reason, revoked_at]
           properties:
             reason: { $ref: "#/components/schemas/RevocationReason" }
             revoked_at: { type: string, format: date-time }
@@ -1752,19 +1936,20 @@ components:
     IssueRequest:
       description: "Request to issue a certificate; exactly one of `csr_pem` or `key`"
       type: object
-      required: [ca_id, preset, subject]
+      required: [ca_id, preset]
+      additionalProperties: false
       oneOf:
         - required: [csr_pem]
         - required: [key]
       properties:
         ca_id: { $ref: "#/components/schemas/ID" }
-        preset: { type: string }
+        preset: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
         subject: { $ref: "#/components/schemas/Subject" }
         sans: { $ref: "#/components/schemas/SANs" }
         validity_days:
           type: integer
           minimum: 1
-          description: Defaults to the preset; capped by the CA's own notAfter
+          description: Defaults to the preset; capped by the CA's limit and its own notAfter
         csr_pem: { type: string, maxLength: 65536 }
         use_csr_sans:
           type: boolean
@@ -1773,8 +1958,9 @@ components:
         key:
           type: object
           required: [algorithm]
+          additionalProperties: false
           properties:
-            algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+            algorithm: { $ref: "#/components/schemas/GeneratedKeyAlgorithm" }
         key_usage:
           type: array
           items: { type: string }
@@ -1783,6 +1969,26 @@ components:
           type: array
           items: { type: string }
           description: Extended key usages – only for customizable presets; validated like preset files
+
+    IssuedCertificate:
+      description: "A new certificate, with what the server changed or dropped"
+      allOf:
+        - $ref: "#/components/schemas/Certificate"
+        - type: object
+          required: [notes, warnings, dropped_csr_names]
+          properties:
+            notes:
+              type: array
+              description: Defaults that changed the request (validity shortened, base domain added)
+              items: { type: string }
+            warnings:
+              type: array
+              description: Compatibility problems that didn't stop the issuance
+              items: { type: string }
+            dropped_csr_names:
+              type: array
+              description: Names from the CSR the preset doesn't take, as `type:value`
+              items: { type: string }
 
     RevokeRequest:
       description: "Request to revoke a certificate"
@@ -1810,28 +2016,17 @@ components:
         validity_days: { type: integer, minimum: 1 }
 
     ExportRequest:
-      description: "Request to export a certificate together with its private key"
+      description: "Request to export the private key of a server-generated key"
       type: object
       required: [format]
+      additionalProperties: false
       properties:
         format:
           type: string
-          enum: [pkcs12, key, combined, zip]
+          enum: [pkcs8-pem]
           description: |
-            pkcs12 = certificate + key + chain (Windows, macOS, browsers);
-            key = PEM private key; combined = key + fullchain in one PEM (HAProxy);
-            zip = all files plus the deployment guide
-        password:
-          type: string
-          format: password
-          writeOnly: true
-          minLength: 8
-          maxLength: 1024
-          description: Required for pkcs12 and to encrypt the key in key/combined/zip
-        pkcs12_legacy:
-          type: boolean
-          default: false
-          description: Legacy encryption (3DES/RC2) for old Windows/macOS/Java – weak, use only if needed
+            pkcs8-pem = the private key as unencrypted PKCS#8 PEM (step 13). PKCS#12 with a password,
+            a combined PEM and a ZIP with the deployment guide follow in step 18.
 
     CSRInfo:
       description: "What a CSR asks for, parsed for preview"

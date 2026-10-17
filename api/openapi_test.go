@@ -104,7 +104,7 @@ func TestSpecOperations(t *testing.T) {
 	t.Parallel()
 	doc := loadSpec(t)
 	opID := regexp.MustCompile(`^[a-z][a-zA-Z0-9]+$`)
-	roles := []string{"none", "viewer", "operator", "admin"}
+	roles := []string{"none", "signed-in", "instance-admin", "viewer", "operator", "admin"}
 	declaredTags := map[string]bool{}
 	topTags, _ := get(doc, "tags").([]any)
 	for _, tag := range topTags {
