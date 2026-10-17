@@ -17,11 +17,16 @@ SELECT * FROM users ORDER BY username;
 SELECT count(*) FROM users;
 
 -- name: SetPassword :exec
-UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE id = ?;
+UPDATE users SET password_hash = ?, password_changed_at = ?, credentials_epoch = credentials_epoch + 1, updated_at = ? WHERE id = ?;
+
+-- The same password with new hash parameters: device cookies stay valid.
+-- name: RehashPassword :exec
+UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?;
 
 -- A new secret set by an admin: confirmed by the first valid code.
 -- name: ResetTOTP :exec
-UPDATE users SET totp_secret = ?, totp_confirmed_at = NULL, totp_last_step = 0, totp_pending = NULL, updated_at = ?
+UPDATE users SET totp_secret = ?, totp_confirmed_at = NULL, totp_last_step = 0, totp_pending = NULL,
+                 credentials_epoch = credentials_epoch + 1, updated_at = ?
 WHERE id = ?;
 
 -- Takes a time step only if it is newer than the last one: a TOTP code is
@@ -34,11 +39,16 @@ WHERE id = ? AND totp_last_step < ?;
 UPDATE users SET totp_pending = ?, updated_at = ? WHERE id = ?;
 
 -- name: ApplyTOTPPending :execrows
-UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_confirmed_at = ?, totp_last_step = ?, updated_at = ?
+UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_confirmed_at = ?, totp_last_step = ?,
+                 credentials_epoch = credentials_epoch + 1, updated_at = ?
 WHERE id = ? AND totp_pending IS NOT NULL;
 
 -- name: SetLoginFailures :exec
 UPDATE users SET failed_logins = ?, locked_until = ?, updated_at = ? WHERE id = ?;
+
+-- myownpki user unlock: device cookies issued before are void.
+-- name: BumpCredentialsEpoch :exec
+UPDATE users SET credentials_epoch = credentials_epoch + 1, updated_at = ? WHERE id = ?;
 
 -- name: SetDisabled :exec
 UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?;

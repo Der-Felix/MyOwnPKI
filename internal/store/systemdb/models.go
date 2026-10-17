@@ -87,4 +87,5 @@ type User struct {
 	LockedUntil       sql.NullString
 	CreatedAt         string
 	UpdatedAt         string
+	CredentialsEpoch  int64
 }

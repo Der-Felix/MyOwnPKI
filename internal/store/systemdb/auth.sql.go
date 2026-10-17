@@ -11,7 +11,8 @@ import (
 )
 
 const applyTOTPPending = `-- name: ApplyTOTPPending :execrows
-UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_confirmed_at = ?, totp_last_step = ?, updated_at = ?
+UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_confirmed_at = ?, totp_last_step = ?,
+                 credentials_epoch = credentials_epoch + 1, updated_at = ?
 WHERE id = ? AND totp_pending IS NOT NULL
 `
 
@@ -33,6 +34,21 @@ func (q *Queries) ApplyTOTPPending(ctx context.Context, arg ApplyTOTPPendingPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const bumpCredentialsEpoch = `-- name: BumpCredentialsEpoch :exec
+UPDATE users SET credentials_epoch = credentials_epoch + 1, updated_at = ? WHERE id = ?
+`
+
+type BumpCredentialsEpochParams struct {
+	UpdatedAt string
+	ID        string
+}
+
+// myownpki user unlock: device cookies issued before are void.
+func (q *Queries) BumpCredentialsEpoch(ctx context.Context, arg BumpCredentialsEpochParams) error {
+	_, err := q.db.ExecContext(ctx, bumpCredentialsEpoch, arg.UpdatedAt, arg.ID)
+	return err
 }
 
 const countOtherActiveInstanceAdmins = `-- name: CountOtherActiveInstanceAdmins :one
@@ -190,7 +206,7 @@ func (q *Queries) GetSession(ctx context.Context, idHash string) (Session, error
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at FROM users WHERE id = ?
+SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at, credentials_epoch FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
@@ -211,12 +227,13 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 		&i.LockedUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialsEpoch,
 	)
 	return i, err
 }
 
 const getUserByName = `-- name: GetUserByName :one
-SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at FROM users WHERE username = ?
+SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at, credentials_epoch FROM users WHERE username = ?
 `
 
 func (q *Queries) GetUserByName(ctx context.Context, username string) (User, error) {
@@ -237,6 +254,7 @@ func (q *Queries) GetUserByName(ctx context.Context, username string) (User, err
 		&i.LockedUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialsEpoch,
 	)
 	return i, err
 }
@@ -353,7 +371,7 @@ func (q *Queries) ListRoleBindings(ctx context.Context, userID string) ([]RoleBi
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at FROM users ORDER BY username
+SELECT id, username, password_hash, password_changed_at, totp_secret, totp_confirmed_at, totp_last_step, totp_pending, instance_admin, disabled_at, failed_logins, locked_until, created_at, updated_at, credentials_epoch FROM users ORDER BY username
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -380,6 +398,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.LockedUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CredentialsEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -394,8 +413,25 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const rehashPassword = `-- name: RehashPassword :exec
+UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
+`
+
+type RehashPasswordParams struct {
+	PasswordHash string
+	UpdatedAt    string
+	ID           string
+}
+
+// The same password with new hash parameters: device cookies stay valid.
+func (q *Queries) RehashPassword(ctx context.Context, arg RehashPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, rehashPassword, arg.PasswordHash, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const resetTOTP = `-- name: ResetTOTP :exec
-UPDATE users SET totp_secret = ?, totp_confirmed_at = NULL, totp_last_step = 0, totp_pending = NULL, updated_at = ?
+UPDATE users SET totp_secret = ?, totp_confirmed_at = NULL, totp_last_step = 0, totp_pending = NULL,
+                 credentials_epoch = credentials_epoch + 1, updated_at = ?
 WHERE id = ?
 `
 
@@ -448,7 +484,7 @@ func (q *Queries) SetLoginFailures(ctx context.Context, arg SetLoginFailuresPara
 }
 
 const setPassword = `-- name: SetPassword :exec
-UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE id = ?
+UPDATE users SET password_hash = ?, password_changed_at = ?, credentials_epoch = credentials_epoch + 1, updated_at = ? WHERE id = ?
 `
 
 type SetPasswordParams struct {
