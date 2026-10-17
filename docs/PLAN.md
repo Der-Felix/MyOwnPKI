@@ -534,7 +534,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
 | CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13); added in phase 1 step 1: actionlint 1.7.12, vacuum 0.30.6 (newest release older than two weeks), rules in `api/vacuum.yaml` – snake_case and per-property examples switched off with reasons, every other warning fails CI |
-| Two-week rule, exceptions | A module version already selected by the graph through approved modules is taken as it is, never forced down by downgrading those (§14 "CI and build"): `golang.org/x/crypto` v0.58.0 (2026-10-13), `golang.org/x/term` v0.47.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; owner 2026-10-16) |
+| Two-week rule, exceptions | A module version already selected by the graph through approved modules is taken as it is, never forced down by downgrading those (§14 "CI and build"): `golang.org/x/crypto` v0.58.0 (2026-10-13), `golang.org/x/term` v0.47.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; owner 2026-10-16), `golang.org/x/text` v0.43.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; pulled in by the test-only JSON Schema validator; owner 2026-10-17) |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
 
 ---
@@ -551,7 +551,7 @@ keeps the reasons. None of them changes an ADR.
 | Third-party actions pinned to a full commit SHA, not a tag | A tag can be moved to other code later; a SHA can't. The CI builds a CA |
 | Only GitHub's own actions; golangci-lint, ShellCheck, sqlc, actionlint and vacuum downloaded directly with a pinned SHA-256 | Fewer third parties with code execution in CI; a swapped release file is detected |
 | Two-week rule: dependencies and tools are only updated to releases that have been public for at least 14 days – Dependabot `cooldown: 14` days, the same rule by hand for pinned binaries; security updates are not delayed | A broken or hijacked release usually surfaces within days; a CA should not be among the first to run it |
-| Two-week rule, exception: if an approved tool already pulls a newer version of a module into the graph (Go picks the highest), we don't downgrade the tool – the diff of the packages we actually use is checked against the approved version and the exception recorded (cases: x/crypto v0.58.0 via govulncheck, 2026-10-13; x/term v0.47.0, required by x/crypto v0.58.0 and x/net v0.61.0 – v0.46.0 would downgrade x/crypto, x/net, x/tools and x/vuln, 2026-10-16) | Downgrading the vulnerability scanner would cost more safety than it buys |
+| Two-week rule, exception: if an approved tool already pulls a newer version of a module into the graph (Go picks the highest), we don't downgrade the tool – the diff of the packages we actually use is checked against the approved version and the exception recorded (cases: x/crypto v0.58.0 via govulncheck, 2026-10-13; x/term v0.47.0, required by x/crypto v0.58.0 and x/net v0.61.0 – v0.46.0 would downgrade x/crypto, x/net, x/tools and x/vuln, 2026-10-16; x/text v0.43.0 for the same reason, 2026-10-17) | Downgrading the vulnerability scanner would cost more safety than it buys |
 | `permissions: contents: read`, `persist-credentials: false` | Least privilege – a compromised step can't push or read a token from `.git/config` |
 | Runner images pinned (`ubuntu-24.04`, `windows-2025`, `macos-15`) | `*-latest` changes underneath; failures should come from our changes |
 | sqlc is installed in CI only when `sqlc.yaml` exists | Not used before phase 1 |
@@ -575,8 +575,8 @@ keeps the reasons. None of them changes an ADR.
 | Decision | Why |
 |---|---|
 | `x-required-role` and `x-step-up` on every operation | RBAC and step-up become reviewable and testable in the spec |
-| `/health` unauthenticated and returns only `{"status":"ok"}`; version and seal state only via `/system/status` | Load balancers need a check; anonymous endpoints must not reveal versions |
-| Key export is `POST /certificates/{id}/export` with the password in the body | Secrets in URLs end up in proxy logs and browser history |
+| `/health` unauthenticated and returns only "ok"; version and seal state only via `/system/status` – since step 13 the listener's own `GET /healthz` is the only health check, `/api/v1/health` is gone (owner 2026-10-17) | Load balancers need a check; anonymous endpoints must not reveal versions; one check is enough |
+| Key export is `POST /certificates/{id}/export` with the password in the body (step 18; step 13 has only `pkcs8-pem` without a password) | Secrets in URLs end up in proxy logs and browser history |
 | `certificateHold` not offered | Temporary revocation is poorly supported; CA/B Baseline Requirements forbid it |
 | Role scopes `tenant` and `ca` only; no tenant in any path | Domain/agent-group scopes come with phases 2/3; the tenant comes from the authenticated context |
 | Not in the draft: batch upload, encrypted backup download, ACME, domains, agents | Not in the phase 1 row or belong to later phases |
@@ -676,6 +676,17 @@ keeps the reasons. None of them changes an ADR.
 | Listeners start sealed; `--unseal` asks only afterwards; a wrong passphrase keeps the server running | CRLs and CA certificates are served from the first second, whatever the operator types |
 | Shutdown within 8 s, seal with the last checkpoint at the end | Container runtimes kill after 10 s; the audit log must be signed up to the end |
 | Direct audit entries fail-closed, outbox entries may pile up (warned with count and age) | No unseal or sign-in without a trace; business changes are never lost, only delayed |
+
+### REST API part 1 (phase 1 step 13, design approved 2026-10-17)
+| Decision | Why |
+|---|---|
+| A route table in `internal/httpapi`, each row an operation of the spec; contract tests compare both and validate every answer against the JSON Schema of the spec, plus a check that no field outside the spec is sent | The spec stays the source of truth without a generator; a renamed field fails a test instead of a client |
+| No read access = 404 (as for an unknown ID); read access but a too low role = 403 | Nobody can probe which CAs or certificates exist; whoever may see an object learns why an action fails |
+| Sign-in works sealed; reading works sealed, signing answers 503 `sealed` | The browser must be able to sign in to unseal; the TOTP secrets are under the auth key, not the unseal key |
+| Device cookies (OWASP) with a credentials epoch (system 0006) | A stranger who knows a user name can't lock the real admin out; a new password, a new second factor or `user unlock` void every old device |
+| Status and session polling are passive (decided by the route) | An open tab must not keep a session alive forever |
+| Private key download in step 13 as unencrypted PKCS#8 PEM over TLS, with step-up, audited before the key leaves; PKCS#12 with a password in step 18 | The browser test needs server-generated keys; PKCS#12 needs another dependency, decided at step 18 |
+| JSON bodies only (415 otherwise), unknown fields refused | A form post or a typo can't slip through |
 
 ### Web UI and dev mode
 | Decision | Why |

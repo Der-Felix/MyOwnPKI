@@ -33,19 +33,22 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
 - OIDC optional (Authentik, Keycloak, Entra ID): validate issuer, audience, nonce, PKCE.
 - Sessions: server-side in `system.db` (only the SHA-256 of the ID), random 256-bit IDs, cookie
   `HttpOnly; Secure; SameSite=Strict; Path=/`, `__Host-` prefix, idle 30 min + absolute 12 h, new ID
-  after the second factor; role changes, password change and disabling end sessions.
+  after the second factor; role changes, password change and disabling end sessions. Requests a page
+  makes on its own (status, session polling) are passive by route and don't keep a session alive.
 - CSRF: `http.CrossOriginProtection` (Sec-Fetch-Site/Origin) plus a synchronizer token for all
   state-changing requests (htmx sends it via a header set from a `<meta>` tag).
 - Throttle (in memory, per IP+user and per user; unknown names one counter per IP; IPv6 per /64;
   pruning never drops a braking entry) and a time-limited lockout (never permanent: that would let
-  anybody lock the admin out); `myownpki user unlock` ends it early; device cookies follow in
-  step 13. Client IPs from `X-Forwarded-For` only behind `auth.trusted_proxies`.
+  anybody lock the admin out); `myownpki user unlock` ends it early. **Device cookies** (OWASP, step 13):
+  a browser that completed a sign-in is judged by its own counter, not by the user lockout strangers
+  cause; the cookie's HMAC covers a credentials epoch, so a new password, a new second factor or
+  `user unlock` void it. Client IPs from `X-Forwarded-For` only behind `auth.trusted_proxies`.
 - The last active instance admin and the last active admin of a tenant can't be disabled or lose
   the role.
 - **Step-up auth** (fresh 2FA within 5 minutes) for: private key download, revocation, CA
   create/renew/retire/revoke, CRL upload, user/role changes, 2FA reset, API token creation (step 18).
 - **Unseal = a signed-in instance admin + the passphrase** – the passphrase is the stronger proof,
-  no extra step-up. Changing your own password, authenticator or recovery codes needs the current
+  no extra step-up. Wrong passphrases are slowed down per instance and per client address. Changing your own password, authenticator or recovery codes needs the current
   password.
 - Console emergencies (`user reset-2fa`) need the unseal passphrase or the recovery key: shell access
   to the server alone is not enough.
@@ -61,6 +64,8 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
   paths all call the same services. `keys.Who.Principal` carries the caller; nil is denied; the
   console and system jobs have their own principals.
 - Tenant ID comes from the authenticated context, never from a request parameter alone.
+- Whoever may not read an object gets **404**, the same as for an unknown ID; whoever may read it but
+  lacks the role for an action gets **403**. Nobody can probe which CAs or certificates exist.
 
 ## Key storage (ADR-09)
 

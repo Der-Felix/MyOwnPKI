@@ -60,6 +60,10 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
 - Wildcards: only one label (`*.example.com`), never `*.*.x` or `*.com`; `*.example.com` does not
   cover `example.com`, so add both (legacy behaviour).
 - IP SANs: IPv4 and IPv6 in binary form, never as DNS SANs.
+- Downloads: `chain` = the intermediates up to just below the root, `fullchain` = certificate +
+  intermediates (certbot, legacy `chain.pem`/`fullchain.pem`). The root is never in a chain a server
+  sends – the client has it as trust anchor (RFC 8446 §4.4.2; SSL Labs "chain contains anchor"); it is
+  downloaded on its own (`GET /cas/{id}/certificate`).
 
 ## 3. CA rules
 
