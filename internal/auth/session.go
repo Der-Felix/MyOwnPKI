@@ -66,13 +66,22 @@ type Session struct {
 	Username  string
 	CSRFToken string
 	CreatedAt time.Time
-	ExpiresAt time.Time
+	ExpiresAt time.Time // absolute end (a pending session: PendingTTL)
+	LastSeen  time.Time // last activity; the idle timeout counts from here
 	StepUpAt  time.Time
 	// Principal is what the session may do; nil for a pending session.
 	Principal *authz.Principal
 
 	idHash  string
 	pending bool
+}
+
+// IdleExpiresAt is when the session ends without further activity.
+func (s *Session) IdleExpiresAt() time.Time {
+	if idle := s.LastSeen.Add(IdleTimeout); !s.pending && idle.Before(s.ExpiresAt) {
+		return idle
+	}
+	return s.ExpiresAt
 }
 
 // SessionCookie is the cookie for token. No Expires: the browser drops it at
@@ -152,8 +161,19 @@ func (s *Service) loadSession(ctx context.Context, q *systemdb.Queries, token, s
 
 // Authenticate returns the signed-in session of token with its principal.
 // It ends sessions of disabled users and records activity (at most once a
-// minute).
+// minute), which moves the idle timeout.
 func (s *Service) Authenticate(ctx context.Context, token string) (*Session, error) {
+	return s.authenticate(ctx, token, true)
+}
+
+// AuthenticatePassive is Authenticate without counting as activity: for
+// requests a page makes on its own (status polling), so an open browser tab
+// still times out (owner 2026-10-17).
+func (s *Service) AuthenticatePassive(ctx context.Context, token string) (*Session, error) {
+	return s.authenticate(ctx, token, false)
+}
+
+func (s *Service) authenticate(ctx context.Context, token string, touch bool) (*Session, error) {
 	now := s.now()
 	q := systemdb.New(s.System)
 	row, err := s.loadSession(ctx, q, token, stateFull, now)
@@ -172,17 +192,18 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Session, err
 	if err != nil {
 		return nil, err
 	}
-	if now.Sub(parseTime(row.LastSeenAt)) >= touchEvery {
+	if touch && now.Sub(parseTime(row.LastSeenAt)) >= touchEvery {
 		if err := q.TouchSession(ctx, systemdb.TouchSessionParams{LastSeenAt: formatTime(now), IDHash: row.IDHash}); err != nil {
 			return nil, err
 		}
+		row.LastSeenAt = formatTime(now)
 	}
 	return sessionOf(row, u, bindings), nil
 }
 
 func sessionOf(row systemdb.Session, u systemdb.User, bindings []systemdb.RoleBinding) *Session {
 	sess := &Session{
-		UserID: u.ID, Username: u.Username, CSRFToken: row.CsrfToken, CreatedAt: parseTime(row.CreatedAt),
+		UserID: u.ID, Username: u.Username, CSRFToken: row.CsrfToken, CreatedAt: parseTime(row.CreatedAt), LastSeen: parseTime(row.LastSeenAt),
 		ExpiresAt: parseTime(row.ExpiresAt), StepUpAt: parseNullTime(row.StepupAt), idHash: row.IDHash, pending: row.State == statePassword,
 	}
 	if !sess.pending {

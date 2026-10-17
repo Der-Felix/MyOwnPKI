@@ -72,6 +72,21 @@ func normalizeTOTPCode(code string) string {
 	return strings.ReplaceAll(strings.TrimSpace(code), " ", "")
 }
 
+// looksLikeTOTP: six digits (spaces allowed) are a TOTP code; anything else
+// is a recovery code.
+func looksLikeTOTP(code string) bool {
+	c := normalizeTOTPCode(code)
+	if len(c) != totpDigits {
+		return false
+	}
+	for _, r := range c {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // Enrollment is what a user needs to set up an authenticator app. Show it
 // once; it is never shown again.
 type Enrollment struct {

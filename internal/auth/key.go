@@ -41,6 +41,7 @@ var ErrKeyExists = errors.New("the auth key file exists already – it is never 
 type Key struct {
 	totp     cipher.AEAD
 	recovery []byte // HMAC key for recovery code hashes
+	device   []byte // HMAC key for device cookies
 }
 
 // CreateKeyFile writes a new random auth key to path (mode 0600). It never
@@ -128,7 +129,11 @@ func newKey(raw []byte) (*Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Key{totp: aead, recovery: recovery}, nil
+	device, err := hkdf.Key(sha256.New, raw, nil, "myownpki auth device-cookie v1", keySize)
+	if err != nil {
+		return nil, err
+	}
+	return &Key{totp: aead, recovery: recovery, device: device}, nil
 }
 
 // totpAAD binds a sealed TOTP secret to its purpose and user: a secret copied

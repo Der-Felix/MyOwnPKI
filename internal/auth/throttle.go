@@ -102,12 +102,17 @@ func (t *Throttle) Wait(ip, user string, known bool, now time.Time) time.Duratio
 
 // Failure counts a failed attempt.
 func (t *Throttle) Failure(ip, user string, known bool, now time.Time) {
+	t.count(throttleKeys(ip, user, known), now)
+}
+
+// count adds a failure to every counter in keys.
+func (t *Throttle) count(keys map[string]rule, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.entries)+2 > maxThrottleEntries {
+	if len(t.entries)+len(keys) > maxThrottleEntries {
 		t.prune(now)
 	}
-	for key, r := range throttleKeys(ip, user, known) {
+	for key, r := range keys {
 		e := t.entries[key]
 		if e == nil || now.Sub(e.last) >= r.forget {
 			e = &throttleEntry{rule: r}
@@ -116,6 +121,32 @@ func (t *Throttle) Failure(ip, user string, known bool, now time.Time) {
 		e.failures++
 		e.last = now
 	}
+}
+
+// WaitDevice is Wait for an attempt with a valid device cookie: only the
+// strict (IP, user) counter applies, not the per-user one strangers build up.
+func (t *Throttle) WaitDevice(ip, user string, now time.Time) time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if e := t.entries["s|"+ipKey(ip)+"|"+strings.ToLower(user)]; e != nil {
+		return e.wait(now)
+	}
+	return 0
+}
+
+// FailureDevice counts a failed attempt with a device cookie: against
+// (IP, user) and against the cookie, not against the user.
+func (t *Throttle) FailureDevice(ip, user, nonce string, now time.Time) {
+	t.count(map[string]rule{"s|" + ipKey(ip) + "|" + strings.ToLower(user): strictRule, "d|" + nonce: deviceRule}, now)
+}
+
+// DeviceLocked reports whether the device cookie with this random value had
+// too many failures: it then counts like an unknown browser.
+func (t *Throttle) DeviceLocked(nonce string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entries["d|"+nonce]
+	return e != nil && e.wait(now) > 0
 }
 
 // Success clears the strict counter of (ip, user). The per-user counter

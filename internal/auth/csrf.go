@@ -36,7 +36,7 @@ func CSRF(next http.Handler, sessionToken func(*http.Request) (string, bool)) ht
 				if got == "" {
 					got = r.PostFormValue(CSRFField)
 				}
-				if want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+				if !SameCSRFToken(got, want) {
 					http.Error(w, ErrCSRF.Error(), http.StatusForbidden)
 					return
 				}
@@ -46,6 +46,15 @@ func CSRF(next http.Handler, sessionToken func(*http.Request) (string, bool)) ht
 	})
 	return cop.Handler(check)
 }
+
+// SameCSRFToken compares a sent token with the session's in constant time;
+// an empty expected token never matches.
+func SameCSRFToken(got, want string) bool {
+	return want != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// SafeMethod: GET, HEAD and OPTIONS must not change state and need no token.
+func SafeMethod(m string) bool { return safeMethod(m) }
 
 func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions

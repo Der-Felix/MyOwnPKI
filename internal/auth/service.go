@@ -84,14 +84,26 @@ type LoginResult struct {
 	// FirstTOTP: the authenticator was never confirmed – the setup from init
 	// or reset-2fa is completed by this login.
 	FirstTOTP bool
+	// Factor is the second factor used: "totp" or "recovery_code".
+	Factor string
 	// RecoveryCodesLeft after a sign-in with a recovery code.
 	RecoveryCodesLeft int
-	Warnings          []string
+	// DeviceCookie is a new device cookie value after a complete sign-in
+	// (DeviceCookie); renewed at every one.
+	DeviceCookie string
+	Warnings     []string
 }
 
 // Login checks user name and password and opens a pending session.
 func (s *Service) Login(ctx context.Context, username, password, ip string) (*LoginResult, error) {
+	return s.LoginFrom(ctx, username, password, Client{IP: ip})
+}
+
+// LoginFrom is Login with the client's device cookie: a known device is
+// judged by its own counter instead of the user lockout.
+func (s *Service) LoginFrom(ctx context.Context, username, password string, c Client) (*LoginResult, error) {
 	now := s.now()
+	ip := c.IP
 	// The name lookup is cheap and comes first: unknown names share one
 	// throttle counter per address and never get entries of their own.
 	q := systemdb.New(s.System)
@@ -99,7 +111,11 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Lo
 	if err != nil {
 		return nil, err
 	}
-	if wait := s.Throttle.Wait(ip, username, found, now); wait > 0 {
+	var device string
+	if found {
+		device = s.trustedDevice(c, u, now)
+	}
+	if wait := s.wait(c, username, found, device, now); wait > 0 {
 		var who *systemdb.User
 		if found {
 			who = &u
@@ -115,7 +131,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Lo
 		// the wrong field, and the audit log can't be cleaned.
 		return nil, s.refuse(ctx, nil, ip, "user.login", audit.ResultFailure, "unknown user", ErrInvalidLogin)
 	}
-	if wait := lockedFor(u, now); wait > 0 {
+	if wait := lockedFor(u, now); wait > 0 && device == "" {
 		return nil, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
 	}
 	ok, rehash, err := s.Hasher.Verify(ctx, u.PasswordHash, password)
@@ -123,7 +139,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Lo
 		return nil, err
 	}
 	if !ok {
-		return nil, s.failed(ctx, u, ip, "user.login", "wrong password", ErrInvalidLogin)
+		return nil, s.failedFrom(ctx, u, c, device, "user.login", "wrong password", ErrInvalidLogin)
 	}
 	if u.DisabledAt.Valid {
 		return nil, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
@@ -147,9 +163,29 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Lo
 // LoginTOTP completes a sign-in with a TOTP code. The pending session is
 // replaced by a new full one: a new session ID after every privilege change.
 func (s *Service) LoginTOTP(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
+	return s.loginTOTP(ctx, pendingToken, code, Client{IP: ip})
+}
+
+// LoginRecoveryCode completes a sign-in with a recovery code (lost phone).
+// Each code works once.
+func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
+	return s.loginRecoveryCode(ctx, pendingToken, code, Client{IP: ip})
+}
+
+// SecondFactor completes a sign-in with what the user typed: six digits are
+// a TOTP code, anything else is tried as a recovery code. Failures of both
+// count in the same throttle and lockout as wrong passwords.
+func (s *Service) SecondFactor(ctx context.Context, pendingToken, code string, c Client) (*LoginResult, error) {
+	if looksLikeTOTP(code) {
+		return s.loginTOTP(ctx, pendingToken, code, c)
+	}
+	return s.loginRecoveryCode(ctx, pendingToken, code, c)
+}
+
+func (s *Service) loginTOTP(ctx context.Context, pendingToken, code string, c Client) (*LoginResult, error) {
 	now := s.now()
 	q := systemdb.New(s.System)
-	row, u, err := s.pending(ctx, q, pendingToken, ip, now)
+	row, u, device, err := s.pending(ctx, q, pendingToken, c, now)
 	if err != nil {
 		return nil, err
 	}
@@ -158,22 +194,20 @@ func (s *Service) LoginTOTP(ctx context.Context, pendingToken, code, ip string) 
 		return nil, err
 	}
 	if !ok {
-		return nil, s.failed(ctx, u, ip, "user.login", "wrong code", ErrInvalidCode)
+		return nil, s.failedFrom(ctx, u, c, device, "user.login", "wrong code", ErrInvalidCode)
 	}
-	res, err := s.completeLogin(ctx, u, row, ip, now, map[string]any{"factor": "totp", "first_totp": first})
+	res, err := s.completeLogin(ctx, u, row, c, device, now, map[string]any{"factor": "totp", "first_totp": first})
 	if err != nil {
 		return nil, err
 	}
-	res.FirstTOTP = first
+	res.FirstTOTP, res.Factor = first, "totp"
 	return res, nil
 }
 
-// LoginRecoveryCode completes a sign-in with a recovery code (lost phone).
-// Each code works once.
-func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
+func (s *Service) loginRecoveryCode(ctx context.Context, pendingToken, code string, c Client) (*LoginResult, error) {
 	now := s.now()
 	q := systemdb.New(s.System)
-	row, u, err := s.pending(ctx, q, pendingToken, ip, now)
+	row, u, device, err := s.pending(ctx, q, pendingToken, c, now)
 	if err != nil {
 		return nil, err
 	}
@@ -188,17 +222,17 @@ func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip 
 		ok = n == 1
 	}
 	if !ok {
-		return nil, s.failed(ctx, u, ip, "user.login", "wrong recovery code", ErrInvalidCode)
+		return nil, s.failedFrom(ctx, u, c, device, "user.login", "wrong recovery code", ErrInvalidCode)
 	}
 	left, err := q.CountUnusedRecoveryCodes(ctx, u.ID)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.completeLogin(ctx, u, row, ip, now, map[string]any{"factor": "recovery_code", "codes_left": left})
+	res, err := s.completeLogin(ctx, u, row, c, device, now, map[string]any{"factor": "recovery_code", "codes_left": left})
 	if err != nil {
 		return nil, err
 	}
-	res.RecoveryCodesLeft = int(left)
+	res.RecoveryCodesLeft, res.Factor = int(left), "recovery_code"
 	if left <= 3 {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("only %d recovery code(s) left – create new ones", left))
 	}
@@ -206,39 +240,44 @@ func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip 
 }
 
 // pending loads a pending session and its user and applies throttle, lock
-// and disabled state before any code is checked.
-func (s *Service) pending(ctx context.Context, q *systemdb.Queries, token, ip string, now time.Time) (systemdb.Session, systemdb.User, error) {
+// and disabled state before any code is checked. device is the counter key
+// of a valid device cookie ("" = none).
+func (s *Service) pending(ctx context.Context, q *systemdb.Queries, token string, c Client, now time.Time) (systemdb.Session, systemdb.User, string, error) {
 	row, err := s.loadSession(ctx, q, token, statePassword, now)
 	if err != nil {
-		return row, systemdb.User{}, err
+		return row, systemdb.User{}, "", err
 	}
 	u, err := q.GetUser(ctx, row.UserID)
 	if err != nil {
-		return row, u, err
+		return row, u, "", err
 	}
-	if wait := s.Throttle.Wait(ip, u.Username, true, now); wait > 0 {
-		return row, u, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+	device := s.trustedDevice(c, u, now)
+	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
+		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
 	}
-	if wait := lockedFor(u, now); wait > 0 {
+	if wait := lockedFor(u, now); wait > 0 && device == "" {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
 	}
 	if u.DisabledAt.Valid {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
+		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
 	}
-	return row, u, nil
+	return row, u, device, nil
 }
 
 // completeLogin swaps the pending session for a full one, resets the
-// failure count and audits the sign-in.
-func (s *Service) completeLogin(ctx context.Context, u systemdb.User, pending systemdb.Session, ip string, now time.Time, details map[string]any) (*LoginResult, error) {
+// failure count, audits the sign-in and issues a new device cookie. A lock
+// that strangers caused stays when a known device signs in: they must not
+// get their attempts back.
+func (s *Service) completeLogin(ctx context.Context, u systemdb.User, pending systemdb.Session, c Client, device string, now time.Time, details map[string]any) (*LoginResult, error) {
 	var token string
+	keepLock := s.keepLock(u, device, now)
 	err := s.inTx(ctx, func(q *systemdb.Queries, _ *sql.Tx) error {
 		if err := q.DeleteSession(ctx, pending.IDHash); err != nil {
 			return err
 		}
-		if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
+		if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, LockedUntil: keepLock, UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
 			return err
 		}
 		var err error
@@ -248,8 +287,9 @@ func (s *Service) completeLogin(ctx context.Context, u systemdb.User, pending sy
 	if err != nil {
 		return nil, err
 	}
-	s.Throttle.Success(ip, u.Username)
-	if aerr := s.direct(ctx, &u, ip, "user.login", audit.ResultSuccess, details); aerr != nil {
+	s.Throttle.Success(c.IP, u.Username)
+	details["known_device"] = device != ""
+	if aerr := s.direct(ctx, &u, c.IP, "user.login", audit.ResultSuccess, details); aerr != nil {
 		// No sign-in without its audit entry.
 		_ = systemdb.New(s.System).DeleteSession(ctx, hashToken(token))
 		return nil, aerr
@@ -258,14 +298,32 @@ func (s *Service) completeLogin(ctx context.Context, u systemdb.User, pending sy
 	if err != nil {
 		return nil, err
 	}
-	return &LoginResult{Token: token, Session: sess}, nil
+	cookie, err := s.Key.newDevice(s.Rand, u, now)
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{Token: token, Session: sess, DeviceCookie: cookie}, nil
+}
+
+// keepLock is the lock to keep after a success: none, unless a known device
+// signed in while strangers had locked the account.
+func (s *Service) keepLock(u systemdb.User, device string, now time.Time) sql.NullString {
+	if device != "" && lockedFor(u, now) > 0 {
+		return u.LockedUntil
+	}
+	return sql.NullString{}
 }
 
 // StepUp confirms a sensitive action with a fresh TOTP code (security.md):
 // the session's step-up time is set, authz accepts it for StepUpWindow.
 func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session, error) {
+	return s.StepUpFrom(ctx, token, code, Client{IP: ip})
+}
+
+// StepUpFrom is StepUp with the client's device cookie.
+func (s *Service) StepUpFrom(ctx context.Context, token, code string, c Client) (*Session, error) {
 	now := s.now()
-	sess, u, err := s.signedIn(ctx, token, ip, "user.step_up", now)
+	sess, u, device, err := s.signedInFrom(ctx, token, c, "user.step_up", now)
 	if err != nil {
 		return nil, err
 	}
@@ -275,40 +333,69 @@ func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session,
 		return nil, err
 	}
 	if !ok {
-		return nil, s.failed(ctx, u, ip, "user.step_up", "wrong code", ErrInvalidCode)
+		return nil, s.failedFrom(ctx, u, c, device, "user.step_up", "wrong code", ErrInvalidCode)
 	}
 	// Fail-closed: no step-up without its audit entry.
-	if err := s.direct(ctx, &u, ip, "user.step_up", audit.ResultSuccess, nil); err != nil {
+	if err := s.direct(ctx, &u, c.IP, "user.step_up", audit.ResultSuccess, nil); err != nil {
 		return nil, fmt.Errorf("step-up refused – the audit entry can't be written: %w", err)
 	}
 	if err := q.SetStepUp(ctx, systemdb.SetStepUpParams{StepupAt: sql.NullString{String: formatTime(now), Valid: true}, IDHash: sess.idHash}); err != nil {
 		return nil, err
 	}
-	if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
+	if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, LockedUntil: s.keepLock(u, device, now), UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
 		return nil, err
 	}
-	s.Throttle.Success(ip, u.Username)
+	s.Throttle.Success(c.IP, u.Username)
 	return s.Authenticate(ctx, token)
 }
 
 // signedIn returns the session and user of token and applies throttle and
 // lock – for actions that check a secret again (step-up, own changes).
 func (s *Service) signedIn(ctx context.Context, token, ip, action string, now time.Time) (*Session, systemdb.User, error) {
+	sess, u, _, err := s.signedInFrom(ctx, token, Client{IP: ip}, action, now)
+	return sess, u, err
+}
+
+func (s *Service) signedInFrom(ctx context.Context, token string, c Client, action string, now time.Time) (*Session, systemdb.User, string, error) {
 	sess, err := s.Authenticate(ctx, token)
 	if err != nil {
-		return nil, systemdb.User{}, err
+		return nil, systemdb.User{}, "", err
 	}
 	u, err := systemdb.New(s.System).GetUser(ctx, sess.UserID)
 	if err != nil {
-		return nil, u, err
+		return nil, u, "", err
 	}
-	if wait := s.Throttle.Wait(ip, u.Username, true, now); wait > 0 {
-		return nil, u, s.refuse(ctx, &u, ip, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+	device := s.trustedDevice(c, u, now)
+	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
+		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
 	}
-	if wait := lockedFor(u, now); wait > 0 {
-		return nil, u, s.refuse(ctx, &u, ip, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+	if wait := lockedFor(u, now); wait > 0 && device == "" {
+		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
 	}
-	return sess, u, nil
+	return sess, u, device, nil
+}
+
+// wait is the throttle for an attempt: a known device only meets the strict
+// (IP, user) counter.
+func (s *Service) wait(c Client, username string, known bool, device string, now time.Time) time.Duration {
+	if device != "" {
+		return s.Throttle.WaitDevice(c.IP, username, now)
+	}
+	return s.Throttle.Wait(c.IP, username, known, now)
+}
+
+// failedFrom counts a failure. With a known device it counts against
+// (IP, user) and the device cookie only, never against the user: strangers
+// can't lock the real user out through it. Otherwise it is failed.
+func (s *Service) failedFrom(ctx context.Context, u systemdb.User, c Client, device, action, reason string, cause error) error {
+	if device == "" {
+		return s.failed(ctx, u, c.IP, action, reason, cause)
+	}
+	s.Throttle.FailureDevice(c.IP, u.Username, device, s.now())
+	if aerr := s.direct(ctx, &u, c.IP, action, audit.ResultFailure, map[string]any{"reason": reason, "known_device": true}); aerr != nil {
+		return errors.Join(cause, aerr)
+	}
+	return cause
 }
 
 // Logout ends the session of token.
@@ -539,7 +626,7 @@ func (s *Service) rehash(ctx context.Context, q *systemdb.Queries, u systemdb.Us
 	if err != nil {
 		return err
 	}
-	return q.SetPassword(ctx, systemdb.SetPasswordParams{PasswordHash: hash, PasswordChangedAt: u.PasswordChangedAt, UpdatedAt: formatTime(now), ID: u.ID})
+	return q.RehashPassword(ctx, systemdb.RehashPasswordParams{PasswordHash: hash, UpdatedAt: formatTime(now), ID: u.ID})
 }
 
 func (s *Service) replaceRecoveryCodes(ctx context.Context, q *systemdb.Queries, userID string, now time.Time) ([]string, error) {

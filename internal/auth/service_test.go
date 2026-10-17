@@ -280,7 +280,7 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	if _, err := v.s.LoginRecoveryCode(t.Context(), res.Token, code, ip); !errors.Is(err, ErrInvalidCode) {
 		t.Errorf("code used twice: %v", err)
 	}
-	if !strings.Contains(strings.Join(v.actions(t), "\n"), `{"codes_left":9,"factor":"recovery_code"}`) {
+	if !strings.Contains(strings.Join(v.actions(t), "\n"), `{"codes_left":9,"factor":"recovery_code","known_device":false}`) {
 		t.Error("recovery code use not audited")
 	}
 }

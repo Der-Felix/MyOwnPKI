@@ -314,6 +314,11 @@ func (s *Service) Unlock(ctx context.Context, username string, who keys.Who) err
 		if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
 			return err
 		}
+		// An unlock often follows a compromise: devices signed in before
+		// lose their trust (device cookies, owner 2026-10-17).
+		if err := q.BumpCredentialsEpoch(ctx, systemdb.BumpCredentialsEpochParams{UpdatedAt: formatTime(now), ID: u.ID}); err != nil {
+			return err
+		}
 		return s.enqueueTarget(ctx, tx, who, "user.unlock", u.ID, map[string]any{
 			"username": u.Username, "was_locked": lockedFor(u, now) > 0, "failures": u.FailedLogins,
 		})
