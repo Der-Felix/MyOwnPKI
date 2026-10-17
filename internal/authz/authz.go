@@ -140,7 +140,11 @@ func (p *Principal) Check(perm Permission, res Resource, now time.Time) error {
 		}
 		return fmt.Errorf("%w: %s on %s needs the role %s", ErrDenied, perm, where, lowestRole(perm))
 	}
-	if NeedsStepUp(perm) && (p.StepUpAt.IsZero() || now.Sub(p.StepUpAt) > StepUpWindow || now.Before(p.StepUpAt)) {
+	// Whole seconds: the CA engine works in seconds (like certificates),
+	// sessions store milliseconds – a step-up in the same second must not
+	// look like one from the future (live run finding 2026-10-17).
+	stepUp := p.StepUpAt.Truncate(time.Second)
+	if NeedsStepUp(perm) && (p.StepUpAt.IsZero() || now.Sub(stepUp) > StepUpWindow || now.Before(stepUp)) {
 		return fmt.Errorf("%w (%s)", ErrStepUpRequired, perm)
 	}
 	return nil

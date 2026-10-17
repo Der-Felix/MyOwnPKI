@@ -109,6 +109,12 @@ func TestStepUp(t *testing.T) {
 			t.Errorf("%s at +%v: %v", c.perm, c.at.Sub(now), err)
 		}
 	}
+	// A step-up at 08:00:00.700, checked by the engine at 08:00:00 (whole
+	// seconds) – the same second, not the future.
+	p.StepUpAt = now.Add(700 * time.Millisecond)
+	if err := p.Check(DownloadKey, res, now); err != nil {
+		t.Errorf("step-up in the same second: %v", err)
+	}
 	p.StepUpAt = time.Time{}
 	if err := p.Check(DownloadKey, res, now); !errors.Is(err, ErrStepUpRequired) {
 		t.Errorf("never stepped up: %v", err)
