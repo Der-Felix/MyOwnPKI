@@ -18,6 +18,7 @@ type AppearanceData struct {
 	Layouts   []Choice
 	Themes    []Choice
 	Densities []Choice
+	CSRF      string // session token of the real UI; "" in the prototype
 }
 
 // Appearance renders the per-user appearance settings. Saved server-side in a
@@ -26,6 +27,9 @@ templ Appearance(p view.Page, d AppearanceData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
 		<form class="form" action="/admin/appearance" method="post">
+			if d.CSRF != "" {
+				<input type="hidden" name="csrf_token" value={ d.CSRF }/>
+			}
 			@choiceGroup("Layout", "layout", d.Layouts)
 			@choiceGroup("Color scheme", "theme", d.Themes)
 			@choiceGroup("Density", "density", d.Densities)

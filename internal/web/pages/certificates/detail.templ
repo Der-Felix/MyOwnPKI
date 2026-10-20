@@ -48,11 +48,21 @@ type DetailData struct {
 	Extensions     []ExtRow
 	Chain          []ChainRow
 	History        []HistoryRow
+
+	// Real is set by the real UI (step 14): downloads and the key download
+	// instead of the prototype commands.
+	Real *RealActions
+}
+
+// RealActions are the commands of the real detail page.
+type RealActions struct {
+	CSRF           string
+	CanDownloadKey bool // operator on the issuing CA, key stored on the server
 }
 
 // Detail renders one certificate with tabs.
 templ Detail(p view.Page, d DetailData) {
-	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(detailActions(d))) {
+	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(actions(d))) {
 		@components.Messages(d.Messages)
 		@components.Tabs(d.Tabs)
 		switch d.Tab {
@@ -174,6 +184,33 @@ templ historyTab(rows []HistoryRow) {
 				</tbody>
 			</table>
 		</div>
+	}
+}
+
+func actions(d DetailData) templ.Component {
+	if d.Real != nil {
+		return realActions(d)
+	}
+	return detailActions(d)
+}
+
+// realActions: downloads are links (GET changes nothing); the key download
+// is a POST form with the CSRF token and answers with the file itself.
+// The root is never in chain or fullchain (owner 2026-10-17).
+templ realActions(d DetailData) {
+	@components.CommandGroup("Transfer") {
+		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/fullchain") }>Download fullchain</a>
+		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/pem") }>Certificate (PEM)</a>
+		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/chain") }>Chain</a>
+		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/der") }>DER</a>
+	}
+	if d.Real.CanDownloadKey {
+		<form action={ templ.SafeURL("/certificates/" + d.ID + "/key") } method="post">
+			<input type="hidden" name="csrf_token" value={ d.Real.CSRF }/>
+			@components.CommandGroup("Private key") {
+				<button type="submit" class="cmd">Download private key</button>
+			}
+		</form>
 	}
 }
 

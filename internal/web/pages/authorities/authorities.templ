@@ -11,7 +11,7 @@ type Row struct {
 	ID, Name, Kind, Subject   string
 	KeyAlgorithm, KeyMode     string
 	ValidUntil, ValidUntilRel string
-	MaxValidity, Issued       string
+	MaxValidity, Issued       string // Issued: what the CA signed, e.g. "5 certificates" or "1 intermediate CA"
 	Status                    view.Status
 	StatusText                string
 }
@@ -20,23 +20,27 @@ type Row struct {
 type ListData struct {
 	Messages []view.Message
 	Rows     []Row
+	// Real UI (step 14): no CA commands yet (step 18).
+	Real bool
 }
 
 // List renders all certificate authorities of the tenant.
 templ List(p view.Page, d ListData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
-		<form action="/authorities/actions" method="post">
-			@components.CommandBar("CA commands") {
-				@components.CommandGroup("Create") {
-					<button type="submit" class="cmd cmd-primary" name="action" value="new-intermediate">New intermediate CA</button>
-					<button type="submit" class="cmd" name="action" value="import">Import CA</button>
+		if !d.Real {
+			<form action="/authorities/actions" method="post">
+				@components.CommandBar("CA commands") {
+					@components.CommandGroup("Create") {
+						<button type="submit" class="cmd cmd-primary" name="action" value="new-intermediate">New intermediate CA</button>
+						<button type="submit" class="cmd" name="action" value="import">Import CA</button>
+					}
+					@components.CommandGroup("Transfer") {
+						<button type="submit" class="cmd" name="action" value="offline">Sign offline (CSR)</button>
+					}
 				}
-				@components.CommandGroup("Transfer") {
-					<button type="submit" class="cmd" name="action" value="offline">Sign offline (CSR)</button>
-				}
-			}
-		</form>
+			</form>
+		}
 		<div class="table-wrap">
 			<table class="table">
 				<thead>
@@ -49,7 +53,7 @@ templ List(p view.Page, d ListData) {
 						<th scope="col">Key storage</th>
 						<th scope="col">Valid until</th>
 						<th scope="col" class="num">Max. validity</th>
-						<th scope="col" class="num">Issued</th>
+						<th scope="col" class="num">Signed</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -65,7 +69,7 @@ templ List(p view.Page, d ListData) {
 							<td class="nowrap">{ r.KeyMode }</td>
 							<td class="nowrap">{ r.ValidUntil }<span class="rel">{ r.ValidUntilRel }</span></td>
 							<td class="num">{ r.MaxValidity }</td>
-							<td class="num">{ r.Issued }</td>
+							<td class="num nowrap">{ r.Issued }</td>
 						</tr>
 					}
 				</tbody>
@@ -84,12 +88,21 @@ type DetailData struct {
 	Constraints []view.KV
 	CRL         []view.KV
 	Issued      []view.CertRow
+	IssuedEmpty string // the text when Issued is empty; "" = the default
 	CanSign     bool
+	// Real is set by the real UI: downloads instead of prototype commands.
+	Real *RealActions
+}
+
+// RealActions are the commands of the real CA page.
+type RealActions struct {
+	CanIssue    bool // the user may issue here and the CA can sign
+	Generations []view.KV
 }
 
 // Detail renders one certificate authority.
 templ Detail(p view.Page, d DetailData) {
-	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(caActions(d))) {
+	@layout.App(p.WithStatus(d.Status, d.StatusText).WithActions(actions(d))) {
 		@components.Messages(d.Messages)
 		<div class="columns">
 			<section class="section" aria-labelledby="h-props">
@@ -109,16 +122,45 @@ templ Detail(p view.Page, d DetailData) {
 					<h2 id="h-crl" class="section-head">Revocation list</h2>
 					@components.KVList(d.CRL)
 				</section>
+				if d.Real != nil && len(d.Real.Generations) > 0 {
+					<section class="section" aria-labelledby="h-gen">
+						<h2 id="h-gen" class="section-head">Generations</h2>
+						@components.KVList(d.Real.Generations)
+					</section>
+				}
 			</div>
 		</div>
 		<section class="section" aria-labelledby="h-issued">
 			<h2 id="h-issued" class="section-head">Issued certificates</h2>
-			if len(d.Issued) == 0 {
+			if len(d.Issued) == 0 && d.IssuedEmpty != "" {
+				<p class="empty">{ d.IssuedEmpty }</p>
+			} else if len(d.Issued) == 0 {
 				<p class="empty">This CA has not issued any end-entity certificates.</p>
 			} else {
 				@components.CertificateTable(d.Issued, false, "")
 			}
 		</section>
+	}
+}
+
+func actions(d DetailData) templ.Component {
+	if d.Real != nil {
+		return realActions(d)
+	}
+	return caActions(d)
+}
+
+// realActions: the CA certificate for trust stores – alone (pem) or with its
+// issuers up to the root (chain).
+templ realActions(d DetailData) {
+	if d.Real.CanIssue {
+		@components.CommandGroup("Create") {
+			<a class="cmd cmd-primary" href={ templ.SafeURL("/certificates/new?ca=" + d.ID) }>Issue certificate</a>
+		}
+	}
+	@components.CommandGroup("Transfer") {
+		<a class="cmd" href={ templ.SafeURL("/authorities/" + d.ID + "/certificate?format=pem") }>Download certificate</a>
+		<a class="cmd" href={ templ.SafeURL("/authorities/" + d.ID + "/certificate?format=chain") }>Download with issuers</a>
 	}
 }
 

@@ -13,6 +13,10 @@ templ MessageBar(m view.Message) {
 	<div class={ "msg", "msg-" + string(m.Kind) } role={ messageRole(m.Kind) }>
 		<span class="msg-label">{ m.Kind.Label() }</span>
 		{ m.Text }
+		if m.Href != "" {
+			{ " " }
+			<a href={ templ.SafeURL(m.Href) }>{ m.LinkText }</a>
+		}
 	</div>
 }
 

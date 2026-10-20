@@ -1,0 +1,16 @@
+// Package notice renders pages that only say something: not found, refused.
+package notice
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Page shows messages and a way back.
+templ Page(p view.Page, msgs []view.Message) {
+	@layout.App(p) {
+		@components.Messages(msgs)
+		<p><a href="/">Back to the dashboard</a></p>
+	}
+}
