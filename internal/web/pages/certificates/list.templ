@@ -17,6 +17,12 @@ type ListData struct {
 	Presets  []view.Option
 	Rows     []view.CertRow
 	Total    int
+
+	// Real UI (step 14): no bulk commands yet, paging by cursor.
+	Real      bool
+	CanIssue  bool
+	NextHref  string // next page; "" = last page
+	FirstHref string // first page; "" = this is the first
 }
 
 // List renders the certificate list: filters, command bar, selectable table.
@@ -43,28 +49,48 @@ templ List(p view.Page, d ListData) {
 			<button type="submit" class="btn">Apply</button>
 			<a class="btn" href="/certificates">Reset</a>
 		</form>
-		<form id="selection" action="/certificates/actions" method="post">
-			@components.CommandBar("Certificate commands") {
-				@components.CommandGroup("Create") {
-					<a class="cmd cmd-primary" href="/certificates/new">New certificate</a>
-					<button type="submit" class="cmd" name="action" value="import">Import</button>
+		if d.Real {
+			if d.CanIssue {
+				@components.CommandBar("Certificate commands") {
+					@components.CommandGroup("Create") {
+						<a class="cmd cmd-primary" href="/certificates/new">New certificate</a>
+					}
 				}
-				@components.CommandGroup("Edit") {
-					<button type="submit" class="cmd" name="action" value="export">Export</button>
-					<button type="submit" class="cmd" name="action" value="renew">Renew</button>
-				}
-				@components.CommandGroup("Dangerous") {
-					<button type="submit" class="cmd cmd-danger" name="action" value="revoke">Revoke</button>
-				}
-				<span class="cmdbar-end">Select rows, then choose a command.</span>
 			}
-		</form>
+		} else {
+			<form id="selection" action="/certificates/actions" method="post">
+				@components.CommandBar("Certificate commands") {
+					@components.CommandGroup("Create") {
+						<a class="cmd cmd-primary" href="/certificates/new">New certificate</a>
+						<button type="submit" class="cmd" name="action" value="import">Import</button>
+					}
+					@components.CommandGroup("Edit") {
+						<button type="submit" class="cmd" name="action" value="export">Export</button>
+						<button type="submit" class="cmd" name="action" value="renew">Renew</button>
+					}
+					@components.CommandGroup("Dangerous") {
+						<button type="submit" class="cmd cmd-danger" name="action" value="revoke">Revoke</button>
+					}
+					<span class="cmdbar-end">Select rows, then choose a command.</span>
+				}
+			</form>
+		}
 		if len(d.Rows) == 0 {
 			<p class="empty">No certificates match the filter.</p>
 		} else {
-			@components.CertificateTable(d.Rows, true, "selection")
+			@components.CertificateTable(d.Rows, !d.Real, "selection")
 		}
-		<div class="table-foot">{ strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } certificates</div>
+		<div class="table-foot">
+			{ strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } certificates
+			if d.FirstHref != "" {
+				{ " · " }
+				<a href={ templ.SafeURL(d.FirstHref) }>First page</a>
+			}
+			if d.NextHref != "" {
+				{ " · " }
+				<a href={ templ.SafeURL(d.NextHref) }>Next page</a>
+			}
+		</div>
 	}
 }
 

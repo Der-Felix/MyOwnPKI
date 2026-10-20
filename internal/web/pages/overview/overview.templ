@@ -12,13 +12,30 @@ type Data struct {
 	Numbers  []components.Number
 	Expiring []view.CertRow
 	Activity []view.ActivityRow
+	// Attention is set by the real UI: CRLs, CA certificates and seal state
+	// that need an admin; nil in the prototype.
+	Attention []view.Message
+	// Real UI: no recent activity yet (the audit log follows in step 18).
+	Real bool
 }
 
 // Page renders the dashboard.
 templ Page(p view.Page, d Data) {
-	@layout.App(p.WithActions(dashboardActions())) {
+	@layout.App(p.WithActions(dashboardActions(p.Session == nil || p.Session.CanIssue))) {
 		@components.Messages(d.Messages)
 		@components.NumberRow(d.Numbers)
+		if d.Real {
+			<section class="section" aria-labelledby="h-attention">
+				<div class="section-head">
+					<h2 id="h-attention">Needs attention</h2>
+				</div>
+				if len(d.Attention) == 0 {
+					<p class="empty">Nothing needs attention: every CRL is current and no CA certificate ends soon.</p>
+				} else {
+					@components.Messages(d.Attention)
+				}
+			</section>
+		}
 		<section class="section" aria-labelledby="h-expiring">
 			<div class="section-head">
 				<h2 id="h-expiring">Expiring in the next 30 days</h2>
@@ -30,19 +47,25 @@ templ Page(p view.Page, d Data) {
 				@components.CertificateTable(d.Expiring, false, "")
 			}
 		</section>
-		<section class="section" aria-labelledby="h-activity">
-			<div class="section-head">
-				<h2 id="h-activity">Recent activity</h2>
-				<span class="muted small">Audit log (phase 1)</span>
-			</div>
-			@components.ActivityTable(d.Activity)
-		</section>
+		if !d.Real {
+			<section class="section" aria-labelledby="h-activity">
+				<div class="section-head">
+					<h2 id="h-activity">Recent activity</h2>
+					<span class="muted small">Audit log (phase 1)</span>
+				</div>
+				@components.ActivityTable(d.Activity)
+			</section>
+		}
 	}
 }
 
-templ dashboardActions() {
-	@components.CommandGroup("Create") {
-		<a class="cmd cmd-primary" href="/certificates/new">Issue certificate</a>
+// dashboardActions: "Issue certificate" only for users who may issue (the
+// prototype has no session and shows it).
+templ dashboardActions(canIssue bool) {
+	if canIssue {
+		@components.CommandGroup("Create") {
+			<a class="cmd cmd-primary" href="/certificates/new">Issue certificate</a>
+		}
 	}
 	@components.CommandGroup("View") {
 		<a class="cmd" href="/certificates?status=expiring">Show expiring</a>

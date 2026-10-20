@@ -33,6 +33,9 @@ type Options struct {
 	// prototype on fixture data.
 	Dev    bool
 	Logger *slog.Logger
+	// App, if set, serves the real UI on the services (phase 1 step 14)
+	// instead of the gallery; Dev and App are exclusive.
+	App *AppDeps
 }
 
 // NewHandler returns the admin UI handler with all routes and middleware.
@@ -51,24 +54,34 @@ func NewHandler(opts Options) (http.Handler, error) {
 		r2.URL.Path = "/brand/favicon.ico"
 		brandFiles.ServeHTTP(w, r2)
 	})
-	mux.HandleFunc("GET /design", func(w http.ResponseWriter, r *http.Request) {
-		p := newPage(r, "Design system", "design", opts.Dev, view.Crumb{Label: "Administration"})
-		p.Description = "Every class of web/styles in one place. Themes change tokens only."
-		render(w, r, opts.Logger, http.StatusOK, design.Page(p))
-	})
-	if opts.Dev {
+	switch {
+	case opts.App != nil:
+		registerApp(mux, *opts.App, opts.Logger)
+	case opts.Dev:
+		registerGallery(mux, opts)
 		registerPrototype(mux, opts.Logger)
-	} else {
+	default:
+		registerGallery(mux, opts)
 		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/design", http.StatusSeeOther)
 		})
 	}
 
-	// Reject state-changing cross-origin requests (Sec-Fetch-Site / Origin).
-	// CSRF tokens for logged-in sessions follow in phase 1 (security.md).
+	// Reject state-changing cross-origin requests (Sec-Fetch-Site / Origin);
+	// the real UI checks the session's CSRF token on top (app.go).
 	csrf := http.NewCrossOriginProtection()
 
 	return recoverer(opts.Logger, logRequests(opts.Logger, SecurityHeaders(csrf.Handler(mux)))), nil
+}
+
+// registerGallery serves the design gallery without sign-in (prototype and
+// the server before step 14); the real UI serves it behind the sign-in.
+func registerGallery(mux *http.ServeMux, opts Options) {
+	mux.HandleFunc("GET /design", func(w http.ResponseWriter, r *http.Request) {
+		p := newPage(r, "Design system", "design", opts.Dev, view.Crumb{Label: "Administration"})
+		p.Description = "Every class of web/styles in one place. Themes change tokens only."
+		render(w, r, opts.Logger, http.StatusOK, design.Page(p))
+	})
 }
 
 // staticFiles serves the embedded assets. Content types are set explicitly:
@@ -144,11 +157,16 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+		// The route pattern, not the path: IDs stay out of the log, like in the
+		// API (owner 2026-10-16); addresses are in the audit log where needed.
+		route := r.Pattern
+		if route == "" {
+			route = "(none)"
+		}
 		log.InfoContext(r.Context(), "request",
 			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
+			slog.String("route", route),
 			slog.Int("status", rec.status),
-			slog.String("remote", r.RemoteAddr),
 		)
 	})
 }

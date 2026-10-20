@@ -70,7 +70,7 @@ func issueStateFromForm(r *http.Request) certificates.IssueState {
 		CommonName: strings.TrimSpace(f.Get("cn")),
 		DNS:        strings.ToLower(f.Get("dns")), IP: f.Get("ip"), Email: f.Get("email"),
 		KeyMode: f.Get("keymode"), Algorithm: f.Get("alg"), CSR: f.Get("csr"),
-		Days: strings.TrimSpace(f.Get("days")),
+		Days: strings.TrimSpace(f.Get("days")), Prefilled: f.Get("prefilled"),
 	}
 }
 

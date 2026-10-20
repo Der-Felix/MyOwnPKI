@@ -70,8 +70,9 @@ templ App(p view.Page) {
 					@components.DevBanner()
 				}
 				@header(p)
-				@sidebar(p.Section)
+				@sidebar(p.Section, p.BuiltOnly, p.Session != nil && !p.Session.CanIssue)
 				<main id="main" class="app-main">
+					@components.Messages(p.Notices)
 					@pageHeader(p)
 					{ children... }
 				</main>
@@ -87,51 +88,142 @@ templ header(p view.Page) {
 			<img class="app-logo" src="/static/brand/logo-small-on-dark.svg" alt="" width="30" height="32"/>
 			MyOwnPKI
 		</span>
-		<form class="app-tenant" action="/" method="get">
-			<label for="tenant">Tenant</label>
-			<select id="tenant" name="tenant">
-				for _, t := range p.Tenants {
-					<option value={ t } selected?={ t == p.Tenant }>{ t }</option>
-				}
-			</select>
-			<button type="submit" class="btn">Switch</button>
-		</form>
+		if len(p.Tenants) > 1 {
+			@tenantSwitch(p)
+		}
 		<form class="app-search" action="/certificates" method="get" role="search">
 			<input type="search" name="q" value={ p.Search } placeholder="Search certificates by name or serial" aria-label="Search certificates"/>
 		</form>
-		<details class="app-user">
-			<summary>{ p.User }</summary>
-			<ul class="app-user-menu">
-				<li><a href="/admin/appearance">Appearance</a></li>
-				<li><span>Security keys and 2FA (phase 1)</span></li>
-				<li><span>Sign out (phase 1)</span></li>
-			</ul>
-		</details>
+		if p.Session != nil {
+			@userMenu(*p.Session)
+		} else {
+			@prototypeUserMenu(p.User)
+		}
 	</header>
 }
 
-templ sidebar(active string) {
+templ tenantSwitch(p view.Page) {
+	<form class="app-tenant" action="/" method="get">
+		<label for="tenant">Tenant</label>
+		<select id="tenant" name="tenant">
+			for _, t := range p.Tenants {
+				<option value={ t } selected?={ t == p.Tenant }>{ t }</option>
+			}
+		</select>
+		<button type="submit" class="btn">Switch</button>
+	</form>
+}
+
+// userMenu: sign out and seal change state – POST forms with the CSRF
+// token, never links (owner 2026-10-17).
+templ userMenu(s view.Session) {
+	<details class="app-user">
+		<summary>{ s.Username }</summary>
+		<ul class="app-user-menu">
+			<li><span>{ s.Roles }</span></li>
+			<li><a href="/admin/appearance">Appearance</a></li>
+			if s.CanSeal {
+				<li>
+					<form action="/seal" method="post">
+						<input type="hidden" name="csrf_token" value={ s.CSRF }/>
+						<button type="submit" class="app-user-cmd">Seal now</button>
+					</form>
+				</li>
+			}
+			<li>
+				<form action="/logout" method="post">
+					<input type="hidden" name="csrf_token" value={ s.CSRF }/>
+					<button type="submit" class="app-user-cmd">Sign out</button>
+				</form>
+			</li>
+		</ul>
+	</details>
+}
+
+templ prototypeUserMenu(user string) {
+	<details class="app-user">
+		<summary>{ user }</summary>
+		<ul class="app-user-menu">
+			<li><a href="/admin/appearance">Appearance</a></li>
+			<li><span>Security keys and 2FA (phase 1)</span></li>
+			<li><span>Sign out (phase 1)</span></li>
+		</ul>
+	</details>
+}
+
+// sidebar: builtOnly (the real UI) leaves out entries that don't exist yet
+// and groups that end up empty – no dead links; hideIssue leaves out "Issue
+// certificate" for users who may issue nowhere.
+templ sidebar(active string, builtOnly, hideIssue bool) {
 	<nav class="app-nav" aria-label="Main">
 		for _, g := range nav {
-			<ul class="nav-group" aria-label={ g.Title }>
-				<li class="nav-group-title" aria-hidden="true">{ g.Title }</li>
-				for _, it := range g.Items {
-					<li>
-						if it.Href == "" {
-							<span class={ "nav-link", "is-disabled", templ.KV("nav-primary", it.Primary) } aria-disabled="true">
-								{ it.Label }
-								<span class="nav-note">{ it.Note }</span>
-							</span>
-						} else if it.Key == active {
-							<a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) } aria-current="page">{ it.Label }</a>
-						} else {
-							<a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) }>{ it.Label }</a>
+			if !builtOnly || g.hasBuilt() {
+				<ul class="nav-group" aria-label={ g.Title }>
+					<li class="nav-group-title" aria-hidden="true">{ g.Title }</li>
+					for _, it := range g.Items {
+						if hideIssue && it.Key == "issue" {
+							// not offered: the user may issue nowhere
+						} else if it.Href == "" && !builtOnly {
+							<li>
+								<span class={ "nav-link", "is-disabled", templ.KV("nav-primary", it.Primary) } aria-disabled="true">
+									{ it.Label }
+									<span class="nav-note">{ it.Note }</span>
+								</span>
+							</li>
+						} else if it.Href != "" && it.Key == active {
+							<li><a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) } aria-current="page">{ it.Label }</a></li>
+						} else if it.Href != "" {
+							<li><a class={ "nav-link", templ.KV("nav-primary", it.Primary) } href={ templ.SafeURL(it.Href) }>{ it.Label }</a></li>
 						}
-					</li>
-				}
-			</ul>
+					}
+				</ul>
+			}
 		}
 	</nav>
+}
+
+func (g navGroup) hasBuilt() bool {
+	for _, it := range g.Items {
+		if it.Href != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Plain is the shell of the sign-in pages: the brand and the content, no
+// navigation, no user menu and nothing about the instance.
+templ Plain(p view.Page) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme={ string(p.Prefs.Theme) } data-density={ string(p.Prefs.Density) } data-layout={ string(p.Prefs.Layout) }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="color-scheme" content="light dark"/>
+			<title>{ p.Title } – MyOwnPKI</title>
+			<link rel="icon" href="/favicon.ico" sizes="32x32"/>
+			<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml"/>
+			<link rel="stylesheet" href="/static/styles/tokens.css"/>
+			<link rel="stylesheet" href="/static/styles/base.css"/>
+			<link rel="stylesheet" href="/static/styles/components.css"/>
+			<link rel="stylesheet" href="/static/styles/layouts.css"/>
+		</head>
+		<body>
+			<a class="skip-link" href="#main">Skip to content</a>
+			<div class="app app-plain">
+				<header class="app-header">
+					<span class="app-brand">
+						<img class="app-logo" src="/static/brand/logo-small-on-dark.svg" alt="" width="30" height="32"/>
+						MyOwnPKI
+					</span>
+				</header>
+				<main id="main" class="app-main">
+					@pageHeader(p)
+					{ children... }
+				</main>
+			</div>
+		</body>
+	</html>
 }
 
 // pageHeader is the same on every page: breadcrumb (all pages but the

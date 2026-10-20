@@ -1,0 +1,102 @@
+// Package signin renders sign-in, second factor, unseal and step-up.
+package signin
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// FormData is what the sign-in forms need.
+type FormData struct {
+	Next     string // where to go afterwards (checked local path)
+	CSRF     string // session token (unseal, step-up); "" before sign-in
+	Messages []view.Message
+}
+
+// Login is the first factor. Before sign-in the page tells nothing about the
+// instance: no version, seal state or demo mark (owner 2026-10-17).
+templ Login(p view.Page, d FormData) {
+	@layout.Plain(p) {
+		@components.Messages(d.Messages)
+		<form class="form" action="/login" method="post">
+			<input type="hidden" name="next" value={ d.Next }/>
+			@components.FormRow("username", "User name", "", "", true) {
+				<input id="username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required/>
+			}
+			@components.FormRow("password", "Password", "", "", true) {
+				<input id="password" type="password" name="password" autocomplete="current-password" required/>
+			}
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Sign in</button>
+			</div>
+		</form>
+	}
+}
+
+// Code is the second factor: a TOTP code or a recovery code in one field.
+templ Code(p view.Page, d FormData) {
+	@layout.Plain(p) {
+		@components.Messages(d.Messages)
+		<form class="form" action="/login/code" method="post">
+			<input type="hidden" name="next" value={ d.Next }/>
+			@components.FormRow("code", "Code", "The 6-digit code of your authenticator app – or one of your recovery codes if the phone is lost.", "", true) {
+				<input id="code" type="text" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required/>
+			}
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Confirm</button>
+				<a class="btn" href="/login">Start over</a>
+			</div>
+		</form>
+	}
+}
+
+// UnsealData adds what the admin should know before unsealing.
+type UnsealData struct {
+	FormData
+	Facts []view.KV
+}
+
+// Unseal asks for the passphrase. The form has no user name field and
+// autocomplete is off, so the browser doesn't store the passphrase as a
+// second sign-in password (owner 2026-10-17).
+templ Unseal(p view.Page, d UnsealData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		if len(d.Facts) > 0 {
+			<section class="section" aria-labelledby="h-state">
+				<h2 id="h-state" class="section-head">State</h2>
+				@components.KVList(d.Facts)
+			</section>
+		}
+		<form class="form" action="/unseal" method="post" autocomplete="off">
+			<input type="hidden" name="csrf_token" value={ d.CSRF }/>
+			<input type="hidden" name="next" value={ d.Next }/>
+			@components.FormRow("passphrase", "Unseal passphrase", "Not your sign-in password: the passphrase set at myownpki init. Wrong passphrases are slowed down.", "", true) {
+				<input id="passphrase" type="password" name="passphrase" autocomplete="off" required/>
+			}
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Unseal</button>
+			</div>
+		</form>
+	}
+}
+
+// StepUp confirms a sensitive action with a fresh code; afterwards the user
+// is back on the page and starts the action again – it never runs on its own.
+templ StepUp(p view.Page, d FormData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<form class="form" action="/step-up" method="post">
+			<input type="hidden" name="csrf_token" value={ d.CSRF }/>
+			<input type="hidden" name="next" value={ d.Next }/>
+			@components.FormRow("code", "Code", "The 6-digit code of your authenticator app. It counts for 5 minutes.", "", true) {
+				<input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required/>
+			}
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Confirm</button>
+				<a class="btn" href={ templ.SafeURL(d.Next) }>Cancel</a>
+			</div>
+		</form>
+	}
+}

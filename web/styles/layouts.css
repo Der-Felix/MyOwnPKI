@@ -130,6 +130,28 @@
   color: var(--text-muted);
 }
 
+/* Commands of the user menu are POST forms (sign out, seal): a button that
+   looks like the menu entries. */
+.app-user-menu form {
+  margin: 0;
+}
+
+.app-user-cmd {
+  display: block;
+  width: 100%;
+  padding: var(--s-4) var(--s-16);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-user-cmd:hover {
+  background: var(--row-hover);
+}
+
 /* ---------- Sidebar navigation ---------- */
 .app-nav {
   grid-area: nav;
@@ -359,4 +381,22 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+}
+
+/* ---------- Plain shell: the sign-in pages ----------
+ * No navigation and nothing about the instance (version, seal state, demo):
+ * what the page shows before sign-in is for strangers too. */
+.app.app-plain,
+[data-layout] .app.app-plain {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto var(--header-h) minmax(0, 1fr);
+  grid-template-areas:
+    "banner"
+    "header"
+    "main";
+}
+
+.app-plain .app-main {
+  width: 100%;
+  max-width: var(--form-w);
 }

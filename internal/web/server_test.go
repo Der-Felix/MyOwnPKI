@@ -167,7 +167,8 @@ var (
 	reCSSComment  = regexp.MustCompile(`(?s)/\*.*?\*/`)
 )
 
-// renderedPages returns the HTML of every prototype page plus a wizard error state.
+// renderedPages returns the HTML of every prototype page plus a wizard error
+// state, and every page of the real UI (realPages).
 func renderedPages(t *testing.T) map[string]string {
 	t.Helper()
 	h := newTestHandler(t, true)
@@ -175,8 +176,11 @@ func renderedPages(t *testing.T) map[string]string {
 	for _, p := range devPages {
 		out[p] = get(t, h, p).Body.String()
 	}
-	out["wizard error"] = do(t, h, http.MethodPost, "/certificates/new", wizardForm(2, "next", url.Values{"dns": {"bad..name"}})).Body.String()
+	out["wizard error"] = do(t, h, http.MethodPost, "/certificates/new", wizardForm(3, "next", url.Values{"dns": {"bad..name"}})).Body.String()
 	out["wizard review"] = do(t, h, http.MethodPost, "/certificates/new", wizardForm(3, "next", url.Values{"keymode": {"server"}})).Body.String()
+	for k, html := range realPages(t) {
+		out[k] = html
+	}
 	return out
 }
 
@@ -419,18 +423,18 @@ func TestIssueWizard(t *testing.T) {
 		wantStatus int
 		want       string
 	}{
-		{"step 1 → 2", wizardForm(1, "next", nil), http.StatusOK, `aria-current="step">Names`},
+		{"step 1 → 2", wizardForm(1, "next", nil), http.StatusOK, `aria-current="step">Key`},
 		{"offline root can't sign", wizardForm(1, "next", url.Values{"ca": {"homelab-root"}}), http.StatusUnprocessableEntity, "Choose a CA whose key is online"},
-		{"name constraints", wizardForm(2, "next", url.Values{"dns": {"nas.example.org"}}), http.StatusUnprocessableEntity, "outside the name constraints of homelab-issuing"},
-		{"IP outside constraints", wizardForm(2, "next", url.Values{"ip": {"8.8.8.8"}}), http.StatusUnprocessableEntity, "8.8.8.8 is outside the name constraints"},
-		{"double wildcard", wizardForm(2, "next", url.Values{"dns": {"*.*.homelab.lan"}}), http.StatusUnprocessableEntity, "not a valid DNS name"},
-		{"server needs a SAN", wizardForm(2, "next", url.Values{"dns": {""}, "ip": {""}}), http.StatusUnprocessableEntity, "needs at least one DNS name or IP address"},
-		{"step 2 → 3", wizardForm(2, "next", nil), http.StatusOK, `aria-current="step">Key`},
-		{"bad CSR", wizardForm(3, "next", url.Values{"keymode": {"csr"}, "csr": {"hello"}}), http.StatusUnprocessableEntity, "Paste a PEM certificate request"},
-		{"too long", wizardForm(3, "next", url.Values{"days": {"398"}}), http.StatusUnprocessableEntity, "the maximum validity of homelab-issuing"},
+		{"name constraints", wizardForm(3, "next", url.Values{"dns": {"nas.example.org"}}), http.StatusUnprocessableEntity, "outside the name constraints of homelab-issuing"},
+		{"IP outside constraints", wizardForm(3, "next", url.Values{"ip": {"8.8.8.8"}}), http.StatusUnprocessableEntity, "8.8.8.8 is outside the name constraints"},
+		{"double wildcard", wizardForm(3, "next", url.Values{"dns": {"*.*.homelab.lan"}}), http.StatusUnprocessableEntity, "not a valid DNS name"},
+		{"server needs a SAN", wizardForm(3, "next", url.Values{"dns": {""}, "ip": {""}}), http.StatusUnprocessableEntity, "needs at least one DNS name or IP address"},
+		{"step 2 → 3", wizardForm(2, "next", nil), http.StatusOK, `aria-current="step">Names`},
+		{"bad CSR", wizardForm(2, "next", url.Values{"keymode": {"csr"}, "csr": {"hello"}}), http.StatusUnprocessableEntity, "Paste a PEM certificate request"},
+		{"too long", wizardForm(2, "next", url.Values{"days": {"398"}}), http.StatusUnprocessableEntity, "the maximum validity of homelab-issuing"},
 		{"review with CSR", wizardForm(3, "next", url.Values{"keymode": {"csr"}, "csr": {testCSR(t)}}), http.StatusOK, "From the uploaded request: ECDSA P-256"},
 		{"review shows preset extensions", wizardForm(3, "next", url.Values{"alg": {"rsa-3072"}}), http.StatusOK, "digitalSignature, keyEncipherment (critical)"},
-		{"back", wizardForm(3, "back", nil), http.StatusOK, `aria-current="step">Names`},
+		{"back", wizardForm(3, "back", nil), http.StatusOK, `aria-current="step">Key`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

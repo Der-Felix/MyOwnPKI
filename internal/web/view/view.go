@@ -28,6 +28,26 @@ type Page struct {
 	Tenants     []string
 	User        string
 	Search      string // current value of the header search box
+
+	// Session is the signed-in user of the real UI (phase 1 step 14); nil
+	// in the prototype, which shows its placeholder user menu.
+	Session *Session
+	// Notices are shown above the page header on every page: the demo
+	// warning and "signing is off" while sealed.
+	Notices []Message
+	// BuiltOnly hides navigation entries that don't exist yet.
+	BuiltOnly bool
+}
+
+// Session is what the shell shows of the signed-in user.
+type Session struct {
+	Username string
+	Roles    string // "admin of tenant default", for the user menu
+	CSRF     string // token for the forms of the user menu
+	CanSeal  bool   // instance admin: offer "Seal now"
+	// CanIssue: the user may issue at one CA at least – otherwise "Issue
+	// certificate" is not offered anywhere (no dead links, owner 2026-10-18).
+	CanIssue bool
 }
 
 // WithActions returns a copy of p with the given header actions.
@@ -86,10 +106,12 @@ func (k MessageKind) Label() string {
 	}
 }
 
-// Message is one message bar.
+// Message is one message bar, optionally with a link after the text.
 type Message struct {
-	Kind MessageKind
-	Text string
+	Kind     MessageKind
+	Text     string
+	Href     string
+	LinkText string
 }
 
 // KV is one row of a key/value list.
