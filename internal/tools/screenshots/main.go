@@ -1,4 +1,4 @@
-// Command screenshots renders the UI prototype (dev mode, fixture data) with a
+// Command screenshots renders the real UI of a throwaway demo instance with a
 // headless Chromium-based browser (Edge, Chrome, Chromium) and writes
 // losslessly optimized PNGs for the README to docs/screenshots.
 //
@@ -22,8 +22,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -32,19 +34,32 @@ import (
 // reported, not rejected.
 const sizeTarget = 150 * 1024
 
+// view is the state a page is shot in.
+type viewKind int
+
+const (
+	anonymous viewKind = iota // no session: the sign-in page
+	sealed                    // signed in, sealed: the unseal page
+	light                     // signed in, unsealed
+	dark                      // the same in the dark theme
+)
+
 type shot struct {
 	name string
-	path string
-	dark bool
+	path string // "{detail}" = the sample certificate with a server key
+	kind viewKind
 }
 
+// shots are taken in this order: the sealed one before the unseal.
 var shots = []shot{
-	{"dashboard", "/", false},
-	{"certificates", "/certificates", false},
-	{"certificate-detail", "/certificates/c-0102", false},
-	{"issue-wizard", "/certificates/new", false},
-	{"authorities", "/authorities", false},
-	{"dashboard-dark", "/", true},
+	{"login", "/login", anonymous},
+	{"unseal", "/unseal", sealed},
+	{"dashboard", "/", light},
+	{"certificates", "/certificates", light},
+	{"certificate-detail", "/certificates/{detail}", light},
+	{"issue-wizard", "/certificates/new", light},
+	{"authorities", "/authorities", light},
+	{"dashboard-dark", "/", dark},
 }
 
 func main() {
@@ -71,7 +86,20 @@ func run(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	light, dark, stop, err := startServers()
+	ctx := context.Background()
+	dir, cleanup, err := tempDir()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer cleanup()
+	in, err := newInstance(ctx, dir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer in.close()
+	bases, stop, err := startServers(in)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -80,13 +108,19 @@ func run(stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "browser: %s\n", *browser)
 	failed := false
+	unsealed := false
 	for _, s := range shots {
-		base := light
-		if s.dark {
-			base = dark
+		if s.kind >= light && !unsealed {
+			if err := in.ring.Unseal(ctx, []byte(in.passphrase), console); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			unsealed = true
 		}
+		base := bases[s.kind]
+		path := strings.ReplaceAll(s.path, "{detail}", in.detailID)
 		file := filepath.Join(*out, s.name+".png")
-		if err := capture(*browser, base+s.path, file, *width, *height); err != nil {
+		if err := capture(*browser, base+path, file, *width, *height); err != nil {
 			fmt.Fprintf(stderr, "FAILED %s: %v\n", s.name, err)
 			failed = true
 			continue
@@ -109,37 +143,42 @@ func run(stdout, stderr io.Writer) int {
 	return 0
 }
 
-// startServers serves the dev-mode UI on two loopback ports: the second one
-// adds the appearance cookie for the dark theme to every request, so the
-// product needs no screenshot-only switch.
-func startServers() (light, dark string, stop func(), err error) {
-	handler, err := web.NewHandler(web.Options{Dev: true, Logger: slog.New(slog.DiscardHandler)})
+// startServers serves the real UI of the demo instance on loopback ports,
+// one per view: the cookies (session, dark theme) are set on every request
+// by a wrapper, so the product needs no screenshot-only switch.
+func startServers(in *instance) (bases map[viewKind]string, stop func(), err error) {
+	handler, err := web.NewHandler(web.Options{App: &in.deps, Logger: slog.New(slog.DiscardHandler)})
 	if err != nil {
-		return "", "", nil, err
+		return nil, nil, err
 	}
 	prefs := view.DefaultPrefs()
 	prefs.Theme = view.ThemeDark
-	darkHandler := withCookie(handler, view.PrefsCookie+"="+prefs.String())
-
+	session := auth.CookieName + "=" + in.session
+	handlers := map[viewKind]http.Handler{
+		anonymous: handler,
+		sealed:    withCookie(handler, session),
+		light:     withCookie(handler, session),
+		dark:      withCookie(handler, session+"; "+view.PrefsCookie+"="+prefs.String()),
+	}
 	var servers []*http.Server
 	stop = func() {
 		for _, srv := range servers {
 			_ = srv.Close()
 		}
 	}
-	var urls []string
-	for _, h := range []http.Handler{handler, darkHandler} {
-		ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
-		if err != nil {
+	bases = map[viewKind]string{}
+	for kind, h := range handlers {
+		ln, lerr := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if lerr != nil {
 			stop()
-			return "", "", nil, err
+			return nil, nil, lerr
 		}
 		srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 		servers = append(servers, srv)
 		go func() { _ = srv.Serve(ln) }()
-		urls = append(urls, "http://"+ln.Addr().String())
+		bases[kind] = "http://" + ln.Addr().String()
 	}
-	return urls[0], urls[1], stop, nil
+	return bases, stop, nil
 }
 
 // withCookie sets the Cookie request header (name=value) before h sees it.
@@ -180,8 +219,17 @@ func capture(browser, url, file string, width, height int) error {
 		url,
 	)
 	output, runErr := cmd.CombinedOutput()
-	if info, err := os.Stat(abs); err == nil && info.Size() > 0 {
-		return nil
+	// Edge's launcher may return at once and write the file a moment later:
+	// wait until it exists and its size stays the same.
+	last := int64(-1)
+	for ctx.Err() == nil {
+		if info, err := os.Stat(abs); err == nil && info.Size() > 0 {
+			if info.Size() == last {
+				return nil
+			}
+			last = info.Size()
+		}
+		time.Sleep(300 * time.Millisecond)
 	}
 	if runErr == nil {
 		runErr = errors.New("browser wrote no screenshot")

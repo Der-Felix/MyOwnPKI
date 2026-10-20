@@ -7,6 +7,8 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -98,25 +100,48 @@ func TestSamePixelsDetectsChange(t *testing.T) {
 	}
 }
 
-func TestDarkServerRendersDarkTheme(t *testing.T) {
+// TestServersShowTheRealUI: the demo instance behind the screenshot servers –
+// the sign-in page without session and without anything about the instance,
+// the unseal page sealed, the dashboard light and dark; neutral names only.
+func TestServersShowTheRealUI(t *testing.T) {
 	t.Parallel()
-	light, dark, stop, err := startServers()
+	in, err := newInstance(t.Context(), filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.close()
+	bases, stop, err := startServers(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stop()
-	for base, want := range map[string]string{light: `data-theme="light"`, dark: `data-theme="dark"`} {
-		resp, err := http.Get(base + "/") //nolint:noctx // test against a local server
+	get := func(url string) string {
+		t.Helper()
+		resp, err := http.Get(url) //nolint:noctx,gosec // test against the local screenshot servers
 		if err != nil {
 			t.Fatal(err)
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if !strings.Contains(string(body), want) {
-			t.Errorf("%s/: missing %s", base, want)
+		return string(body)
+	}
+	if login := get(bases[anonymous] + "/login"); !strings.Contains(login, `name="password"`) || strings.Contains(login, "DEMO") {
+		t.Error("sign-in page")
+	}
+	if unseal := get(bases[sealed] + "/unseal"); !strings.Contains(unseal, `name="passphrase"`) {
+		t.Error("unseal page while sealed")
+	}
+	if err := in.ring.Unseal(t.Context(), []byte(in.passphrase), console); err != nil {
+		t.Fatal(err)
+	}
+	for kind, want := range map[viewKind]string{light: `data-theme="light"`, dark: `data-theme="dark"`} {
+		html := get(bases[kind] + "/certificates")
+		if !strings.Contains(html, want) || !strings.Contains(html, "nas.homelab.example") || strings.Contains(html, "DEV MODE") {
+			t.Errorf("view %d: theme or sample data missing", kind)
 		}
-		if !strings.Contains(string(body), "DEV MODE") {
-			t.Errorf("%s/: DEV MODE banner missing", base)
-		}
+	}
+	host, _ := os.Hostname()
+	if html := get(bases[light] + "/authorities"); !strings.Contains(html, "O=Homelab") || (host != "" && strings.Contains(strings.ToLower(html), strings.ToLower(host))) {
+		t.Error("the CAs must be named neutrally, without the host name")
 	}
 }
