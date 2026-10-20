@@ -296,8 +296,13 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 	if peer != srv.CertInfo.Fingerprint {
 		t.Errorf("served certificate %s, logged %s", peer, srv.CertInfo.Fingerprint)
 	}
-	if code, _, _ := get("https://" + srv.AdminAddr() + "/certificates"); code != http.StatusNotFound {
-		t.Errorf("UI page before step 14: %d", code)
+	// The UI: without a session to the sign-in page, which says nothing about
+	// the instance (no demo mark, no seal state, no version).
+	if code, _, h := get("https://" + srv.AdminAddr() + "/certificates"); code != http.StatusSeeOther || h.Get("Location") != "/login?next=%2Fcertificates" {
+		t.Errorf("UI page without a session: %d %q", code, h.Get("Location"))
+	}
+	if code, body, _ := get("https://" + srv.AdminAddr() + "/login"); code != http.StatusOK || strings.Contains(body, "DEMO") || strings.Contains(body, "sealed") || strings.Contains(body, "test") {
+		t.Errorf("sign-in page: %d\n%s", code, body)
 	}
 	// The API is mounted; an unclean path is a 404 problem, not a redirect.
 	if code, _, h := get("https://" + srv.AdminAddr() + "/api/v1/certificates//download/fullchain"); code != http.StatusNotFound || h.Get("Content-Type") != "application/problem+json" {

@@ -85,6 +85,7 @@ type Server struct {
 	auth      *auth.Service
 	engine    *ca.Engine
 	api       *httpapi.API
+	ui        http.Handler
 	deliverer *audit.Deliverer
 	cp        *audit.Checkpointer
 	jobs      *scheduler
@@ -147,7 +148,7 @@ func Open(ctx context.Context, opt Options) (_ *Server, err error) {
 	if berr := s.build(key); berr != nil {
 		return nil, berr
 	}
-	if aerr := s.buildAPI(inst.Demo); aerr != nil {
+	if aerr := s.buildHTTP(inst.Demo); aerr != nil {
 		return nil, aerr
 	}
 	if s.cert, s.CertInfo, err = adminCertificate(opt.Config, opt.Hostname, s.clk.Now(), nil); err != nil {
@@ -381,8 +382,7 @@ func (s *Server) PublicAddr() string {
 	return "http://" + s.publicLn.Addr().String()
 }
 
-// adminHandler: /healthz and the REST API (step 13); the web UI follows in
-// step 14. /healthz says "ok" and nothing about the seal state: that is not
+// adminHandler: /healthz, the REST API (step 13) and the web UI (step 14). /healthz says "ok" and nothing about the seal state: that is not
 // for strangers.
 func (s *Server) adminHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -391,6 +391,7 @@ func (s *Server) adminHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	mux.Handle("/", s.ui)
 	// The API gets its paths unchanged: the mux would redirect unclean ones
 	// ("//") with text/html before the API could answer with a problem.
 	return hsts(web.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -497,8 +498,9 @@ func (s *Server) closeDBs() {
 	}
 }
 
-// buildAPI prepares the REST API of the admin listener (PHASE1 step 13).
-func (s *Server) buildAPI(demo bool) error {
+// buildHTTP prepares the REST API (PHASE1 step 13) and the web UI (step 14)
+// of the admin listener; both call the same services.
+func (s *Server) buildHTTP(demo bool) error {
 	trusted, err := config.ParseNetworks(s.opt.Config.Auth.TrustedProxies)
 	if err != nil {
 		return fmt.Errorf("auth.trusted_proxies: %w", err)
@@ -507,5 +509,13 @@ func (s *Server) buildAPI(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk, Log: s.log,
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 	})
+	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
+		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
+		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
+	}})
+	if err != nil {
+		return err
+	}
+	s.ui = ui
 	return nil
 }
