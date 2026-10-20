@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -237,4 +238,20 @@ func AuditIPs(t *testing.T, db *store.DB) []string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// Deliver moves the outbox entries of system.db and pki.db into their audit
+// logs, as the server's deliverer does.
+func (v *Instance) Deliver(t *testing.T) {
+	t.Helper()
+	d := &audit.Deliverer{
+		Routes: []audit.Route{
+			{Source: "system", From: v.SystemDB.Write, To: v.InstanceAudit.Write, Scope: store.InstanceScope},
+			{Source: "pki", From: v.PKIDB.Write, To: v.TenantAudit.Write, Scope: store.TenantScope(store.DefaultTenant)},
+		},
+		Clock: v.Clock, Log: slog.New(slog.DiscardHandler),
+	}
+	if _, err := d.DeliverPending(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 }

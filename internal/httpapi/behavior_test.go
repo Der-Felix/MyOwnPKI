@@ -422,3 +422,59 @@ func TestRootIssuesNoLeavesOverTheAPI(t *testing.T) {
 		t.Errorf("issue from the root: %d %s", r.Code, r.Body.String())
 	}
 }
+
+// TestExportFormatsAndKeyDeletion (step 18): PKCS#12 that OpenSSL opens with
+// the password, a combined PEM, and "delete the key after the download" –
+// afterwards the key is gone (409) and the audit log says so.
+func TestExportFormatsAndKeyDeletion(t *testing.T) {
+	t.Parallel()
+	bin := testutil.OpenSSL(t)
+	v := newEnv(t)
+	v.unseal(t)
+	c := v.client("192.0.2.1")
+	c.signIn(t, "demo", v.demoPass)
+	r := c.do(t, http.MethodPost, "/certificates", map[string]any{"ca_id": v.caIDs["issuing"], "preset": "server", "sans": map[string]any{"dns": []string{"nas.homelab.lan"}}, "key": map[string]string{"algorithm": "ecdsa-p256"}})
+	id, _ := r.body["id"].(string)
+	export := func(body map[string]any) *resp {
+		t.Helper()
+		return c.do(t, http.MethodPost, "/certificates/"+id+"/export", body)
+	}
+	if rs := export(map[string]any{"format": "pkcs12", "password": "short"}); rs.Code != 400 {
+		t.Errorf("short PKCS#12 password: %d", rs.Code)
+	}
+	if rp := export(map[string]any{"format": "pkcs8-pem", "password": "a password that is not used"}); rp.Code != 400 {
+		t.Errorf("password for PEM: %d", rp.Code)
+	}
+	r = export(map[string]any{"format": "combined-pem"})
+	if r.Code != 200 || strings.Count(r.Body.String(), "BEGIN CERTIFICATE") != 2 || !strings.Contains(r.Body.String(), "BEGIN PRIVATE KEY") {
+		t.Errorf("combined PEM: %d\n%s", r.Code, r.Body.String())
+	}
+	password := "a password for the p12 file"
+	r = export(map[string]any{"format": "pkcs12", "password": password, "delete_key_after_download": true})
+	if r.Code != 200 || r.Header().Get("Content-Type") != "application/x-pkcs12" || r.Header().Get("X-Key-Deleted") != "true" ||
+		r.Header().Get("Content-Disposition") != `attachment; filename="nas.homelab.lan.p12"` {
+		t.Fatalf("pkcs12: %d %v", r.Code, r.Header())
+	}
+	dir := t.TempDir()
+	p12, pass := filepath.Join(dir, "nas.p12"), filepath.Join(dir, "pass")
+	if err := os.WriteFile(p12, r.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pass, []byte(password), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", p12, "-passin", "file:"+pass, "-nodes").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "BEGIN PRIVATE KEY") || !strings.Contains(string(out), "subject=CN=nas.homelab.lan") {
+		t.Errorf("openssl pkcs12: %v\n%s", err, out)
+	}
+	if r := export(map[string]any{"format": "pkcs8-pem"}); r.Code != 409 || !strings.Contains(r.Body.String(), "deleted") {
+		t.Errorf("export after the deletion: %d %s", r.Code, r.Body.String())
+	}
+	if r := c.do(t, http.MethodGet, "/certificates/"+id, nil); r.Code != 200 {
+		t.Errorf("the certificate stays: %d", r.Code)
+	}
+	v.deliver(t)
+	if got := v.audit(t, v.ta); !slices.Contains(got, "key.destroy/success") {
+		t.Errorf("tenant audit: %v", got)
+	}
+}

@@ -128,6 +128,17 @@ type DbInfo struct {
 	Value string
 }
 
+type ImportJob struct {
+	ID         string
+	Kind       string
+	Status     string
+	DryRun     int64
+	StartedAt  string
+	FinishedAt string
+	StartedBy  string
+	ReportJson string
+}
+
 type Key struct {
 	ID             string
 	Purpose        string
@@ -138,6 +149,7 @@ type Key struct {
 	KeyCiphertext  []byte
 	HsmRef         sql.NullString
 	CreatedAt      string
+	DestroyedAt    sql.NullString
 }
 
 type Outbox struct {

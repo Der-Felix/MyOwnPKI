@@ -108,6 +108,9 @@ func SaveKey(ctx context.Context, q pkidb.DBTX, key StoredKey, now string) error
 	})
 }
 
+// ErrKeyDestroyed: the key was destroyed after its download (step 18).
+var ErrKeyDestroyed = errors.New("the key was deleted from the server")
+
 // ErrNoSuchKey means there is no key with that ID.
 var ErrNoSuchKey = errors.New("no such key")
 
@@ -119,6 +122,9 @@ func LoadKey(ctx context.Context, q pkidb.DBTX, id string) (StoredKey, error) {
 	}
 	if err != nil {
 		return StoredKey{}, err
+	}
+	if row.DestroyedAt.Valid {
+		return StoredKey{}, fmt.Errorf("%w: %s (on %s)", ErrKeyDestroyed, id, row.DestroyedAt.String)
 	}
 	if row.Storage != "envelope" {
 		return StoredKey{}, fmt.Errorf("key %s: storage %q is not supported in this build", id, row.Storage)

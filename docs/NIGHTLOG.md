@@ -179,6 +179,27 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
   git stash`, which put the uncommitted step-17 work into a stash and detached HEAD. `git stash pop`
   and `git switch night/v0.1` restored everything (same files, same branch tip); nothing was lost.
 
+## Step 18 – REST API, part 2
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| **PKCS#12 written by our own code** (`internal/pkcs12`, ~250 lines): PBES2 (PBKDF2-HMAC-SHA256, AES-256-CBC) for the key, certificates unencrypted, MAC HMAC-SHA256 with the RFC 7292 KDF, 600,000 PBKDF2 iterations; a password of at least 12 characters is required | No PKCS#12 module is approved tonight; this is what OpenSSL 3 writes by default and what Windows 10 1709+, macOS and Java import. Checked with `openssl pkcs12` in the tests | Approve `software.sslmate.com/src/go-pkcs12` (BSD-3) and swap |
+| **No "legacy" PKCS#12 (3DES/RC2-SHA1)** | Weak by today's rules; only very old Windows/Android need it | Add a `pkcs12-legacy` format |
+| Export formats: `pkcs8-pem` (as before), `pkcs12` (+ `password`), `combined-pem` (certificate, chain, key – HAProxy); option `delete_key_after_download` destroys the stored key **after** the file was built and audited | Owner 2026-10-17; the export is the last chance to get the key | – |
+| Deleting a key: pki.db migration 0007 adds `keys.destroyed_at`; the DEK and the ciphertext are overwritten (one zero byte each, `PRAGMA secure_delete` on), the row stays (certificates point to it and are immutable). Older backups still hold the encrypted key – the answer says so | The schema's CHECK needs non-NULL values; a table rebuild with foreign keys isn't worth it | Table rebuild with NULLs |
+| `deleteUser` **disables** the user (users are never deleted, decision 47); the spec says so | The audit log keeps user IDs | – |
+| `createUser` returns the otpauth URI and the recovery codes **once** to the instance admin, who hands them over (as `init --otpauth-file`); the first sign-in confirms the secret | The second factor is fixed at creation (security.md) | – |
+| Own TOTP change: `POST /users/me/totp` takes `{"password"}`, `/users/me/totp/confirm` answers 204; new `POST /users/me/recovery-codes` `{"password"}` → new codes | Decision 45 (own authenticator needs the current password); the spec drafted confirm as returning codes, but the recovery codes don't change with the authenticator | – |
+| **API tokens**: system.db migration 0008 `api_tokens`; `mop_` + 32 random bytes (Base32), only the SHA-256 stored, shown once; expiry required (≤ 1 year); scope = roles that the owner has (never more), checked at every request; `Authorization: Bearer`; creating one needs step-up; **a token never satisfies step-up** (no revoke, key download, CA management by token); last use recorded at most once a minute; a disabled user's tokens stop working | security.md "API tokens: random, shown once, stored hashed, scoped, expiring"; step-up means a human with a second factor | Allow step-up operations for tokens with a separate scope |
+| CA management, new in the spec: `POST /cas/{id}/renew`, `POST /cas/{id}/retire`, `PATCH /cas/{id}` (CRL days, max. validity), `POST /cas/{id}/revoke`, `PUT /cas/{id}/crl` (offline root CRL upload); `GET /cas/{id}/csr` answers the offline bundle as JSON (CSR, extension file, days, digest, serial, instructions) | PHASE1 step 18 lists them; the engine has all of them since step 8/9 | – |
+| Legacy import over the API: `POST /imports/legacy` takes a `.tar.gz` of the pki.sh directory (≤ 64 MiB, ≤ 100,000 entries, regular files only, no `..`, no absolute paths), runs the import **synchronously** (dry run with `?dry_run=true`) and records it in `import_jobs` (pki.db 0007); `GET /imports/{id}` returns the report | Background jobs need a job runner; a homelab PKI imports in seconds | Run it in the job runner later |
+| `POST /imports/external-certificate`: a PEM certificate of another CA, stored as `external` for expiry monitoring (tenant admin) | Already in the spec draft | – |
+| Audit: `GET /audit` (tenant log, operator and up – the viewer has no audit access, decision 46; filter by action, result, time; cursor = seq), `POST /audit/verify` (tenant and, for instance admins, instance log; optional checkpoint key pin) | – | – |
+| Tenant settings: `GET/PUT /settings` – `allow_server_keygen` and subject defaults (O, OU, L, ST, C) in system.db `tenant_settings` (migration 0009); the API and the UI fill missing subject fields of a request from them | PHASE1 note "Subject defaults per tenant (step 19)" | – |
+| `inspectCSR` parses an uploaded CSR and shows subject, names, key, signature check and the problems the policy would raise for a preset – nothing is stored | The wizard (step 19) and scripts want the answer before issuing | – |
+| vacuum is not installed on this machine: the spec is checked by `api/openapi_test.go` and the contract tests locally; vacuum runs in CI | PHASE1 note (step 13) | Install vacuum locally |
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,

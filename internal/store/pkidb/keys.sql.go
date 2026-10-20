@@ -10,8 +10,26 @@ import (
 	"database/sql"
 )
 
+const destroyKey = `-- name: DestroyKey :execrows
+UPDATE keys SET wrapped_dek = x'00', key_ciphertext = x'00', destroyed_at = ? WHERE id = ? AND destroyed_at IS NULL
+`
+
+type DestroyKeyParams struct {
+	DestroyedAt sql.NullString
+	ID          string
+}
+
+// Destroys the key material; the trigger allows this once.
+func (q *Queries) DestroyKey(ctx context.Context, arg DestroyKeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, destroyKey, arg.DestroyedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getKey = `-- name: GetKey :one
-SELECT id, purpose, algorithm, storage, root_key_version, wrapped_dek, key_ciphertext, hsm_ref, created_at
+SELECT id, purpose, algorithm, storage, root_key_version, wrapped_dek, key_ciphertext, hsm_ref, created_at, destroyed_at
 FROM keys
 WHERE id = ?
 `
@@ -29,6 +47,7 @@ func (q *Queries) GetKey(ctx context.Context, id string) (Key, error) {
 		&i.KeyCiphertext,
 		&i.HsmRef,
 		&i.CreatedAt,
+		&i.DestroyedAt,
 	)
 	return i, err
 }
@@ -50,7 +69,7 @@ type InsertEnvelopeKeyParams struct {
 }
 
 // Private keys (ASCII only, see queries/system/tenants.sql).
-// Keys are never updated; a new key gets a new row.
+// Keys are never updated (a new key gets a new row) - only destroyed once.
 func (q *Queries) InsertEnvelopeKey(ctx context.Context, arg InsertEnvelopeKeyParams) error {
 	_, err := q.db.ExecContext(ctx, insertEnvelopeKey,
 		arg.ID,
@@ -62,4 +81,15 @@ func (q *Queries) InsertEnvelopeKey(ctx context.Context, arg InsertEnvelopeKeyPa
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const keyDestroyedAt = `-- name: KeyDestroyedAt :one
+SELECT destroyed_at FROM keys WHERE id = ?
+`
+
+func (q *Queries) KeyDestroyedAt(ctx context.Context, id string) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, keyDestroyedAt, id)
+	var destroyed_at sql.NullString
+	err := row.Scan(&destroyed_at)
+	return destroyed_at, err
 }
