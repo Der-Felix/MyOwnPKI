@@ -392,3 +392,48 @@ func (e *Engine) ExportKey(ctx context.Context, who keys.Who, id string) ([]byte
 	}
 	return out, nil
 }
+
+// ExpiringWindow: a valid certificate that ends within it "expires soon".
+const ExpiringWindow = 30 * day
+
+// Counts are certificate numbers by state; Valid includes Expiring.
+type Counts struct {
+	Valid, Expiring, Expired, Revoked int64
+}
+
+// Total is every certificate counted.
+func (c Counts) Total() int64 { return c.Valid + c.Expired + c.Revoked }
+
+// CertificateCounts counts the certificates who may read, in total and per
+// issuing CA ID.
+func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, map[string]Counts, error) {
+	now := e.now()
+	q := pkidb.New(e.PKI)
+	cas, err := q.ListCAs(ctx)
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	names := map[string]string{}
+	for _, c := range cas {
+		names[c.ID] = c.Name
+	}
+	rows, err := q.CountCertificates(ctx, pkidb.CountCertificatesParams{Now: now.Format(dbTime), Soon: now.Add(ExpiringWindow).Format(dbTime)})
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	var total Counts
+	perCA := map[string]Counts{}
+	for _, r := range rows {
+		// No CA: external certificates – a tenant-wide role sees them.
+		if !e.canRead(who, names[r.CaID.String], now) {
+			continue
+		}
+		c := Counts{Valid: r.Valid + r.Expiring, Expiring: r.Expiring, Expired: r.Expired, Revoked: r.Revoked}
+		perCA[r.CaID.String] = c
+		total.Valid += c.Valid
+		total.Expiring += c.Expiring
+		total.Expired += c.Expired
+		total.Revoked += c.Revoked
+	}
+	return total, perCA, nil
+}

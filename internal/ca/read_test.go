@@ -209,3 +209,31 @@ func TestKeyDownload(t *testing.T) {
 		t.Errorf("key.download audit: %v", got)
 	}
 }
+
+// TestCertificateCounts: numbers by state, only of CAs the caller may read.
+func TestCertificateCounts(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	root, issuing := v.chain(t, caOpts{})
+	other := v.addCA(t, "other", caOpts{parent: root})
+	v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"a.homelab.lan"}})
+	v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"b.homelab.lan"}, ValidityDays: 10})
+	bad := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"c.homelab.lan"}})
+	v.issue(t, Request{CA: "other", Preset: "server", DNSNames: []string{"d.homelab.lan"}})
+	if _, err := v.e.Revoke(t.Context(), RevokeRequest{CertificateID: bad.ID, Reason: ReasonSuperseded, Who: tester}); err != nil {
+		t.Fatal(err)
+	}
+	total, perCA, err := v.e.CertificateCounts(t.Context(), tester)
+	if err != nil || total != (Counts{Valid: 3, Expiring: 1, Revoked: 1}) || perCA[issuing.id].Total() != 3 || perCA[other.id].Total() != 1 {
+		t.Fatalf("console: %+v %+v %v", total, perCA, err)
+	}
+	scoped := signedIn("cv", time.Time{}, authz.Binding{CA: "other", Role: authz.Viewer})
+	total, perCA, err = v.e.CertificateCounts(t.Context(), scoped)
+	if err != nil || total != (Counts{Valid: 1}) || len(perCA) != 1 {
+		t.Errorf("CA viewer: %+v %+v %v", total, perCA, err)
+	}
+	v.clk.Advance(11 * day)
+	if total, _, _ = v.e.CertificateCounts(t.Context(), tester); total.Expired != 1 || total.Valid != 2 {
+		t.Errorf("after 11 days: %+v", total)
+	}
+}
