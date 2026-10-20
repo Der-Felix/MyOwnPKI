@@ -66,6 +66,17 @@ func (q *Queries) CountCertificates(ctx context.Context, arg CountCertificatesPa
 	return items, nil
 }
 
+const countFingerprint = `-- name: CountFingerprint :one
+SELECT count(*) FROM certificates WHERE fingerprint_sha256 = ?
+`
+
+func (q *Queries) CountFingerprint(ctx context.Context, fingerprintSha256 string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countFingerprint, fingerprintSha256)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getCertificate = `-- name: GetCertificate :one
 SELECT id, ca_id, ca_generation, source, preset, serial_hex, subject_dn, common_name, not_before, not_after, key_algorithm, key_id, cert_der, fingerprint_sha256, renewal_of, requested_by, custom_ku, custom_eku, created_at FROM certificates WHERE id = ?
 `

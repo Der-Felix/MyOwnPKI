@@ -871,6 +871,7 @@ func checkCACertBasics(cert *x509.Certificate, now time.Time) []string {
 var (
 	oidBasicConstraints = asn1.ObjectIdentifier{2, 5, 29, 19}
 	oidKeyUsageExt      = asn1.ObjectIdentifier{2, 5, 29, 15}
+	oidNameConstraints  = asn1.ObjectIdentifier{2, 5, 29, 30}
 )
 
 func findExtension(cert *x509.Certificate, oid asn1.ObjectIdentifier) (pkix.Extension, bool) {

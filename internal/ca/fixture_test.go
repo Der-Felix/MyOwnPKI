@@ -68,6 +68,11 @@ func runTests(m *testing.M) (int, error) {
 		return 0, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	defer func() {
+		if legacyOnce.dir != "" {
+			_ = os.RemoveAll(filepath.Dir(legacyOnce.dir))
+		}
+	}()
 	ctx := context.Background()
 	l := store.Layout{DataDir: dir}
 	clk := clock.NewFake(t0)

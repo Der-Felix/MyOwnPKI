@@ -37,6 +37,18 @@ type Ca struct {
 	LegacyUrls        int64
 }
 
+type CaCertificateHistory struct {
+	CaID              string
+	Generation        int64
+	SerialHex         string
+	NotBefore         string
+	NotAfter          string
+	CertDer           []byte
+	FingerprintSha256 string
+	Source            string
+	CreatedAt         string
+}
+
 type CaGeneration struct {
 	CaID              string
 	Generation        int64

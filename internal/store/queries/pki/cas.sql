@@ -46,10 +46,13 @@ SELECT CAST(coalesce(max(generation), 0) AS INTEGER) AS generation FROM ca_gener
 SELECT count(*) FROM ca_generations WHERE subject_dn = ? AND ca_id <> ?;
 
 -- Issuer name + serial must identify one certificate (RFC 5280): a serial is
--- taken by a leaf of the CA or by a CA certificate the CA signed.
+-- taken by a leaf of the CA or by a CA certificate the CA signed (also an
+-- older certificate of a renewed key, step 15).
 -- name: SerialTaken :one
 SELECT (SELECT count(*) FROM certificates WHERE certificates.ca_id = sqlc.arg(issuer_id) AND certificates.serial_hex = sqlc.arg(serial_hex))
-     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = sqlc.arg(issuer_id) AND ca_generations.serial_hex = sqlc.arg(serial_hex)) AS taken;
+     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = sqlc.arg(issuer_id) AND ca_generations.serial_hex = sqlc.arg(serial_hex))
+     + (SELECT count(*) FROM ca_certificate_history h JOIN ca_generations g ON g.ca_id = h.ca_id AND g.generation = h.generation
+        WHERE g.issuer_ca_id = sqlc.arg(issuer_id) AND h.serial_hex = sqlc.arg(serial_hex)) AS taken;
 
 -- Sets the certificate of a pending generation (offline signing); a signed
 -- generation can't be changed (trigger), the WHERE makes that explicit.
@@ -63,3 +66,16 @@ UPDATE cas SET status = ?, updated_at = ? WHERE id = ?;
 
 -- name: UpdateCALimits :exec
 UPDATE cas SET crl_days = ?, max_validity_days = ?, updated_at = ? WHERE id = ?;
+
+-- Set by the legacy importer: serve <base>/<name>.crt|.crl as aliases of
+-- generation 1 (step 9).
+-- name: SetLegacyURLs :exec
+UPDATE cas SET legacy_urls = 1, updated_at = ? WHERE id = ?;
+
+-- name: InsertCAHistory :exec
+INSERT INTO ca_certificate_history (ca_id, generation, serial_hex, not_before, not_after, cert_der,
+                                    fingerprint_sha256, source, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListCAHistory :many
+SELECT * FROM ca_certificate_history WHERE ca_id = ? ORDER BY not_before;
