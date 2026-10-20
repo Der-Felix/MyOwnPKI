@@ -35,5 +35,9 @@ func (a *API) table() []Route {
 		{OperationID: "getCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}", access: signedIn, handle: a.getCertificate},
 		{OperationID: "downloadCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}/download/{format}", access: signedIn, handle: a.downloadCertificate},
 		{OperationID: "exportCertificateWithKey", Method: http.MethodPost, Path: "/certificates/{certificateId}/export", access: signedIn, body: true, handle: a.exportKey},
+		{OperationID: "revokeCertificate", Method: http.MethodPost, Path: "/certificates/{certificateId}/revoke", access: signedIn, body: true, handle: a.revokeCertificate},
+		{OperationID: "renewCertificate", Method: http.MethodPost, Path: "/certificates/{certificateId}/renew", access: signedIn, body: true, handle: a.renewCertificate},
+		{OperationID: "inspectCSR", Method: http.MethodPost, Path: "/csr/inspect", access: signedIn, body: true, handle: a.inspectCSR},
+		{OperationID: "importExternalCertificate", Method: http.MethodPost, Path: "/imports/external-certificate", access: signedIn, body: true, handle: a.importExternalCertificate},
 	}
 }

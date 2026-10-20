@@ -1088,8 +1088,10 @@ paths:
       operationId: revokeCertificate
       summary: Revoke a certificate (irreversible)
       description: |
-        The CRL is regenerated immediately and OCSP answers change without restart.
-        `certificateHold` is not offered: a "temporary" revocation is not supported by many clients.
+        The CRL of the issuing CA is signed again at once. While the server is sealed the
+        revocation is stored and audited, and the CRL follows at the unseal (`crl_published`
+        false). `certificateHold` is not offered (final reasons only). keyCompromise blocks the key
+        for every later request.
       x-required-role: operator
       x-step-up: true
       requestBody:
@@ -1100,16 +1102,17 @@ paths:
             schema: { $ref: "#/components/schemas/RevokeRequest" }
       responses:
         "200":
-          description: Revoked; the CRL is already regenerated
+          description: Revoked
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Certificate" }
+              schema: { $ref: "#/components/schemas/RevocationResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
-        "503": { $ref: "#/components/responses/Sealed" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /certificates/{certificateId}/renew:
     parameters:
@@ -1118,9 +1121,13 @@ paths:
       tags: [certificates]
       operationId: renewCertificate
       summary: Issue a successor with the same names, preset and CA
+      description: |
+        The successor always gets a new key: a server-generated one when the original had one,
+        otherwise from `csr_pem` (required then). With `revoke_previous` the original is revoked
+        as superseded afterwards (needs the step-up of a revocation, checked first).
       x-required-role: operator
       requestBody:
-        description: "Optional changes for the successor; without a body the defaults apply"
+        description: "Options for the successor; an empty body is fine for server-generated keys"
         required: false
         content:
           application/json:
@@ -1130,11 +1137,13 @@ paths:
           description: New certificate
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Certificate" }
+              schema: { $ref: "#/components/schemas/IssuedCertificate" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
 
@@ -1143,14 +1152,21 @@ paths:
       tags: [certificates]
       operationId: inspectCSR
       summary: Parse a CSR and show what it asks for – nothing is issued
-      description: Lets the UI preview a CSR (untrusted input) before issuing. The signature is verified.
+      description: |
+        Lets the UI preview a CSR (untrusted input) before issuing. The signature is verified; a
+        broken CSR is a policy violation. Needs the operator role on one CA at least.
       x-required-role: operator
       requestBody:
         description: "PKCS#10 request in PEM (untrusted input)"
         required: true
         content:
-          application/pkcs10:
-            schema: { type: string, maxLength: 65536 }
+          application/json:
+            schema:
+              type: object
+              required: [csr_pem]
+              additionalProperties: false
+              properties:
+                csr_pem: { type: string, maxLength: 65536 }
       responses:
         "200":
           description: Parsed request
@@ -1161,6 +1177,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   # ---------------------------------------------------------------- imports
   /imports/legacy:
@@ -1221,13 +1239,18 @@ paths:
       operationId: importExternalCertificate
       summary: Add a certificate from another CA for expiry monitoring
       description: "Stored with `source: external`; never signed, renewed or revoked by this server."
-      x-required-role: operator
+      x-required-role: admin
       requestBody:
-        description: "Certificate in PEM, optionally followed by its chain"
+        description: "One certificate in PEM"
         required: true
         content:
-          application/pem-certificate-chain:
-            schema: { type: string, maxLength: 262144 }
+          application/json:
+            schema:
+              type: object
+              required: [certificate_pem]
+              additionalProperties: false
+              properties:
+                certificate_pem: { type: string, maxLength: 65536 }
       responses:
         "201":
           description: Added
@@ -1237,8 +1260,9 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   # ---------------------------------------------------------------- audit
   /audit:
@@ -2131,16 +2155,35 @@ components:
     RenewRequest:
       description: "Options for renewing a certificate"
       type: object
+      additionalProperties: false
       properties:
-        reuse_key:
-          type: boolean
-          default: false
-          description: Keep the existing key (only for server-generated keys)
+        csr_pem:
+          type: string
+          maxLength: 65536
+          description: Required when the original was issued from a CSR; refused otherwise
+        key_algorithm:
+          type: string
+          description: New server key algorithm; default the original's
         revoke_previous:
           type: boolean
           default: false
-          description: Revoke the old certificate with reason superseded
+          description: Revoke the old certificate with reason superseded (step-up as for a revocation)
         validity_days: { type: integer, minimum: 1 }
+
+    RevocationResult:
+      description: "A revocation and whether a CRL lists it already"
+      type: object
+      required: [certificate, crl_published, crl_number, warnings]
+      additionalProperties: false
+      properties:
+        certificate: { $ref: "#/components/schemas/Certificate" }
+        crl_published:
+          type: boolean
+          description: false while sealed – the CRL is signed at the unseal; only then clients see it
+        crl_number: { type: [integer, "null"] }
+        warnings:
+          type: array
+          items: { type: string }
 
     ExportRequest:
       description: "Request to export the private key of a server-generated key"
@@ -2169,15 +2212,21 @@ components:
     CSRInfo:
       description: "What a CSR asks for, parsed for preview"
       type: object
-      required: [subject, sans, key_algorithm, signature_valid]
+      required: [subject, common_name, sans, key_algorithm, signature_valid, requested_extensions, problems, warnings]
+      additionalProperties: false
       properties:
         subject: { type: string }
+        common_name: { type: string }
         sans: { $ref: "#/components/schemas/SANs" }
         key_algorithm: { type: string }
         signature_valid: { type: boolean }
         requested_extensions:
           type: array
           description: Shown for information only – extensions are never copied from a CSR
+          items: { type: string }
+        problems:
+          type: array
+          description: What the key policy refuses (an issuance would be denied)
           items: { type: string }
         warnings:
           type: array

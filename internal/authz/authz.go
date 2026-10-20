@@ -188,3 +188,20 @@ func (p *Principal) FreshStepUp(now time.Time) error {
 	}
 	return nil
 }
+
+// CanIssueSomewhere tells whether p may issue at one CA at least (or is the
+// console) – for previews that belong to no CA yet.
+func (p *Principal) CanIssueSomewhere() bool {
+	if p == nil {
+		return false
+	}
+	if p.Kind == KindConsole || p.Kind == KindSystem {
+		return true
+	}
+	for _, b := range p.Bindings {
+		if slices.Contains(rolePermissions[b.Role], IssueCert) {
+			return true
+		}
+	}
+	return false
+}
