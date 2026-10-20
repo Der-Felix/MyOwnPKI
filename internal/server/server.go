@@ -210,6 +210,14 @@ func (s *Server) build(key *auth.Key) error {
 	}
 	s.auth = auth.NewService(s.sys.Write, s.ia.Write, key, s.clk)
 	s.auth.Wake = s.wakeUp
+	origin := s.opt.Config.Auth.PasskeyOrigin
+	if rpID, perr := config.PasskeyRPID(origin); perr != nil {
+		return perr
+	} else if rpID != "" {
+		if s.auth.Passkeys, perr = auth.NewPasskeys(rpID, origin); perr != nil {
+			return perr
+		}
+	}
 	s.ring.OnUnseal = func(ctx context.Context) {
 		s.deliver(ctx)
 		if err := s.cp.MakeAll(ctx, "unseal"); err != nil {

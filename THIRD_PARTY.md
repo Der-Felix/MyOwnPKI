@@ -1,8 +1,14 @@
 # Third-party data
 
-Data from other projects that is copied into this repository and built into the binaries.
-Go modules are not listed here: they are in `go.mod`, and only permissive licenses are
-accepted (ADR-14).
+Data from other projects that is copied into this repository and built into the binaries,
+and the modules and release tools approved one by one since phase 1 (with the modules they
+bring). All Go modules are in `go.mod`; only permissive licenses are accepted (ADR-14).
+
+## Go modules approved for phase 1 (night run 2026-10-21)
+
+| Module | Version (release date) | License | For | Brings |
+|---|---|---|---|---|
+| `github.com/go-webauthn/webauthn` | v0.18.2 (2026-09-19) | BSD-3-Clause | passkeys (step 17) | `github.com/go-webauthn/x` v0.3.1 (BSD-3), `github.com/fxamacker/cbor/v2` v2.9.4 (MIT), `github.com/x448/float16` v0.8.4 (MIT), `github.com/golang-jwt/jwt/v5` v5.3.1 (MIT, metadata service), `github.com/google/go-tpm` v0.9.8 (Apache-2.0, TPM attestation), `github.com/go-viper/mapstructure/v2` v2.5.0 (MIT), `github.com/tinylib/msgp` v1.6.4 (MIT), `github.com/philhofer/fwd` v1.2.0 (MIT); `github.com/google/uuid` was already in the graph. Test-only modules of webauthn (testify, go.uber.org/mock) are not built in |
 
 ## Common passwords (`internal/auth/common-passwords.txt`)
 

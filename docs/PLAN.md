@@ -534,6 +534,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | UI | System fonts, no JavaScript in phase 0, status colors fixed per light/dark, US English spelling |
 | API errors | RFC 9457 with problem types `urn:myownpki:problem:<name>` (kept, confirmed 2026-10-13) |
 | CI lint tools | actionlint (workflows) and vacuum (OpenAPI) approved as pinned CI tools (2026-10-13); added in phase 1 step 1: actionlint 1.7.12, vacuum 0.30.6 (newest release older than two weeks), rules in `api/vacuum.yaml` – snake_case and per-property examples switched off with reasons, every other warning fails CI |
+| Passkeys | `github.com/go-webauthn/webauthn` v0.18.2 (approved for step 17; its modules in THIRD_PARTY.md); a virtual authenticator for tests in `internal/auth/passkeytest` (own minimal CBOR encoder) |
 | Two-week rule, exceptions | A module version already selected by the graph through approved modules is taken as it is, never forced down by downgrading those (§14 "CI and build"): `golang.org/x/crypto` v0.58.0 (2026-10-13), `golang.org/x/term` v0.47.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; owner 2026-10-16), `golang.org/x/text` v0.43.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; pulled in by the test-only JSON Schema validator; owner 2026-10-17) |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
 
@@ -696,6 +697,19 @@ keeps the reasons. None of them changes an ADR.
 | The sign-in page shows nothing about the instance and one message for every failure | Version, seal state and the demo mark help strangers; the message must not tell real names from invented ones |
 | `next=` only as a strictly checked local path | An open redirect after sign-in is a classic phishing aid |
 | The CSR's names fill the form; issued is what the form says | The requester sees and confirms the names; extensions and names never come from the CSR unchecked (ADR-19, pki-rules) |
+
+### Night run 2026-10-21 (phase 1 steps 15–20, release) – for the owner to confirm
+Taken alone during the autonomous run, each the reversible variant; docs/NIGHTLOG.md has the full
+tables with "how to reverse".
+
+| Decision | Why |
+|---|---|
+| Legacy import: reader `internal/ca/legacy` (parses, never executes) + `ca.ImportLegacy` in one transaction + `myownpki import legacy DIR [--dry-run]`; the root becomes an **offline root** by default (`--root-key online` imports its key) | pki.sh stays the offline root tool; all or nothing; the dry run shows every problem first |
+| Import keeps serials, revocation time and reason and the CRL numbering: `crlnumber` (hex) − 1 becomes the last number, pki.sh's CRL is kept as evidence, every online CA signs its next CRL in the import transaction; certificateHold → unspecified, CACompromise on a leaf → keyCompromise, both with a warning | RFC 5280 §5.2.3 (numbers never go back); what relying parties see stays the same |
+| Older certificates of a key pki.sh renewed (`renew-ca`) go into `ca_certificate_history` (pki.db 0006) | They verify the same leaves and are evidence |
+| Backup = a new directory with `VACUUM INTO` copies (audit logs last) and `manifest.json` (SHA-256, migration versions, audit heads, checkpoint key); `backup verify` and `restore` run the same checks on a work copy, incl. integrity, chains ending at the heads and the SAN index; restore only into an empty data directory | Works while the server runs; a manipulated or damaged backup never becomes the PKI |
+| Passkeys (go-webauthn v0.18.2) as **second factor and step-up**, only with `auth.passkey_origin`; adding one needs step-up + current password, raises the credentials epoch and ends other sessions; UV required, no attestation; reset-2fa removes passkeys | Same rules as TOTP (decision 45); WebAuthn binds passkeys to the host name users type |
+| No passkey button in the UI until esbuild (ADR-04) or one plain script is approved | A browser needs `navigator.credentials`; no ADR change at night |
 
 ### Web UI and dev mode
 | Decision | Why |

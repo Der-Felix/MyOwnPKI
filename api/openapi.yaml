@@ -207,6 +207,10 @@ paths:
       tags: [auth]
       operationId: beginWebAuthnLogin
       summary: Start a passkey/WebAuthn assertion (second factor or step-up)
+      description: |
+        With the pending session of `POST /auth/login` this is the second factor; with a full session
+        it is a step-up. The options go unchanged to `navigator.credentials.get()`. Passkeys need
+        `auth.passkey_origin` in the configuration (otherwise 404) and a registered passkey (otherwise 409).
       security: []
       x-required-role: none
       responses:
@@ -216,6 +220,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WebAuthnOptions" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/webauthn/finish:
@@ -223,6 +229,9 @@ paths:
       tags: [auth]
       operationId: finishWebAuthnLogin
       summary: Complete the WebAuthn assertion
+      description: |
+        After the password: a new session ID and a device cookie, as after a TOTP code. Signed in: the
+        step-up time is refreshed. A refused assertion counts like a wrong code (throttle, lockout).
       security: []
       x-required-role: none
       requestBody:
@@ -239,6 +248,11 @@ paths:
               schema: { $ref: "#/components/schemas/Session" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/step-up:
@@ -478,28 +492,75 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /users/me/webauthn:
+    get:
+      tags: [users]
+      operationId: listWebAuthnCredentials
+      summary: List the own passkeys
+      x-required-role: signed-in
+      responses:
+        "200":
+          description: The own passkeys (no key material)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WebAuthnPasskey" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /users/me/webauthn/begin:
     post:
       tags: [users]
       operationId: beginWebAuthnRegistration
       summary: Start registering a passkey / security key
+      description: |
+        Needs a fresh step-up **and** the current password (a new second factor is never added with
+        the session alone). User verification is required (PIN or biometrics), attestation is not
+        asked for. At most 10 passkeys per user.
       x-required-role: signed-in
       x-step-up: true
+      requestBody:
+        description: "The current password"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentPassword" }
       responses:
         "200":
           description: PublicKeyCredentialCreationOptions for navigator.credentials.create()
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebAuthnOptions" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /users/me/webauthn/finish:
     post:
       tags: [users]
       operationId: finishWebAuthnRegistration
       summary: Complete passkey registration
+      description: |
+        Stores the passkey. Every device cookie of the user becomes void and the other sessions end,
+        as for every new authenticator.
       x-required-role: signed-in
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: "A name to recognize the passkey by (at most 64 characters; default Passkey)"
+          schema: { type: string, maxLength: 64 }
       requestBody:
         description: "Attestation returned by navigator.credentials.create()"
         required: true
@@ -507,9 +568,47 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/WebAuthnCredential" }
       responses:
-        "204": { description: Registered }
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebAuthnPasskey" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /users/me/webauthn/{passkeyId}:
+    delete:
+      tags: [users]
+      operationId: deleteWebAuthnCredential
+      summary: Remove an own passkey
+      x-required-role: signed-in
+      x-step-up: true
+      parameters:
+        - name: passkeyId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+      requestBody:
+        description: "The current password"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentPassword" }
+      responses:
+        "204": { description: Removed; device cookies of the user are void }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ---------------------------------------------------------------- tokens
   /tokens:
@@ -1379,7 +1478,7 @@ components:
         second_factor_required: { type: boolean, const: true }
         methods:
           type: array
-          description: "Phase 1: totp (a recovery code works in its place); webauthn follows in step 17"
+          description: "totp (a recovery code works in its place); webauthn when the user has a passkey and the server has auth.passkey_origin"
           items: { type: string, enum: [totp, webauthn] }
         first_totp:
           type: boolean
@@ -1431,6 +1530,25 @@ components:
           type: array
           description: Shown exactly once; stored only as hashes
           items: { type: string }
+
+    CurrentPassword:
+      description: "The current password, for changes to the own account"
+      type: object
+      required: [password]
+      additionalProperties: false
+      properties:
+        password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 1024 }
+
+    WebAuthnPasskey:
+      description: "A registered passkey (no key material)"
+      type: object
+      required: [id, name, created_at, last_used_at]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        name: { type: string, maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
 
     WebAuthnOptions:
       type: object

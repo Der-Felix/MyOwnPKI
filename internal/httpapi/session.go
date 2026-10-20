@@ -73,12 +73,18 @@ func (a *API) login(c *call) error {
 		return err
 	}
 	http.SetCookie(c.w, auth.SessionCookie(res.Token))
+	methods := []string{"totp"}
+	if has, herr := a.d.Auth.HasPasskeys(c.ctx(), res.Session.UserID); herr != nil {
+		return herr
+	} else if has {
+		methods = append(methods, "webauthn")
+	}
 	return c.reply(http.StatusOK, struct {
 		SecondFactorRequired bool      `json:"second_factor_required"`
 		Methods              []string  `json:"methods"`
 		FirstTOTP            bool      `json:"first_totp"`
 		PendingExpiresAt     time.Time `json:"pending_expires_at"`
-	}{true, []string{"totp"}, res.FirstTOTP, res.Session.ExpiresAt.UTC()})
+	}{true, methods, res.FirstTOTP, res.Session.ExpiresAt.UTC()})
 }
 
 // secondFactor completes the sign-in: a new session ID (no session

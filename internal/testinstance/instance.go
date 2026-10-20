@@ -35,12 +35,17 @@ var Console = keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "console:
 // Password is the password of every user made with User.
 const Password = "a long password for the HTTP tests"
 
+// BrowserOrigin is where the tests' browser runs (passkeys, step 17).
+const BrowserOrigin = "https://pki.homelab.lan:9443"
+
 // Options shape the instance.
 type Options struct {
 	// Hostname is O of the test CA; "" = "pki01".
 	Hostname string
 	// BaseURL of the test CA; "" = http://pki.homelab.lan.
 	BaseURL string
+	// NoPasskeys leaves passkeys off (default: on for BrowserOrigin).
+	NoPasskeys bool
 }
 
 // Instance is an initialized instance, sealed.
@@ -132,6 +137,11 @@ func New(t *testing.T, o Options) *Instance {
 	}
 	v.Auth = auth.NewService(v.SystemDB.Write, v.InstanceAudit.Write, key, v.Clock)
 	v.Auth.Hasher = auth.NewHasher(auth.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}, 4, time.Second)
+	if !o.NoPasskeys {
+		if v.Auth.Passkeys, err = auth.NewPasskeys("pki.homelab.lan", BrowserOrigin); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cas, err := ca.ListCAs(t.Context(), pki.Read)
 	if err != nil {
 		t.Fatal(err)

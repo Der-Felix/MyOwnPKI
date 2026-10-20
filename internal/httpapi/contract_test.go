@@ -22,7 +22,9 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Der-Felix/MyOwnPKI/api"
+	"github.com/Der-Felix/MyOwnPKI/internal/auth/passkeytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
 // The contract tests (PHASE1 step 13) read api/openapi.yaml and check the
@@ -440,6 +442,58 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "verifyTOTP", as: fresh, body: map[string]string{"code": "000000"}, want: 422, kind: "wrong-secret"})
 	run(contractCase{op: "verifyTOTP", as: fresh, body: map[string]string{"code": v.code("viewer")}, want: 200})
 	run(contractCase{op: "logout", as: fresh, want: 204})
+
+	// Passkeys (step 17) with a virtual authenticator: register as the
+	// viewer, sign in with it, remove it.
+	authn := passkeytest.New(testinstance.BrowserOrigin)
+	pw := map[string]string{"password": testPassword}
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	run(contractCase{op: "listWebAuthnCredentials", as: anon, want: 401, note: "no-session"})
+	run(contractCase{op: "beginWebAuthnRegistration", as: anon, body: pw, want: 401, note: "no-session"})
+	run(contractCase{op: "beginWebAuthnRegistration", as: viewer, body: pw, want: 403, kind: "step-up-required", note: "step-up"})
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_x", body: pw, want: 403, kind: "step-up-required", note: "step-up"})
+	run(contractCase{op: "deleteWebAuthnCredential", as: anon, path: "/users/me/webauthn/pk_x", body: pw, want: 401, note: "no-session"})
+	run(contractCase{op: "finishWebAuthnRegistration", as: anon, body: map[string]any{}, want: 401, note: "no-session"})
+	run(contractCase{op: "beginWebAuthnLogin", as: anon, want: 401})
+	viewer.stepUp(t, "viewer")
+	run(contractCase{op: "beginWebAuthnRegistration", as: viewer, body: map[string]string{"password": "not the password at all"}, want: 422, kind: "wrong-secret"})
+	run(contractCase{op: "finishWebAuthnRegistration", as: viewer, body: map[string]any{}, want: 409, kind: "conflict"})
+	begin := viewer.do(t, http.MethodPost, "/users/me/webauthn/begin", pw)
+	s.check(t, s.routeOf(t, v.api, "beginWebAuthnRegistration"), begin)
+	if begin.Code == http.StatusOK {
+		mark("beginWebAuthnRegistration", "success")
+	}
+	created, err := authn.Create(begin.Body.Bytes())
+	if err != nil {
+		t.Fatalf("virtual authenticator: %v (%s)", err, begin.Body.String())
+	}
+	run(contractCase{op: "finishWebAuthnRegistration", as: viewer, path: "/users/me/webauthn/finish?name=Laptop", body: json.RawMessage(created), want: 201})
+	list := viewer.do(t, http.MethodGet, "/users/me/webauthn", nil)
+	run(contractCase{op: "listWebAuthnCredentials", as: viewer, want: 200})
+	items, _ := list.body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("passkeys: %s", list.Body.String())
+	}
+	pkID, _ := items[0].(map[string]any)["id"].(string)
+
+	pk := v.client("192.0.2.21")
+	v.clk.Advance(30 * time.Second)
+	if r := pk.do(t, http.MethodPost, "/auth/login", map[string]string{"username": "viewer", "password": testPassword}); r.Code != 200 || !strings.Contains(r.Body.String(), `"webauthn"`) {
+		t.Fatalf("login of a user with a passkey: %d %s", r.Code, r.Body.String())
+	}
+	assertion := pk.do(t, http.MethodPost, "/auth/webauthn/begin", nil)
+	s.check(t, s.routeOf(t, v.api, "beginWebAuthnLogin"), assertion)
+	if assertion.Code == http.StatusOK {
+		mark("beginWebAuthnLogin", "success")
+	}
+	answer, err := authn.Get(assertion.Body.Bytes())
+	if err != nil {
+		t.Fatalf("virtual authenticator: %v (%s)", err, assertion.Body.String())
+	}
+	run(contractCase{op: "finishWebAuthnLogin", as: pk, body: json.RawMessage(answer), want: 200})
+	run(contractCase{op: "finishWebAuthnLogin", as: pk, body: json.RawMessage(answer), want: 409, kind: "conflict"}) // used once
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_nothere", body: pw, want: 404})
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/" + pkID, body: pw, want: 204})
 
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {

@@ -95,3 +95,12 @@ func fileName(cn, fallback string) string {
 	}
 	return fallback
 }
+
+// replyRaw writes JSON that is already encoded (WebAuthn options).
+func (c *call) replyRaw(status int, data []byte) error {
+	c.status = status
+	c.w.Header().Set("Content-Type", "application/json")
+	c.w.WriteHeader(status)
+	_, err := c.w.Write(data)
+	return err
+}

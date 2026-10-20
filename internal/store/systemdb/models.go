@@ -89,3 +89,14 @@ type User struct {
 	UpdatedAt         string
 	CredentialsEpoch  int64
 }
+
+type WebauthnCredential struct {
+	ID           string
+	UserID       string
+	CredentialID []byte
+	Credential   string
+	Name         string
+	SignCount    int64
+	CreatedAt    string
+	LastUsedAt   sql.NullString
+}

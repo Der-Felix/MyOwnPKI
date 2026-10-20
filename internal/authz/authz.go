@@ -175,3 +175,16 @@ func lowestRole(perm Permission) Role {
 
 // ValidRole reports whether r is a tenant role.
 func ValidRole(r Role) bool { return slices.Contains(Roles, r) }
+
+// FreshStepUp checks only the step-up of a signed-in user – for changes to
+// the own account (a new or removed passkey) that need no role.
+func (p *Principal) FreshStepUp(now time.Time) error {
+	if p == nil || p.Kind != KindUser {
+		return fmt.Errorf("%w: not a signed-in user", ErrDenied)
+	}
+	stepUp := p.StepUpAt.Truncate(time.Second)
+	if p.StepUpAt.IsZero() || now.Sub(stepUp) > StepUpWindow || now.Before(stepUp) {
+		return fmt.Errorf("%w (own account)", ErrStepUpRequired)
+	}
+	return nil
+}
