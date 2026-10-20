@@ -10,6 +10,62 @@ import (
 	"database/sql"
 )
 
+const countCertificates = `-- name: CountCertificates :many
+SELECT c.ca_id,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS INTEGER) AS revoked,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after <= CAST(?1 AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expired,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(?1 AS TEXT)
+                                   AND c.not_after <= CAST(?2 AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expiring,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(?2 AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS valid
+FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+GROUP BY c.ca_id
+`
+
+type CountCertificatesParams struct {
+	Now  string
+	Soon string
+}
+
+type CountCertificatesRow struct {
+	CaID     sql.NullString
+	Revoked  int64
+	Expired  int64
+	Expiring int64
+	Valid    int64
+}
+
+// Certificates per issuing CA by state, for the overview: revoked, expired
+// (not revoked, past notAfter), expiring (valid, notAfter before soon) and
+// valid (the rest). The caller drops the CAs the user may not read.
+func (q *Queries) CountCertificates(ctx context.Context, arg CountCertificatesParams) ([]CountCertificatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, countCertificates, arg.Now, arg.Soon)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountCertificatesRow{}
+	for rows.Next() {
+		var i CountCertificatesRow
+		if err := rows.Scan(
+			&i.CaID,
+			&i.Revoked,
+			&i.Expired,
+			&i.Expiring,
+			&i.Valid,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCertificate = `-- name: GetCertificate :one
 SELECT id, ca_id, ca_generation, source, preset, serial_hex, subject_dn, common_name, not_before, not_after, key_algorithm, key_id, cert_der, fingerprint_sha256, renewal_of, requested_by, custom_ku, custom_eku, created_at FROM certificates WHERE id = ?
 `

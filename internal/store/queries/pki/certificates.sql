@@ -41,3 +41,16 @@ WHERE (CAST(sqlc.arg(all_cas) AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM j
   AND (CAST(sqlc.arg(cursor) AS TEXT) = '' OR c.id < CAST(sqlc.arg(cursor) AS TEXT))
 ORDER BY c.id DESC
 LIMIT sqlc.arg(page_size);
+
+-- Certificates per issuing CA by state, for the overview: revoked, expired
+-- (not revoked, past notAfter), expiring (valid, notAfter before soon) and
+-- valid (the rest). The caller drops the CAs the user may not read.
+-- name: CountCertificates :many
+SELECT c.ca_id,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS INTEGER) AS revoked,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after <= CAST(sqlc.arg(now) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expired,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(sqlc.arg(now) AS TEXT)
+                                   AND c.not_after <= CAST(sqlc.arg(soon) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expiring,
+       CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(sqlc.arg(soon) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS valid
+FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+GROUP BY c.ca_id;
