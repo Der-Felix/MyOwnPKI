@@ -132,6 +132,11 @@ func (s *Service) LoginFrom(ctx context.Context, username, password string, c Cl
 		return nil, s.refuse(ctx, nil, ip, "user.login", audit.ResultFailure, "unknown user", ErrInvalidLogin)
 	}
 	if wait := lockedFor(u, now); wait > 0 && device == "" {
+		// A hash like for an unknown name: the answer time must not tell that
+		// this name exists and was locked by others (owner 2026-10-17).
+		if derr := s.Hasher.VerifyDummy(ctx, password); derr != nil {
+			return nil, derr
+		}
 		return nil, s.refuse(ctx, &u, ip, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
 	}
 	ok, rehash, err := s.Hasher.Verify(ctx, u.PasswordHash, password)

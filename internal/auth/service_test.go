@@ -644,3 +644,25 @@ func TestSignInIsFailClosed(t *testing.T) {
 		t.Errorf("step-up took effect without its audit entry: %v", err)
 	}
 }
+
+// TestLockedNameCostsAHashToo: a name that strangers locked answers like an
+// unknown one – after a hash, not at once – so the answer time doesn't tell
+// that it exists (owner 2026-10-17). With every hash slot taken, both wait
+// for one; a fresh address meets no in-memory throttle first.
+func TestLockedNameCostsAHashToo(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.create(t, "alice", false)
+	for i := range LockAfter {
+		_, _ = v.s.Login(t.Context(), "alice", "wrong password, long", fmt.Sprintf("192.0.2.%d", 100+i))
+	}
+	v.s.Hasher = NewHasher(fastParams, 1, 50*time.Millisecond)
+	if err := v.s.Hasher.acquire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alice", "nobody-here"} {
+		if _, err := v.s.Login(t.Context(), name, password, "198.51.100.77"); !errors.Is(err, ErrBusy) {
+			t.Errorf("%s with every hash slot taken: %v, want ErrBusy (no answer before a hash)", name, err)
+		}
+	}
+}
