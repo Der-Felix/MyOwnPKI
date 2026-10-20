@@ -76,6 +76,12 @@ sense for RSA key transport. For ECDSA leaves used in TLS, `digitalSignature` is
   per-CA compatibility switch for clients that mishandle critical NC. Support IPv6 CIDRs (legacy only did IPv4).
 - Enforce name constraints **before signing** as well – don't rely on clients to reject.
 - A CA never issues beyond its own `notAfter`.
+- **A root signs intermediate CAs and CRLs only** – never end-entity certificates (CA/B BR §6.1.7;
+  owner 2026-10-18). The engine refuses it as policy (`a root CA only signs intermediate CAs and
+  CRLs – issue from an intermediate`): a misissued leaf is revoked by its intermediate instead of
+  touching the trust anchor, and the root key isn't needed for every issuance. Imported existing
+  certificates (legacy importer) are not issuance and stay possible. BR §6.1.7 would also allow OCSP
+  responder certificates from a root – revisit when OCSP comes (phase 4).
 - Root key modes: offline / online-encrypted / HSM (ADR-09). In offline mode the server only
   ever holds the root **certificate**.
 - **Offline signing** (step 8):
