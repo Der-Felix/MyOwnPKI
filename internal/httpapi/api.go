@@ -61,8 +61,9 @@ const (
 type Route struct {
 	OperationID, Method, Path string // Path relative to BasePath, in spec syntax
 	access                    access
-	passive                   bool // doesn't count as session activity (x-passive)
-	body                      bool // takes a JSON body
+	passive                   bool  // doesn't count as session activity (x-passive)
+	body                      bool  // takes a JSON body
+	maxBody                   int64 // 0 = MaxBody
 	handle                    func(*call) error
 }
 
@@ -216,7 +217,11 @@ func (a *API) serve(c *call, rt Route) error {
 				return c.problem(http.StatusUnsupportedMediaType, "unsupported-media-type", "send the body as application/json", nil)
 			}
 		}
-		c.r.Body = http.MaxBytesReader(c.w, c.r.Body, MaxBody)
+		limit := int64(MaxBody)
+		if rt.maxBody > 0 {
+			limit = rt.maxBody
+		}
+		c.r.Body = http.MaxBytesReader(c.w, c.r.Body, limit)
 	}
 	return rt.handle(c)
 }

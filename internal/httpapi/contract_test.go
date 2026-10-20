@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"slices"
 	"strconv"
@@ -321,6 +322,13 @@ func TestContract(t *testing.T) {
 		t.Fatalf("issue: %d %s", keyed.Code, keyed.Body.String())
 	}
 	keyedID, _ := keyed.body["id"].(string)
+	revokable := admin.do(t, http.MethodPost, "/certificates", map[string]any{"ca_id": issuing, "preset": "server", "sans": map[string]any{"dns": []string{"old.homelab.lan"}}, "key": map[string]string{"algorithm": "ecdsa-p256"}})
+	revokableID, _ := revokable.body["id"].(string)
+	extKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	extTmpl := &x509.Certificate{SerialNumber: big.NewInt(42), Subject: pkix.Name{CommonName: "router.example.org"}, DNSNames: []string{"router.example.org"},
+		NotBefore: v.clk.Now().Add(-time.Hour), NotAfter: v.clk.Now().Add(90 * 24 * time.Hour)}
+	extDER, _ := x509.CreateCertificate(rand.Reader, extTmpl, extTmpl, &extKey.PublicKey, extKey)
+	extPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: extDER}))
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "web.homelab.lan"}, DNSNames: []string{"web.homelab.lan"}}, priv)
 	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
@@ -398,6 +406,25 @@ func TestContract(t *testing.T) {
 		{op: "exportCertificateWithKey", as: rootview, path: "/certificates/" + keyedID + "/export", body: map[string]string{"format": "pkcs8-pem"}, want: 404, note: "no-read"},
 		{op: "exportCertificateWithKey", as: anon, path: "/certificates/" + keyedID + "/export", body: map[string]string{"format": "pkcs8-pem"}, want: 401, note: "no-session"},
 		{op: "exportCertificateWithKey", as: op, path: "/certificates/" + keyedID + "/export", body: map[string]string{"format": "pkcs12"}, want: 400},
+
+		{op: "revokeCertificate", as: anon, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 401, note: "no-session"},
+		{op: "revokeCertificate", as: viewer, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "revokeCertificate", as: rootview, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 404, note: "no-read"},
+		{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{}, want: 400},
+		{op: "renewCertificate", as: anon, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 401, note: "no-session"},
+		{op: "renewCertificate", as: viewer, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "renewCertificate", as: rootview, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 404, note: "no-read"},
+		{op: "renewCertificate", as: op, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 201},
+		{op: "renewCertificate", as: op, path: "/certificates/" + keyedID + "/renew", body: map[string]any{"csr_pem": csrPEM}, want: 422, kind: "policy-violation"},
+		{op: "inspectCSR", as: anon, body: map[string]string{"csr_pem": csrPEM}, want: 401, note: "no-session"},
+		{op: "inspectCSR", as: viewer, body: map[string]string{"csr_pem": csrPEM}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "inspectCSR", as: op, body: map[string]string{"csr_pem": csrPEM}, want: 200},
+		{op: "inspectCSR", as: op, body: map[string]string{"csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\nAAAA\n-----END CERTIFICATE REQUEST-----\n"}, want: 422, kind: "policy-violation"},
+		{op: "importExternalCertificate", as: anon, body: map[string]string{"certificate_pem": extPEM}, want: 401, note: "no-session"},
+		{op: "importExternalCertificate", as: op, body: map[string]string{"certificate_pem": extPEM}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "importExternalCertificate", as: admin, body: map[string]string{"certificate_pem": extPEM}, want: 201},
+		{op: "importExternalCertificate", as: admin, body: map[string]string{"certificate_pem": extPEM}, want: 422, kind: "policy-violation"},
 	}
 
 	seen := map[string]map[string]bool{}
@@ -435,6 +462,8 @@ func TestContract(t *testing.T) {
 	// The rest needs a sequence: step-up, export, second factor, logout.
 	op.stepUp(t, "op")
 	run(contractCase{op: "exportCertificateWithKey", as: op, path: "/certificates/" + keyedID + "/export", body: map[string]string{"format": "pkcs8-pem"}, want: 200})
+	run(contractCase{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 200})
+	run(contractCase{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 422, kind: "policy-violation"})
 	run(contractCase{op: "stepUp", as: viewer, body: map[string]string{"code": func() string { v.clk.Advance(30 * time.Second); return v.code("viewer") }()}, want: 200})
 	fresh := v.client("192.0.2.20")
 	v.clk.Advance(30 * time.Second)

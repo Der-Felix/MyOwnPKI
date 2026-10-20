@@ -103,7 +103,7 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 	q := pkidb.New(e.PKI)
 	row, err := q.GetCertificate(ctx, req.CertificateID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, deny("there is no certificate %q", short(req.CertificateID))
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -114,6 +114,10 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 	issuerCA, err := q.GetCA(ctx, row.CaID.String)
 	if err != nil {
 		return nil, err
+	}
+	// No read access: answered like an unknown ID (decision 64).
+	if !e.canRead(req.Who, issuerCA.Name, now) {
+		return nil, ErrNotFound
 	}
 	if aerr := e.authorize(req.Who, authz.RevokeCert, issuerCA.Name, now); aerr != nil {
 		return nil, aerr

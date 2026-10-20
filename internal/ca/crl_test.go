@@ -130,7 +130,6 @@ func TestRevocationRules(t *testing.T) {
 	out := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"a.homelab.lan"}})
 	future := t0.Add(day)
 	for want, req := range map[string]RevokeRequest{
-		"no certificate":               {CertificateID: "crt_nope", Reason: ReasonSuperseded},
 		"there is no certificateHold":  {CertificateID: out.ID, Reason: "certificateHold"},
 		"only goes with keyCompromise": {CertificateID: out.ID, Reason: ReasonSuperseded, InvalidityDate: &t0},
 		"in the future":                {CertificateID: out.ID, Reason: ReasonKeyCompromise, InvalidityDate: &future},
@@ -141,6 +140,10 @@ func TestRevocationRules(t *testing.T) {
 		if got := deniedErr(t, err); !strings.Contains(got, want) {
 			t.Errorf("%q, want %q", got, want)
 		}
+	}
+	// An unknown ID is "not found", like one the caller may not read.
+	if _, err := v.e.Revoke(t.Context(), RevokeRequest{CertificateID: "crt_nope", Reason: ReasonSuperseded, Who: tester}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown certificate: %v", err)
 	}
 	v.revoke(t, out.ID, ReasonCessationOfOperation)
 	if _, err := v.e.Revoke(t.Context(), RevokeRequest{CertificateID: out.ID, Reason: ReasonSuperseded, Who: tester}); !strings.Contains(deniedErr(t, err), "final") {
