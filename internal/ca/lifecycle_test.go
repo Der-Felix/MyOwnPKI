@@ -910,3 +910,32 @@ func TestUnreadableGenerationIsAnError(t *testing.T) {
 		t.Error("the failed renewal is not in the audit log")
 	}
 }
+
+// TestRootIssuesNoLeaves (owner 2026-10-18, CA/B BR §6.1.7): a root signs
+// intermediate CAs and CRLs – an end-entity certificate from it is refused
+// as policy, whoever asks; the intermediate below it issues.
+func TestRootIssuesNoLeaves(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	r := v.root(t, "root", nil)
+	if r.CRL == nil {
+		t.Fatal("the root signs its CRL")
+	}
+	v.intermediate(t, "issuing", "root", nil)
+	for _, preset := range []string{"server", "client", "ocsp"} {
+		got := v.denied(t, Request{CA: "root", Preset: preset, DNSNames: []string{"leaf-from-root.homelab.lan"}, Subject: Subject{CommonName: "leaf-from-root"}})
+		if got != "a root CA only signs intermediate CAs and CRLs – issue from an intermediate" {
+			t.Errorf("%s from the root: %q", preset, got)
+		}
+	}
+	v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"leaf.homelab.lan"}})
+	denied := 0
+	for _, row := range v.auditRows(t) {
+		if row.action == ActionIssue && row.result == "denied" {
+			denied++
+		}
+	}
+	if denied != 3 {
+		t.Errorf("refusals audited: %d", denied)
+	}
+}

@@ -161,6 +161,7 @@ func TestKeyCompromiseBlocksTheKey(t *testing.T) {
 	v := newEnv(t)
 	root, issuing := v.chain(t, caOpts{})
 	leafKey := mustKey(t, elliptic.P256())
+	v.addCA(t, "other", caOpts{parent: root})
 	csr := makeCSR(t, leafKey, &x509.CertificateRequest{DNSNames: []string{"a.homelab.lan"}})
 	out := v.issue(t, Request{CA: "issuing", Preset: "server", CSR: csr})
 	inv := t0.Add(-time.Hour)
@@ -168,7 +169,7 @@ func TestKeyCompromiseBlocksTheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The same key in a new CSR – for any CA of the tenant – is refused.
-	for _, ca := range []string{"issuing", "root"} {
+	for _, ca := range []string{"issuing", "other"} {
 		if got := v.denied(t, Request{CA: ca, Preset: "server", CSR: makeCSR(t, leafKey, &x509.CertificateRequest{DNSNames: []string{"b.homelab.lan"}})}); !strings.Contains(got, "reported compromised (keyCompromise, certificate") {
 			t.Errorf("%s: %q", ca, got)
 		}
@@ -189,7 +190,7 @@ func TestKeyCompromiseBlocksTheKey(t *testing.T) {
 	if got := v.denied(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"c.homelab.lan"}}); !strings.Contains(got, "is revoked") {
 		t.Errorf("issue below a revoked CA: %q", got)
 	}
-	if got := v.denied(t, Request{CA: "root", Preset: "server", CSR: makeCSR(t, issuing.key, &x509.CertificateRequest{DNSNames: []string{"d.homelab.lan"}})}); !strings.Contains(got, "cACompromise") {
+	if got := v.denied(t, Request{CA: "other", Preset: "server", CSR: makeCSR(t, issuing.key, &x509.CertificateRequest{DNSNames: []string{"d.homelab.lan"}})}); !strings.Contains(got, "cACompromise") {
 		t.Errorf("CSR with the compromised CA key: %q", got)
 	}
 	_ = root

@@ -276,16 +276,16 @@ func TestCertificatesAreImmutable(t *testing.T) {
 func TestSignatureFollowsTheIssuerKey(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
-	root := v.addCA(t, "root", caOpts{})
-	out := v.issue(t, Request{CA: "root", Preset: "server", DNSNames: []string{"nas.homelab.lan"}})
+	root, issuing := v.chain(t, caOpts{key: mustKey(t, elliptic.P384())})
+	out := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"nas.homelab.lan"}})
 	cert := parse(t, out.CertDER)
 	if cert.SignatureAlgorithm != x509.ECDSAWithSHA384 {
-		t.Errorf("P-384 root signed with %v", cert.SignatureAlgorithm)
+		t.Errorf("P-384 CA signed with %v", cert.SignatureAlgorithm)
 	}
-	if len(out.Chain) != 1 || cert.CheckSignatureFrom(root.cert) != nil {
-		t.Error("leaf issued by the root doesn't verify")
+	if len(out.Chain) != 2 || cert.CheckSignatureFrom(issuing.cert) != nil {
+		t.Error("leaf doesn't verify against its CA")
 	}
-	opensslVerify(t, []*fixtureCA{root}, out.CertDER, "sslserver")
+	opensslVerify(t, []*fixtureCA{issuing, root}, out.CertDER, "sslserver")
 }
 
 func TestMaliciousCSRGetsNoCAPowers(t *testing.T) {
@@ -562,9 +562,11 @@ func TestRefusedCAs(t *testing.T) {
 	root := v.addCA(t, "root", caOpts{notAfter: t0.Add(10 * day)})
 	v.addCA(t, "offline", caOpts{parent: root, keyMode: KeyModeOffline})
 	v.addCA(t, "retired", caOpts{parent: root, status: StatusRetired})
+	v.addCA(t, "issuing", caOpts{parent: root})
 	req := Request{Preset: "server", DNSNames: []string{"a.homelab.lan"}}
 	for ca, want := range map[string]string{
-		"offline": "is offline", "retired": "is retired", "nope": "no CA named", "root": "",
+		"offline": "is offline", "retired": "is retired", "nope": "no CA named", "issuing": "",
+		"root": "a root CA only signs intermediate CAs and CRLs – issue from an intermediate",
 	} {
 		req.CA = ca
 		if want == "" {
@@ -574,7 +576,7 @@ func TestRefusedCAs(t *testing.T) {
 			t.Errorf("%s: %q", ca, got)
 		}
 	}
-	req.CA, req.Preset = "root", "nope"
+	req.CA, req.Preset = "issuing", "nope"
 	if got := v.denied(t, req); !strings.Contains(got, "no preset named") {
 		t.Errorf("preset: %q", got)
 	}

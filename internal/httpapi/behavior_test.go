@@ -408,3 +408,17 @@ func TestUncleanPathsAreNotFound(t *testing.T) {
 		}
 	}
 }
+
+// TestRootIssuesNoLeavesOverTheAPI: issuing from a root is a policy refusal
+// (422) with the engine's reason (owner 2026-10-18).
+func TestRootIssuesNoLeavesOverTheAPI(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.unseal(t)
+	c := v.client("192.0.2.1")
+	c.signIn(t, "demo", v.demoPass)
+	r := c.do(t, http.MethodPost, "/certificates", map[string]any{"ca_id": v.caIDs["root"], "preset": "server", "sans": map[string]any{"dns": []string{"leaf-from-root.homelab.lan"}}, "key": map[string]string{"algorithm": "ecdsa-p256"}})
+	if r.Code != 422 || r.problemType() != "policy-violation" || !strings.Contains(r.Body.String(), "a root CA only signs intermediate CAs and CRLs") {
+		t.Errorf("issue from the root: %d %s", r.Code, r.Body.String())
+	}
+}

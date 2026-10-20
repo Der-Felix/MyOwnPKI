@@ -146,6 +146,13 @@ func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued
 	if err != nil {
 		return nil, err
 	}
+	// A root signs intermediate CAs and CRLs only (owner 2026-10-18; CA/B
+	// BR §6.1.7): a misissued leaf is revoked by its intermediate instead of
+	// endangering the trust anchor, and the root key isn't needed for every
+	// issuance. Imported certificates (legacy importer) are not issued here.
+	if is.ca.Kind == KindRoot {
+		return nil, deny("a root CA only signs intermediate CAs and CRLs – issue from an intermediate")
+	}
 	if e.Keys.Status().Sealed {
 		return nil, keys.ErrSealed
 	}
