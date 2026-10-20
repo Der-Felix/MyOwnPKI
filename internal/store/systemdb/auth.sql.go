@@ -81,6 +81,17 @@ func (q *Queries) CountOtherActiveTenantAdmins(ctx context.Context, arg CountOth
 	return count, err
 }
 
+const countPasskeys = `-- name: CountPasskeys :one
+SELECT count(*) FROM webauthn_credentials WHERE user_id = ?
+`
+
+func (q *Queries) CountPasskeys(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPasskeys, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnusedRecoveryCodes = `-- name: CountUnusedRecoveryCodes :one
 SELECT count(*) FROM recovery_codes WHERE user_id = ? AND used_at IS NULL
 `
@@ -137,6 +148,23 @@ func (q *Queries) DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUs
 	return result.RowsAffected()
 }
 
+const deletePasskey = `-- name: DeletePasskey :execrows
+DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?
+`
+
+type DeletePasskeyParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) DeletePasskey(ctx context.Context, arg DeletePasskeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePasskey, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
 DELETE FROM recovery_codes WHERE user_id = ?
 `
@@ -171,6 +199,18 @@ DELETE FROM sessions WHERE id_hash = ?
 func (q *Queries) DeleteSession(ctx context.Context, idHash string) error {
 	_, err := q.db.ExecContext(ctx, deleteSession, idHash)
 	return err
+}
+
+const deleteUserPasskeys = `-- name: DeleteUserPasskeys :execrows
+DELETE FROM webauthn_credentials WHERE user_id = ?
+`
+
+func (q *Queries) DeleteUserPasskeys(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserPasskeys, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteUserSessions = `-- name: DeleteUserSessions :execrows
@@ -259,6 +299,36 @@ func (q *Queries) GetUserByName(ctx context.Context, username string) (User, err
 	return i, err
 }
 
+const insertPasskey = `-- name: InsertPasskey :exec
+
+INSERT INTO webauthn_credentials (id, user_id, credential_id, credential, name, sign_count, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertPasskeyParams struct {
+	ID           string
+	UserID       string
+	CredentialID []byte
+	Credential   string
+	Name         string
+	SignCount    int64
+	CreatedAt    string
+}
+
+// Passkeys (step 17).
+func (q *Queries) InsertPasskey(ctx context.Context, arg InsertPasskeyParams) error {
+	_, err := q.db.ExecContext(ctx, insertPasskey,
+		arg.ID,
+		arg.UserID,
+		arg.CredentialID,
+		arg.Credential,
+		arg.Name,
+		arg.SignCount,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertRecoveryCode = `-- name: InsertRecoveryCode :exec
 INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)
 `
@@ -334,6 +404,42 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const listPasskeys = `-- name: ListPasskeys :many
+SELECT id, user_id, credential_id, credential, name, sign_count, created_at, last_used_at FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at, id
+`
+
+func (q *Queries) ListPasskeys(ctx context.Context, userID string) ([]WebauthnCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listPasskeys, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WebauthnCredential{}
+	for rows.Next() {
+		var i WebauthnCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.CredentialID,
+			&i.Credential,
+			&i.Name,
+			&i.SignCount,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRoleBindings = `-- name: ListRoleBindings :many
@@ -572,6 +678,35 @@ type TouchSessionParams struct {
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.ExecContext(ctx, touchSession, arg.LastSeenAt, arg.IDHash)
 	return err
+}
+
+const usePasskey = `-- name: UsePasskey :execrows
+UPDATE webauthn_credentials
+SET credential = ?1, sign_count = ?2, last_used_at = ?3
+WHERE id = ?4 AND (sign_count < ?2 OR (sign_count = 0 AND ?2 = 0))
+`
+
+type UsePasskeyParams struct {
+	Credential string
+	SignCount  int64
+	LastUsedAt sql.NullString
+	ID         string
+}
+
+// A sign-in with a passkey: the counter only moves forward, or stays 0 for
+// authenticators that never count (synced passkeys). The WHERE makes a race
+// between two sign-ins safe.
+func (q *Queries) UsePasskey(ctx context.Context, arg UsePasskeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, usePasskey,
+		arg.Credential,
+		arg.SignCount,
+		arg.LastUsedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const useRecoveryCode = `-- name: UseRecoveryCode :execrows

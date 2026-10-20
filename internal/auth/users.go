@@ -289,7 +289,12 @@ func (s *Service) ResetTOTP(ctx context.Context, username string, who keys.Who) 
 		if terr != nil {
 			return terr
 		}
-		return s.enqueueTarget(ctx, tx, who, "user.totp_reset", u.ID, map[string]any{"username": u.Username, "sessions_ended": n})
+		// The lost device may be a security key: only the new secret works.
+		passkeys, terr := q.DeleteUserPasskeys(ctx, u.ID)
+		if terr != nil {
+			return terr
+		}
+		return s.enqueueTarget(ctx, tx, who, "user.totp_reset", u.ID, map[string]any{"username": u.Username, "sessions_ended": n, "passkeys_removed": passkeys})
 	})
 	if err != nil {
 		return nil, err

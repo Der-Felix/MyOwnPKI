@@ -128,6 +128,57 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 - A backup of a server under real load on Linux (the concurrency test runs in-process).
 - Restore across machines with different paths of `auth.key_file` (only the note is tested).
 
+## Step 17 – Passkeys (WebAuthn)
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| `github.com/go-webauthn/webauthn` **v0.18.2** (2026-09-19, BSD-3); it brings fxamacker/cbor, go-webauthn/x, golang-jwt/jwt/v5, google/go-tpm, go-viper/mapstructure, tinylib/msgp, philhofer/fwd, x448/float16 (all MIT/BSD/Apache-2.0) | Approved for step 17; the newest version older than two weeks; the transitive modules come with it (listed in THIRD_PARTY.md) | – |
+| A passkey is a **second factor** (after the password) and works for **step-up** – not passwordless sign-in | The spec (`/auth/webauthn/*`) and security.md say "second factor"; a password + passkey keeps one sign-in model | Discoverable login later (`BeginDiscoverableLogin`) |
+| Passkeys only when `auth.passkey_origin` is set (e.g. `https://pki.homelab.lan:9443`); RP ID = its host name. Without it the endpoints answer 404 and sign-in offers TOTP only | WebAuthn binds every passkey to the RP ID: it must be the name users type, which the server can't guess. Browsers refuse WebAuthn on certificate errors – passkeys need the admin certificate from the own CA (or an operator certificate) | – |
+| Registering a passkey: signed in, **fresh step-up and the current password** (decision 45, own authenticator); afterwards the credentials epoch rises (device cookies void) and other sessions end; audited `user.passkey_add` | The second factor is never added with the password alone | – |
+| User verification **required**, attestation `none` (no vendor list), resident key preferred; at most 10 passkeys per user | UV makes the passkey itself two factors; attestation lists are for regulated sites, not a homelab PKI | – |
+| Ceremony state (challenge) **in memory**, bound to the session that started it, 5 minutes, at most 10,000 at once | Like the throttle: a restart only loses ceremonies in progress | Store in system.db |
+| A failed assertion counts like a wrong TOTP code (throttle, lockout, audit); a sign counter that goes backwards is refused as a cloned authenticator (audited `cloned`) | Same rules for every second factor | Warn only |
+| `user reset-2fa` also removes the passkeys | The lost device may be the security key; reset means "only the new secret works" | Keep passkeys |
+| **No passkey button in the browser UI yet**: it needs a script (`navigator.credentials`), ADR-04 wants TypeScript bundled with esbuild, which is not approved. API and service are complete and tested | No ADR change at night; question to the owner below | Approve esbuild (or one plain JS file) |
+| Spec: `beginWebAuthnRegistration` takes `{"password"}`; new `GET /users/me/webauthn` and `DELETE /users/me/webauthn/{id}` (list, remove with step-up + password) | Decision 45 needs the current password; a passkey must be removable | – |
+
+### Done
+- `internal/auth/passkey.go`: relying party (`NewPasskeys`), registration (step-up + current
+  password, exclusion of known credentials, UV required), sign-in as second factor and step-up,
+  list and remove; ceremonies in memory, bound to the session, used once; clone detection in Go
+  and in the SQL update; reset-2fa removes passkeys.
+- system.db migration 0007 `webauthn_credentials`; config `auth.passkey_origin`
+  (`MYOWNPKI_AUTH_PASSKEY_ORIGIN`), checked by `config.PasskeyRPID` (https or http://localhost,
+  host name, no path).
+- API: `beginWebAuthnLogin`, `finishWebAuthnLogin`, `listWebAuthnCredentials`,
+  `beginWebAuthnRegistration` (now with `{"password"}`), `finishWebAuthnRegistration` (201 with the
+  passkey, `?name=`), `deleteWebAuthnCredential`; `login` lists `webauthn` in `methods` when the
+  user has a passkey. The 405 fallback is now registered per method (a method-less pattern for
+  `/users/me/webauthn/finish` clashed with `DELETE /users/me/webauthn/{id}` in Go's mux).
+- `internal/auth/passkeytest`: virtual authenticator (ECDSA P-256, attestation none, own minimal
+  CBOR encoder – no extra module).
+
+### Tests
+- `TestPasskeyRegistrationAndLogin`: registration, credentials epoch +1, other sessions end,
+  sign-in with password + passkey (new session ID, device cookie), answer used twice refused,
+  step-up with the passkey, list, remove (wrong password refused), audit entries.
+- `TestPasskeyRefusals`: passkeys off, registration without the password, a passkey from another
+  origin (phishing), no user verification, excluded authenticator, a user without passkeys, a
+  counter that goes back (cloned), reset-2fa removes passkeys.
+- Contract test: every new operation with success, no session and step-up cases, schema-checked.
+- Mutations: clone detection off → test fails; a second allowed origin → the phishing case fails.
+- `task vuln`: 0 vulnerabilities reached; the module list shows the known GO-2026-5932
+  (`x/crypto/openpgp`, not used, blocked by depguard).
+
+### Not verifiable tonight
+- A real browser and a real authenticator (Windows Hello, a YubiKey, a phone): no UI button yet,
+  and WebAuthn needs the admin certificate trusted by the browser.
+- **My own mistake, repaired at once:** a diagnostic command line ended with `git checkout HEAD~0;
+  git stash`, which put the uncommitted step-17 work into a stash and detached HEAD. `git stash pop`
+  and `git switch night/v0.1` restored everything (same files, same branch tip); nothing was lost.
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,

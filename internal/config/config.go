@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,6 +85,10 @@ type Auth struct {
 	// whose X-Forwarded-For header is believed. Empty: the direct peer is
 	// the client – the safe default.
 	TrustedProxies string `yaml:"trusted_proxies"`
+	// PasskeyOrigin is the address users open the admin UI with, e.g.
+	// https://pki.homelab.lan:9443 (PHASE1 step 17). Passkeys are bound to its
+	// host name (the WebAuthn RP ID). Empty: no passkeys, TOTP only.
+	PasskeyOrigin string `yaml:"passkey_origin"`
 }
 
 // Allowed values.
@@ -195,6 +200,9 @@ func (c Config) Validate() error {
 	}
 	if _, err := ParseNetworks(c.Auth.TrustedProxies); err != nil {
 		add("auth.trusted_proxies: %w", err)
+	}
+	if _, err := PasskeyRPID(c.Auth.PasskeyOrigin); err != nil {
+		add("auth.passkey_origin: %w", err)
 	}
 
 	if len(errs) > 0 {
@@ -377,4 +385,28 @@ func validDNSName(s string) bool {
 		}
 	}
 	return true
+}
+
+// PasskeyRPID checks auth.passkey_origin and returns its host name, the
+// WebAuthn RP ID ("" when passkeys are off). Browsers allow WebAuthn only
+// in a secure context: https, or http on localhost.
+func PasskeyRPID(origin string) (string, error) {
+	if origin == "" {
+		return "", nil
+	}
+	u, err := url.Parse(origin)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%q is not a URL", origin)
+	case u.Host == "" || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "":
+		return "", fmt.Errorf("%q: want only scheme, host and port, e.g. https://pki.homelab.lan:9443", origin)
+	case u.Scheme == "https":
+	case u.Scheme == "http" && u.Hostname() == "localhost":
+	default:
+		return "", fmt.Errorf("%q: passkeys need https (browsers allow plain http only for localhost)", origin)
+	}
+	if net.ParseIP(u.Hostname()) != nil {
+		return "", fmt.Errorf("%q: passkeys need a host name, not an IP address (WebAuthn RP ID)", origin)
+	}
+	return strings.ToLower(u.Hostname()), nil
 }

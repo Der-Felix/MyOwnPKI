@@ -110,3 +110,29 @@ SELECT count(*) FROM users WHERE instance_admin = 1 AND disabled_at IS NULL AND 
 -- name: CountOtherActiveTenantAdmins :one
 SELECT count(*) FROM role_bindings b JOIN users u ON u.id = b.user_id
 WHERE b.tenant_id = ? AND b.ca = '' AND b.role = 'admin' AND u.disabled_at IS NULL AND b.user_id <> ?;
+
+-- Passkeys (step 17).
+
+-- name: InsertPasskey :exec
+INSERT INTO webauthn_credentials (id, user_id, credential_id, credential, name, sign_count, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListPasskeys :many
+SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at, id;
+
+-- name: CountPasskeys :one
+SELECT count(*) FROM webauthn_credentials WHERE user_id = ?;
+
+-- A sign-in with a passkey: the counter only moves forward, or stays 0 for
+-- authenticators that never count (synced passkeys). The WHERE makes a race
+-- between two sign-ins safe.
+-- name: UsePasskey :execrows
+UPDATE webauthn_credentials
+SET credential = sqlc.arg(credential), sign_count = sqlc.arg(sign_count), last_used_at = sqlc.arg(last_used_at)
+WHERE id = sqlc.arg(id) AND (sign_count < sqlc.arg(sign_count) OR (sign_count = 0 AND sqlc.arg(sign_count) = 0));
+
+-- name: DeletePasskey :execrows
+DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?;
+
+-- name: DeleteUserPasskeys :execrows
+DELETE FROM webauthn_credentials WHERE user_id = ?;

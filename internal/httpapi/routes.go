@@ -14,7 +14,14 @@ func (a *API) table() []Route {
 		{OperationID: "verifyTOTP", Method: http.MethodPost, Path: "/auth/totp", access: public, body: true, handle: a.secondFactor},
 		{OperationID: "stepUp", Method: http.MethodPost, Path: "/auth/step-up", access: signedIn, body: true, handle: a.stepUp},
 		{OperationID: "getSession", Method: http.MethodGet, Path: "/auth/session", access: signedIn, passive: true, handle: a.getSession},
+		{OperationID: "beginWebAuthnLogin", Method: http.MethodPost, Path: "/auth/webauthn/begin", access: public, handle: a.passkeyBegin},
+		{OperationID: "finishWebAuthnLogin", Method: http.MethodPost, Path: "/auth/webauthn/finish", access: public, body: true, handle: a.passkeyFinish},
 		{OperationID: "logout", Method: http.MethodPost, Path: "/auth/logout", access: signedIn, handle: a.logout},
+
+		{OperationID: "listWebAuthnCredentials", Method: http.MethodGet, Path: "/users/me/webauthn", access: signedIn, handle: a.listPasskeys},
+		{OperationID: "beginWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/begin", access: signedIn, body: true, handle: a.passkeyRegisterBegin},
+		{OperationID: "finishWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/finish", access: signedIn, body: true, handle: a.passkeyRegisterFinish},
+		{OperationID: "deleteWebAuthnCredential", Method: http.MethodDelete, Path: "/users/me/webauthn/{passkeyId}", access: signedIn, body: true, handle: a.deletePasskey},
 
 		{OperationID: "listPresets", Method: http.MethodGet, Path: "/presets", access: signedIn, handle: a.listPresets},
 		{OperationID: "getPreset", Method: http.MethodGet, Path: "/presets/{presetName}", access: signedIn, handle: a.getPreset},

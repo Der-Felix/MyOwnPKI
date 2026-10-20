@@ -53,6 +53,8 @@ type Service struct {
 	Issuer string
 	// Wake, if set, is called after an audit event was written to the outbox.
 	Wake func()
+	// Passkeys is the WebAuthn relying party; nil = no passkeys (TOTP only).
+	Passkeys *Passkeys
 }
 
 // NewService returns a service with the production hasher and throttle.

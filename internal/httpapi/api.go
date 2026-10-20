@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/netip"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -117,12 +118,21 @@ func New(d Deps) *API {
 		a.mux.Handle(rt.Method+" "+BasePath+rt.Path, a.wrap(rt))
 		allowed[rt.Path] = append(allowed[rt.Path], rt.Method)
 	}
+	// 405 per method, not one pattern for all: a method-less pattern for
+	// /users/me/webauthn/finish would conflict with DELETE /users/me/webauthn/{id}.
 	for path, methods := range allowed {
 		allow := strings.Join(methods, ", ")
-		a.mux.Handle(BasePath+path, a.wrap(Route{OperationID: "methodNotAllowed", access: public, handle: func(c *call) error {
+		notAllowed := a.wrap(Route{OperationID: "methodNotAllowed", access: public, handle: func(c *call) error {
 			c.w.Header().Set("Allow", allow)
 			return c.problem(http.StatusMethodNotAllowed, "bad-request", "method not allowed – use "+allow, nil)
-		}}))
+		}})
+		// No HEAD: a GET pattern covers HEAD and would clash with it.
+		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions} {
+			if slices.Contains(methods, m) {
+				continue
+			}
+			a.mux.Handle(m+" "+BasePath+path, notAllowed)
+		}
 	}
 	a.notFound = a.wrap(Route{OperationID: "notFound", access: public, handle: func(c *call) error {
 		return c.problem(http.StatusNotFound, "not-found", "no such API operation", nil)

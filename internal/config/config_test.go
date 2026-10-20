@@ -185,7 +185,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
-		Auth: Auth{"marker", "marker"}}
+		Auth: Auth{"marker", "marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -264,5 +264,22 @@ func TestAdminTLSNamesAndAllowlist(t *testing.T) {
 	cfg.Admin.AllowedNetworks, cfg.Admin.TLSNames = "10.0.0.1/8", "*.lan"
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "admin.allowed_networks") || !strings.Contains(err.Error(), "admin.tls_names") {
 		t.Errorf("validate: %v", err)
+	}
+}
+
+func TestPasskeyRPID(t *testing.T) {
+	t.Parallel()
+	for origin, want := range map[string]string{
+		"": "", "https://PKI.homelab.lan:9443": "pki.homelab.lan", "https://pki.homelab.lan": "pki.homelab.lan",
+		"http://localhost:9443": "localhost",
+	} {
+		if got, err := PasskeyRPID(origin); err != nil || got != want {
+			t.Errorf("%q: %q %v", origin, got, err)
+		}
+	}
+	for _, bad := range []string{"http://pki.homelab.lan", "https://192.0.2.10:9443", "https://pki.homelab.lan/ui", "pki.homelab.lan", "https://user@pki.lan", "https://pki.lan?x=1"} {
+		if _, err := PasskeyRPID(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }

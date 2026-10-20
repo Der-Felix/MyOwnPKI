@@ -30,6 +30,12 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
   stored as HMAC keyed from the auth key.
 - The second factor is fixed **at creation** (init on the console, reset-2fa): the first code only
   confirms it – never "enroll at first login", which would let whoever knows the password enroll.
+- Passkeys (step 17, `internal/auth/passkey.go`): second factor after the password and step-up,
+  only with `auth.passkey_origin` (RP ID = its host name; browsers need https without certificate
+  errors). Adding or removing one needs a fresh step-up **and** the current password and raises the
+  credentials epoch; user verification required, no attestation; the challenge is bound to the
+  session and used once; a sign counter that goes back is refused (cloned authenticator);
+  `reset-2fa` removes all passkeys. Tests use the virtual authenticator `internal/auth/passkeytest`.
 - OIDC optional (Authentik, Keycloak, Entra ID): validate issuer, audience, nonce, PKCE.
 - Sessions: server-side in `system.db` (only the SHA-256 of the ID), random 256-bit IDs, cookie
   `HttpOnly; Secure; SameSite=Strict; Path=/`, `__Host-` prefix, idle 30 min + absolute 12 h, new ID

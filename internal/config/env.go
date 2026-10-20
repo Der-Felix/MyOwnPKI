@@ -27,6 +27,7 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "PUBLIC_LISTEN":          &c.Public.Listen,
 		EnvPrefix + "AUTH_KEY_FILE":          &c.Auth.KeyFile,
 		EnvPrefix + "AUTH_TRUSTED_PROXIES":   &c.Auth.TrustedProxies,
+		EnvPrefix + "AUTH_PASSKEY_ORIGIN":    &c.Auth.PasskeyOrigin,
 	}
 }
 
