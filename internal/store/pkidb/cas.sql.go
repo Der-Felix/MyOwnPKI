@@ -235,6 +235,39 @@ func (q *Queries) InsertCAGeneration(ctx context.Context, arg InsertCAGeneration
 	return err
 }
 
+const insertCAHistory = `-- name: InsertCAHistory :exec
+INSERT INTO ca_certificate_history (ca_id, generation, serial_hex, not_before, not_after, cert_der,
+                                    fingerprint_sha256, source, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertCAHistoryParams struct {
+	CaID              string
+	Generation        int64
+	SerialHex         string
+	NotBefore         string
+	NotAfter          string
+	CertDer           []byte
+	FingerprintSha256 string
+	Source            string
+	CreatedAt         string
+}
+
+func (q *Queries) InsertCAHistory(ctx context.Context, arg InsertCAHistoryParams) error {
+	_, err := q.db.ExecContext(ctx, insertCAHistory,
+		arg.CaID,
+		arg.Generation,
+		arg.SerialHex,
+		arg.NotBefore,
+		arg.NotAfter,
+		arg.CertDer,
+		arg.FingerprintSha256,
+		arg.Source,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertNameConstraint = `-- name: InsertNameConstraint :exec
 INSERT INTO ca_name_constraints (ca_id, kind, value, permitted) VALUES (?, ?, ?, ?)
 `
@@ -320,6 +353,43 @@ func (q *Queries) ListCAGenerations(ctx context.Context, caID string) ([]CaGener
 			&i.SkiHex,
 			&i.IssuerCaID,
 			&i.IssuerGeneration,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCAHistory = `-- name: ListCAHistory :many
+SELECT ca_id, generation, serial_hex, not_before, not_after, cert_der, fingerprint_sha256, source, created_at FROM ca_certificate_history WHERE ca_id = ? ORDER BY not_before
+`
+
+func (q *Queries) ListCAHistory(ctx context.Context, caID string) ([]CaCertificateHistory, error) {
+	rows, err := q.db.QueryContext(ctx, listCAHistory, caID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CaCertificateHistory{}
+	for rows.Next() {
+		var i CaCertificateHistory
+		if err := rows.Scan(
+			&i.CaID,
+			&i.Generation,
+			&i.SerialHex,
+			&i.NotBefore,
+			&i.NotAfter,
+			&i.CertDer,
+			&i.FingerprintSha256,
+			&i.Source,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -426,7 +496,9 @@ func (q *Queries) MaxGeneration(ctx context.Context, caID string) (int64, error)
 
 const serialTaken = `-- name: SerialTaken :one
 SELECT (SELECT count(*) FROM certificates WHERE certificates.ca_id = ?1 AND certificates.serial_hex = ?2)
-     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = ?1 AND ca_generations.serial_hex = ?2) AS taken
+     + (SELECT count(*) FROM ca_generations WHERE ca_generations.issuer_ca_id = ?1 AND ca_generations.serial_hex = ?2)
+     + (SELECT count(*) FROM ca_certificate_history h JOIN ca_generations g ON g.ca_id = h.ca_id AND g.generation = h.generation
+        WHERE g.issuer_ca_id = ?1 AND h.serial_hex = ?2) AS taken
 `
 
 type SerialTakenParams struct {
@@ -435,7 +507,8 @@ type SerialTakenParams struct {
 }
 
 // Issuer name + serial must identify one certificate (RFC 5280): a serial is
-// taken by a leaf of the CA or by a CA certificate the CA signed.
+// taken by a leaf of the CA or by a CA certificate the CA signed (also an
+// older certificate of a renewed key, step 15).
 func (q *Queries) SerialTaken(ctx context.Context, arg SerialTakenParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, serialTaken, arg.IssuerID, arg.SerialHex)
 	var taken int64
@@ -470,6 +543,22 @@ type SetCurrentGenerationParams struct {
 
 func (q *Queries) SetCurrentGeneration(ctx context.Context, arg SetCurrentGenerationParams) error {
 	_, err := q.db.ExecContext(ctx, setCurrentGeneration, arg.CurrentGeneration, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const setLegacyURLs = `-- name: SetLegacyURLs :exec
+UPDATE cas SET legacy_urls = 1, updated_at = ? WHERE id = ?
+`
+
+type SetLegacyURLsParams struct {
+	UpdatedAt string
+	ID        string
+}
+
+// Set by the legacy importer: serve <base>/<name>.crt|.crl as aliases of
+// generation 1 (step 9).
+func (q *Queries) SetLegacyURLs(ctx context.Context, arg SetLegacyURLsParams) error {
+	_, err := q.db.ExecContext(ctx, setLegacyURLs, arg.UpdatedAt, arg.ID)
 	return err
 }
 

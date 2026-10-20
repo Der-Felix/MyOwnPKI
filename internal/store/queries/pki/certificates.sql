@@ -54,3 +54,6 @@ SELECT c.ca_id,
        CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(sqlc.arg(soon) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS valid
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
 GROUP BY c.ca_id;
+
+-- name: CountFingerprint :one
+SELECT count(*) FROM certificates WHERE fingerprint_sha256 = ?;

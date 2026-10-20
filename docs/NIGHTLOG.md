@@ -34,6 +34,58 @@ sub-CA count) each made a test fail. Eight commits, each built and tested on its
 ### Not verifiable tonight
 Nothing open for step 14; the owner's browser test of M1 is still to do.
 
+## Step 15 – Legacy importer
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| Reader `internal/ca/legacy` (parses a `pki/` directory as an `fs.FS`, never executes or `source`s anything) + engine `ImportLegacy` (one pki.db transaction: all or nothing) + CLI `myownpki import legacy DIR [--dry-run]` | The legacy files are input from another tool: parsing stays apart from writing. An `fs.FS` lets step 18 feed an uploaded archive the same way | – |
+| Source of truth for certificates: each CA's `index.txt` + `newcerts/<serial>.pem`; `issued/<name>/cert.meta` only adds preset and key | `issued/` holds only the newest certificate of a name; `newcerts/` holds every certificate a CA ever signed, so renewed and revoked ones are not lost | – |
+| The **root is imported as an offline root** (certificate only, its CRL as `uploaded`); `--root-key online` imports its key encrypted instead | A root signs only intermediates and CRLs (decision 81); `legacy/pki.sh` stays the offline root tool (`pki ca-sign`, `pki crl --ca root`) | Default to `online` |
+| Intermediates are imported **with their key** (encrypted in pki.db, generation 1, `legacy_urls = 1` when `AIA_BASE_URL` was set) | Without the key the CA can't issue or sign CRLs on the server | – |
+| CRL numbers: `crlnumber` is **hex** (OpenSSL); `cas.crl_number` = the last number used (file − 1); the current `crl/ca.crl` is kept as evidence (`crls.source = uploaded`) after its signature is checked; an online CA signs its next CRL **in the import transaction** – so the numbering continues exactly where pki.sh stopped | Decision 62 (no CA without a CRL); CRL numbers must never go back (RFC 5280 §5.2.3) | – |
+| Revocations keep time and reason; `keyTime`/`CAkeyTime` become the invalidity date; `certificateHold` → `unspecified` with the warning of decision 36; `CACompromise` on an **end-entity** certificate → `keyCompromise` with a warning (the table allows cACompromise only for CAs); `removeFromCRL` entries are reported and skipped | Keeps what relying parties see on the CRL; every change is named in the report and the audit entry | Extend the reasons (new migration) |
+| keyCompromise / cACompromise put the key into `blocked_keys` (decision 29) | Same rule as a revocation on the server | – |
+| Encrypted keys: passphrases from the legacy variables `PKI_CA_PASS_<NAME>`, `PKI_CA_PASS`, `PKI_KEY_PASS` (PBES2 decrypted with the standard library); a CA key that can't be decrypted **blocks** the import, a leaf key that can't is skipped with a warning (the certificate is imported) | Same names as pki.sh uses for automation; a CA without its key would be useless, a leaf without a key is still a valid record | Add a prompt per key |
+| Self-signed leaves (`CA="selfsigned"`) are imported as `external` | They have no CA here, but are still certificates the operator watches | Skip them |
+| Older certificates of the **same** CA key (pki.sh `renew-ca`, from `archive/` and `newcerts/`) go into a new immutable table `ca_certificate_history` (pki.db migration 0006); the newest certificate is generation 1 | PHASE1 note for step 15; they verify the same leaves and must stay as evidence | – |
+| Refused as a whole: a CA name or subject that exists already, an Ed25519 CA (decision 22), a certificate whose signature doesn't verify with its CA, a CA key that doesn't match its certificate, index entries without their certificate file. Warnings only: unknown preset names, leaf keys that can't be read, stale CRLs, validity above the CA maximum (397 days) | The import is all or nothing; `--dry-run` lists every problem first | – |
+| `max_validity_days` 397 for imported intermediates, `crl_days` from `pki.conf` `CRL_DAYS`; imported certificates are not checked against the maximum | Keeps the owner's default for new certificates; old ones are records, not requests | `--max-validity-days` later |
+| Audit: one `ca.import_legacy` entry per CA (counts, warnings) and one `import.legacy` summary, all in the import transaction (outbox) | Thousands of certificates would flood the log; the counts and serials are in the database | One entry per certificate |
+| The CLI needs the unseal passphrase (like `user reset-2fa`), `--dry-run` doesn't; API import jobs (`import_jobs`) come with step 18 | Keys are encrypted with the root key | – |
+
+### Done
+- `internal/ca/legacy`: reads `pki.conf`, every CA (`ca.meta`, `certs/ca.crt`, `private/ca.key`,
+  `index.txt`, `newcerts/`, `crlnumber`, `crl/ca.crl`, `archive/`) and `issued/` (current and
+  archived versions); PKCS#8 keys, PBES2-encrypted ones with the standard library only.
+- `ca.ImportLegacy`: checks everything first (dry run = the same checks), then one pki.db
+  transaction: CAs, generation 1, name constraints and EKU limit from the certificate, history of
+  `renew-ca`, certificates with SANs, revocations, blocked keys, pki.sh's CRL as evidence, the next
+  CRL of every online CA, audit entries.
+- `myownpki import legacy DIR [--dry-run] [--base-url URL] [--root-key offline|online]`.
+- `internal/ca/legacy/legacytest`: a pki.sh-shaped directory written in Go, for the CLI test on
+  every platform.
+
+### Tests
+- `TestImportLegacyPkiSh` (pki.sh fixture: 2 intermediates, one with name constraints, three
+  revocation reasons, a renewed certificate, `renew-ca`, an encrypted key, a self-signed
+  certificate): serials, revocation time and reason per CA identical before/after; pki.sh's CRL
+  kept with its number; the server's CRL has exactly the number of `crlnumber` and the same
+  entries (serial, time, reason); `openssl verify -crl_check_all` refuses every revoked leaf and
+  accepts the others; the imported intermediate issues with the new URLs (`openssl verify`); a
+  second import is refused; audit entries.
+- `TestImportLegacyRootOnline` (root key imported, other base URL, encrypted leaf key without
+  passphrase), `TestImportLegacyRefuses` (missing `newcerts/` file: refused, nothing written,
+  `denied` in the audit log), reader unit tests (index lines incl. keyTime/holdInstruction and
+  UTCTime 1950, key/value files, PBES2 incl. wrong passphrase and iteration cap), CLI test.
+- Mutation: the CRL number one too high made `TestImportLegacyPkiSh` and
+  `TestImportLegacyRootOnline` fail.
+
+### Not verifiable tonight
+- A real, years-old pki.sh directory (RSA 4096 CAs with passphrases, many certificates): only the
+  fixture. The owner's own `pki/` is the real test – first with `--dry-run`.
+- The API/UI import (archive upload as an import job) is step 18/19.
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,
