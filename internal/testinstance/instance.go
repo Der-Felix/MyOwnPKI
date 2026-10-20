@@ -1,0 +1,227 @@
+// Package testinstance builds an initialized instance for tests of the HTTP
+// layers (API, web UI): init --demo with the test CA, the services wired like
+// the server does, a fake clock and helpers for users and TOTP codes. It is
+// imported by tests only.
+package testinstance
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha1" // #nosec G505 -- TOTP (RFC 6238) is HMAC-SHA1 by design; test helper only
+	"encoding/base32"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/auth"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
+	"github.com/Der-Felix/MyOwnPKI/internal/clock"
+	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/setup"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
+)
+
+// Console is the console operator of the tests.
+var Console = keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "console:test"}, Principal: authz.Console()}
+
+// Password is the password of every user made with User.
+const Password = "a long password for the HTTP tests"
+
+// Options shape the instance.
+type Options struct {
+	// Hostname is O of the test CA; "" = "pki01".
+	Hostname string
+	// BaseURL of the test CA; "" = http://pki.homelab.lan.
+	BaseURL string
+}
+
+// Instance is an initialized instance, sealed.
+type Instance struct {
+	Auth    *auth.Service
+	Engine  *ca.Engine
+	Ring    *keys.Keyring
+	Presets *preset.Set
+	Clock   *clock.Fake
+	// SystemDB, InstanceAudit and TenantAudit are open for checks.
+	SystemDB, InstanceAudit, TenantAudit *store.DB
+
+	Passphrase   string // unseal passphrase
+	DemoPassword string // password of the init user "demo"
+	CAIDs        map[string]string
+	secrets      map[string][]byte // TOTP secrets by user name
+}
+
+// New runs init --demo with the test CA and wires the services. The clock is
+// not on a whole second: the engine works in seconds, sessions in
+// milliseconds, and the tests must see both.
+func New(t *testing.T, o Options) *Instance {
+	t.Helper()
+	if o.Hostname == "" {
+		o.Hostname = "pki01"
+	}
+	if o.BaseURL == "" {
+		o.BaseURL = "http://pki.homelab.lan"
+	}
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	v := &Instance{
+		Clock:   clock.NewFake(clock.System{}.Now().UTC().Truncate(time.Second).Add(700 * time.Millisecond)),
+		secrets: map[string][]byte{}, CAIDs: map[string]string{},
+	}
+	res, err := setup.Run(t.Context(), setup.Options{
+		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console,
+	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	demo, err := os.ReadFile(res.DemoSecretsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(demo), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if p, ok := strings.CutPrefix(line, "unseal passphrase: "); ok {
+			v.Passphrase = p
+		}
+		if p, ok := strings.CutPrefix(line, "admin password: "); ok {
+			v.DemoPassword = p
+		}
+		if s, ok := strings.CutPrefix(line, "secret:"); ok {
+			v.secrets["demo"] = decodeSecret(t, s)
+		}
+	}
+
+	l := store.Layout{DataDir: cfg.DataDir}
+	open := func(path string) *store.DB {
+		db, oerr := store.Open(t.Context(), path)
+		if oerr != nil {
+			t.Fatal(oerr)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db
+	}
+	pkiPath, _ := l.TenantDB(store.DefaultTenant, store.KindPKI)
+	taPath, _ := l.TenantDB(store.DefaultTenant, store.KindAudit)
+	v.SystemDB = open(l.SystemDB())
+	v.InstanceAudit = open(l.InstanceAuditDB())
+	pki := open(pkiPath)
+	v.TenantAudit = open(taPath)
+
+	key, _, err := auth.LoadKey(cfg.AuthKeyFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock)
+	if v.Presets, err = preset.Builtin(); err != nil {
+		t.Fatal(err)
+	}
+	v.Engine = &ca.Engine{
+		PKI: pki.Write, Audit: v.TenantAudit.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: v.Ring, Presets: v.Presets,
+		Clock: v.Clock, ServerKeygen: func(context.Context) (bool, error) { return true, nil },
+	}
+	v.Auth = auth.NewService(v.SystemDB.Write, v.InstanceAudit.Write, key, v.Clock)
+	v.Auth.Hasher = auth.NewHasher(auth.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}, 4, time.Second)
+	cas, err := ca.ListCAs(t.Context(), pki.Read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cas {
+		v.CAIDs[c.Name] = c.ID
+	}
+	return v
+}
+
+func decodeSecret(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// User creates a user with Password and roles in the default tenant.
+func (v *Instance) User(t *testing.T, name string, instanceAdmin bool, roles ...authz.Binding) {
+	t.Helper()
+	for i := range roles {
+		roles[i].Tenant = store.DefaultTenant
+	}
+	enr, err := v.Auth.CreateUser(t.Context(), auth.NewUserRequest{Username: name, Password: Password, InstanceAdmin: instanceAdmin, Roles: roles, Who: Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.secrets[name] = decodeSecret(t, enr.Secret)
+}
+
+// Code is the TOTP code of name now (RFC 6238: HMAC-SHA1, 30 s, 6 digits).
+func (v *Instance) Code(name string) string {
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], uint64(v.Clock.Now().Unix()/30)) // #nosec G115 -- a time after 1970
+	mac := hmac.New(sha1.New, v.secrets[name])
+	mac.Write(msg[:])
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	n := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7fffffff
+	return fmt.Sprintf("%06d", n%1_000_000)
+}
+
+// Unseal unlocks the keyring as the console.
+func (v *Instance) Unseal(t *testing.T) {
+	t.Helper()
+	if err := v.Ring.Unseal(t.Context(), []byte(v.Passphrase), Console); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Audit lists "action/result" of an audit log (direct entries are there at
+// once; outbox entries need a delivery, which these tests don't run).
+func Audit(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Read.QueryContext(t.Context(), `SELECT action, result FROM audit_entries ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var a, r string
+		if err := rows.Scan(&a, &r); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, a+"/"+r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// AuditIPs lists "action/result ip" of an audit log.
+func AuditIPs(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Read.QueryContext(t.Context(), `SELECT action, result, coalesce(source_ip, '') FROM audit_entries ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var a, r, ip string
+		if err := rows.Scan(&a, &r, &ip); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, a+"/"+r+" "+ip)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
