@@ -53,6 +53,10 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
 - Console emergencies (`user reset-2fa`) need the unseal passphrase or the recovery key: shell access
   to the server alone is not enough.
 - Never log a typed user name of a failed login with an unknown user (it may be a password).
+- The sign-in page shows nothing about the instance (version, seal state, demo mark) and one message
+  for a wrong name, a wrong password and a lockout; a name that strangers locked costs a hash like
+  an unknown one, so neither text nor answer time tells that it exists (step 14).
+- Redirect targets from requests (`next=`) are local paths only; every POST of the UI ends in 303.
 - API tokens: random, shown once, stored hashed, scoped (tenant, actions), expiring.
 
 ## Authorization (RBAC)

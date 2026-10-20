@@ -1,3 +1,39 @@
+# Night log – Phase 1, steps 14–20 and release
+
+> Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).
+> Rules: one local commit per finished part, only when `task check` and `task generate:check` are
+> green; never push, no tags, no releases. Approved new dependencies: go-webauthn/webauthn,
+> GoReleaser, cosign, syft (CI tools, pinned SHA-256), distroless static-debian12:nonroot (by digest).
+> No ADR changes; decisions taken alone are the reversible variant and listed below.
+>
+> Written in English (ADR-17). The owner's report is at the top; the step-by-step record follows.
+
+## Report for the owner
+
+_Filled in at the end of the run._
+
+## Step 14 – finish (review points 1–4)
+
+### Done
+- A root CA signs intermediate CAs and CRLs only; an end-entity request at a root is a
+  `ca.DeniedError` ("a root CA only signs intermediate CAs and CRLs – issue from an
+  intermediate"), audited as `denied`. The API answers 422 `policy-violation`; the wizard does
+  not offer roots. Decision 81, `pki-rules.md` §3.
+- "Issue certificate" in the menu and on the dashboard only when the user may issue at ≥1
+  intermediate (decision 82). The server still refuses on its own.
+- The instance audit carries the client address for sign-in success and failure (wrong
+  password, unknown name, wrong code), step-up success and failure, unseal success and
+  failure – `TestAuditHasTheAddress`. Decision 80 holds as written.
+- CA list: column "Signed" (certificates and intermediate CAs), "–" for a root's maximum
+  validity, readable key storage labels (decision 83). Only `authorities.png` regenerated.
+
+### Tests
+`task check` green; mutation checks (root rule, root in the wizard, menu for non-issuers,
+sub-CA count) each made a test fail. Eight commits, each built and tested on its own.
+
+### Not verifiable tonight
+Nothing open for step 14; the owner's browser test of M1 is still to do.
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,
