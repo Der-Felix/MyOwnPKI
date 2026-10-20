@@ -86,6 +86,48 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
   fixture. The owner's own `pki/` is the real test – first with `--dry-run`.
 - The API/UI import (archive upload as an import job) is step 18/19.
 
+## Step 16 – Backup and restore
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| A backup is a **new directory** (never overwritten, 0700, files 0600) with the database copies, `auth.key` when it lives in the data directory, and `manifest.json` written last | Inspectable with plain tools; the operator tars or encrypts it with whatever the site uses; a half-written backup has no manifest and is refused | One archive file (tar) |
+| Each database is copied with **`VACUUM INTO`** on a read-only connection – works while the server runs | One consistent snapshot per file without stopping anything (SQLite docs) | Online backup API |
+| Order: `system.db`, every tenant's `pki.db`, then **the audit databases last** (instance, then tenants) | PHASE1 "Backup consistency": the audit copies then hold at least every entry the others mark delivered; a redelivery after restore is deduplicated by `outbox_id` | – |
+| Manifest: format version, time, MyOwnPKI version, per file path/kind/SHA-256/size/migration version, per audit log the head (`seq:hash`), entry count, newest checkpoint and checkpoint key fingerprint; tenants; whether `auth.key` is inside | What PHASE1 step 16 asks for; the heads let a restore prove that no log was cut off or rewritten | – |
+| `myownpki backup DIR`, `myownpki backup verify DIR [--checkpoint-key FP]`, `myownpki restore DIR` | A backup that was never checked is a hope: `verify` runs every restore check without writing | – |
+| Restore only into an **empty or missing** data directory; checks before writing anything: manifest, SHA-256 of every file, `PRAGMA integrity_check`, kind/scope, migration versions (newer than this binary → refused), every audit chain intact **and** ending exactly at the manifest head, checkpoint key (pinned with `--checkpoint-key`, else all the same and printed for comparison), and the **SAN index**: every certificate's names in `certificate_sans` match the names in its DER | A restore must not bring back a damaged or manipulated PKI; the SAN index is what search and (phase 2) ACME rely on | – |
+| `system.backup` / `system.restore` entries in the instance audit log (the backup entry is written before the audit copy, so the backup contains it) | Who took and restored backups is audit-worthy | Leave out |
+| The manifest is **not signed**; integrity rests on SHA-256 + audit chains + signed checkpoints, pinned by the fingerprint noted at init | Signing would need the passphrase at every backup (cron); the checkpoint signatures already need the root key to forge | Add an HMAC with a key from the root key |
+| Prominent warning at every backup: keep the unseal passphrase and the recovery key apart from the backup | Owner decision 2 | – |
+| A backup is refused when a live audit chain is broken or two logs use different checkpoint keys | A broken chain is an incident to look at first (`audit verify`); a restore would refuse such a backup anyway | Write it with a warning instead |
+
+### Done
+- `internal/backup`: `Create` (order system → tenant business databases → audit logs, `store.Snapshot` =
+  `VACUUM INTO` on a connection without query_only), `Verify` and `Restore` (all checks on a work copy
+  next to the data directory, then one rename), `system.backup`/`system.restore` audit entries.
+- `ca.CheckSANIndex`: names in `certificate_sans` against the names in each certificate (DNS and
+  e-mail domain without case, IPs canonical).
+- `myownpki backup DIR`, `myownpki backup verify DIR [--checkpoint-key FP]`,
+  `myownpki restore DIR [--checkpoint-key FP]`; the backup prints the passphrase warning, the audit
+  heads, the checkpoint key and whether `auth.key` is inside.
+
+### Tests
+- `TestBackupRestoreRoundTrip`: pki.db and system.db tables identical after the restore, auth.key
+  restored, chains verify, backup + restore entries, no second backup into the same directory, no
+  restore into a used data directory.
+- `TestBackupDuringWrites`: certificates are issued and delivered while the backup runs; after the
+  restore every certificate has exactly one issue entry and a second delivery adds nothing.
+  **Mutation:** audit logs copied first → 10 certificates without their audit entry, the test fails.
+- `TestTamperedBackupRefused`: changed file, missing file, extra file, no manifest, path outside the
+  backup, head moved, audit entry changed (hash fixed in the manifest), SAN index changed (hash
+  fixed) – each refused, no data directory created; unknown manifest fields refused.
+- CLI test: backup, verify, restore refused into the used directory, restore into a new one.
+
+### Not verifiable tonight
+- A backup of a server under real load on Linux (the concurrency test runs in-process).
+- Restore across machines with different paths of `auth.key_file` (only the note is tested).
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,

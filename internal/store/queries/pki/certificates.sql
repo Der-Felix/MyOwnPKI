@@ -57,3 +57,8 @@ GROUP BY c.ca_id;
 
 -- name: CountFingerprint :one
 SELECT count(*) FROM certificates WHERE fingerprint_sha256 = ?;
+
+-- Every certificate in ID order, a page at a time (restore check of the
+-- SAN index, step 16).
+-- name: ListCertificateDERs :many
+SELECT id, serial_hex, cert_der FROM certificates WHERE id > ? ORDER BY id LIMIT ?;

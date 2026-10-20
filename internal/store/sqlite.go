@@ -103,3 +103,26 @@ func (d *DB) JournalMode(ctx context.Context) (string, error) {
 	}
 	return mode, nil
 }
+
+// Snapshot copies an existing database into dst (which must not exist) as
+// one consistent snapshot with VACUUM INTO – also while a server writes to
+// it (WAL). The copy is compact and in rollback-journal mode. It needs a
+// connection without query_only, but changes nothing in src.
+func Snapshot(ctx context.Context, src, dst string) error {
+	if strings.ContainsAny(src, "?#") {
+		return fmt.Errorf("open %s: path must not contain '?' or '#'", src)
+	}
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	db, err := sql.Open("sqlite", src+"?"+commonPragmas)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	if _, err = db.ExecContext(ctx, "VACUUM INTO ?", dst); err != nil {
+		return fmt.Errorf("copy %s: %w", src, err)
+	}
+	return nil
+}
