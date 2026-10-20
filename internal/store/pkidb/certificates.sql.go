@@ -180,6 +180,46 @@ func (q *Queries) InsertCertificateSAN(ctx context.Context, arg InsertCertificat
 	return err
 }
 
+const listCertificateDERs = `-- name: ListCertificateDERs :many
+SELECT id, serial_hex, cert_der FROM certificates WHERE id > ? ORDER BY id LIMIT ?
+`
+
+type ListCertificateDERsParams struct {
+	ID    string
+	Limit int64
+}
+
+type ListCertificateDERsRow struct {
+	ID        string
+	SerialHex string
+	CertDer   []byte
+}
+
+// Every certificate in ID order, a page at a time (restore check of the
+// SAN index, step 16).
+func (q *Queries) ListCertificateDERs(ctx context.Context, arg ListCertificateDERsParams) ([]ListCertificateDERsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCertificateDERs, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCertificateDERsRow{}
+	for rows.Next() {
+		var i ListCertificateDERsRow
+		if err := rows.Scan(&i.ID, &i.SerialHex, &i.CertDer); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCertificateSANs = `-- name: ListCertificateSANs :many
 SELECT type, value FROM certificate_sans WHERE certificate_id = ? ORDER BY type, value
 `

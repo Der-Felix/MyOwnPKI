@@ -50,8 +50,10 @@ type Instance struct {
 	Ring    *keys.Keyring
 	Presets *preset.Set
 	Clock   *clock.Fake
-	// SystemDB, InstanceAudit and TenantAudit are open for checks.
-	SystemDB, InstanceAudit, TenantAudit *store.DB
+	// SystemDB, InstanceAudit, TenantAudit and PKIDB are open for checks.
+	SystemDB, InstanceAudit, TenantAudit, PKIDB *store.DB
+	// Config is the configuration init ran with (data directory, auth key).
+	Config config.Config
 
 	Passphrase   string // unseal passphrase
 	DemoPassword string // password of the init user "demo"
@@ -113,6 +115,7 @@ func New(t *testing.T, o Options) *Instance {
 	v.SystemDB = open(l.SystemDB())
 	v.InstanceAudit = open(l.InstanceAuditDB())
 	pki := open(pkiPath)
+	v.PKIDB, v.Config = pki, cfg
 	v.TenantAudit = open(taPath)
 
 	key, _, err := auth.LoadKey(cfg.AuthKeyFile())
