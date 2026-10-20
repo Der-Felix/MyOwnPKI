@@ -5,12 +5,14 @@ import (
 	"encoding/pem"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
+	"github.com/Der-Felix/MyOwnPKI/internal/pkcs12"
 )
 
 var (
@@ -483,28 +485,38 @@ func (a *API) downloadCertificate(c *call) error {
 // exportKey hands out a server-generated key as PKCS#8 PEM (owner
 // 2026-10-17): operator on the issuing CA, step-up, unsealed, audited;
 // the key stays encrypted on the server.
+// exportKey hands out the key of a server-generated certificate: PKCS#8
+// PEM, PKCS#12 with a password, or certificate + chain + key in one PEM;
+// optionally the key is deleted on the server afterwards (step 18).
 func (a *API) exportKey(c *call) error {
 	id := c.r.PathValue("certificateId")
 	if !idPattern.MatchString(id) {
 		return ca.ErrNotFound
 	}
 	var req struct {
-		Format string `json:"format"`
+		Format                 string `json:"format"`
+		Password               string `json:"password"`
+		DeleteKeyAfterDownload bool   `json:"delete_key_after_download"`
 	}
 	if err := c.decode(&req); err != nil {
 		return err
 	}
-	if req.Format != "pkcs8-pem" {
-		return badRequest("/format", "pkcs8-pem (PKCS#12 follows in step 18)")
+	if !slices.Contains(ca.ExportFormats, req.Format) {
+		return badRequest("/format", "one of %s", strings.Join(ca.ExportFormats, ", "))
 	}
-	key, err := a.d.Engine.ExportKey(c.ctx(), c.who(), id)
+	if req.Format == ca.ExportPKCS12 && len([]rune(req.Password)) < pkcs12.MinPassword {
+		return badRequest("/password", "PKCS#12 needs a password of at least %d characters", pkcs12.MinPassword)
+	}
+	if req.Format != ca.ExportPKCS12 && req.Password != "" {
+		return badRequest("/password", "only for pkcs12")
+	}
+	out, err := a.d.Engine.Export(c.ctx(), ca.ExportRequest{ID: id, Format: req.Format, Password: req.Password, DeleteKey: req.DeleteKeyAfterDownload, Who: c.who()})
 	if err != nil {
 		return err
 	}
-	defer clear(key)
-	info, err := a.d.Engine.Certificate(c.ctx(), c.who(), id)
-	if err != nil {
-		return err
+	defer clear(out.Data)
+	if out.KeyDeleted {
+		c.w.Header().Set("X-Key-Deleted", "true")
 	}
-	return c.file("application/x-pem-file", fileName(info.CommonName, info.Serial)+".key.pem", key)
+	return c.file(out.ContentType, out.FileName, out.Data)
 }

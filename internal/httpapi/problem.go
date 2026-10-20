@@ -88,6 +88,8 @@ func (c *call) fail(err error) {
 		_ = c.problem(http.StatusNotFound, "not-found", "no such object, or you may not see it", nil)
 	case errors.Is(err, ca.ErrNoStoredKey):
 		_ = c.problem(http.StatusConflict, "conflict", ca.ErrNoStoredKey.Error(), nil)
+	case errors.Is(err, ca.ErrKeyDeleted):
+		_ = c.problem(http.StatusConflict, "conflict", ca.ErrKeyDeleted.Error(), nil)
 	case errors.Is(err, authz.ErrStepUpRequired):
 		_ = c.problem(http.StatusForbidden, "step-up-required", "confirm with a fresh code first (POST /auth/step-up)", nil)
 	case errors.Is(err, authz.ErrDenied):

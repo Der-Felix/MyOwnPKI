@@ -67,6 +67,11 @@ func (v *env) unseal(t *testing.T) {
 	v.in.Unseal(t)
 }
 
+func (v *env) deliver(t *testing.T) {
+	t.Helper()
+	v.in.Deliver(t)
+}
+
 func (v *env) audit(t *testing.T, db *store.DB) []string {
 	t.Helper()
 	return testinstance.Audit(t, db)

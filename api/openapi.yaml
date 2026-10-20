@@ -1043,11 +1043,14 @@ paths:
       summary: Download the private key of a server-generated key
       description: |
         Only for certificates with a server-generated key, only for an operator of the issuing CA
-        with a fresh second factor, only while unsealed. Step 13 offers `pkcs8-pem`: the key as
-        unencrypted PKCS#8 PEM over TLS. Every download is audited (`key.download`) before the key
-        leaves; the response is `Cache-Control: no-store` and an attachment.
-        **The key stays encrypted on the server.** PKCS#12 with a password and "delete the key
-        after the download" follow in step 18.
+        with a fresh second factor, only while unsealed. Formats: `pkcs12` (with `password`, at least
+        12 characters: PBES2/AES-256-CBC key, HMAC-SHA256 MAC – Windows 10 1709+, macOS, Java,
+        OpenSSL), `pkcs8-pem` (the key alone, unencrypted, over TLS) and `combined-pem`
+        (certificate, chain and key in one file – HAProxy). Every download is audited
+        (`key.download`) before the key leaves; the response is `Cache-Control: no-store` and an
+        attachment. With `delete_key_after_download` the key is destroyed on the server afterwards
+        (`key.destroy`, header `X-Key-Deleted: true`); later exports answer 409. Older backups still
+        hold the (encrypted) key.
       x-required-role: operator
       x-step-up: true
       requestBody:
@@ -1058,10 +1061,16 @@ paths:
             schema: { $ref: "#/components/schemas/ExportRequest" }
       responses:
         "200":
-          description: Private key (Content-Disposition attachment)
+          description: The file (Content-Disposition attachment)
+          headers:
+            X-Key-Deleted:
+              description: "true when the key was destroyed on the server after this download"
+              schema: { type: string, enum: ["true"] }
           content:
             application/x-pem-file:
               schema: { type: string }
+            application/x-pkcs12:
+              schema: { type: string, format: binary }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -2141,10 +2150,21 @@ components:
       properties:
         format:
           type: string
-          enum: [pkcs8-pem]
+          enum: [pkcs12, pkcs8-pem, combined-pem]
           description: |
-            pkcs8-pem = the private key as unencrypted PKCS#8 PEM (step 13). PKCS#12 with a password,
-            a combined PEM and a ZIP with the deployment guide follow in step 18.
+            pkcs12 = key, certificate and chain, protected by `password`; pkcs8-pem = the key alone,
+            unencrypted; combined-pem = certificate, chain and key in one PEM file.
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 12
+          maxLength: 1024
+          description: Required for pkcs12, refused for the other formats
+        delete_key_after_download:
+          type: boolean
+          default: false
+          description: Destroy the key on the server once the file is built and the download audited
 
     CSRInfo:
       description: "What a CSR asks for, parsed for preview"

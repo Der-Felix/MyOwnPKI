@@ -2,16 +2,13 @@ package ca
 
 import (
 	"context"
-	"crypto/x509"
 	"database/sql"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -343,54 +340,14 @@ func (e *Engine) CertificateChain(ctx context.Context, who keys.Who, id string) 
 }
 
 // ExportKey returns the private key of a certificate with a server-generated
-// key as unencrypted PKCS#8 PEM (PHASE1 step 13, owner 2026-10-17: PKCS#12
-// and "delete the key after the download" follow in step 18). It needs
-// key.download – operator on the issuing CA and a fresh second factor – and
-// an unsealed server. The download is audited before the key leaves
-// (fail-closed); the key stays encrypted on the server.
+// key as unencrypted PKCS#8 PEM (PHASE1 step 13); the key stays on the
+// server. Export has the other formats and the deletion (step 18).
 func (e *Engine) ExportKey(ctx context.Context, who keys.Who, id string) ([]byte, error) {
-	now := e.now()
-	info, err := e.Certificate(ctx, who, id)
+	out, err := e.Export(ctx, ExportRequest{ID: id, Format: ExportPKCS8PEM, Who: who})
 	if err != nil {
 		return nil, err
 	}
-	target := audit.Target{Type: "certificate", ID: info.ID}
-	details := map[string]any{"serial": info.Serial, "ca": info.CAName, "format": "pkcs8-pem"}
-	if derr := e.authorize(who, authz.DownloadKey, info.CAName, now); derr != nil {
-		if aerr := e.refuse(ctx, now, ActionKeyDownload, who, target, details, derr); aerr != nil {
-			return nil, errors.Join(derr, fmt.Errorf("audit: %w", aerr))
-		}
-		return nil, derr
-	}
-	if !info.KeyStored {
-		return nil, ErrNoStoredKey
-	}
-	if e.Keys.Status().Sealed {
-		return nil, keys.ErrSealed
-	}
-	key, err := keys.LoadKey(ctx, e.PKI, info.keyID)
-	if err != nil {
-		return nil, err
-	}
-	var out []byte
-	err = e.Keys.WithKey(key.ID, key.Purpose, key.Algorithm, key.Envelope, func(pkcs8 []byte) error {
-		if _, perr := x509.ParsePKCS8PrivateKey(pkcs8); perr != nil {
-			return fmt.Errorf("key %s: not a PKCS#8 private key", key.ID)
-		}
-		out = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if _, _, aerr := audit.Append(ctx, e.Audit, e.Scope, audit.Entry{
-		Time: now, Actor: who.Actor, Action: ActionKeyDownload, Target: target,
-		Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
-	}, ""); aerr != nil {
-		clear(out)
-		return nil, fmt.Errorf("key download refused – the audit entry can't be written: %w", aerr)
-	}
-	return out, nil
+	return out.Data, nil
 }
 
 // ExpiringWindow: a valid certificate that ends within it "expires soon".
