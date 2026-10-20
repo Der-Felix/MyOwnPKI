@@ -688,6 +688,15 @@ keeps the reasons. None of them changes an ADR.
 | Private key download in step 13 as unencrypted PKCS#8 PEM over TLS, with step-up, audited before the key leaves; PKCS#12 with a password in step 18 | The browser test needs server-generated keys; PKCS#12 needs another dependency, decided at step 18 |
 | JSON bodies only (415 otherwise), unknown fields refused | A form post or a typo can't slip through |
 
+### Web UI part 1 (phase 1 step 14, design approved 2026-10-17)
+| Decision | Why |
+|---|---|
+| The real UI calls the services directly, not the REST API over HTTP; pages of the prototype are reused | One permission check in the service layer for both; no second client to secure |
+| Plain forms, Post/Redirect/Get with 303, messages in a short-lived cookie; no htmx yet | A reload never issues twice; no text from a URL reaches a page; nothing JavaScript needs to do for M1 |
+| The sign-in page shows nothing about the instance and one message for every failure | Version, seal state and the demo mark help strangers; the message must not tell real names from invented ones |
+| `next=` only as a strictly checked local path | An open redirect after sign-in is a classic phishing aid |
+| The CSR's names fill the form; issued is what the form says | The requester sees and confirms the names; extensions and names never come from the CSR unchecked (ADR-19, pki-rules) |
+
 ### Web UI and dev mode
 | Decision | Why |
 |---|---|

@@ -69,6 +69,24 @@ rejected as "too AI-looking", and the first gallery still read as such – so:
   elsewhere; Consolas/Cascadia Mono for serials, fingerprints, OIDs and PEM (`.mono`).
 - Dates absolute (`2027-01-04`) with a relative hint ("in 12 days"); times in UTC.
 
+## Real UI and prototype (phase 1 step 14)
+
+- `internal/web/app*.go` serve the real UI on the services (auth, CA engine, keyring) – the same
+  ones the REST API calls, with the same permission checks. The prototype (`prototype*.go`, fixture
+  data) runs only with `serve --dev`. Pages are shared: real-only parts hang on a `Real` field.
+- **Post/Redirect/Get:** every POST form ends with **303 See Other** on a GET page, so a reload never
+  repeats an action. Exceptions: the private key download (answers with the file) and wizard steps
+  that only move between steps (no side effect).
+- **Messages to the next page** travel in the short-lived cookie `__Host-myownpki_flash`, never in
+  the URL – no text from a link reaches a page.
+- **`next=`** is a local path only (`safeNext`): exactly one leading `/`, no `//`, `\`, dot segments,
+  control characters – also percent-encoded; anything else goes to the dashboard.
+- **Sign-in pages** use `layout.Plain` and show nothing about the instance (no version, seal state,
+  demo mark). One message for a wrong name, a wrong password and a lockout.
+- State-changing commands (sign out, seal, key download) are POST forms with the CSRF token
+  (`csrf_token` field), never links. Navigation shows only built pages (`view.Page.BuiltOnly`).
+- The access log names the route pattern, not the path (no IDs), and no client address.
+
 ## htmx
 
 - Progressive enhancement: forms work without JS where practical; htmx swaps fragments.

@@ -21,19 +21,25 @@ MyOwnPKI is a self-hosted certificate authority platform:
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 
-> **UI prototype with sample data – phase 1 in progress.**
+> **Phase 1, milestone M1: the first running server with a web UI.** Screenshots of a demo instance
+> (`myownpki init --demo`) with sample certificates under homelab.example.
 
-<p><img src="docs/screenshots/dashboard.png" alt="Dashboard: figures, certificates expiring in 30 days, recent activity" width="100%"></p>
+<p><img src="docs/screenshots/dashboard.png" alt="Dashboard: figures, what needs attention, certificates expiring in 30 days" width="100%"></p>
 
 <table>
   <tr>
-    <td width="33%"><a href="docs/screenshots/certificates.png"><img src="docs/screenshots/certificates.png" alt="Certificate list with filters and command bar"></a><br>Certificates</td>
+    <td width="33%"><a href="docs/screenshots/certificates.png"><img src="docs/screenshots/certificates.png" alt="Certificate list with filters"></a><br>Certificates</td>
     <td width="33%"><a href="docs/screenshots/certificate-detail.png"><img src="docs/screenshots/certificate-detail.png" alt="Certificate detail page"></a><br>Certificate detail</td>
     <td width="33%"><a href="docs/screenshots/issue-wizard.png"><img src="docs/screenshots/issue-wizard.png" alt="Issue wizard, step 1: preset"></a><br>Issue wizard</td>
   </tr>
   <tr>
     <td><a href="docs/screenshots/authorities.png"><img src="docs/screenshots/authorities.png" alt="Certificate authorities"></a><br>Certificate authorities</td>
     <td><a href="docs/screenshots/dashboard-dark.png"><img src="docs/screenshots/dashboard-dark.png" alt="Dashboard in the dark theme"></a><br>Dark theme</td>
+    <td><a href="docs/screenshots/unseal.png"><img src="docs/screenshots/unseal.png" alt="Unsealing the CA keys after the start"></a><br>Unseal</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/login.png"><img src="docs/screenshots/login.png" alt="Sign-in page – it shows nothing about the instance"></a><br>Sign in</td>
+    <td></td>
     <td></td>
   </tr>
 </table>
