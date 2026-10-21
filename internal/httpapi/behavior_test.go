@@ -432,7 +432,7 @@ func TestRootIssuesNoLeavesOverTheAPI(t *testing.T) {
 // afterwards the key is gone (409) and the audit log says so.
 func TestExportFormatsAndKeyDeletion(t *testing.T) {
 	t.Parallel()
-	bin := testutil.OpenSSL(t)
+	testutil.OpenSSL(t) // skip early without OpenSSL 3
 	v := newEnv(t)
 	v.unseal(t)
 	c := v.client("192.0.2.1")
@@ -459,17 +459,19 @@ func TestExportFormatsAndKeyDeletion(t *testing.T) {
 		r.Header().Get("Content-Disposition") != `attachment; filename="nas.homelab.lan.p12"` {
 		t.Fatalf("pkcs12: %d %v", r.Code, r.Header())
 	}
-	dir := t.TempDir()
-	p12, pass := filepath.Join(dir, "nas.p12"), filepath.Join(dir, "pass")
+	p12 := filepath.Join(t.TempDir(), "nas.p12")
 	if err := os.WriteFile(p12, r.Body.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(pass, []byte(password), 0o600); err != nil {
+	// What OpenSSL read must be exactly the certificate and its chain as the
+	// server serves them, and a key for that certificate.
+	leaf, chain := fullChain(t, c, id)
+	got, err := testutil.OpenSSLPKCS12(t, p12, password, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", p12, "-passin", "file:"+pass, "-nodes").CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "BEGIN PRIVATE KEY") || !strings.Contains(string(out), "subject=CN=nas.homelab.lan") {
-		t.Errorf("openssl pkcs12: %v\n%s", err, out)
+	for _, p := range got.Problems(leaf, chain, "nas.homelab.lan") {
+		t.Errorf("PKCS#12 export as OpenSSL read it: %s\n%s", p, got.Text)
 	}
 	if r := export(map[string]any{"format": "pkcs8-pem"}); r.Code != 409 || !strings.Contains(r.Body.String(), "deleted") {
 		t.Errorf("export after the deletion: %d %s", r.Code, r.Body.String())
@@ -547,4 +549,31 @@ func TestAPITokens(t *testing.T) {
 	if r := bot.do(t, http.MethodGet, "/certificates", nil, "Authorization", "Bearer mop_wrong"); r.Code != 401 {
 		t.Errorf("unknown token: %d", r.Code)
 	}
+}
+
+// fullChain downloads the certificate with its chain and parses it: the leaf
+// first, then the intermediates (what an export puts into a PKCS#12 file).
+func fullChain(t *testing.T, c *client, id string) (*x509.Certificate, []*x509.Certificate) {
+	t.Helper()
+	r := c.do(t, http.MethodGet, "/certificates/"+id+"/download/fullchain", nil)
+	if r.Code != http.StatusOK {
+		t.Fatalf("fullchain: %d %s", r.Code, r.Body.String())
+	}
+	var certs []*x509.Certificate
+	rest := r.Body.Bytes()
+	for {
+		var b *pem.Block
+		if b, rest = pem.Decode(rest); b == nil {
+			break
+		}
+		cert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) < 2 {
+		t.Fatalf("fullchain has %d certificates, want the leaf and its issuing CA", len(certs))
+	}
+	return certs[0], certs[1:]
 }

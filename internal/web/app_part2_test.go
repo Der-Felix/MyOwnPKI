@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/x509"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,7 +53,7 @@ func TestCertificateActions(t *testing.T) {
 	}
 
 	// Export as PKCS#12 with "delete the key": the file, then the key is gone.
-	bin := testutil.OpenSSL(t)
+	testutil.OpenSSL(t) // skip early without OpenSSL 3
 	r = b.post(t, successor+"/export", url.Values{"csrf_token": {token}, "format": {"pkcs12"}, "password": {"short"}, "password2": {"short"}})
 	if r.Code != http.StatusSeeOther || r.location() != successor+"/export" {
 		t.Errorf("short password: %d %q", r.Code, r.location())
@@ -63,12 +63,33 @@ func TestCertificateActions(t *testing.T) {
 	if r.Code != http.StatusOK || r.Header().Get("Content-Type") != "application/x-pkcs12" {
 		t.Fatalf("export: %d %v %s", r.Code, r.Header(), r.html())
 	}
-	dir := t.TempDir()
-	p12, pass := filepath.Join(dir, "x.p12"), filepath.Join(dir, "pass")
-	_ = os.WriteFile(p12, r.Body.Bytes(), 0o600)
-	_ = os.WriteFile(pass, []byte(pw), 0o600)
-	if out, oerr := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", p12, "-passin", "file:"+pass, "-nodes").CombinedOutput(); oerr != nil {
-		t.Errorf("openssl pkcs12: %v\n%s", oerr, out)
+	p12 := filepath.Join(t.TempDir(), "x.p12")
+	if werr := os.WriteFile(p12, r.Body.Bytes(), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	// What OpenSSL read: exactly the successor and its chain, and its key.
+	certDER, chainDER, err := v.Engine.CertificateChain(t.Context(), testinstance.Console, strings.TrimPrefix(successor, "/certificates/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chain []*x509.Certificate
+	for _, der := range chainDER {
+		c, perr := x509.ParseCertificate(der)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		chain = append(chain, c)
+	}
+	got, err := testutil.OpenSSLPKCS12(t, p12, pw, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got.Problems(leaf, chain, "nas.homelab.lan") {
+		t.Errorf("PKCS#12 export as OpenSSL read it: %s\n%s", p, got.Text)
 	}
 	r = b.post(t, successor+"/export", url.Values{"csrf_token": {token}, "format": {"pkcs8-pem"}})
 	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, r.location()), "deleted") {
