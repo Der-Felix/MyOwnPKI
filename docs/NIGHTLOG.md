@@ -142,7 +142,7 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 | A failed assertion counts like a wrong TOTP code (throttle, lockout, audit); a sign counter that goes backwards is refused as a cloned authenticator (audited `cloned`) | Same rules for every second factor | Warn only |
 | `user reset-2fa` also removes the passkeys | The lost device may be the security key; reset means "only the new secret works" | Keep passkeys |
 | **No passkey button in the browser UI yet**: it needs a script (`navigator.credentials`), ADR-04 wants TypeScript bundled with esbuild, which is not approved. API and service are complete and tested | No ADR change at night; question to the owner below | Approve esbuild (or one plain JS file) |
-| Spec: `beginWebAuthnRegistration` takes `{"password"}`; new `GET /users/me/webauthn` and `DELETE /users/me/webauthn/{id}` (list, remove with step-up + password) | Decision 45 needs the current password; a passkey must be removable | – |
+| Spec: `beginWebAuthnRegistration` takes `{"password"}`; new `GET /users/me/webauthn` and `POST /users/me/webauthn/{id}/remove` (list, remove with step-up + password) | Decision 45 needs the current password; a passkey must be removable | – |
 
 ### Done
 - `internal/auth/passkey.go`: relying party (`NewPasskeys`), registration (step-up + current
@@ -199,6 +199,43 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 | Tenant settings: `GET/PUT /settings` – `allow_server_keygen` and subject defaults (O, OU, L, ST, C) in system.db `tenant_settings` (migration 0009); the API and the UI fill missing subject fields of a request from them | PHASE1 note "Subject defaults per tenant (step 19)" | – |
 | `inspectCSR` parses an uploaded CSR and shows subject, names, key, signature check and the problems the policy would raise for a preset – nothing is stored | The wizard (step 19) and scripts want the answer before issuing | – |
 | vacuum is not installed on this machine: the spec is checked by `api/openapi_test.go` and the contract tests locally; vacuum runs in CI | PHASE1 note (step 13) | Install vacuum locally |
+
+### Done
+- **58 operations**, every one served and every one in the contract run (success, no session,
+  low role, no read access and step-up where the spec asks); `TestEverySpecOperationIsServed`
+  checks spec ↔ route table in both directions.
+- Export (PKCS#12, PKCS#8 PEM, combined PEM, delete after download) – commit `36f0cfe`.
+- Certificates: revoke, renew, CSR inspection, external certificates – `00a08be`.
+- CAs: create, import offline root, offline bundle and upload, renew, retire, limits, revoke,
+  CRL download, sign, upload – `973417c`.
+- Users, own account, API tokens (system.db 0008), tenant settings – `96e6c43`.
+- Legacy import over the API (base64 `.tar.gz`, unpacked in memory, recorded as an import job),
+  audit list (filters, cursor) and chain verification.
+- Changes against the design table above, taken while building:
+  - A refused API import answers **201 with a job of status `failed`** (all problems listed),
+    not 422 – the spec rules want every error answer to be a shared problem response; 422 stays
+    for an unreadable archive.
+  - Removing a passkey is `POST /users/me/webauthn/{id}/remove` (not `DELETE` with a body –
+    vacuum's `no-request-body`); the body carries the current password.
+  - The 405 fallback is registered per method (a method-less pattern clashed in Go's mux).
+  - A revocation of a certificate the caller may not read answers 404 (decision 64), as reads do.
+  - Import jobs: without a tenant-wide role 404, with a too low one 403.
+- vacuum 0.30.6 (the CI version) run locally with `go run`: 0 errors, 0 warnings, 8 infos
+  (`description-duplication`). Unused components removed.
+
+### Tests
+- Contract run over all 58 operations, including the offline flow with a root signed in Go, a
+  passkey ceremony, a TOTP change confirmed with the new secret, a token, an archive import.
+- `TestExportFormatsAndKeyDeletion` (OpenSSL opens the PKCS#12, key gone afterwards, 409),
+  `TestAPITokens` (issues with its roles, no step-up, no sign-in, no token creation, revoked →
+  401), PKCS#12 tests with OpenSSL (ECDSA, RSA, Unicode password, wrong password), archive tests
+  (same result as the directory, `..`, links and absolute paths refused).
+- Mutations: wrong PBKDF2 PRF OID, wrong PKCS#12 KDF ID for the MAC – both caught by OpenSSL.
+
+### Not verifiable tonight
+- Import of a PKCS#12 file on real Windows / macOS / Java (OpenSSL 3 accepts it; the format is
+  what OpenSSL 3 writes by default).
+- A large legacy archive over the API (memory use with ~90 MB of JSON).
 
 # Night log – Phase 0, steps 4–8
 

@@ -362,6 +362,7 @@ paths:
   /users/{userId}:
     parameters:
       - name: userId
+        description: "ID of the user"
         in: path
         required: true
         schema: { type: string, maxLength: 64 }
@@ -422,6 +423,7 @@ paths:
   /users/{userId}/roles:
     parameters:
       - name: userId
+        description: "ID of the user"
         in: path
         required: true
         schema: { type: string, maxLength: 64 }
@@ -645,8 +647,8 @@ paths:
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
 
-  /users/me/webauthn/{passkeyId}:
-    delete:
+  /users/me/webauthn/{passkeyId}/remove:
+    post:
       tags: [users]
       operationId: deleteWebAuthnCredential
       summary: Remove an own passkey
@@ -654,6 +656,7 @@ paths:
       x-step-up: true
       parameters:
         - name: passkeyId
+          description: "ID of the passkey"
           in: path
           required: true
           schema: { type: string, maxLength: 64 }
@@ -722,6 +725,7 @@ paths:
   /tokens/{tokenId}:
     parameters:
       - name: tokenId
+        description: "ID of the token"
         in: path
         required: true
         schema: { type: string, maxLength: 64 }
@@ -1466,47 +1470,52 @@ paths:
     post:
       tags: [imports]
       operationId: startLegacyImport
-      summary: Import a pki.sh directory (tar.gz or zip of ./pki)
+      summary: Import a pki.sh directory (base64 .tar.gz of ./pki)
       description: |
-        Runs in the background. Serial numbers, revocations (status, reason, time) and CRL
-        numbers are preserved so existing CRLs and OCSP answers stay correct. Passphrases of
-        encrypted CA keys are passed as form fields `ca_passphrase[<name>]` and never stored.
+        Runs at once (a homelab PKI imports in seconds) and is recorded as an import job. Serial
+        numbers, revocations (time and reason) and CRL numbers are kept; online CAs sign their next
+        CRL in the import transaction. The root becomes an offline root unless `root_key` is
+        `online`. Archive: at most 64 MiB, files and directories only. Passphrases of encrypted keys
+        are used once and never stored. Every run is recorded as a job (201): a refused import has
+        status `failed` and lists every problem, and nothing else is written; 422 means the archive
+        can't be read. `dry_run` checks everything and writes only the job.
       x-required-role: admin
       x-step-up: true
       requestBody:
-        description: "Archive of the pki.sh directory plus passphrases of encrypted CA keys"
+        description: "The archive and the options"
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema: { $ref: "#/components/schemas/LegacyImportUpload" }
       responses:
-        "202":
-          description: Import started
+        "201":
+          description: Imported (or checked, for a dry run)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ImportJob" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
 
   /imports/{importId}:
     get:
       tags: [imports]
       operationId: getImport
-      summary: Progress and result of an import
+      summary: The report of an import
       x-required-role: admin
       parameters:
         - name: importId
-          description: "ID returned when the import was started"
+          description: "ID returned when the import ran"
           in: path
           required: true
           schema: { $ref: "#/components/schemas/ID" }
       responses:
         "200":
-          description: Import job
+          description: The recorded job
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ImportJob" }
@@ -1551,28 +1560,54 @@ paths:
       tags: [audit]
       operationId: listAuditEntries
       summary: Read the audit log (newest first)
-      x-required-role: admin
+      description: |
+        The tenant log for operators and admins with a tenant-wide role (the viewer role has no
+        audit access: user names and addresses are personal data); `scope=instance` for instance
+        admins (sign-ins, users, unseal).
+      x-required-role: operator
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Cursor"
+        - name: scope
+          description: "tenant = the tenant log, instance = sign-ins, users, unseal (instance admins)"
+          in: query
+          schema: { type: string, enum: [tenant, instance], default: tenant }
         - name: action
-          description: "Only entries with this action, for example `certificate.revoke`"
           in: query
+          description: Prefix of the action, e.g. `certificate.` or `user.login`
           schema: { type: string, maxLength: 64 }
-        - name: actor
-          description: "Only entries of this actor (user name, token or account)"
+        - name: result
+          description: "Only this result"
           in: query
-          schema: { type: string, maxLength: 128 }
+          schema: { type: string, enum: [success, failure, denied] }
         - name: since
-          description: "Only entries at or after this time (UTC)"
+          description: "Only entries from this time on"
           in: query
           schema: { type: string, format: date-time }
+        - name: until
+          description: "Only entries before this time"
+          in: query
+          schema: { type: string, format: date-time }
+        - name: before
+          in: query
+          description: "Cursor: the next_before of the previous page"
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          description: "Entries per page (1 to 100)"
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
-          description: Entries
+          description: One page of entries
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AuditList" }
+              schema:
+                type: object
+                required: [items, next_before]
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+                  next_before: { type: [integer, "null"] }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1581,16 +1616,30 @@ paths:
     post:
       tags: [audit]
       operationId: verifyAuditChain
-      summary: Walk the hash chain and report the first broken entry, if any
-      x-required-role: admin
+      summary: Walk the hash chain and the signed checkpoints of a log
+      x-required-role: operator
+      requestBody:
+        description: "Which log, and the checkpoint key fingerprint noted at init (recommended)"
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                scope: { type: string, enum: [tenant, instance], default: tenant }
+                checkpoint_key: { type: string, maxLength: 128 }
       responses:
         "200":
-          description: Verification result
+          description: Result of the walk
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuditVerifyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
 
 components:
   securitySchemes:
@@ -1620,12 +1669,6 @@ components:
       in: query
       description: Opaque value from `next_cursor` of the previous page
       schema: { type: string, maxLength: 512 }
-    UserId:
-      description: "ID of the user"
-      name: userId
-      in: path
-      required: true
-      schema: { $ref: "#/components/schemas/ID" }
     CAId:
       description: "ID of the CA"
       name: caId
@@ -2063,16 +2106,6 @@ components:
             state: { type: string, maxLength: 128 }
             country: { type: string, pattern: "^([A-Z]{2})?$" }
 
-    UserList:
-      description: "One page of users"
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/User" }
-        next_cursor: { type: [string, "null"] }
-
     PasswordChange:
       description: "Password change of the logged-in user"
       type: object
@@ -2080,11 +2113,6 @@ components:
       properties:
         current_password: { type: string, format: password, writeOnly: true, maxLength: 1024 }
         new_password: { type: string, format: password, writeOnly: true, minLength: 12, maxLength: 1024 }
-
-    TokenScope:
-      description: "What an API token may do; never more than its owner"
-      type: string
-      enum: [certificates:read, certificates:issue, certificates:revoke, cas:read, audit:read]
 
     SANType:
       description: "Kind of subject alternative name"
@@ -2172,20 +2200,6 @@ components:
           type: array
           maxItems: 100
           items: { type: string, format: uri }
-
-    NameConstraints:
-      type: object
-      description: |
-        Limits which names this CA may sign for. Marked critical by default (RFC 5280); enforced
-        by the server before signing as well, not only by clients.
-      properties:
-        permitted_dns:
-          type: array
-          items: { type: string, description: "e.g. .homelab.lan or homelab.lan" }
-        permitted_ip:
-          type: array
-          items: { type: string, description: "CIDR, IPv4 or IPv6" }
-        critical: { type: boolean, default: true }
 
     CAKind:
       description: "Root (self-signed) or intermediate CA"
@@ -2657,50 +2671,61 @@ components:
           items: { type: string }
 
     LegacyImportUpload:
-      description: "Upload of a legacy pki.sh directory"
+      description: "A pki.sh directory to import"
       type: object
       required: [archive]
+      additionalProperties: false
       properties:
-        archive:
-          type: string
-          contentMediaType: application/octet-stream
-          description: tar.gz or zip of the pki/ directory (size-limited, zip-slip safe)
-        dry_run:
-          type: boolean
-          default: false
-          description: Only analyse and report, write nothing
-      additionalProperties:
-        type: string
-        description: "ca_passphrase[<name>] fields for encrypted CA keys"
+        archive: { type: string, contentEncoding: base64, description: "The .tar.gz of ./pki (at most 64 MiB)" }
+        base_url: { type: string, format: uri, description: "Public base URL for new certificates; default AIA_BASE_URL of pki.conf" }
+        root_key: { type: string, enum: [offline, online], default: offline }
+        dry_run: { type: boolean, default: false }
+        ca_passphrases:
+          type: object
+          description: "Passphrases of encrypted CA keys by CA name (root, intermediates)"
+          additionalProperties: { type: string, writeOnly: true }
+        key_passphrase: { type: string, format: password, writeOnly: true, description: "PKI_KEY_PASS of pki.sh for encrypted leaf keys" }
 
     ImportJob:
-      description: "State and result of a legacy import"
+      description: "A recorded legacy import"
       type: object
-      required: [id, status]
+      required: [id, status, dry_run, started_at, finished_at, started_by, base_url, legacy_urls, cas, summary, problems, warnings]
+      additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
-        status:
-          type: string
-          enum: [queued, running, succeeded, failed]
+        status: { type: string, enum: [succeeded, checked, failed] }
         dry_run: { type: boolean }
-        started_at: { type: [string, "null"], format: date-time }
-        finished_at: { type: [string, "null"], format: date-time }
-        summary:
-          type: object
-          properties:
-            cas: { type: integer }
-            certificates: { type: integer }
-            revoked: { type: integer }
-            keys_imported: { type: integer }
-        problems:
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        started_by: { type: string }
+        base_url: { type: string }
+        legacy_urls: { type: boolean, description: "The pki.sh URLs <base>/<name>.crt|.crl stay served" }
+        cas:
           type: array
           items:
             type: object
-            required: [severity, message]
+            required: [name, kind, key_mode, status, certificates, revoked, last_crl_number, history]
+            additionalProperties: false
             properties:
-              severity: { type: string, enum: [info, warning, error] }
-              path: { type: string, description: File inside the archive }
-              message: { type: string }
+              name: { type: string }
+              kind: { type: string }
+              key_mode: { type: string }
+              status: { type: string }
+              certificates: { type: integer }
+              revoked: { type: integer }
+              last_crl_number: { type: integer, description: "The newest number pki.sh used; the next CRL gets +1" }
+              history: { type: integer, description: "Older certificates of the same key (pki.sh renew-ca)" }
+        summary:
+          type: object
+          required: [certificates, revoked, keys, external]
+          additionalProperties: false
+          properties:
+            certificates: { type: integer }
+            revoked: { type: integer }
+            keys: { type: integer }
+            external: { type: integer }
+        problems: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
 
     AuditEntry:
       description: "One entry of the hash-chained audit log"
@@ -2731,21 +2756,17 @@ components:
         hash: { type: string, pattern: "^[0-9a-f]{64}$" }
         prev_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
 
-    AuditList:
-      description: "One page of audit entries"
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/AuditEntry" }
-        next_cursor: { type: [string, "null"] }
-
     AuditVerifyResult:
       description: "Result of walking the audit hash chain"
       type: object
-      required: [ok, entries_checked]
+      required: [ok, entries_checked, first_broken_seq, reason, head, checkpoints, checkpoint_key]
+      additionalProperties: false
       properties:
         ok: { type: boolean }
         entries_checked: { type: integer, minimum: 0 }
         first_broken_seq: { type: [integer, "null"] }
+        reason: { type: [string, "null"], description: "Why the chain breaks there" }
+        head: { type: string, description: "seq:hash of the last good entry – compare with the process log or a backup manifest" }
+        checkpoints: { type: integer, minimum: 0 }
+        checkpoint_key: { type: string, description: "Fingerprint of the key that signs the checkpoints" }
+

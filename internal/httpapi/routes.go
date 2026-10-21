@@ -36,7 +36,7 @@ func (a *API) table() []Route {
 		{OperationID: "listWebAuthnCredentials", Method: http.MethodGet, Path: "/users/me/webauthn", access: signedIn, handle: a.listPasskeys},
 		{OperationID: "beginWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/begin", access: signedIn, body: true, handle: a.passkeyRegisterBegin},
 		{OperationID: "finishWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/finish", access: signedIn, body: true, handle: a.passkeyRegisterFinish},
-		{OperationID: "deleteWebAuthnCredential", Method: http.MethodDelete, Path: "/users/me/webauthn/{passkeyId}", access: signedIn, body: true, handle: a.deletePasskey},
+		{OperationID: "deleteWebAuthnCredential", Method: http.MethodPost, Path: "/users/me/webauthn/{passkeyId}/remove", access: signedIn, body: true, handle: a.deletePasskey},
 
 		{OperationID: "listPresets", Method: http.MethodGet, Path: "/presets", access: signedIn, handle: a.listPresets},
 		{OperationID: "getPreset", Method: http.MethodGet, Path: "/presets/{presetName}", access: signedIn, handle: a.getPreset},
@@ -64,6 +64,10 @@ func (a *API) table() []Route {
 		{OperationID: "revokeCertificate", Method: http.MethodPost, Path: "/certificates/{certificateId}/revoke", access: signedIn, body: true, handle: a.revokeCertificate},
 		{OperationID: "renewCertificate", Method: http.MethodPost, Path: "/certificates/{certificateId}/renew", access: signedIn, body: true, handle: a.renewCertificate},
 		{OperationID: "inspectCSR", Method: http.MethodPost, Path: "/csr/inspect", access: signedIn, body: true, handle: a.inspectCSR},
+		{OperationID: "startLegacyImport", Method: http.MethodPost, Path: "/imports/legacy", access: signedIn, body: true, maxBody: 96 << 20, handle: a.startLegacyImport},
+		{OperationID: "getImport", Method: http.MethodGet, Path: "/imports/{importId}", access: signedIn, handle: a.getImport},
+		{OperationID: "listAuditEntries", Method: http.MethodGet, Path: "/audit", access: signedIn, handle: a.listAuditEntries},
+		{OperationID: "verifyAuditChain", Method: http.MethodPost, Path: "/audit/verify", access: signedIn, body: true, handle: a.verifyAuditChain},
 		{OperationID: "importExternalCertificate", Method: http.MethodPost, Path: "/imports/external-certificate", access: signedIn, body: true, handle: a.importExternalCertificate},
 	}
 }
