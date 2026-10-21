@@ -29,7 +29,7 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
 - **Audit log**: hash-chained instance and tenant logs with signed checkpoints;
   `myownpki audit verify` and the audit pages.
 - **Sign-in**: password (Argon2id, common-password check) plus TOTP and recovery codes, passkeys as
-  second factor when `auth.passkey_origin` is set, step-up for dangerous actions, lockout and
+  second factor when `auth.passkey_origin` is set (through the API only, see below), step-up for dangerous actions, lockout and
   throttling, roles per tenant (viewer, operator, admin) and instance admins; API tokens.
 - **REST API** `/api/v1` (OpenAPI 3.1 in `api/openapi.yaml`, 58 operations, RFC 9457 problems).
 - **Web UI**: dashboard, certificates (issue wizard, detail, revoke, renew, download, export as
@@ -52,8 +52,11 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
 
 - No ACME server yet (v0.2), no agent and no monitoring yet (v0.3) – see the release plan in
   [docs/PLAN.md](https://github.com/Der-Felix/MyOwnPKI/blob/v0.1.0/docs/PLAN.md) §10.1.
-- Adding a passkey needs a small browser script that is not approved yet; passkeys can be
-  registered through the API (for a script); the UI lists and removes them.
+- **Passkeys work only through the REST API in v0.1** – registering one, and using it to sign in
+  or to confirm an action (`/api/v1/auth/webauthn/*`, `/api/v1/users/me/webauthn`). The web UI
+  has no passkey button yet: it needs a small browser script that is not approved yet (ADR-04).
+  The UI lists a user's passkeys and removes them; sign-in in the browser uses the authenticator
+  app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
 [Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.1.0...HEAD
