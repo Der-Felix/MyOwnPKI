@@ -48,6 +48,11 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   and the container image `ghcr.io/der-felix/myownpki` (distroless, non-root, signed);
   `deploy/docker-compose.yml` for a single server.
 
+### Security
+
+- Built with Go 1.27.3 (fixes GO-2026-6809 / CVE-2026-111943: `crypto/x509` now refuses known
+  compromised intermediate certificates when verifying a chain).
+
 ### Known limitations
 
 - No ACME server yet (v0.2), no agent and no monitoring yet (v0.3) – see the release plan in

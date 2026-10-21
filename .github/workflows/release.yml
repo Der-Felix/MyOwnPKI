@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.27.2"
+  GO_VERSION: "1.27.3"
   GORELEASER_VERSION: "2.18.2"
   GORELEASER_SHA256: "0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3"
   COSIGN_VERSION: "3.1.3"

@@ -2,8 +2,9 @@
 #
 # Not covered – update by hand, keep in sync with Taskfile.yml:
 #   GO_VERSION, TASK_VERSION, GOLANGCI_LINT_*, SQLC_*, SHELLCHECK_*, ACTIONLINT_*, VACUUM_*
-#   in .github/workflows/ci.yml
-#   and the `toolchain` line in go.mod. Same rule by hand: only releases at least 14 days old.
+#   in .github/workflows/ci.yml (GO_VERSION also in release.yml)
+#   and the `go` line in go.mod. Same rule by hand: only releases at least 14 days old –
+#   except security point releases of Go, taken at once (PLAN §13).
 #
 # cooldown: a new version is proposed only once it has been public for 14 days, so a broken
 # or hijacked release has time to be noticed (PLAN §14). Security updates are not delayed.
