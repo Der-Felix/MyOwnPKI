@@ -113,10 +113,20 @@ jobs:
       - name: Release notes from CHANGELOG.md
         run: |
           v="${GITHUB_REF_NAME#v}"
-          # The section of this version, without the link definitions at the end.
-          awk -v head="## [$v]" 'index($0, head) == 1 { p = 1; next } p && /^## \[/ { exit } p && /^\[[^]]*\]: / { next } p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          # A pre-release tag (v0.1.0-rc.1) without its own section takes the
+          # section of its base version ([0.1.0]).
+          base="${v%%-*}"
+          section() {
+            # The section of version $1, without the link definitions at the end.
+            awk -v head="## [$1]" 'index($0, head) == 1 { p = 1; next } p && /^## \[/ { exit } p && /^\[[^]]*\]: / { next } p' CHANGELOG.md
+          }
+          section "$v" > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md" && [ "$base" != "$v" ]; then
+            echo "No section [$v] in CHANGELOG.md – using [$base]"
+            section "$base" > "$RUNNER_TEMP/notes.md"
+          fi
           if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::CHANGELOG.md has no section \"## [$v]\""
+            echo "::error::CHANGELOG.md has no section \"## [$v]\" (nor \"## [$base]\")"
             exit 1
           fi
 
