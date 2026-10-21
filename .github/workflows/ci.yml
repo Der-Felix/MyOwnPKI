@@ -56,7 +56,18 @@ jobs:
         with:
           golangci-lint: "true"
           sqlc: ${{ hashFiles('sqlc.yaml') != '' }}
-      - run: task check
+      # The output also goes to a file: on a failure the next step turns the
+      # failed tests into annotations, readable without signing in.
+      - name: task check
+        run: |
+          set -o pipefail
+          task check 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Failed tests as annotations
+        if: failure()
+        run: |
+          if [ ! -s "$RUNNER_TEMP/test.log" ]; then exit 0; fi
+          printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
       - run: task generate:check
 
   race:
@@ -72,7 +83,18 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: task test:race
+      # The output also goes to a file: on a failure the next step turns the
+      # failed tests into annotations, readable without signing in.
+      - name: task test:race
+        run: |
+          set -o pipefail
+          task test:race 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Failed tests as annotations
+        if: failure()
+        run: |
+          if [ ! -s "$RUNNER_TEMP/test.log" ]; then exit 0; fi
+          printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
 
   test-os:
     name: tests on ${{ matrix.os }}
@@ -163,7 +185,7 @@ jobs:
           bash legacy/build.sh
           shellcheck --severity=warning --external-sources \
             legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
-            legacy/dist/pki-standalone.sh
+            legacy/dist/pki-standalone.sh .github/scripts/*.sh
           shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
       - name: Smoke test (modular and standalone script, completion)
         run: bash legacy/tests/smoke.sh
