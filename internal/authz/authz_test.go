@@ -141,3 +141,29 @@ func TestSpecialPrincipals(t *testing.T) {
 		t.Errorf("unknown kind: %v", err)
 	}
 }
+
+// TestTokenNeverSatisfiesStepUp: a token gets a plain denial for every
+// step-up permission – even with a fresh StepUpAt and the role – and never
+// the step-up prompt it could not answer.
+func TestTokenNeverSatisfiesStepUp(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	p := &Principal{Kind: KindUser, UserID: "u1", ViaToken: true, InstanceAdmin: true, StepUpAt: now,
+		Bindings: []Binding{{Tenant: "default", Role: Admin}}}
+	for _, perm := range stepUp {
+		if stepUpActions[perm] == "" {
+			t.Errorf("%s: no action text for the token refusal", perm)
+		}
+		err := p.Check(perm, Resource{Tenant: "default"}, now)
+		var tok *TokenStepUpError
+		if !errors.As(err, &tok) || !errors.Is(err, ErrDenied) || errors.Is(err, ErrStepUpRequired) {
+			t.Errorf("%s: %v", perm, err)
+		}
+	}
+	if err := p.Check(IssueCert, Resource{Tenant: "default"}, now); err != nil {
+		t.Errorf("issuing needs no step-up, a token may: %v", err)
+	}
+	if err := p.FreshStepUp(now); !errors.Is(err, ErrDenied) {
+		t.Errorf("own account by token: %v", err)
+	}
+}

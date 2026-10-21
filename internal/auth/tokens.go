@@ -260,7 +260,7 @@ func (s *Service) AuthenticateToken(ctx context.Context, secret string) (*Sessio
 		own = append(own, authz.Binding{Tenant: b.TenantID, CA: b.Ca, Role: authz.Role(b.Role)})
 	}
 	t := tokenOf(row)
-	p := &authz.Principal{Kind: authz.KindUser, UserID: u.ID, Username: u.Username}
+	p := &authz.Principal{Kind: authz.KindUser, UserID: u.ID, Username: u.Username, ViaToken: true}
 	for _, b := range t.Roles {
 		if coveredBy(own, b) {
 			p.Bindings = append(p.Bindings, b)

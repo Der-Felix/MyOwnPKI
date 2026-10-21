@@ -508,8 +508,22 @@ func TestAPITokens(t *testing.T) {
 		t.Fatalf("issue with the token: %d %s", r.Code, r.Body.String())
 	}
 	certID, _ := r.body["id"].(string)
-	if r := bot.do(t, http.MethodPost, "/certificates/"+certID+"/export", map[string]string{"format": "pkcs8-pem"}, bearer...); r.Code != 403 || r.problemType() != "step-up-required" {
-		t.Errorf("key download with a token: %d %s", r.Code, r.Body.String())
+	// Step-up actions: a plain refusal (forbidden), not step-up-required –
+	// no POST /auth/step-up can ever make a token fresh.
+	for _, tc := range []struct {
+		path   string
+		body   any
+		action string
+	}{
+		{"/certificates/" + certID + "/export", map[string]string{"format": "pkcs8-pem"}, "download private keys"},
+		{"/certificates/" + certID + "/revoke", map[string]string{"reason": "superseded"}, "revoke certificates"},
+		{"/users/me/webauthn/pk_x/remove", map[string]string{"password": testPassword}, "change the sign-in of an account"},
+	} {
+		r := bot.do(t, http.MethodPost, tc.path, tc.body, bearer...)
+		want := "an API token can't " + tc.action + " – sign in and confirm with a fresh code"
+		if r.Code != 403 || r.problemType() != "forbidden" || r.body["detail"] != want {
+			t.Errorf("%s with a token: %d %s", tc.path, r.Code, r.Body.String())
+		}
 	}
 	if r := bot.do(t, http.MethodGet, "/cas/"+v.caIDs["root"], nil, bearer...); r.Code != 404 {
 		t.Errorf("token reads a CA outside its roles: %d", r.Code)

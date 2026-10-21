@@ -109,6 +109,10 @@ func (c *call) fail(err error) {
 
 // deniedText is the reason of a permission refusal, without the internals.
 func deniedText(err error, denied *ca.DeniedError) string {
+	var token *authz.TokenStepUpError
+	if errors.As(err, &token) {
+		return token.Error()
+	}
 	if errors.As(err, &denied) && len(denied.Reasons) > 0 {
 		return denied.Reasons[0]
 	}
