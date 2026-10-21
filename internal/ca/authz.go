@@ -1,6 +1,7 @@
 package ca
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -19,4 +20,14 @@ func (e *Engine) authorize(who keys.Who, perm authz.Permission, ca string, now t
 		return &DeniedError{Reasons: []string{err.Error()}, Cause: err}
 	}
 	return nil
+}
+
+// CheckManage tells whether who may manage the CA, a fresh step-up aside –
+// for reading what only its managers see (the offline signing bundle).
+func (e *Engine) CheckManage(who keys.Who, name string) error {
+	err := e.authorize(who, authz.ManageCA, name, e.now())
+	if errors.Is(err, authz.ErrStepUpRequired) {
+		return nil
+	}
+	return err
 }

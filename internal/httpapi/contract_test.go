@@ -524,6 +524,99 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_nothere", body: pw, want: 404})
 	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/" + pkID, body: pw, want: 204})
 
+	// CA management (step 18). The admin's step-up has run out by now.
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	labCA := map[string]any{"name": "lab-ca", "kind": "intermediate", "parent_ca_id": root, "subject": map[string]string{"common_name": "Lab CA"}, "public_base_url": "http://pki.homelab.lan"}
+	offKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	offTmpl := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "Offline Root"}, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, NotBefore: v.clk.Now().Add(-time.Hour), NotAfter: v.clk.Now().AddDate(10, 0, 0)}
+	offDER, _ := x509.CreateCertificate(rand.Reader, offTmpl, offTmpl, &offKey.PublicKey, offKey)
+	offCert, _ := x509.ParseCertificate(offDER)
+	offPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: offDER}))
+	importOff := map[string]any{"name": "offline", "certificate_pem": offPEM, "public_base_url": "http://pki.homelab.lan"}
+	for _, cc := range []contractCase{
+		{op: "createCA", as: anon, body: labCA, want: 401, note: "no-session"},
+		{op: "createCA", as: viewer, body: labCA, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createCA", as: admin, body: labCA, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "importCA", as: anon, body: importOff, want: 401, note: "no-session"},
+		{op: "importCA", as: viewer, body: importOff, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "importCA", as: admin, body: importOff, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "updateCA", as: anon, path: "/cas/" + issuing, body: map[string]int{"crl_days": 5}, want: 401, note: "no-session"},
+		{op: "updateCA", as: viewer, path: "/cas/" + issuing, body: map[string]int{"crl_days": 5}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateCA", as: rootview, path: "/cas/" + issuing, body: map[string]int{"crl_days": 5}, want: 404, note: "no-read"},
+		{op: "updateCA", as: admin, path: "/cas/" + issuing, body: map[string]int{"crl_days": 5}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "renewCA", as: anon, path: "/cas/" + issuing + "/renew", body: map[string]any{}, want: 401, note: "no-session"},
+		{op: "renewCA", as: viewer, path: "/cas/" + issuing + "/renew", body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "renewCA", as: rootview, path: "/cas/" + issuing + "/renew", body: map[string]any{}, want: 404, note: "no-read"},
+		{op: "renewCA", as: admin, path: "/cas/" + issuing + "/renew", body: map[string]any{}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "retireCA", as: anon, path: "/cas/" + issuing + "/retire", want: 401, note: "no-session"},
+		{op: "retireCA", as: viewer, path: "/cas/" + issuing + "/retire", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "retireCA", as: rootview, path: "/cas/" + issuing + "/retire", want: 404, note: "no-read"},
+		{op: "retireCA", as: admin, path: "/cas/" + issuing + "/retire", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "revokeCA", as: anon, path: "/cas/" + issuing + "/revoke", body: map[string]string{"reason": "superseded"}, want: 401, note: "no-session"},
+		{op: "revokeCA", as: viewer, path: "/cas/" + issuing + "/revoke", body: map[string]string{"reason": "superseded"}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "revokeCA", as: rootview, path: "/cas/" + issuing + "/revoke", body: map[string]string{"reason": "superseded"}, want: 404, note: "no-read"},
+		{op: "revokeCA", as: admin, path: "/cas/" + issuing + "/revoke", body: map[string]string{"reason": "superseded"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "uploadSignedCACertificate", as: anon, path: "/cas/" + issuing + "/certificate", body: map[string]string{"certificate_pem": offPEM}, want: 401, note: "no-session"},
+		{op: "uploadSignedCACertificate", as: viewer, path: "/cas/" + issuing + "/certificate", body: map[string]string{"certificate_pem": offPEM}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "uploadSignedCACertificate", as: rootview, path: "/cas/" + issuing + "/certificate", body: map[string]string{"certificate_pem": offPEM}, want: 404, note: "no-read"},
+		{op: "uploadSignedCACertificate", as: admin, path: "/cas/" + issuing + "/certificate", body: map[string]string{"certificate_pem": offPEM}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "downloadCACSR", as: anon, path: "/cas/" + issuing + "/csr", want: 401, note: "no-session"},
+		{op: "downloadCACSR", as: viewer, path: "/cas/" + issuing + "/csr", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "downloadCACSR", as: rootview, path: "/cas/" + issuing + "/csr", want: 404, note: "no-read"},
+		{op: "downloadCACSR", as: admin, path: "/cas/" + issuing + "/csr", want: 422, kind: "policy-violation"}, // not waiting for a signature
+		{op: "downloadCRL", as: anon, path: "/cas/" + issuing + "/crl", want: 401, note: "no-session"},
+		{op: "downloadCRL", as: rootview, path: "/cas/" + issuing + "/crl", want: 404, note: "no-read"},
+		{op: "downloadCRL", as: viewer, path: "/cas/" + issuing + "/crl", want: 200},
+		{op: "downloadCRL", as: viewer, path: "/cas/" + issuing + "/crl?format=pem", want: 200},
+		{op: "regenerateCRL", as: anon, path: "/cas/" + issuing + "/crl", want: 401, note: "no-session"},
+		{op: "regenerateCRL", as: viewer, path: "/cas/" + issuing + "/crl", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "regenerateCRL", as: rootview, path: "/cas/" + issuing + "/crl", want: 404, note: "no-read"},
+		{op: "regenerateCRL", as: admin, path: "/cas/" + issuing + "/crl", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "uploadCRL", as: anon, path: "/cas/" + root + "/crl", body: map[string]string{"crl_pem": "x"}, want: 401, note: "no-session"},
+		{op: "uploadCRL", as: viewer, path: "/cas/" + issuing + "/crl", body: map[string]string{"crl_pem": "x"}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "uploadCRL", as: rootview, path: "/cas/" + issuing + "/crl", body: map[string]string{"crl_pem": "x"}, want: 404, note: "no-read"},
+		{op: "uploadCRL", as: admin, path: "/cas/" + root + "/crl", body: map[string]string{"crl_pem": "x"}, want: 403, kind: "step-up-required", note: "step-up"},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	createdCA := admin.do(t, http.MethodPost, "/cas", labCA)
+	run(contractCase{op: "createCA", as: admin, body: map[string]any{"name": "lab-ca", "kind": "intermediate", "parent_ca_id": root, "subject": map[string]string{"common_name": "Lab CA 2"}, "public_base_url": "http://pki.homelab.lan"}, want: 422, kind: "policy-violation"})
+	s.check(t, s.routeOf(t, v.api, "createCA"), createdCA)
+	if createdCA.Code != http.StatusCreated {
+		t.Fatalf("create lab-ca: %d %s", createdCA.Code, createdCA.Body.String())
+	}
+	mark("createCA", "success")
+	labID, _ := createdCA.body["ca"].(map[string]any)["id"].(string)
+	run(contractCase{op: "updateCA", as: admin, path: "/cas/" + labID, body: map[string]int{"crl_days": 5}, want: 200})
+	run(contractCase{op: "updateCA", as: admin, path: "/cas/" + labID, body: map[string]int{}, want: 400})
+	run(contractCase{op: "renewCA", as: admin, path: "/cas/" + labID + "/renew", body: map[string]any{}, want: 200})
+	run(contractCase{op: "revokeCA", as: admin, path: "/cas/" + labID + "/revoke", body: map[string]any{"reason": "superseded", "generation": 1}, want: 200})
+	run(contractCase{op: "retireCA", as: admin, path: "/cas/" + labID + "/retire", want: 200})
+	run(contractCase{op: "regenerateCRL", as: admin, path: "/cas/" + issuing + "/crl", want: 200})
+	imported := admin.do(t, http.MethodPost, "/cas/import", importOff)
+	s.check(t, s.routeOf(t, v.api, "importCA"), imported)
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("import the offline root: %d %s", imported.Code, imported.Body.String())
+	}
+	mark("importCA", "success")
+	offID, _ := imported.body["ca"].(map[string]any)["id"].(string)
+	// The offline root signs its CRL and an intermediate, as pki.sh would.
+	crlDER, _ := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{Number: big.NewInt(1), ThisUpdate: v.clk.Now().Add(-time.Minute), NextUpdate: v.clk.Now().AddDate(0, 0, 30)}, offCert, offKey)
+	run(contractCase{op: "uploadCRL", as: admin, path: "/cas/" + offID + "/crl", body: map[string]string{"crl_pem": string(pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: crlDER}))}, want: 200})
+	run(contractCase{op: "uploadCRL", as: admin, path: "/cas/" + offID + "/crl", body: map[string]string{"crl_pem": string(pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: crlDER}))}, want: 422, kind: "policy-violation"})
+	pending := admin.do(t, http.MethodPost, "/cas", map[string]any{"name": "below-offline", "kind": "intermediate", "parent_ca_id": offID, "subject": map[string]string{"common_name": "Below Offline"}, "public_base_url": "http://pki.homelab.lan"})
+	if pending.Code != http.StatusCreated || pending.body["offline_signing"] == nil {
+		t.Fatalf("intermediate below the offline root: %d %s", pending.Code, pending.Body.String())
+	}
+	pendingID, _ := pending.body["ca"].(map[string]any)["id"].(string)
+	run(contractCase{op: "downloadCACSR", as: admin, path: "/cas/" + pendingID + "/csr", want: 200})
+	bundle, _ := pending.body["offline_signing"].(map[string]any)
+	signed := signOffline(t, bundle, offCert, offKey, v.clk.Now())
+	run(contractCase{op: "uploadSignedCACertificate", as: admin, path: "/cas/" + pendingID + "/certificate", body: map[string]string{"certificate_pem": signed}, want: 200})
+	run(contractCase{op: "uploadSignedCACertificate", as: admin, path: "/cas/" + pendingID + "/certificate", body: map[string]string{"certificate_pem": signed}, want: 422, kind: "policy-violation"})
+
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {
 		o := s.operation(rt)
@@ -550,4 +643,47 @@ func TestContract(t *testing.T) {
 			}
 		}
 	}
+}
+
+// signOffline plays the offline root: it signs the CSR of the bundle with
+// exactly what the extension file orders (CA:TRUE pathlen 0, the key usage,
+// AIA and CDP of the root), with the bundle's serial.
+func signOffline(t *testing.T, bundle map[string]any, root *x509.Certificate, key *ecdsa.PrivateKey, now time.Time) string {
+	t.Helper()
+	csrPEM, _ := bundle["csr_pem"].(string)
+	block, _ := pem.Decode([]byte(csrPEM))
+	if block == nil {
+		t.Fatalf("bundle without CSR: %v", bundle)
+	}
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serialHex, _ := bundle["serial"].(string)
+	extConfig, _ := bundle["ext_config"].(string)
+	serial, ok := new(big.Int).SetString(serialHex, 16)
+	if !ok {
+		t.Fatalf("serial %v", bundle["serial"])
+	}
+	days, _ := bundle["days"].(float64)
+	var aia, cdp string
+	for _, l := range strings.Split(extConfig, "\n") {
+		if v, found := strings.CutPrefix(l, "authorityInfoAccess    = caIssuers;URI:"); found {
+			aia = v
+		}
+		if v, found := strings.CutPrefix(l, "crlDistributionPoints  = URI:"); found {
+			cdp = v
+		}
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial, RawSubject: csr.RawSubject, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Duration(days) * 24 * time.Hour),
+		IsCA: true, BasicConstraintsValid: true, MaxPathLenZero: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IssuingCertificateURL: []string{aia}, CRLDistributionPoints: []string{cdp},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, root, csr.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
