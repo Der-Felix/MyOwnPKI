@@ -58,6 +58,8 @@ tags:
     description: Local users, roles, second-factor enrollment
   - name: tokens
     description: API tokens
+  - name: settings
+    description: Tenant settings (server key generation, subject defaults)
   - name: presets
     description: Certificate presets (read-only, built in)
   - name: cas
@@ -316,54 +318,61 @@ paths:
     get:
       tags: [users]
       operationId: listUsers
-      summary: List local users
-      x-required-role: admin
-      parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Cursor"
+      summary: List the users (instance admins)
+      x-required-role: instance-admin
       responses:
         "200":
-          description: Users
+          description: Users, no secrets
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/UserList" }
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [users]
       operationId: createUser
-      summary: Create a local user
-      description: The user must enroll a second factor at first login before anything else works.
-      x-required-role: admin
+      summary: Create a user with password and second factor
+      description: |
+        The TOTP secret is fixed now (security.md): the answer has the otpauth link, the secret and
+        the recovery codes **once** – hand them to the user, whose first sign-in confirms the
+        secret. Roles are for this tenant; a CA scope names the CA by ID.
+      x-required-role: instance-admin
       x-step-up: true
       requestBody:
-        description: "The new user with an initial password and role bindings"
+        description: "The new user"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/UserCreate" }
       responses:
         "201":
-          description: User created
+          description: Created
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
+              schema: { $ref: "#/components/schemas/UserCreated" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /users/{userId}:
     parameters:
-      - $ref: "#/components/parameters/UserId"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
     get:
       tags: [users]
       operationId: getUser
       summary: Get a user
-      x-required-role: admin
+      x-required-role: instance-admin
       responses:
         "200":
-          description: User
+          description: The user
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
@@ -373,18 +382,19 @@ paths:
     patch:
       tags: [users]
       operationId: updateUser
-      summary: Change display name, e-mail or disable a user
-      x-required-role: admin
+      summary: Disable, enable or unlock a user
+      description: Nobody disables themselves; the last active admins stay. Disabling ends every session.
+      x-required-role: instance-admin
       x-step-up: true
       requestBody:
-        description: "Fields to change (at least one)"
+        description: "What to change"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/UserUpdate" }
       responses:
         "200":
-          description: Updated
+          description: The user after the change
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
@@ -392,50 +402,62 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
     delete:
       tags: [users]
       operationId: deleteUser
-      summary: Delete a user (the audit log keeps the history)
-      x-required-role: admin
+      summary: Disable a user (users are never deleted)
+      description: "The ID stays in the audit log; the same as PATCH with disabled true."
+      x-required-role: instance-admin
       x-step-up: true
       responses:
-        "204": { description: Deleted }
+        "204": { description: Disabled }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /users/{userId}/roles:
     parameters:
-      - $ref: "#/components/parameters/UserId"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
     put:
       tags: [users]
       operationId: setUserRoles
-      summary: Replace the role bindings of a user
-      description: Sessions of the user are rotated so the change takes effect immediately.
-      x-required-role: admin
+      summary: Replace the roles of a user in this tenant
+      description: New rights only with a new session – the user's sessions end.
+      x-required-role: instance-admin
       x-step-up: true
       requestBody:
-        description: "The complete new set of role bindings – replaces all existing ones"
+        description: "Every role the user shall have in this tenant"
         required: true
         content:
           application/json:
             schema:
-              type: array
-              items: { $ref: "#/components/schemas/RoleBinding" }
+              type: object
+              required: [roles]
+              additionalProperties: false
+              properties:
+                roles:
+                  type: array
+                  items: { $ref: "#/components/schemas/RoleBinding" }
       responses:
         "200":
-          description: New role bindings
+          description: The user after the change
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/RoleBinding" }
+              schema: { $ref: "#/components/schemas/User" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /users/me/password:
     put:
@@ -455,42 +477,84 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /users/me/totp:
     post:
       tags: [users]
       operationId: beginTOTPEnrollment
-      summary: Start TOTP enrollment (returns the otpauth URI once)
+      summary: Start changing the own authenticator app (returns the new secret once)
+      description: Needs the current password; the old secret works until the new one is confirmed.
       x-required-role: signed-in
+      requestBody:
+        description: "The current password"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentPassword" }
       responses:
         "200":
           description: Secret for the authenticator app – shown only now
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TOTPEnrollment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /users/me/totp/confirm:
     post:
       tags: [users]
       operationId: confirmTOTPEnrollment
-      summary: Confirm TOTP enrollment with a first code; returns recovery codes once
+      summary: Confirm the new authenticator with a first code
+      description: The other sessions of the user end; device cookies become void.
       x-required-role: signed-in
       requestBody:
-        description: "First code from the authenticator app, proving the secret was stored"
+        description: "A code from the new authenticator"
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/TOTPRequest" }
       responses:
+        "204": { description: The new authenticator is active }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /users/me/recovery-codes:
+    post:
+      tags: [users]
+      operationId: newRecoveryCodes
+      summary: Replace the own recovery codes (shown once)
+      x-required-role: signed-in
+      requestBody:
+        description: "The current password"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentPassword" }
+      responses:
         "200":
-          description: TOTP active
+          description: The new codes; the old ones stop working
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RecoveryCodes" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/WrongSecret" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /users/me/webauthn:
     get:
@@ -616,7 +680,7 @@ paths:
       tags: [tokens]
       operationId: listTokens
       summary: List the own API tokens (never the secret)
-      x-required-role: viewer
+      x-required-role: signed-in
       responses:
         "200":
           description: Tokens
@@ -624,47 +688,94 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/APIToken" }
+                items: { $ref: "#/components/schemas/Token" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [tokens]
       operationId: createToken
-      summary: Create an API token – the secret is returned exactly once
-      description: Stored only as a hash. A token can never have more rights than its owner.
-      x-required-role: viewer
+      summary: Create an API token (the secret is shown once)
+      description: |
+        A token carries roles its owner has (never more) and ends within one year. Use it as
+        `Authorization: Bearer mop_…`. **A token never satisfies step-up**: revocation, key
+        downloads, CA and user management need a person with a fresh second factor.
+      x-required-role: signed-in
       x-step-up: true
       requestBody:
-        description: "Name, scopes and lifetime of the new token"
+        description: "Name, roles and end of the token"
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/APITokenCreate" }
+            schema: { $ref: "#/components/schemas/TokenCreate" }
       responses:
         "201":
-          description: "Token created; the secret is in `token`"
+          description: Created – the secret is in this answer only
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/APITokenCreated" }
+              schema: { $ref: "#/components/schemas/TokenCreated" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /tokens/{tokenId}:
     parameters:
       - name: tokenId
-        description: "ID of the token"
         in: path
         required: true
-        schema: { $ref: "#/components/schemas/ID" }
+        schema: { type: string, maxLength: 64 }
     delete:
       tags: [tokens]
       operationId: revokeToken
-      summary: Revoke an API token immediately
-      x-required-role: viewer
+      summary: Revoke an own API token – it stops working at once
+      x-required-role: signed-in
       responses:
         "204": { description: Revoked }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /settings:
+    get:
+      tags: [settings]
+      operationId: getSettings
+      summary: Settings of this tenant
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [settings]
+      operationId: updateSettings
+      summary: Change the settings of this tenant
+      description: |
+        `allow_server_keygen` switches server-side key generation (a CSR is always possible);
+        the subject defaults fill fields that neither the request nor the CSR gives (like
+        pki.conf of pki.sh) – never the common name.
+      x-required-role: admin
+      requestBody:
+        description: "The settings"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantSettings" }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   # ---------------------------------------------------------------- presets
   /presets:
@@ -1720,9 +1831,11 @@ components:
     TOTPEnrollment:
       description: "Secret for the authenticator app – returned once"
       type: object
-      required: [otpauth_uri]
+      required: [otpauth_uri, secret]
+      additionalProperties: false
       properties:
         otpauth_uri: { type: string, description: "otpauth:// URI for the QR code – shown once" }
+        secret: { type: string, description: "The same secret for typing in" }
 
     RecoveryCodes:
       description: "One-time recovery codes for when the authenticator is lost"
@@ -1828,22 +1941,127 @@ components:
               $ref: "#/components/schemas/ID"
 
     User:
-      description: "A local user account"
+      description: "A local user account (no secrets)"
       type: object
-      required: [id, username, disabled, created_at]
+      required: [id, username, instance_admin, disabled, locked_until, mfa, roles, created_at]
+      additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
         username: { type: string }
-        display_name: { type: string }
-        email: { type: string, format: email }
+        instance_admin: { type: boolean }
         disabled: { type: boolean }
+        locked_until: { type: [string, "null"], format: date-time, description: "Locked after failed sign-ins until then" }
         mfa:
           type: object
+          required: [totp_confirmed, passkeys]
+          additionalProperties: false
           properties:
-            totp: { type: boolean }
-            webauthn_credentials: { type: integer, minimum: 0 }
+            totp_confirmed: { type: boolean, description: "false until the first sign-in confirms the secret" }
+            passkeys: { type: integer, minimum: 0 }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
         created_at: { type: string, format: date-time }
-        last_login_at: { type: [string, "null"], format: date-time }
+
+    UserCreate:
+      description: "A new local user"
+      type: object
+      required: [username, password, roles]
+      additionalProperties: false
+      properties:
+        username: { type: string, pattern: "^[a-z0-9][a-z0-9._@-]{0,63}$", description: "Lower case; anything else is refused, not converted" }
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 12
+          maxLength: 256
+        instance_admin: { type: boolean, default: false }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+
+    UserCreated:
+      description: "A created user and the second factor to hand over – shown once"
+      type: object
+      required: [user, otpauth_uri, secret, recovery_codes]
+      additionalProperties: false
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        otpauth_uri: { type: string }
+        secret: { type: string, description: "The TOTP secret for typing in" }
+        recovery_codes: { type: array, items: { type: string } }
+
+    UserUpdate:
+      description: "Changes to a user (at least one)"
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        disabled: { type: boolean }
+        unlock: { type: boolean, description: "End a lockout early (like myownpki user unlock)" }
+
+    Token:
+      description: "An API token (never the secret)"
+      type: object
+      required: [id, name, roles, created_at, expires_at, last_used_at]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+
+    TokenCreate:
+      description: "A new API token"
+      type: object
+      required: [name, roles, expires_at]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RoleBinding" }
+        expires_at: { type: string, format: date-time, description: "At most one year ahead" }
+
+    TokenCreated:
+      description: "A new token with its secret – shown only in this answer"
+      type: object
+      required: [id, name, roles, created_at, expires_at, last_used_at, secret]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+        secret: { type: string, pattern: "^mop_[a-z2-7]+$" }
+
+    TenantSettings:
+      description: "Settings of the tenant"
+      type: object
+      required: [allow_server_keygen, subject_defaults]
+      additionalProperties: false
+      properties:
+        allow_server_keygen: { type: boolean }
+        subject_defaults:
+          type: object
+          required: [organization, organizational_unit, locality, state, country]
+          additionalProperties: false
+          properties:
+            organization: { type: string, maxLength: 64 }
+            organizational_unit: { type: string, maxLength: 64 }
+            locality: { type: string, maxLength: 128 }
+            state: { type: string, maxLength: 128 }
+            country: { type: string, pattern: "^([A-Z]{2})?$" }
 
     UserList:
       description: "One page of users"
@@ -1855,34 +2073,6 @@ components:
           items: { $ref: "#/components/schemas/User" }
         next_cursor: { type: [string, "null"] }
 
-    UserCreate:
-      description: "A new local user"
-      type: object
-      required: [username, password, roles]
-      properties:
-        username: { type: string, pattern: "^[a-z0-9._-]{2,64}$" }
-        display_name: { type: string, maxLength: 128 }
-        email: { type: string, format: email }
-        password:
-          type: string
-          format: password
-          writeOnly: true
-          minLength: 12
-          maxLength: 1024
-          description: Initial password; the user must change it at first login
-        roles:
-          type: array
-          items: { $ref: "#/components/schemas/RoleBinding" }
-
-    UserUpdate:
-      description: "Changes to a user (at least one field)"
-      type: object
-      minProperties: 1
-      properties:
-        display_name: { type: string, maxLength: 128 }
-        email: { type: string, format: email }
-        disabled: { type: boolean }
-
     PasswordChange:
       description: "Password change of the logged-in user"
       type: object
@@ -1891,47 +2081,10 @@ components:
         current_password: { type: string, format: password, writeOnly: true, maxLength: 1024 }
         new_password: { type: string, format: password, writeOnly: true, minLength: 12, maxLength: 1024 }
 
-    APIToken:
-      description: "An API token without its secret"
-      type: object
-      required: [id, name, scopes, created_at, expires_at]
-      properties:
-        id: { $ref: "#/components/schemas/ID" }
-        name: { type: string }
-        scopes:
-          type: array
-          items: { $ref: "#/components/schemas/TokenScope" }
-        created_at: { type: string, format: date-time }
-        expires_at: { type: string, format: date-time }
-        last_used_at: { type: [string, "null"], format: date-time }
-
     TokenScope:
       description: "What an API token may do; never more than its owner"
       type: string
       enum: [certificates:read, certificates:issue, certificates:revoke, cas:read, audit:read]
-
-    APITokenCreate:
-      description: "A new API token"
-      type: object
-      required: [name, scopes, expires_in_days]
-      properties:
-        name: { type: string, minLength: 1, maxLength: 64 }
-        scopes:
-          type: array
-          minItems: 1
-          items: { $ref: "#/components/schemas/TokenScope" }
-        expires_in_days: { type: integer, minimum: 1, maximum: 365 }
-
-    APITokenCreated:
-      description: "A new API token including the secret – returned once"
-      allOf:
-        - $ref: "#/components/schemas/APIToken"
-        - type: object
-          required: [token]
-          properties:
-            token:
-              type: string
-              description: The secret – shown exactly once, stored only as a hash
 
     SANType:
       description: "Kind of subject alternative name"

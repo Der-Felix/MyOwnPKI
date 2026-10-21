@@ -255,3 +255,29 @@ func (v *Instance) Deliver(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// UserID is the ID of the user name.
+func (v *Instance) UserID(t *testing.T, name string) string {
+	t.Helper()
+	var id string
+	if err := v.SystemDB.Read.QueryRowContext(t.Context(), `SELECT id FROM users WHERE username = ?`, name).Scan(&id); err != nil {
+		t.Fatalf("user %s: %v", name, err)
+	}
+	return id
+}
+
+// TOTP is the RFC 6238 code of a Base32 secret (as shown at enrollment) at t.
+func TOTP(secret string, at time.Time) string {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.ReplaceAll(secret, " ", "")))
+	if err != nil {
+		return ""
+	}
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], uint64(at.Unix()/30)) // #nosec G115 -- a time after 1970
+	mac := hmac.New(sha1.New, key)
+	mac.Write(msg[:])
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	n := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7fffffff
+	return fmt.Sprintf("%06d", n%1_000_000)
+}

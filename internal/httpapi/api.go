@@ -12,6 +12,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -27,6 +28,8 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 )
 
 // BasePath is where the API lives on the admin listener.
@@ -47,6 +50,12 @@ type Deps struct {
 	TrustedProxies []netip.Prefix
 	Version        string
 	Demo           bool
+	// Settings are the tenant settings (step 18); Tenant is the tenant of
+	// this API ("" = store.DefaultTenant).
+	Settings *tenant.Store
+	Tenant   string
+	// TenantAudit and InstanceAudit are the audit logs for reading (step 18).
+	TenantAudit, InstanceAudit *sql.DB
 }
 
 // access says who may call a route.
@@ -85,6 +94,9 @@ func (c *call) who() keys.Who {
 	if c.session != nil {
 		w.Actor = audit.Actor{Type: audit.ActorUser, ID: c.session.UserID, Name: c.session.Username}
 		w.Principal = c.session.Principal
+		if c.session.TokenID != "" {
+			w.Actor = audit.Actor{Type: audit.ActorToken, ID: c.session.TokenID, Name: c.session.Username + " (token " + c.session.TokenName + ")"}
+		}
 	}
 	return w
 }
@@ -107,6 +119,9 @@ func New(d Deps) *API {
 	}
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
+	}
+	if d.Tenant == "" {
+		d.Tenant = store.DefaultTenant
 	}
 	a := &API{d: d, mux: http.NewServeMux(), cop: http.NewCrossOriginProtection()}
 	a.routes = a.table()
@@ -195,7 +210,18 @@ func (a *API) wrap(rt Route) http.Handler {
 }
 
 func (a *API) serve(c *call, rt Route) error {
-	if rt.access == signedIn {
+	bearer, hasBearer := bearerToken(c.r)
+	switch {
+	case rt.access == signedIn && hasBearer:
+		// An API token (step 18): no cookie, so no CSRF token; never a step-up.
+		sess, err := a.d.Auth.AuthenticateToken(c.ctx(), bearer)
+		if err != nil {
+			return err
+		}
+		c.session = sess
+	case hasBearer:
+		return c.problem(http.StatusBadRequest, "bad-request", "API tokens don't sign in – this operation is for a browser session", nil)
+	case rt.access == signedIn:
 		authenticate := a.d.Auth.Authenticate
 		if rt.passive {
 			authenticate = a.d.Auth.AuthenticatePassive
@@ -233,3 +259,16 @@ func isJSON(ct string) bool {
 
 // now is the API's clock in UTC.
 func (a *API) now() time.Time { return a.d.Clock.Now().UTC() }
+
+// bearerToken reads "Authorization: Bearer mop_…" (step 18).
+func bearerToken(r *http.Request) (string, bool) {
+	h := r.Header.Get("Authorization")
+	if h == "" {
+		return "", false
+	}
+	scheme, value, _ := strings.Cut(h, " ")
+	if !strings.EqualFold(scheme, "Bearer") {
+		return "", true // any other scheme is refused like a wrong token
+	}
+	return strings.TrimSpace(value), true
+}

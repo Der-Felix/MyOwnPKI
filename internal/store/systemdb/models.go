@@ -8,6 +8,17 @@ import (
 	"database/sql"
 )
 
+type ApiToken struct {
+	ID         string
+	UserID     string
+	Name       string
+	TokenHash  string
+	RolesJson  string
+	CreatedAt  string
+	ExpiresAt  string
+	LastUsedAt sql.NullString
+}
+
 type DbInfo struct {
 	Key   string
 	Value string
@@ -59,6 +70,11 @@ type Tenant struct {
 	Name              string
 	AllowServerKeygen int64
 	CreatedAt         string
+	SubjectO          string
+	SubjectOu         string
+	SubjectL          string
+	SubjectSt         string
+	SubjectC          string
 }
 
 type Unseal struct {

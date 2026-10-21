@@ -617,6 +617,91 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "uploadSignedCACertificate", as: admin, path: "/cas/" + pendingID + "/certificate", body: map[string]string{"certificate_pem": signed}, want: 200})
 	run(contractCase{op: "uploadSignedCACertificate", as: admin, path: "/cas/" + pendingID + "/certificate", body: map[string]string{"certificate_pem": signed}, want: 422, kind: "policy-violation"})
 
+	// Users, the own account, tokens, settings (step 18).
+	v.user(t, "self", false, authz.Binding{CA: "issuing", Role: authz.Operator})
+	self := v.client("192.0.2.30")
+	self.signIn(t, "self", testPassword)
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	newUser := map[string]any{"username": "worker", "password": "a long password for the new colleague", "roles": []map[string]any{{"role": "viewer", "scope": map[string]string{"type": "tenant"}}}}
+	selfID := v.in.UserID(t, "self")
+	tokenReq := map[string]any{"name": "ci", "roles": []map[string]any{{"role": "operator", "scope": map[string]string{"type": "ca", "id": issuing}}}, "expires_at": v.clk.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)}
+	settings := map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "Homelab", "organizational_unit": "", "locality": "", "state": "", "country": "DE"}}
+	pwChange := map[string]string{"current_password": testPassword, "new_password": "a different long passphrase"}
+	for _, cc := range []contractCase{
+		{op: "listUsers", as: anon, want: 401, note: "no-session"},
+		{op: "listUsers", as: viewer, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "listUsers", as: admin, want: 200},
+		{op: "getUser", as: anon, path: "/users/" + selfID, want: 401, note: "no-session"},
+		{op: "getUser", as: viewer, path: "/users/" + selfID, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "getUser", as: admin, path: "/users/" + selfID, want: 200},
+		{op: "getUser", as: admin, path: "/users/usr_nothere", want: 404},
+		{op: "createUser", as: anon, body: newUser, want: 401, note: "no-session"},
+		{op: "createUser", as: viewer, body: newUser, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createUser", as: admin, body: newUser, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "updateUser", as: anon, path: "/users/" + selfID, body: map[string]bool{"unlock": true}, want: 401, note: "no-session"},
+		{op: "updateUser", as: viewer, path: "/users/" + selfID, body: map[string]bool{"unlock": true}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateUser", as: admin, path: "/users/" + selfID, body: map[string]bool{"unlock": true}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "deleteUser", as: anon, path: "/users/" + selfID, want: 401, note: "no-session"},
+		{op: "deleteUser", as: viewer, path: "/users/" + selfID, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "deleteUser", as: admin, path: "/users/" + selfID, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "setUserRoles", as: anon, path: "/users/" + selfID + "/roles", body: map[string]any{"roles": []any{}}, want: 401, note: "no-session"},
+		{op: "setUserRoles", as: viewer, path: "/users/" + selfID + "/roles", body: map[string]any{"roles": []any{}}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "setUserRoles", as: admin, path: "/users/" + selfID + "/roles", body: map[string]any{"roles": []any{}}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "changeOwnPassword", as: anon, body: pwChange, want: 401, note: "no-session"},
+		{op: "changeOwnPassword", as: self, body: pwChange, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "beginTOTPEnrollment", as: anon, body: map[string]string{"password": testPassword}, want: 401, note: "no-session"},
+		{op: "beginTOTPEnrollment", as: self, body: map[string]string{"password": "not the password"}, want: 422, kind: "wrong-secret"},
+		{op: "confirmTOTPEnrollment", as: anon, body: map[string]string{"code": "123456"}, want: 401, note: "no-session"},
+		{op: "confirmTOTPEnrollment", as: self, body: map[string]string{"code": "123456"}, want: 409, kind: "conflict"},
+		{op: "newRecoveryCodes", as: anon, body: map[string]string{"password": testPassword}, want: 401, note: "no-session"},
+		{op: "newRecoveryCodes", as: self, body: map[string]string{"password": testPassword}, want: 200},
+		{op: "listTokens", as: anon, want: 401, note: "no-session"},
+		{op: "listTokens", as: self, want: 200},
+		{op: "createToken", as: anon, body: tokenReq, want: 401, note: "no-session"},
+		{op: "createToken", as: self, body: tokenReq, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "revokeToken", as: anon, path: "/tokens/tok_x", want: 401, note: "no-session"},
+		{op: "revokeToken", as: self, path: "/tokens/tok_x", want: 404},
+		{op: "getSettings", as: anon, want: 401, note: "no-session"},
+		{op: "getSettings", as: viewer, want: 200},
+		{op: "updateSettings", as: anon, body: settings, want: 401, note: "no-session"},
+		{op: "updateSettings", as: viewer, body: settings, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateSettings", as: admin, body: settings, want: 200},
+		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	run(contractCase{op: "createUser", as: admin, body: newUser, want: 201})
+	run(contractCase{op: "createUser", as: admin, body: newUser, want: 422, kind: "policy-violation"})
+	workerID := v.in.UserID(t, "worker")
+	run(contractCase{op: "setUserRoles", as: admin, path: "/users/" + workerID + "/roles", body: map[string]any{"roles": []map[string]any{{"role": "operator", "scope": map[string]string{"type": "ca", "id": issuing}}}}, want: 200})
+	run(contractCase{op: "updateUser", as: admin, path: "/users/" + workerID, body: map[string]bool{"disabled": true}, want: 200})
+	run(contractCase{op: "updateUser", as: admin, path: "/users/" + workerID, body: map[string]bool{"disabled": false}, want: 200})
+	run(contractCase{op: "deleteUser", as: admin, path: "/users/" + workerID, want: 204})
+	self.stepUp(t, "self")
+	tok := self.do(t, http.MethodPost, "/tokens", tokenReq)
+	s.check(t, s.routeOf(t, v.api, "createToken"), tok)
+	if tok.Code != http.StatusCreated {
+		t.Fatalf("create token: %d %s", tok.Code, tok.Body.String())
+	}
+	mark("createToken", "success")
+	tokID, _ := tok.body["id"].(string)
+	run(contractCase{op: "createToken", as: self, body: map[string]any{"name": "too much", "roles": []map[string]any{{"role": "admin", "scope": map[string]string{"type": "tenant"}}}, "expires_at": tokenReq["expires_at"]}, want: 422, kind: "policy-violation"})
+	run(contractCase{op: "revokeToken", as: self, path: "/tokens/" + tokID, want: 204})
+	enroll := self.do(t, http.MethodPost, "/users/me/totp", map[string]string{"password": testPassword})
+	s.check(t, s.routeOf(t, v.api, "beginTOTPEnrollment"), enroll)
+	if enroll.Code != http.StatusOK {
+		t.Fatalf("begin TOTP change: %d %s", enroll.Code, enroll.Body.String())
+	}
+	mark("beginTOTPEnrollment", "success")
+	newSecret, _ := enroll.body["secret"].(string)
+	v.clk.Advance(30 * time.Second)
+	run(contractCase{op: "confirmTOTPEnrollment", as: self, body: map[string]string{"code": totpCode(t, newSecret, v.clk.Now())}, want: 204})
+	v.clk.Advance(30 * time.Second)
+	self.do(t, http.MethodPost, "/auth/step-up", map[string]string{"code": totpCode(t, newSecret, v.clk.Now())})
+	run(contractCase{op: "changeOwnPassword", as: self, body: map[string]string{"current_password": testPassword, "new_password": "short"}, want: 422, kind: "policy-violation"})
+	run(contractCase{op: "changeOwnPassword", as: self, body: pwChange, want: 204})
+
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {
 		o := s.operation(rt)
@@ -686,4 +771,13 @@ func signOffline(t *testing.T, bundle map[string]any, root *x509.Certificate, ke
 		t.Fatal(err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func totpCode(t *testing.T, secret string, at time.Time) string {
+	t.Helper()
+	code := testinstance.TOTP(secret, at)
+	if code == "" {
+		t.Fatalf("secret %q is not Base32", secret)
+	}
+	return code
 }

@@ -108,7 +108,7 @@ func registerTenant(ctx context.Context, l Layout, tenant string, now func() tim
 }
 
 // Tenants lists the tenants recorded in system.db without changing anything.
-func Tenants(ctx context.Context, l Layout) ([]systemdb.Tenant, error) {
+func Tenants(ctx context.Context, l Layout) ([]systemdb.ListTenantsRow, error) {
 	db, err := OpenReadOnly(ctx, l.SystemDB())
 	if err != nil {
 		return nil, err

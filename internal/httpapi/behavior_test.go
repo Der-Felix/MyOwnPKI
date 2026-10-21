@@ -478,3 +478,55 @@ func TestExportFormatsAndKeyDeletion(t *testing.T) {
 		t.Errorf("tenant audit: %v", got)
 	}
 }
+
+// TestAPITokens (step 18): a token issues with its roles, never more; it
+// can't do what needs a step-up, can't sign in or create tokens, and stops
+// at once when revoked.
+func TestAPITokens(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.unseal(t)
+	v.user(t, "ci", false, authz.Binding{CA: "issuing", Role: authz.Operator})
+	c := v.client("192.0.2.1")
+	c.signIn(t, "ci", testPassword)
+	c.stepUp(t, "ci")
+	r := c.do(t, http.MethodPost, "/tokens", map[string]any{"name": "deploy", "expires_at": v.clk.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"roles": []map[string]any{{"role": "operator", "scope": map[string]string{"type": "ca", "id": v.caIDs["issuing"]}}}})
+	if r.Code != 201 {
+		t.Fatalf("create: %d %s", r.Code, r.Body.String())
+	}
+	secret, _ := r.body["secret"].(string)
+	id, _ := r.body["id"].(string)
+	bot := v.client("192.0.2.2")
+	bearer := []string{"Authorization", "Bearer " + secret}
+	r = bot.do(t, http.MethodPost, "/certificates", map[string]any{"ca_id": v.caIDs["issuing"], "preset": "server", "sans": map[string]any{"dns": []string{"build.homelab.lan"}}, "key": map[string]string{"algorithm": "ecdsa-p256"}}, bearer...)
+	if r.Code != 201 {
+		t.Fatalf("issue with the token: %d %s", r.Code, r.Body.String())
+	}
+	certID, _ := r.body["id"].(string)
+	if r := bot.do(t, http.MethodPost, "/certificates/"+certID+"/export", map[string]string{"format": "pkcs8-pem"}, bearer...); r.Code != 403 || r.problemType() != "step-up-required" {
+		t.Errorf("key download with a token: %d %s", r.Code, r.Body.String())
+	}
+	if r := bot.do(t, http.MethodGet, "/cas/"+v.caIDs["root"], nil, bearer...); r.Code != 404 {
+		t.Errorf("token reads a CA outside its roles: %d", r.Code)
+	}
+	if r := bot.do(t, http.MethodPost, "/auth/login", map[string]string{"username": "ci", "password": testPassword}, bearer...); r.Code != 400 {
+		t.Errorf("sign-in with a token: %d", r.Code)
+	}
+	if r := bot.do(t, http.MethodPost, "/tokens", map[string]any{"name": "x"}, bearer...); r.Code != 403 {
+		t.Errorf("token creates a token: %d", r.Code)
+	}
+	v.deliver(t)
+	if got := v.audit(t, v.ta); !slices.Contains(got, "certificate.issue/success") {
+		t.Errorf("tenant audit: %v", got)
+	}
+	if r := c.do(t, http.MethodDelete, "/tokens/"+id, nil); r.Code != 204 {
+		t.Fatalf("revoke: %d", r.Code)
+	}
+	if r := bot.do(t, http.MethodGet, "/certificates", nil, bearer...); r.Code != 401 {
+		t.Errorf("revoked token: %d", r.Code)
+	}
+	if r := bot.do(t, http.MethodGet, "/certificates", nil, "Authorization", "Bearer mop_wrong"); r.Code != 401 {
+		t.Errorf("unknown token: %d", r.Code)
+	}
+}

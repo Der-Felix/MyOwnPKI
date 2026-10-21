@@ -82,6 +82,8 @@ type Request struct {
 	// names and subject (legacy --no-csr-san).
 	IgnoreCSRNames bool
 	Subject        Subject
+	// SubjectDefaults are the tenant's (O, OU, L, ST, C), the lowest priority.
+	SubjectDefaults Subject
 
 	ValidityDays int // 0 = the preset's default
 	// CustomKeyUsage and CustomExtKeyUsage: only for customizable presets.
@@ -324,6 +326,10 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 		take(preset.SANURI, uris, &in.URIs)
 		want = mergeSubject(want, csrSubject(csr.Subject))
 	}
+	// Tenant defaults fill what neither the request nor the CSR gives; never the CN.
+	defaults := req.SubjectDefaults
+	defaults.CommonName = ""
+	want = mergeSubject(want, defaults)
 
 	subj, sp := checkSubject(want)
 	problems = append(problems, sp...)

@@ -479,6 +479,9 @@ func (s *Service) StartTOTPChange(ctx context.Context, token, currentPassword, i
 	return newEnrollment(s.issuer(), u.ID, u.Username, secret), nil
 }
 
+// ErrNoTOTPChange: confirm without a started change.
+var ErrNoTOTPChange = errors.New("no authenticator change was started")
+
 // ConfirmTOTPChange switches to the new secret once a code from it works.
 // Every other session of the user ends.
 func (s *Service) ConfirmTOTPChange(ctx context.Context, token, code, ip string) error {
@@ -488,7 +491,7 @@ func (s *Service) ConfirmTOTPChange(ctx context.Context, token, code, ip string)
 		return err
 	}
 	if u.TotpPending == nil {
-		return errors.New("no authenticator change was started")
+		return ErrNoTOTPChange
 	}
 	secret, err := s.Key.openTOTP(u.ID, u.TotpPending)
 	if err != nil {
