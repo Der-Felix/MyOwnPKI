@@ -10,7 +10,106 @@
 
 ## Report for the owner
 
-_Filled in at the end of the run._
+**Result:** phase 1 is complete (steps 14–20), v0.1.0 is ready to release (part C), and the plans
+for v0.2 and v0.3 are written (part D). Everything is on the local branch `night/v0.1` – **not
+merged into main, not pushed, no tag, nothing published.** No stash is left over.
+
+### Commits (22 plus the commit of this report, oldest first, all on `night/v0.1`)
+
+| Part | Commits |
+|---|---|
+| A – step 14 | `1f5e215` root issues no leaves · `81a3164` locked name costs a hash · `48cd708` certificate counts · `7b947b2` shared test instance · `a0b1c6f` real UI · `69cd693` UI on the admin listener · `2fe352b` screenshot tool · `6514131` docs |
+| 15 legacy import | `a3bbaf5` |
+| 16 backup / restore | `80b1c7f` |
+| 17 passkeys | `fc5f8ba` |
+| 18 REST API part 2 | `36f0cfe` PKCS#12 export · `00a08be` revoke/renew/CSR · `973417c` CA management · `96e6c43` users/tokens/settings · `8a4c425` import jobs, audit, all 58 operations |
+| 19 UI part 2 | `311088b` pages · `d4ab257` screenshots and notes |
+| 20 wrap-up | `1bbd1d7` healthcheck, passphrase change/reset, end-to-end test · `bb20b65` operations guide |
+| C release | `71aa10b` GoReleaser, Dockerfile, release workflow, CHANGELOG, README, RELEASING |
+| D plans | `4c7e7ed` PHASE2.md, PHASE3.md |
+
+Every commit was tested on its own (`go vet` + `go test ./...` in a separate worktree, with the
+pki.sh fixture); `task check` and `task generate:check` were green before each commit.
+`71aa10b` was reworded once right after it was made (a split into two commits failed and the docs
+landed in it – the message now says so; content unchanged).
+
+### Done – in short
+- **15** `myownpki import legacy` (and archive upload in UI/API): serials, revocations (time and
+  reason) and CRL numbers identical; CI builds the fixture with the real `pki.sh`.
+- **16** `myownpki backup` / `backup verify` / `restore` with manifest, hashes, audit chains and the
+  SAN index check.
+- **17** passkeys as second factor and step-up (API; tested with a virtual authenticator).
+- **18** all 58 API operations served and contract-tested, PKCS#12 export, "delete key after
+  download", API tokens; vacuum: 0 warnings.
+- **19** UI part 2: revoke, renew, export, CAs incl. the offline flow, legacy import, audit,
+  presets, users, tenant settings, own account; screenshots light/dark.
+- **20** `TestPkiShReplaced` (pki.sh → import → issue → revoke → `openssl verify -crl_check` →
+  backup → restore → same CRL), `myownpki healthcheck`, `docs/OPERATIONS.md` with the passphrase
+  warning, **new** `myownpki passphrase change` / `reset` (see decision 3 below).
+- **C** `.goreleaser.yaml`, `deploy/docker/Dockerfile`, `.github/workflows/release.yml`,
+  `deploy/docker-compose.yml`, CHANGELOG, README, `docs/RELEASING.md` (your checklist).
+  `goreleaser check` and three snapshot builds: **archives byte-identical** between runs.
+- **D** `docs/PHASE2.md` (ACME server) and `docs/PHASE3.md` (agent, monitoring) with open questions.
+
+### Decisions for you to confirm (each reversible; details in the step tables below)
+
+1. **Imported pki.sh root = offline root** by default (`--root-key online` imports its key). (15)
+2. Import refuses as a whole: existing CA name/subject, Ed25519 CA, a bad signature. (15)
+3. **New console command `myownpki passphrase change|reset`** – the recovery key had no command
+   that used it, so a lost passphrase would have meant lost CA keys. (20)
+4. **PKCS#12 written by our own code** (no module approved): AES-256 + PBKDF2-SHA256, 600,000
+   iterations, password ≥ 12 characters; no legacy 3DES format. (18)
+5. **API tokens never count as step-up** (no revoke, key download, CA management by token). (18)
+6. `DELETE /users/{id}` disables; a refused API import answers 201 with a `failed` job; passkey
+   removal is `POST …/remove`. (18)
+7. Pages that show a secret once answer the POST directly with `no-store` (exception to PRG). (19)
+8. **No passkey button in the UI** until esbuild or one small script is approved (ADR-04). (17)
+9. Backups are not signed; integrity = SHA-256 + audit chains + signed checkpoints. (16)
+10. `healthcheck` pins the served certificate file; `127.0.0.1` must stay in
+    `admin.allowed_networks` when that is set. (20)
+11. Release: only the **server binary** (agent/ctl are stubs); symbols kept; **no `latest`** image
+    tag; image tag `0.1.0`; no buildx SBOM on the image (archive SBOMs instead). (C)
+12. **Multi-arch image via Docker's containerd image store** on the runner instead of an extra
+    BuildKit image (not approved). (C)
+13. Tool versions: GoReleaser **2.18.2**, cosign **3.1.3**, syft **1.54.1**, distroless digest
+    `afa5c872…` (all ≥ 2 weeks old, checksum files verified with Sigstore). (C)
+14. CHANGELOG date **2026-10-22** – correct it if you tag later (RELEASING.md step 2). (C)
+15. The compose file publishes the admin port on the host's **loopback only**. (C)
+
+### What I could not check tonight
+- **The release workflow** (only runs on a pushed tag) and **the container image** – there is no
+  Docker on this machine. The first real tag is the test; RELEASING.md says how to undo a failed
+  attempt before publishing.
+- Passkeys in a real browser with a real authenticator; PKCS#12 import on Windows/macOS.
+- `TestPkiShReplaced` runs locally only in Git Bash with `LEGACY_TEST_OPENSSL=/usr/bin/openssl`
+  (green); in CI on Linux it always runs.
+
+### Tomorrow in the browser (demo instance)
+
+A test config `C:\pki-test\config.yaml` with one line: `data_dir: "C:/pki-test/data"`. Then, one
+after the other (the second keeps running; the demo password and the TOTP secret are in
+`C:\pki-test\data\init-demo-secrets.txt`), and open <https://127.0.0.1:9443/>:
+
+```bash
+go run ./cmd/myownpki init --demo --with-ca --ca-base-url http://pki.homelab.lan --config C:/pki-test/config.yaml
+```
+
+```bash
+go run ./cmd/myownpki serve --config C:/pki-test/config.yaml
+```
+
+1. Sign in, unseal; dashboard and the navigation (Presets, Users and roles, Audit log, Legacy
+   import, Tenant settings).
+2. Issue a certificate, open it, **Renew**, **Export** as PKCS#12 (open it with your OS), tick
+   "delete the key afterwards" once, **Revoke** – the step-up page should come first.
+3. CAs: new intermediate; import an offline root and walk the **offline signing** page (CSR,
+   extension file, upload the signed certificate, upload the root CRL).
+4. **Legacy import**: upload a `.tar.gz` of a real `pki.sh` directory, read the report.
+5. Users: create one (authenticator link shown once), change roles, disable; Tenant settings with
+   a wrong country code; Audit log filters and "older".
+6. My account: new API token (shown once), new recovery codes, the passkey list.
+7. Dark theme on two pages; keyboard only through one form.
+8. Read `docs/OPERATIONS.md` and `docs/RELEASING.md`, then the open questions in PHASE2/PHASE3.
 
 ## Step 14 – finish (review points 1–4)
 
