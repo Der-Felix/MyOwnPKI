@@ -73,3 +73,61 @@ func TestValidateDevListen(t *testing.T) {
 		}
 	}
 }
+
+// TestUsageNamesOnlyKnownFlags: every flag the main help shows for a command
+// is accepted by that command (`backup verify` was listed with --config,
+// which it refuses). Each flag is passed in its --flag=VALUE form, then
+// --help: a known flag ends in the help (0), an unknown one in a usage error.
+func TestUsageNamesOnlyKnownFlags(t *testing.T) {
+	t.Parallel()
+	var help bytes.Buffer
+	if code := run(t.Context(), []string{"--help"}, &help, &help); code != 0 {
+		t.Fatalf("--help: %d", code)
+	}
+	checked := 0
+	for line := range strings.SplitSeq(help.String(), "\n") {
+		rest, ok := strings.CutPrefix(line, "  "+binary+" ")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(strings.NewReplacer("[", " ", "]", " ").Replace(rest))
+		var words []string
+		var flags [][]string
+		for i := 0; i < len(fields); i++ {
+			f := fields[i]
+			switch {
+			case strings.HasPrefix(f, "--"):
+				for alt := range strings.SplitSeq(f, "|") { // --stdin|--demo
+					arg := alt
+					// A value follows when the next token is a placeholder or a value.
+					if i+1 < len(fields) && !strings.HasPrefix(fields[i+1], "-") && fields[i+1] != "..." && !strings.Contains(f, "|") {
+						arg += "=" + fields[i+1]
+						i++
+					}
+					flags = append(flags, []string{arg})
+				}
+			case len(flags) == 0 && strings.ToLower(f) == f && f != "...":
+				words = append(words, f)
+			}
+		}
+		if len(words) == 0 {
+			continue // --version
+		}
+		// "db status|migrate": each alternative is a command of its own.
+		last := words[len(words)-1]
+		for alt := range strings.SplitSeq(last, "|") {
+			cmd := append(append([]string{}, words[:len(words)-1]...), alt)
+			for _, fl := range flags {
+				args := append(append(append([]string{}, cmd...), fl...), "--help")
+				var out bytes.Buffer
+				if code := run(t.Context(), args, &out, &out); code != 0 {
+					t.Errorf("help line %q: %v exits %d\n%s", strings.TrimSpace(line), args, code, out.String())
+				}
+				checked++
+			}
+		}
+	}
+	if checked < 20 {
+		t.Errorf("only %d flags checked – does the help still look like `  myownpki cmd [--flag VALUE]`?", checked)
+	}
+}
