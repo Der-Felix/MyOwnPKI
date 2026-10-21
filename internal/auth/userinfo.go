@@ -33,6 +33,9 @@ func canSeeUsers(who keys.Who) error {
 	switch {
 	case p == nil:
 		return authz.ErrDenied
+	case p.ViaToken:
+		// Tokens never carry the instance admin role: users are managed by a person.
+		return &authz.TokenStepUpError{Action: "manage users"}
 	case p.Kind == authz.KindConsole || p.Kind == authz.KindSystem || p.InstanceAdmin:
 		return nil
 	}

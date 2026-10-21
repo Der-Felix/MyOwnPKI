@@ -297,8 +297,10 @@ type contractCase struct {
 	path   string // the concrete path
 	body   any
 	want   int
-	kind   string // problem type, if any
-	note   string // what it shows: "", "no-session", "no-read", "low-role", "step-up"
+	kind   string   // problem type, if any
+	note   string   // what it shows: "", "no-session", "no-read", "low-role", "step-up", "token"
+	header []string // extra request headers (a token)
+	detail string   // the problem detail must start with this, if set
 }
 
 // TestContract runs every operation of the route table in the situations
@@ -441,8 +443,13 @@ func TestContract(t *testing.T) {
 		}
 		seen[opID][what] = true
 	}
+	// The step-up cases, replayed with an API token at the end.
+	var stepUpCases []contractCase
 	run := func(cc contractCase) {
 		t.Helper()
+		if cc.note == "step-up" {
+			stepUpCases = append(stepUpCases, cc)
+		}
 		rt := s.routeOf(t, v.api, cc.op)
 		method, path := cc.method, cc.path
 		if method == "" {
@@ -451,8 +458,9 @@ func TestContract(t *testing.T) {
 		if path == "" {
 			path = rt.Path
 		}
-		r := cc.as.do(t, method, path, cc.body)
-		if r.Code != cc.want || (cc.kind != "" && r.problemType() != cc.kind) {
+		r := cc.as.do(t, method, path, cc.body, cc.header...)
+		detail, _ := r.body["detail"].(string)
+		if r.Code != cc.want || (cc.kind != "" && r.problemType() != cc.kind) || !strings.HasPrefix(detail, cc.detail) {
 			t.Errorf("%s %s as %s: %d %s, want %d %s\n%s", method, path, cc.as.ip, r.Code, r.problemType(), cc.want, cc.kind, r.Body.String())
 		}
 		s.check(t, rt, r)
@@ -747,6 +755,23 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "getImport", as: admin, path: "/imports/" + jobID, want: 200})
 	run(contractCase{op: "startLegacyImport", as: admin, body: map[string]any{"archive": "bm90IGFuIGFyY2hpdmU="}, want: 422, kind: "policy-violation"})
 
+	// Every step-up operation once more with an API token of the admin: a
+	// plain refusal (forbidden), never step-up-required – no POST
+	// /auth/step-up can make a token fresh.
+	admin.stepUp(t, "demo")
+	tokResp := admin.do(t, http.MethodPost, "/tokens", map[string]any{"name": "contract", "expires_at": v.clk.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"roles": []map[string]any{{"role": "admin", "scope": map[string]string{"type": "tenant"}}}})
+	if tokResp.Code != http.StatusCreated {
+		t.Fatalf("token: %d %s", tokResp.Code, tokResp.Body.String())
+	}
+	tokSecret, _ := tokResp.body["secret"].(string)
+	bot := v.client("192.0.2.77")
+	for _, cc := range stepUpCases {
+		cc.as, cc.header = bot, []string{"Authorization", "Bearer " + tokSecret}
+		cc.want, cc.kind, cc.note, cc.detail = http.StatusForbidden, "forbidden", "token", "an API token can't "
+		run(cc)
+	}
+
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {
 		o := s.operation(rt)
@@ -759,7 +784,7 @@ func TestContract(t *testing.T) {
 			need = append(need, "low-role")
 		}
 		if o["x-step-up"] == true {
-			need = append(need, "step-up")
+			need = append(need, "step-up", "token")
 		}
 		if slices.Contains([]string{"viewer", "operator", "admin"}, role) && strings.Contains(rt.Path, "{") {
 			need = append(need, "no-read")

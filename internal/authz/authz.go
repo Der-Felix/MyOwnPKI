@@ -102,6 +102,9 @@ type Principal struct {
 	Bindings      []Binding
 	// StepUpAt is the last fresh second factor of this session; zero = none.
 	StepUpAt time.Time
+	// ViaToken: the request carries an API token. A token never satisfies
+	// step-up (step 18): those actions need a person with a fresh code.
+	ViaToken bool
 }
 
 // Console returns the principal of a command run on the server.
@@ -128,6 +131,10 @@ func (p *Principal) Check(perm Permission, res Resource, now time.Time) error {
 	}
 	if p.Kind != KindUser {
 		return fmt.Errorf("%w: unknown principal kind %q", ErrDenied, p.Kind)
+	}
+	// Before the roles: whatever role a token carries, these need a person.
+	if NeedsStepUp(perm) && p.ViaToken {
+		return &TokenStepUpError{Action: stepUpActions[perm]}
 	}
 	if slices.Contains(instancePermissions, perm) {
 		if !p.InstanceAdmin {
@@ -182,6 +189,9 @@ func (p *Principal) FreshStepUp(now time.Time) error {
 	if p == nil || p.Kind != KindUser {
 		return fmt.Errorf("%w: not a signed-in user", ErrDenied)
 	}
+	if p.ViaToken {
+		return &TokenStepUpError{Action: "change the sign-in of an account"}
+	}
 	stepUp := p.StepUpAt.Truncate(time.Second)
 	if p.StepUpAt.IsZero() || now.Sub(stepUp) > StepUpWindow || now.Before(stepUp) {
 		return fmt.Errorf("%w (own account)", ErrStepUpRequired)
@@ -205,3 +215,26 @@ func (p *Principal) CanIssueSomewhere() bool {
 	}
 	return false
 }
+
+// stepUpActions names the step-up permissions for a token's refusal.
+var stepUpActions = map[Permission]string{
+	RevokeCert:  "revoke certificates",
+	DownloadKey: "download private keys",
+	ManageCA:    "manage CAs",
+	UploadCRL:   "upload CRLs",
+	ManageUsers: "manage users",
+}
+
+// TokenStepUpError refuses an action that needs step-up to an API token. It
+// is a denial (ErrDenied), not a prompt: no POST /auth/step-up can ever make
+// a token fresh, so step-up-required would send a script in circles.
+type TokenStepUpError struct {
+	Action string
+}
+
+func (e *TokenStepUpError) Error() string {
+	return "an API token can't " + e.Action + " – sign in and confirm with a fresh code"
+}
+
+// Unwrap makes errors.Is(err, ErrDenied) true.
+func (e *TokenStepUpError) Unwrap() error { return ErrDenied }

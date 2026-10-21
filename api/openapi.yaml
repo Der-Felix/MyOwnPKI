@@ -30,7 +30,9 @@ info:
     - Objects the caller may not read answer **404**, like unknown IDs – nobody can probe what
       exists. Whoever may read an object but lacks the role for an action gets **403**.
     - `x-step-up: true` means a fresh second factor is required (see `POST /auth/step-up`);
-      otherwise the request fails with `403` and problem type `step-up-required`.
+      otherwise the request fails with `403` and problem type `step-up-required`. An **API token**
+      never satisfies step-up: it gets `403` with problem type `forbidden` ("an API token can't
+      … – sign in and confirm with a fresh code"), since no step-up can ever make a token fresh.
     - `x-passive: true`: the request doesn't count as activity – polling it doesn't keep a
       session alive past its idle timeout (decided by the route, not by the client).
     - Lists use cursor pagination: `limit` (at most 100) + `cursor`, response field `next_cursor`.
@@ -700,7 +702,8 @@ paths:
       description: |
         A token carries roles its owner has (never more) and ends within one year. Use it as
         `Authorization: Bearer mop_…`. **A token never satisfies step-up**: revocation, key
-        downloads, CA and user management need a person with a fresh second factor.
+        downloads, CA and user management need a person with a fresh second factor. Such a
+        request answers `403` `forbidden` (not `step-up-required`).
       x-required-role: signed-in
       x-step-up: true
       requestBody:
@@ -1694,7 +1697,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     Forbidden:
-      description: Role too low, or step-up required (type `step-up-required`)
+      description: Role too low, an API token on a step-up operation (type `forbidden`), or step-up required (type `step-up-required`)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
