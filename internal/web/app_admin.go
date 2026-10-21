@@ -361,15 +361,15 @@ func (a *app) auditLog(c *rc) {
 		case "denied":
 			st = view.StatusCrit
 		}
-		d.Rows = append(d.Rows, []admin.Cell{{Text: strconv.FormatInt(r.Seq, 10), Num: true}, {Text: view.DateTime(t)}, {Text: r.ActorName},
-			{Text: r.Action, Mono: true}, {Text: strings.Trim(r.TargetType+" "+r.TargetID, " ")}, {Text: r.Result, Status: st}, {Text: r.SourceIp}, {Text: detailsText(r.DetailsJson)}})
+		d.Rows = append(d.Rows, []admin.Cell{{Text: strconv.FormatInt(r.Seq, 10), Num: true}, {Text: view.DateTime(t), NoWrap: true}, {Text: r.ActorName},
+			{Text: r.Action, Mono: true, NoWrap: true}, {Text: targetText(r.TargetType, r.TargetID)}, {Text: r.Result, Status: st, NoWrap: true}, {Text: r.SourceIp}, {Text: detailsText(r.DetailsJson)}})
 	}
 	if more {
 		v := url.Values{"scope": {scope}, "action": {action}, "result": {result}, "before": {strconv.FormatInt(rows[len(rows)-1].Seq, 10)}}
 		d.More, d.MoreLabel = "/admin/audit?"+v.Encode(), "Older entries"
 	}
 	p := c.page("Audit log", "audit", adminCrumbs()...)
-	p.Description = "Every change and every refusal, hash-chained and signed at checkpoints; `myownpki audit verify` checks the chain."
+	p.Description = "Every change and every refusal, hash-chained and signed at checkpoints; myownpki audit verify checks the chain."
 	render(c.w, c.r, a.log, http.StatusOK, admin.TablePage(p, d))
 }
 
@@ -486,4 +486,11 @@ func (a *app) importReport(c *rc) {
 	list("Warnings", r.Warnings)
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(c.page("Import report", "import", append(adminCrumbs(), view.Crumb{Label: "Legacy import", Href: "/admin/import"})...),
 		admin.DetailData{Messages: c.messages(), Sections: sections, Commands: []admin.Command{{Label: "New import", Href: "/admin/import"}}}))
+}
+
+func targetText(typ, id string) string {
+	if id == "" || id == typ {
+		return typ
+	}
+	return typ + " " + id
 }

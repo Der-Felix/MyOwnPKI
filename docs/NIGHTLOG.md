@@ -251,6 +251,33 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 | Navigation: the new entries appear only for users who may use them (decision 82) | No dead links | – |
 | Screenshots: new light pages (users, audit log, legacy import report, CA offline signing) plus dark variants of two; the same neutral demo instance | Owner's step 14 rule | – |
 
+### Done
+- `internal/web/pages/admin` (form, table, detail templates) and the pages: certificate revoke /
+  renew / export, CA new / import offline root / offline signing / manage (limits, CRL, root CRL
+  upload, renew, retire, revoke), presets, users and roles, tenant settings, audit log (filters,
+  older pages), legacy import with report, My account (password, authenticator, recovery codes,
+  API tokens, passkeys list and removal) – commit `311088b`.
+- Navigation: Presets, Users and roles, Audit log, Legacy import, Tenant settings – shown only to
+  users who may use them; "My account" in the user menu. The prototype (`serve --dev`) shows the
+  new entries disabled ("real UI").
+- Screenshots of the neutral demo instance (O=Homelab, homelab.example, 192.0.2.10), all
+  regenerated because the navigation changed: new `users`, `audit-log`, `offline-signing`,
+  `legacy-import`, and dark `certificate-detail-dark`, `users-dark` next to `dashboard-dark`.
+
+### Tests
+- Every new page is in the rendered-page set: no inline styles, scripts, event handlers or icons.
+- `TestCertificateActions` (renew → 303 to the successor; PKCS#12 export opened by OpenSSL; key
+  gone after "delete"; revoke needs the confirmation, 303, Revoke no longer offered; without a
+  fresh second factor → step-up page), `TestViewerSeesNoCommands`, `TestCAOfflineFlowInTheUI`
+  (new intermediate, limits, CRL, retire; offline root import, pending intermediate, the offline
+  page with CSR and extension file, the signed certificate installed, root CRL uploaded),
+  `TestAdministrationPages` (settings incl. a refused country, user creation shown once with
+  `no-store`, role, disable, API token shown once, audit page, legacy import upload with report).
+
+### Not verifiable tonight
+- The pages in a real browser beyond the screenshots (keyboard use, screen reader).
+- Adding a passkey in the UI (needs a script, see step 17).
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,
