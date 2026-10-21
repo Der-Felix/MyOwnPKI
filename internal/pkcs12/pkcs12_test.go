@@ -9,12 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/pem"
 	"math/big"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +44,7 @@ func certFor(t *testing.T, cn string, pub, issuerKey any, issuer *x509.Certifica
 // password.
 func TestOpenSSLReadsIt(t *testing.T) {
 	t.Parallel()
-	bin := testutil.OpenSSL(t)
+	testutil.OpenSSL(t) // skip early without OpenSSL 3
 	caKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	ca := certFor(t, "Test Issuing CA", &caKey.PublicKey, caKey, nil, true)
 	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -71,41 +68,28 @@ func TestOpenSSLReadsIt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dir := t.TempDir()
-			file := filepath.Join(dir, "x.p12")
+			file := filepath.Join(t.TempDir(), "x.p12")
 			if werr := os.WriteFile(file, p12, 0o600); werr != nil {
 				t.Fatal(werr)
 			}
-			passFile := filepath.Join(dir, "pass")
-			if werr := os.WriteFile(passFile, []byte(password), 0o600); werr != nil {
-				t.Fatal(werr)
-			}
-			out, err := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", file, "-passin", "file:"+passFile, "-nodes", "-info").CombinedOutput()
+			// What OpenSSL read, compared with what went in – not how
+			// OpenSSL prints names (that differs between 3.0 and 3.5).
+			got, err := testutil.OpenSSLPKCS12(t, file, password, true)
 			if err != nil {
-				t.Fatalf("openssl pkcs12: %v\n%s", err, out)
+				t.Fatal(err)
 			}
-			text := string(out)
-			for _, want := range []string{"MAC: sha256", "PBES2, PBKDF2, AES-256-CBC", "friendlyName: nas.homelab.lan", "BEGIN PRIVATE KEY", "subject=CN=Test Issuing CA"} {
-				if !strings.Contains(text, want) {
-					t.Errorf("openssl output lacks %q:\n%s", want, text)
-				}
+			problems := got.Problems(leaf, []*x509.Certificate{ca}, "nas.homelab.lan")
+			problems = append(problems, got.InfoProblems("PBES2", "PBKDF2", "AES-256-CBC", "hmacWithSHA256", "600000")...)
+			for _, p := range problems {
+				t.Errorf("%s\n%s", p, got.Text)
 			}
-			// The key OpenSSL decrypted is ours.
-			at := strings.Index(text, "-----BEGIN PRIVATE KEY")
-			if at < 0 {
-				t.Fatalf("no key in the output:\n%s", text)
-			}
-			rest := []byte(text[at:])
-			block, _ := pem.Decode(rest)
-			if block == nil || !bytes.Equal(block.Bytes, pkcs8) {
+			// The key OpenSSL decrypted is ours, byte for byte.
+			if !bytes.Equal(got.KeyDER, pkcs8) {
 				t.Error("OpenSSL decrypted another key")
 			}
 			// A wrong password fails the MAC.
-			if err := os.WriteFile(passFile, []byte("a wrong password"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if out, err := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", file, "-passin", "file:"+passFile, "-nodes").CombinedOutput(); err == nil {
-				t.Errorf("wrong password accepted:\n%s", out)
+			if _, err := testutil.OpenSSLPKCS12(t, file, "a wrong password", false); err == nil {
+				t.Error("wrong password accepted")
 			}
 		})
 	}
