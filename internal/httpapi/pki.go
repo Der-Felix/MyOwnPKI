@@ -424,6 +424,13 @@ func (a *API) issueCertificate(c *call) error {
 	if s := req.SANs; s != nil {
 		r.DNSNames, r.IPAddresses, r.EmailAddresses, r.URIs = s.DNS, s.IP, s.Email, s.URI
 	}
+	if a.d.Settings != nil {
+		d, derr := a.d.Settings.Defaults(c.ctx(), a.d.Tenant)
+		if derr != nil {
+			return derr
+		}
+		r.SubjectDefaults = ca.Subject{Organization: d.Organization, OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, Province: d.State, Country: d.Country}
+	}
 	issued, err := a.d.Engine.Issue(c.ctx(), r)
 	if err != nil {
 		return err

@@ -38,14 +38,53 @@ FROM tenants
 WHERE id = ?
 `
 
-func (q *Queries) GetTenant(ctx context.Context, id string) (Tenant, error) {
+type GetTenantRow struct {
+	ID                string
+	Name              string
+	AllowServerKeygen int64
+	CreatedAt         string
+}
+
+func (q *Queries) GetTenant(ctx context.Context, id string) (GetTenantRow, error) {
 	row := q.db.QueryRowContext(ctx, getTenant, id)
-	var i Tenant
+	var i GetTenantRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.AllowServerKeygen,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getTenantSettings = `-- name: GetTenantSettings :one
+SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c
+FROM tenants
+WHERE id = ?
+`
+
+type GetTenantSettingsRow struct {
+	ID                string
+	AllowServerKeygen int64
+	SubjectO          string
+	SubjectOu         string
+	SubjectL          string
+	SubjectSt         string
+	SubjectC          string
+}
+
+// Settings of a tenant (step 18): server key generation and subject defaults.
+func (q *Queries) GetTenantSettings(ctx context.Context, id string) (GetTenantSettingsRow, error) {
+	row := q.db.QueryRowContext(ctx, getTenantSettings, id)
+	var i GetTenantSettingsRow
+	err := row.Scan(
+		&i.ID,
+		&i.AllowServerKeygen,
+		&i.SubjectO,
+		&i.SubjectOu,
+		&i.SubjectL,
+		&i.SubjectSt,
+		&i.SubjectC,
 	)
 	return i, err
 }
@@ -56,15 +95,22 @@ FROM tenants
 ORDER BY id
 `
 
-func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
+type ListTenantsRow struct {
+	ID                string
+	Name              string
+	AllowServerKeygen int64
+	CreatedAt         string
+}
+
+func (q *Queries) ListTenants(ctx context.Context) ([]ListTenantsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listTenants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Tenant{}
+	items := []ListTenantsRow{}
 	for rows.Next() {
-		var i Tenant
+		var i ListTenantsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -82,4 +128,36 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setTenantSettings = `-- name: SetTenantSettings :execrows
+UPDATE tenants
+SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?
+WHERE id = ?
+`
+
+type SetTenantSettingsParams struct {
+	AllowServerKeygen int64
+	SubjectO          string
+	SubjectOu         string
+	SubjectL          string
+	SubjectSt         string
+	SubjectC          string
+	ID                string
+}
+
+func (q *Queries) SetTenantSettings(ctx context.Context, arg SetTenantSettingsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setTenantSettings,
+		arg.AllowServerKeygen,
+		arg.SubjectO,
+		arg.SubjectOu,
+		arg.SubjectL,
+		arg.SubjectSt,
+		arg.SubjectC,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

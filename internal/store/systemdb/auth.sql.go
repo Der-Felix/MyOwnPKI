@@ -92,6 +92,17 @@ func (q *Queries) CountPasskeys(ctx context.Context, userID string) (int64, erro
 	return count, err
 }
 
+const countTokens = `-- name: CountTokens :one
+SELECT count(*) FROM api_tokens WHERE user_id = ?
+`
+
+func (q *Queries) CountTokens(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTokens, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnusedRecoveryCodes = `-- name: CountUnusedRecoveryCodes :one
 SELECT count(*) FROM recovery_codes WHERE user_id = ? AND used_at IS NULL
 `
@@ -201,6 +212,23 @@ func (q *Queries) DeleteSession(ctx context.Context, idHash string) error {
 	return err
 }
 
+const deleteToken = `-- name: DeleteToken :execrows
+DELETE FROM api_tokens WHERE id = ? AND user_id = ?
+`
+
+type DeleteTokenParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) DeleteToken(ctx context.Context, arg DeleteTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteToken, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteUserPasskeys = `-- name: DeleteUserPasskeys :execrows
 DELETE FROM webauthn_credentials WHERE user_id = ?
 `
@@ -225,6 +253,18 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID string) (int64,
 	return result.RowsAffected()
 }
 
+const deleteUserTokens = `-- name: DeleteUserTokens :execrows
+DELETE FROM api_tokens WHERE user_id = ?
+`
+
+func (q *Queries) DeleteUserTokens(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserTokens, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at FROM sessions WHERE id_hash = ?
 `
@@ -241,6 +281,26 @@ func (q *Queries) GetSession(ctx context.Context, idHash string) (Session, error
 		&i.LastSeenAt,
 		&i.ExpiresAt,
 		&i.StepupAt,
+	)
+	return i, err
+}
+
+const getTokenByHash = `-- name: GetTokenByHash :one
+SELECT id, user_id, name, token_hash, roles_json, created_at, expires_at, last_used_at FROM api_tokens WHERE token_hash = ?
+`
+
+func (q *Queries) GetTokenByHash(ctx context.Context, tokenHash string) (ApiToken, error) {
+	row := q.db.QueryRowContext(ctx, getTokenByHash, tokenHash)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.RolesJson,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
 	)
 	return i, err
 }
@@ -374,6 +434,35 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 	return err
 }
 
+const insertToken = `-- name: InsertToken :exec
+
+INSERT INTO api_tokens (id, user_id, name, token_hash, roles_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertTokenParams struct {
+	ID        string
+	UserID    string
+	Name      string
+	TokenHash string
+	RolesJson string
+	CreatedAt string
+	ExpiresAt string
+}
+
+// API tokens (step 18).
+func (q *Queries) InsertToken(ctx context.Context, arg InsertTokenParams) error {
+	_, err := q.db.ExecContext(ctx, insertToken,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.TokenHash,
+		arg.RolesJson,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const insertUser = `-- name: InsertUser :exec
 
 INSERT INTO users (id, username, password_hash, password_changed_at, totp_secret, instance_admin, created_at, updated_at)
@@ -462,6 +551,42 @@ func (q *Queries) ListRoleBindings(ctx context.Context, userID string) ([]RoleBi
 			&i.Role,
 			&i.CreatedAt,
 			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTokens = `-- name: ListTokens :many
+SELECT id, user_id, name, token_hash, roles_json, created_at, expires_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY created_at, id
+`
+
+func (q *Queries) ListTokens(ctx context.Context, userID string) ([]ApiToken, error) {
+	rows, err := q.db.QueryContext(ctx, listTokens, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiToken{}
+	for rows.Next() {
+		var i ApiToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.TokenHash,
+			&i.RolesJson,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -677,6 +802,20 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.ExecContext(ctx, touchSession, arg.LastSeenAt, arg.IDHash)
+	return err
+}
+
+const touchToken = `-- name: TouchToken :exec
+UPDATE api_tokens SET last_used_at = ? WHERE id = ?
+`
+
+type TouchTokenParams struct {
+	LastUsedAt sql.NullString
+	ID         string
+}
+
+func (q *Queries) TouchToken(ctx context.Context, arg TouchTokenParams) error {
+	_, err := q.db.ExecContext(ctx, touchToken, arg.LastUsedAt, arg.ID)
 	return err
 }
 

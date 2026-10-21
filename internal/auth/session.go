@@ -71,6 +71,9 @@ type Session struct {
 	StepUpAt  time.Time
 	// Principal is what the session may do; nil for a pending session.
 	Principal *authz.Principal
+	// TokenID and TokenName are set when an API token signed the request in
+	// (no cookie, no CSRF token, never a step-up).
+	TokenID, TokenName string
 
 	idHash  string
 	pending bool

@@ -18,3 +18,14 @@ WHERE id = ?;
 SELECT id, name, allow_server_keygen, created_at
 FROM tenants
 ORDER BY id;
+
+-- Settings of a tenant (step 18): server key generation and subject defaults.
+-- name: GetTenantSettings :one
+SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c
+FROM tenants
+WHERE id = ?;
+
+-- name: SetTenantSettings :execrows
+UPDATE tenants
+SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?
+WHERE id = ?;

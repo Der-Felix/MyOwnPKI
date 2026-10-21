@@ -136,3 +136,26 @@ DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?;
 
 -- name: DeleteUserPasskeys :execrows
 DELETE FROM webauthn_credentials WHERE user_id = ?;
+
+-- API tokens (step 18).
+
+-- name: InsertToken :exec
+INSERT INTO api_tokens (id, user_id, name, token_hash, roles_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetTokenByHash :one
+SELECT * FROM api_tokens WHERE token_hash = ?;
+
+-- name: ListTokens :many
+SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at, id;
+
+-- name: CountTokens :one
+SELECT count(*) FROM api_tokens WHERE user_id = ?;
+
+-- name: DeleteToken :execrows
+DELETE FROM api_tokens WHERE id = ? AND user_id = ?;
+
+-- name: TouchToken :exec
+UPDATE api_tokens SET last_used_at = ? WHERE id = ?;
+
+-- name: DeleteUserTokens :execrows
+DELETE FROM api_tokens WHERE user_id = ?;
