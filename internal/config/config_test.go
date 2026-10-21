@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // absDir returns an absolute directory valid on the test's OS.
@@ -280,6 +282,36 @@ func TestPasskeyRPID(t *testing.T) {
 	for _, bad := range []string{"http://pki.homelab.lan", "https://192.0.2.10:9443", "https://pki.homelab.lan/ui", "pki.homelab.lan", "https://user@pki.lan", "https://pki.lan?x=1"} {
 		if _, err := PasskeyRPID(bad); err == nil {
 			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// TestExampleFileHasEveryKey: every setting is in the example – a new key
+// must not be left undocumented (auth.passkey_origin was, until step 20).
+func TestExampleFileHasEveryKey(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "config.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for k, v := range doc {
+		sub, ok := v.(map[string]any)
+		if !ok {
+			have[EnvPrefix+strings.ToUpper(k)] = true
+			continue
+		}
+		for kk := range sub {
+			have[EnvPrefix+strings.ToUpper(k+"_"+kk)] = true
+		}
+	}
+	for _, name := range EnvNames() {
+		if !have[name] {
+			t.Errorf("deploy/config.example.yaml lacks the key of %s", name)
 		}
 	}
 }
