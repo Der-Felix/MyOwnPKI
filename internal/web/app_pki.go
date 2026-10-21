@@ -306,14 +306,15 @@ func (a *app) certificateDetail(c *rc) {
 	d := certificates.DetailData{
 		ID: info.ID, CommonName: cmp.Or(info.CommonName, info.Serial), Status: st, StatusText: text, Tab: tab,
 		KeyStored: info.KeyStored, Revoked: info.Status == ca.CertRevoked, Messages: c.messages(),
-		Real: &certificates.RealActions{CSRF: c.sess.CSRFToken, CanDownloadKey: info.KeyStored && c.may(authz.DownloadKey, info.CAName)},
+		Real: &certificates.RealActions{CSRF: c.sess.CSRFToken, CanDownloadKey: info.KeyStored && c.may(authz.DownloadKey, info.CAName),
+			CanRenew: info.Source != "external" && info.Preset != "" && c.may(authz.IssueCert, info.CAName), CanRevoke: info.Source != "external" && c.may(authz.RevokeCert, info.CAName)},
 	}
 	for _, t := range realCertTabs {
 		d.Tabs = append(d.Tabs, view.Tab{Label: t.label, Href: "/certificates/" + info.ID + t.suffix, Active: t.key == tab})
 	}
 	key := "Not on the server – the key was made by the requester (CSR)"
 	if info.KeyStored {
-		key = "Stored encrypted on the server – the download needs a fresh second factor and stays on the server afterwards"
+		key = "Stored encrypted on the server – the export needs a fresh second factor; you may delete it from the server with the export"
 	}
 	d.Overview = []view.KV{
 		{Key: "Subject", Value: info.Subject},
@@ -466,7 +467,7 @@ func (a *app) authorityList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := authorities.ListData{Real: true, Messages: c.messages()}
+	d := authorities.ListData{Real: true, CanManage: c.may(authz.ManageCA, ""), Messages: c.messages()}
 	for _, info := range cas {
 		st, text := a.caStatus(info)
 		g, _ := current(info)
@@ -501,7 +502,8 @@ func (a *app) authorityDetail(c *rc) {
 	d := authorities.DetailData{
 		ID: info.ID, Name: info.Name, Status: st, StatusText: text, Messages: c.messages(),
 		CanSign: info.KeyMode == ca.KeyModeOnlineEncrypted,
-		Real:    &authorities.RealActions{CanIssue: c.canIssueAt(*info)},
+		Real: &authorities.RealActions{CanIssue: c.canIssueAt(*info), CanManage: c.may(authz.ManageCA, info.Name) || c.may(authz.ManageCA, info.Parent),
+			Pending: info.Status == ca.StatusPendingSignature},
 		Properties: []view.KV{
 			{Key: "Type", Value: info.Kind},
 			{Key: "Subject", Value: g.Subject},

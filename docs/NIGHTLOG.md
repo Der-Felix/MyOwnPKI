@@ -237,6 +237,20 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
   what OpenSSL 3 writes by default).
 - A large legacy archive over the API (memory use with ~90 MB of JSON).
 
+## Step 19 – Web UI, part 2
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| Three generic page templates (`pages/admin`: a form page, a table page, a detail page with sections and inline command forms) instead of one hand-made page per function | Many small admin pages in one calm, consistent look (frontend.md "calm and plain"); the existing CSS classes only; less templ code to review | Hand-made pages where a function needs more |
+| Still no htmx and no JavaScript: plain forms with PRG (decision 74) | Same rules as step 14 | – |
+| **Exceptions to PRG** – the answer to the POST shows a secret once and is `Cache-Control: no-store`: a new user's otpauth link and recovery codes, the own new TOTP secret, new recovery codes, a new API token, the key export file | A secret must not travel in a cookie or a URL, and must not be shown twice | Store them encrypted for one GET |
+| Certificate detail: Revoke (reason, confirmation, step-up), Renew (new key or new CSR), Export (PKCS#12 with password / PEM / combined, "delete the key afterwards") | Steps 18/19 | – |
+| CAs: new CA (root or intermediate), import offline root, offline signing page (CSR, extension file, instructions, upload), renew, retire, revoke, limits, sign CRL, upload root CRL | Step 19 list | – |
+| Administration: legacy import (archive upload, report page), audit log (filters, pages; operators and up), presets (read-only), users and roles (instance admins), tenant settings (admins), own account (password, authenticator, recovery codes, API tokens, passkeys list) | Step 19 list; the own account is where tokens and passkeys live | – |
+| Navigation: the new entries appear only for users who may use them (decision 82) | No dead links | – |
+| Screenshots: new light pages (users, audit log, legacy import report, CA offline signing) plus dark variants of two; the same neutral demo instance | Owner's step 14 rule | – |
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,

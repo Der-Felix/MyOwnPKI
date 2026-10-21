@@ -58,6 +58,8 @@ type DetailData struct {
 type RealActions struct {
 	CSRF           string
 	CanDownloadKey bool // operator on the issuing CA, key stored on the server
+	// CanRenew and CanRevoke offer those commands (step 19).
+	CanRenew, CanRevoke bool
 }
 
 // Detail renders one certificate with tabs.
@@ -198,6 +200,11 @@ func actions(d DetailData) templ.Component {
 // is a POST form with the CSRF token and answers with the file itself.
 // The root is never in chain or fullchain (owner 2026-10-17).
 templ realActions(d DetailData) {
+	if d.Real.CanRenew {
+		@components.CommandGroup("Create") {
+			<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/renew") }>Renew</a>
+		}
+	}
 	@components.CommandGroup("Transfer") {
 		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/fullchain") }>Download fullchain</a>
 		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/pem") }>Certificate (PEM)</a>
@@ -205,12 +212,14 @@ templ realActions(d DetailData) {
 		<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/download/der") }>DER</a>
 	}
 	if d.Real.CanDownloadKey {
-		<form action={ templ.SafeURL("/certificates/" + d.ID + "/key") } method="post">
-			<input type="hidden" name="csrf_token" value={ d.Real.CSRF }/>
-			@components.CommandGroup("Private key") {
-				<button type="submit" class="cmd">Download private key</button>
-			}
-		</form>
+		@components.CommandGroup("Private key") {
+			<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/export") }>Export with key</a>
+		}
+	}
+	if d.Real.CanRevoke && !d.Revoked {
+		@components.CommandGroup("Dangerous") {
+			<a class="cmd cmd-danger" href={ templ.SafeURL("/certificates/" + d.ID + "/revoke") }>Revoke</a>
+		}
 	}
 }
 

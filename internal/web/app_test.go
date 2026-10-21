@@ -262,7 +262,7 @@ func TestKeyDownloadNeedsAFreshCode(t *testing.T) {
 	}
 	detail := "/certificates/" + issued.ID
 	page := b.get(t, detail).html()
-	if !strings.Contains(page, `action="`+detail+`/key" method="post"`) || !strings.Contains(page, "Download fullchain") {
+	if !strings.Contains(page, `href="`+detail+`/export"`) || !strings.Contains(page, "Download fullchain") {
 		t.Fatalf("detail actions:\n%s", page)
 	}
 	token := b.csrf(t)
@@ -408,6 +408,10 @@ func realPages(t *testing.T) map[string]string {
 			"/certificates/" + issued.ID + "/extensions", "/certificates/" + issued.ID + "/chain", "/certificates/new",
 			"/authorities", "/authorities/" + v.CAIDs["issuing"], "/authorities/" + v.CAIDs["root"],
 			"/admin/appearance", "/design", "/step-up?next=%2F", "/certificates/crt_none",
+			"/certificates/" + issued.ID + "/revoke", "/certificates/" + issued.ID + "/renew", "/certificates/" + issued.ID + "/export",
+			"/authorities/new", "/authorities/import", "/authorities/" + v.CAIDs["issuing"] + "/manage", "/authorities/" + v.CAIDs["root"] + "/manage",
+			"/presets", "/presets/server", "/admin/users", "/admin/users/new", "/admin/users/" + v.UserID(t, "demo"), "/admin/settings",
+			"/admin/audit", "/admin/audit?scope=instance", "/admin/import", "/account",
 		} {
 			out["real "+p] = b.get(t, p).html()
 		}
@@ -426,10 +430,15 @@ func realPages(t *testing.T) map[string]string {
 		out["real wizard review"] = b.post(t, "/certificates/new", form(3, nil)).html()
 		out["real wizard error"] = b.post(t, "/certificates/new", form(2, url.Values{"csr": {"hello"}})).html()
 		out["real wizard refused"] = b.post(t, "/certificates/new", form(4, url.Values{"go": {"issue"}, "dns": {"*.lan"}})).html()
+		out["real new user"] = b.post(t, "/admin/users/new", url.Values{"csrf_token": {token}, "username": {"carol"}, "password": {"a long password for the new colleague"}, "role": {"viewer"}}).html()
+		out["real new token"] = b.post(t, "/account/tokens", url.Values{"csrf_token": {token}, "name": {"ci"}, "role": {"viewer"}, "days": {"30"}}).html()
+		out["real new codes"] = b.post(t, "/account/recovery-codes", url.Values{"csrf_token": {token}, "password": {v.DemoPassword}}).html()
 		for page, want := range map[string]string{
 			"real wizard refused": "the policy refused the request", "real wizard error": `id="csr-err"`,
 			"real wizard names": `aria-current="step">Names`, "real /certificates/crt_none": "There is no such object",
 			"real /unseal": "Sealed since", "real /login/code": `autocomplete="one-time-code"`,
+			"real new user": "otpauth://", "real new token": "mop_", "real new codes": "Shown only now", "real /admin/audit?scope=instance": "user.login",
+			"real /account": "API tokens", "real /presets/server": "serverAuth",
 		} {
 			if !strings.Contains(out[page], want) {
 				t.Errorf("%s lacks %q", page, want)

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,9 +18,11 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -46,6 +49,10 @@ type AppDeps struct {
 	TrustedProxies []netip.Prefix
 	Demo           bool
 	Tenant         string // the tenant of this instance (phase 1: one)
+	// Settings, TenantAudit and InstanceAudit serve the pages of step 19
+	// (tenant settings, audit log); nil hides those pages.
+	Settings                   *tenant.Store
+	TenantAudit, InstanceAudit *sql.DB
 }
 
 // maxUIForm limits form bodies; a CSR upload is at most 64 KiB.
@@ -83,9 +90,53 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /certificates/{id}/{tab}", a.signedIn(a.certificateDetail))
 	mux.HandleFunc("GET /certificates/{id}/download/{format}", a.signedIn(a.certificateDownload))
 	mux.HandleFunc("POST /certificates/{id}/key", a.signedIn(a.keyDownload))
+	mux.HandleFunc("GET /certificates/{id}/revoke", a.signedIn(a.revokePage))
+	mux.HandleFunc("POST /certificates/{id}/revoke", a.signedIn(a.revoke))
+	mux.HandleFunc("GET /certificates/{id}/renew", a.signedIn(a.renewPage))
+	mux.HandleFunc("POST /certificates/{id}/renew", a.signedIn(a.renew))
+	mux.HandleFunc("GET /certificates/{id}/export", a.signedIn(a.exportPage))
+	mux.HandleFunc("POST /certificates/{id}/export", a.signedIn(a.export))
 	mux.HandleFunc("GET /authorities", a.signedIn(a.authorityList))
 	mux.HandleFunc("GET /authorities/{id}", a.signedIn(a.authorityDetail))
+	mux.HandleFunc("GET /authorities/new", a.signedIn(a.newCAPage))
+	mux.HandleFunc("POST /authorities/new", a.signedIn(a.newCA))
+	mux.HandleFunc("GET /authorities/import", a.signedIn(a.importRootPage))
+	mux.HandleFunc("POST /authorities/import", a.signedIn(a.importRoot))
 	mux.HandleFunc("GET /authorities/{id}/certificate", a.signedIn(a.authorityCertificate))
+	mux.HandleFunc("POST /authorities/{id}/certificate", a.signedIn(a.installCertificate))
+	mux.HandleFunc("GET /authorities/{id}/offline", a.signedIn(a.offlinePage))
+	mux.HandleFunc("GET /authorities/{id}/manage", a.signedIn(a.managePage))
+	mux.HandleFunc("POST /authorities/{id}/limits", a.signedIn(a.caLimits))
+	mux.HandleFunc("POST /authorities/{id}/crl", a.signedIn(a.caSignCRL))
+	mux.HandleFunc("POST /authorities/{id}/crl-upload", a.signedIn(a.caUploadCRL))
+	mux.HandleFunc("POST /authorities/{id}/renew", a.signedIn(a.caRenew))
+	mux.HandleFunc("POST /authorities/{id}/retire", a.signedIn(a.caRetire))
+	mux.HandleFunc("POST /authorities/{id}/revoke", a.signedIn(a.caRevoke))
+	mux.HandleFunc("GET /presets", a.signedIn(a.presetList))
+	mux.HandleFunc("GET /presets/{name}", a.signedIn(a.presetDetail))
+	mux.HandleFunc("GET /admin/users", a.signedIn(a.userList))
+	mux.HandleFunc("GET /admin/users/new", a.signedIn(a.newUserPage))
+	mux.HandleFunc("POST /admin/users/new", a.signedIn(a.newUser))
+	mux.HandleFunc("GET /admin/users/{id}", a.signedIn(a.userDetail))
+	mux.HandleFunc("POST /admin/users/{id}/roles", a.signedIn(a.userGiveRole))
+	mux.HandleFunc("POST /admin/users/{id}/roles/remove", a.signedIn(a.userRemoveRole))
+	mux.HandleFunc("POST /admin/users/{id}/disable", a.signedIn(a.userDisable))
+	mux.HandleFunc("POST /admin/users/{id}/enable", a.signedIn(a.userEnable))
+	mux.HandleFunc("POST /admin/users/{id}/unlock", a.signedIn(a.userUnlock))
+	mux.HandleFunc("GET /admin/settings", a.signedIn(a.settingsPage))
+	mux.HandleFunc("POST /admin/settings", a.signedIn(a.saveSettings))
+	mux.HandleFunc("GET /admin/audit", a.signedIn(a.auditLog))
+	mux.HandleFunc("GET /admin/import", a.signedIn(a.importPage))
+	mux.HandleFunc("POST /admin/import", a.signedIn(a.runImport))
+	mux.HandleFunc("GET /admin/import/{id}", a.signedIn(a.importReport))
+	mux.HandleFunc("GET /account", a.signedIn(a.accountPage))
+	mux.HandleFunc("POST /account/password", a.signedIn(a.changePassword))
+	mux.HandleFunc("POST /account/totp", a.signedIn(a.startTOTP))
+	mux.HandleFunc("POST /account/totp/confirm", a.signedIn(a.confirmTOTP))
+	mux.HandleFunc("POST /account/recovery-codes", a.signedIn(a.newCodes))
+	mux.HandleFunc("POST /account/tokens", a.signedIn(a.createToken))
+	mux.HandleFunc("POST /account/tokens/{id}/revoke", a.signedIn(a.revokeToken))
+	mux.HandleFunc("POST /account/passkeys/{id}/remove", a.signedIn(a.removePasskey))
 	mux.HandleFunc("GET /admin/appearance", a.signedIn(a.appearance))
 	mux.HandleFunc("POST /admin/appearance", a.signedIn(a.saveAppearance))
 	mux.HandleFunc("GET /design", a.signedIn(a.design))
@@ -172,7 +223,11 @@ func (a *app) signedIn(h func(*rc)) http.HandlerFunc {
 		}
 		c.sess = sess
 		if r.Method == http.MethodPost {
-			if !c.parseForm(maxUIForm) {
+			limit := int64(maxUIForm)
+			if r.URL.Path == "/admin/import" {
+				limit = legacy.MaxArchive + 1<<20 // the pki.sh archive (step 19)
+			}
+			if !c.parseForm(limit) {
 				return
 			}
 			if !auth.SameCSRFToken(r.PostFormValue(auth.CSRFField), sess.CSRFToken) {
@@ -316,6 +371,18 @@ func (c *rc) page(title, section string, crumbs ...view.Crumb) view.Page {
 	p.Session = &view.Session{Username: c.sess.Username, Roles: rolesText(c.sess.Principal), CSRF: c.sess.CSRFToken, CanSeal: c.instanceAdmin()}
 	if cas, err := c.a.issuableCAs(c); err == nil && len(cas) > 0 {
 		p.Session.CanIssue = true
+	}
+	if !c.instanceAdmin() {
+		p.Session.Hidden = append(p.Session.Hidden, "users")
+	}
+	if !c.may(authz.ReadAudit, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "audit")
+	}
+	if !c.may(authz.ManageCA, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "import")
+	}
+	if !c.may(authz.ReadPKI, "") && !c.may(authz.ManageTenant, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "settings")
 	}
 	if c.a.d.Demo {
 		p.Notices = append(p.Notices, view.Message{Kind: view.MessageWarning, Text: "DEMO instance – all secrets are in one file, do not use it in production."})

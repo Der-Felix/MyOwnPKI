@@ -1,0 +1,275 @@
+package web
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"io/fs"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
+)
+
+// Part 2 of the real UI (step 19): every action ends with 303 on a page
+// (PRG), shows what happened, and the services decide.
+
+func flashOf(t *testing.T, b *browser, target string) string {
+	t.Helper()
+	return strings.Join(messages(b.get(t, target).html()), " | ")
+}
+
+func TestCertificateActions(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	token := b.csrf(t)
+	issued, err := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"nas.homelab.lan"}, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := "/certificates/" + issued.ID
+
+	// Renew: 303 to the successor.
+	r := b.post(t, detail+"/renew", url.Values{"csrf_token": {token}, "alg": {"ecdsa-p256"}})
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/certificates/crt_") || r.location() == detail {
+		t.Fatalf("renew: %d %q", r.Code, r.location())
+	}
+	successor := r.location()
+	if got := flashOf(t, b, successor); !strings.Contains(got, "successor") {
+		t.Errorf("renew message: %s", got)
+	}
+
+	// Export as PKCS#12 with "delete the key": the file, then the key is gone.
+	bin := testutil.OpenSSL(t)
+	r = b.post(t, successor+"/export", url.Values{"csrf_token": {token}, "format": {"pkcs12"}, "password": {"short"}, "password2": {"short"}})
+	if r.Code != http.StatusSeeOther || r.location() != successor+"/export" {
+		t.Errorf("short password: %d %q", r.Code, r.location())
+	}
+	pw := "a password for the p12 file"
+	r = b.post(t, successor+"/export", url.Values{"csrf_token": {token}, "format": {"pkcs12"}, "password": {pw}, "password2": {pw}, "delete": {"yes"}})
+	if r.Code != http.StatusOK || r.Header().Get("Content-Type") != "application/x-pkcs12" {
+		t.Fatalf("export: %d %v %s", r.Code, r.Header(), r.html())
+	}
+	dir := t.TempDir()
+	p12, pass := filepath.Join(dir, "x.p12"), filepath.Join(dir, "pass")
+	_ = os.WriteFile(p12, r.Body.Bytes(), 0o600)
+	_ = os.WriteFile(pass, []byte(pw), 0o600)
+	if out, oerr := exec.CommandContext(t.Context(), bin, "pkcs12", "-in", p12, "-passin", "file:"+pass, "-nodes").CombinedOutput(); oerr != nil {
+		t.Errorf("openssl pkcs12: %v\n%s", oerr, out)
+	}
+	r = b.post(t, successor+"/export", url.Values{"csrf_token": {token}, "format": {"pkcs8-pem"}})
+	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, r.location()), "deleted") {
+		t.Errorf("export after deletion: %d", r.Code)
+	}
+
+	// Revoke: confirmation needed, then 303 with the CRL message.
+	if rr := b.post(t, detail+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}}); rr.Code != http.StatusSeeOther || rr.location() != detail+"/revoke" {
+		t.Errorf("revoke without confirmation: %d %q", r.Code, r.location())
+	}
+	r = b.post(t, detail+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}})
+	if r.Code != http.StatusSeeOther || r.location() != detail {
+		t.Fatalf("revoke: %d %q", r.Code, r.location())
+	}
+	if page := b.get(t, detail).html(); !strings.Contains(page, "Revoked") || strings.Contains(page, `href="`+detail+`/revoke"`) {
+		t.Error("the revoked certificate still offers Revoke or doesn't say Revoked")
+	}
+
+	// Without a fresh second factor a revocation goes to the step-up page.
+	other, _ := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"git.homelab.lan"}, Who: testinstance.Console})
+	v.Clock.Advance(authz.StepUpWindow + time.Second)
+	r = b.post(t, "/certificates/"+other.ID+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}})
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/step-up?next=") {
+		t.Errorf("revoke without step-up: %d %q", r.Code, r.location())
+	}
+}
+
+func TestViewerSeesNoCommands(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	v.User(t, "watcher", false, authz.Binding{Role: authz.Viewer})
+	b := v.browser("192.0.2.2")
+	b.signIn(t, "watcher", testinstance.Password)
+	issued, _ := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"nas.homelab.lan"}, Who: testinstance.Console})
+	page := b.get(t, "/certificates/"+issued.ID).html()
+	for _, cmd := range []string{"/revoke", "/renew", "/export"} {
+		if strings.Contains(page, `/certificates/`+issued.ID+cmd+`"`) {
+			t.Errorf("a viewer is offered %s", cmd)
+		}
+	}
+	nav := b.get(t, "/").html()
+	for _, link := range []string{`href="/admin/users"`, `href="/admin/audit"`, `href="/admin/import"`} {
+		if strings.Contains(nav, link) {
+			t.Errorf("a viewer sees %s", link)
+		}
+	}
+	if r := b.get(t, "/admin/users"); r.Code != http.StatusForbidden {
+		t.Errorf("users page for a viewer: %d", r.Code)
+	}
+	token := b.csrf(t)
+	if rr := b.post(t, "/certificates/"+issued.ID+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}}); rr.Code != http.StatusSeeOther ||
+		!strings.Contains(flashOf(t, b, rr.location()), "needs the role operator") {
+		t.Errorf("revoke by a viewer: %d %q", rr.Code, rr.location())
+	}
+}
+
+func TestCAOfflineFlowInTheUI(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	token := b.csrf(t)
+	// An intermediate under the online root: signed at once.
+	r := b.post(t, "/authorities/new", url.Values{"csrf_token": {token}, "parent": {v.CAIDs["root"]}, "name": {"lab-ca"}, "cn": {"Lab CA"}, "alg": {"ecdsa-p384"},
+		"pathlen": {"0"}, "dns": {"homelab.example"}, "base": {"http://pki.homelab.example"}})
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/authorities/ca_") || strings.HasSuffix(r.location(), "/offline") {
+		t.Fatalf("new CA: %d %q %s", r.Code, r.location(), flashOf(t, b, "/authorities/new"))
+	}
+	lab := r.location()
+	// Manage: limits, CRL, retire.
+	if rr := b.post(t, lab+"/limits", url.Values{"csrf_token": {token}, "crl_days": {"5"}, "max_days": {"90"}}); rr.Code != http.StatusSeeOther || rr.location() != lab {
+		t.Errorf("limits: %d %q", r.Code, r.location())
+	}
+	if rr := b.post(t, lab+"/crl", url.Values{"csrf_token": {token}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "CRL number") {
+		t.Errorf("sign CRL: %d", r.Code)
+	}
+	if rr := b.post(t, lab+"/retire", url.Values{"csrf_token": {token}, "confirm": {"yes"}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "retired") {
+		t.Errorf("retire: %d", r.Code)
+	}
+
+	// An offline root and an intermediate below it: the offline page, then
+	// the certificate signed by "the offline root" (this test) comes back.
+	off := newOfflineRoot(t, v.Clock.Now())
+	r = b.post(t, "/authorities/import", url.Values{"csrf_token": {token}, "name": {"offline"}, "cert": {off.pem}, "base": {"http://pki.homelab.example"}})
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/authorities/ca_") {
+		t.Fatalf("import root: %d %q %s", r.Code, r.location(), flashOf(t, b, "/authorities/import"))
+	}
+	offID := strings.TrimPrefix(r.location(), "/authorities/")
+	r = b.post(t, "/authorities/new", url.Values{"csrf_token": {token}, "parent": {offID}, "name": {"below"}, "cn": {"Below Offline"}, "alg": {"ecdsa-p384"}, "pathlen": {"0"}, "base": {"http://pki.homelab.example"}})
+	if r.Code != http.StatusSeeOther || !strings.HasSuffix(r.location(), "/offline") {
+		t.Fatalf("intermediate below the offline root: %d %q", r.Code, r.location())
+	}
+	page := b.get(t, r.location()).html()
+	if !strings.Contains(page, "BEGIN CERTIFICATE REQUEST") || !strings.Contains(page, "v3_myownpki_ca") || !strings.Contains(page, "copy_extensions") {
+		t.Fatalf("offline page:\n%s", page)
+	}
+	belowID := strings.TrimSuffix(strings.TrimPrefix(r.location(), "/authorities/"), "/offline")
+	b2, err := v.Engine.OfflineBundleFor(t.Context(), "below")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := off.sign(t, b2, v.Clock.Now())
+	r = b.post(t, "/authorities/"+belowID+"/certificate", url.Values{"csrf_token": {token}, "cert": {signed}})
+	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, r.location()), "is active") {
+		t.Errorf("install: %d %q", r.Code, r.location())
+	}
+	// The offline root's CRL upload.
+	r = b.post(t, "/authorities/"+offID+"/crl-upload", url.Values{"csrf_token": {token}, "crl": {off.crl(t, v.Clock.Now())}})
+	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, r.location()), "uploaded") {
+		t.Errorf("CRL upload: %d", r.Code)
+	}
+}
+
+func TestAdministrationPages(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	token := b.csrf(t)
+
+	// Settings: the subject default reaches the next certificate.
+	r := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}})
+	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
+		t.Fatalf("settings: %d", r.Code)
+	}
+	if rr := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "c": {"Germany"}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "country") {
+		t.Errorf("bad country: %d", r.Code)
+	}
+
+	// Users: create (shown once), role, disable.
+	r = b.post(t, "/admin/users/new", url.Values{"csrf_token": {token}, "username": {"carol"}, "password": {"a long password for the new colleague"}, "role": {"operator"}, "scope": {"issuing"}})
+	if r.Code != http.StatusOK || !strings.Contains(r.html(), "otpauth://") || r.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("new user: %d %s", r.Code, r.html())
+	}
+	carol := "/admin/users/" + v.UserID(t, "carol")
+	if rr := b.post(t, carol+"/roles", url.Values{"csrf_token": {token}, "role": {"viewer"}, "scope": {""}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, carol), "Role given") {
+		t.Errorf("give role: %d", r.Code)
+	}
+	if rr := b.post(t, carol+"/disable", url.Values{"csrf_token": {token}}); rr.Code != http.StatusSeeOther || !strings.Contains(b.get(t, carol).html(), "disabled") {
+		t.Errorf("disable: %d", r.Code)
+	}
+
+	// Own account: a token (shown once) and its revocation.
+	r = b.post(t, "/account/tokens", url.Values{"csrf_token": {token}, "name": {"backup-job"}, "role": {"viewer"}, "scope": {""}, "days": {"30"}})
+	if r.Code != http.StatusOK || !strings.Contains(r.html(), "mop_") {
+		t.Fatalf("new token: %d %s", r.Code, flashOf(t, b, "/account"))
+	}
+	if !strings.Contains(b.get(t, "/account").html(), "backup-job") {
+		t.Error("the token is not listed")
+	}
+
+	// Audit: the instance log shows the user creation.
+	v.Deliver(t)
+	if page := b.get(t, "/admin/audit?scope=instance&action=user.create").html(); !strings.Contains(page, "user.create") {
+		t.Errorf("audit page lacks user.create")
+	}
+
+	// Legacy import over the page: the fixture's CA names exist here, so the
+	// dry run is refused with a report.
+	fx := legacytest.Write(t, filepath.Join(t.TempDir(), "pki"), v.Clock.Now())
+	r = b.postFile(t, "/admin/import", url.Values{"csrf_token": {token}, "dry_run": {"yes"}, "root_key": {"offline"}}, "archive", "pki.tar.gz", tarGz(t, fx.Dir))
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/admin/import/imp_") {
+		t.Fatalf("import: %d %q %s", r.Code, r.location(), flashOf(t, b, "/admin/import"))
+	}
+	if page := b.get(t, r.location()).html(); !strings.Contains(page, "refused") || !strings.Contains(page, "exists already") {
+		t.Errorf("import report:\n%s", page)
+	}
+}
+
+// tarGz packs a directory with its name as the top folder.
+func tarGz(t *testing.T, dir string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, _ := filepath.Rel(filepath.Dir(dir), p)
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			return tw.WriteHeader(&tar.Header{Name: rel + "/", Typeflag: tar.TypeDir, Mode: 0o700})
+		}
+		body, rerr := os.ReadFile(p) // #nosec G304 G122 -- the test's own fixture in a temp dir
+		if rerr != nil {
+			return rerr
+		}
+		if herr := tw.WriteHeader(&tar.Header{Name: rel, Typeflag: tar.TypeReg, Mode: 0o600, Size: int64(len(body))}); herr != nil {
+			return herr
+		}
+		_, werr = tw.Write(body)
+		return werr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tw.Close()
+	_ = zw.Close()
+	return buf.Bytes()
+}

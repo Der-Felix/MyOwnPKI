@@ -20,14 +20,23 @@ type Row struct {
 type ListData struct {
 	Messages []view.Message
 	Rows     []Row
-	// Real UI (step 14): no CA commands yet (step 18).
-	Real bool
+	// Real UI (step 14); CanManage offers "New CA" and "Import offline root"
+	// (step 19).
+	Real, CanManage bool
 }
 
 // List renders all certificate authorities of the tenant.
 templ List(p view.Page, d ListData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
+		if d.Real && d.CanManage {
+			@components.CommandBar("CA commands") {
+				@components.CommandGroup("Create") {
+					<a class="cmd cmd-primary" href="/authorities/new">New CA</a>
+					<a class="cmd" href="/authorities/import">Import offline root</a>
+				}
+			}
+		}
 		if !d.Real {
 			<form action="/authorities/actions" method="post">
 				@components.CommandBar("CA commands") {
@@ -98,6 +107,9 @@ type DetailData struct {
 type RealActions struct {
 	CanIssue    bool // the user may issue here and the CA can sign
 	Generations []view.KV
+	// CanManage offers the management page; Pending the offline signing
+	// page (step 19).
+	CanManage, Pending bool
 }
 
 // Detail renders one certificate authority.
@@ -161,6 +173,14 @@ templ realActions(d DetailData) {
 	@components.CommandGroup("Transfer") {
 		<a class="cmd" href={ templ.SafeURL("/authorities/" + d.ID + "/certificate?format=pem") }>Download certificate</a>
 		<a class="cmd" href={ templ.SafeURL("/authorities/" + d.ID + "/certificate?format=chain") }>Download with issuers</a>
+	}
+	if d.Real.CanManage {
+		@components.CommandGroup("Manage") {
+			if d.Real.Pending {
+				<a class="cmd cmd-primary" href={ templ.SafeURL("/authorities/" + d.ID + "/offline") }>Offline signing</a>
+			}
+			<a class="cmd" href={ templ.SafeURL("/authorities/" + d.ID + "/manage") }>Manage CA</a>
+		}
 	}
 }
 
