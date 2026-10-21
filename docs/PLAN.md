@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phase 0 complete, phase 1 next · Last updated: 2026-10-13 · License: Apache-2.0
+> Status: phase 1 complete (v0.1 ready for release, not released yet) · Last updated: 2026-10-21 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -418,7 +418,7 @@ MyOwnPKI/
 | Phase | Scope | Outcome |
 |---|---|---|
 | **0 – Foundation** ✅ 2026-10-13 | Go skeleton, CI, presets → YAML, OpenAPI draft, design tokens + component gallery | Runnable empty binary, design system visible (`task dev` → `/design`) |
-| **1 – Core** | Data model, CA engine, importer, REST API, login (2FA), RBAC, unseal, audit log, UI: issue / revoke / upload / download, layout B | Bash script replaced in the browser |
+| **1 – Core** ✅ 2026-10-21 | Data model, CA engine, importer, REST API, login (2FA), RBAC, unseal, audit log, UI: issue / revoke / upload / download, layout B | Bash script replaced in the browser |
 | **2 – ACME server & domains** | ACME server (http-01, dns-01, tls-alpn-01), domain model, policies, approval levels, EAB | certbot/Traefik/Caddy against the own CA (integration level 1) |
 | **3 – Agent** | Enrollment with proof of control, issuance via ACME, deploy profiles (Linux first), heartbeat/inventory, batched reload + rollback; then Windows, FreeBSD; ACME client (lego) for Let's Encrypt | Deploy and monitor certificates (level 3), public certificates |
 | **4 – Operations** | Dashboards, layouts A + C, themes (3 levels), notifications, OCSP/CRL, Prometheus, Litestream, trust store distribution, **alarm when the server stays sealed** (measured against the remaining CRL lifetimes) | Production-ready |
@@ -710,6 +710,12 @@ tables with "how to reverse".
 | Backup = a new directory with `VACUUM INTO` copies (audit logs last) and `manifest.json` (SHA-256, migration versions, audit heads, checkpoint key); `backup verify` and `restore` run the same checks on a work copy, incl. integrity, chains ending at the heads and the SAN index; restore only into an empty data directory | Works while the server runs; a manipulated or damaged backup never becomes the PKI |
 | Passkeys (go-webauthn v0.18.2) as **second factor and step-up**, only with `auth.passkey_origin`; adding one needs step-up + current password, raises the credentials epoch and ends other sessions; UV required, no attestation; reset-2fa removes passkeys | Same rules as TOTP (decision 45); WebAuthn binds passkeys to the host name users type |
 | No passkey button in the UI until esbuild (ADR-04) or one plain script is approved | A browser needs `navigator.credentials`; no ADR change at night |
+| PKCS#12 export written by our own code (`internal/pkcs12`: PBES2 AES-256-CBC, PBKDF2-SHA256 600,000 iterations, MAC HMAC-SHA256, password ≥ 12 characters); "delete the key after the download" overwrites DEK and ciphertext, the row stays (pki.db 0007) | No PKCS#12 module approved; what OpenSSL 3 writes and current Windows/macOS/Java import |
+| API tokens (`mop_…`, only SHA-256 stored, expiry ≤ 1 year, roles ≤ the owner's) **never satisfy step-up** | Step-up means a human with a second factor; no revoke, key download or CA management by token |
+| `DELETE /users/{id}` disables the user; a refused legacy import over the API answers 201 with a job of status `failed`; removing a passkey is `POST …/remove` | Users are never deleted (decision 47); the spec rules want shared problem responses; no request body on DELETE |
+| UI part 2 with three generic templates (form, table, detail), still no JavaScript; pages that show a secret once (new user's authenticator, token, recovery codes, export file) answer the POST itself with `no-store` instead of PRG | A secret never travels in a cookie or URL and is shown once |
+| `myownpki healthcheck` pins the exact certificate file the admin listener serves (no CA check); `127.0.0.1` must be in `admin.allowed_networks` when that is set | Distroless has no curl; an unchecked TLS connection would talk to anything on the port |
+| `myownpki passphrase change` / `reset` (console): the key ring could since step 6, no command used it – the recovery key was a dead end | A lost passphrase must be recoverable with the recovery key (§5) |
 
 ### Web UI and dev mode
 | Decision | Why |

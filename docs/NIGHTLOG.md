@@ -278,6 +278,50 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 - The pages in a real browser beyond the screenshots (keyboard use, screen reader).
 - Adding a passkey in the UI (needs a script, see step 17).
 
+## Step 20 – Phase 1 wrap-up: end-to-end test, operations guide, healthcheck
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| End-to-end test in `cmd/myownpki` (`TestPkiShReplaced`), one process: the real `legacy/pki.sh` builds the PKI, then the console commands (`init --demo`, `import legacy`, `backup`, `backup verify`, `restore`, `audit verify`) and a real server with both listeners; issue and revoke through the REST API like a browser (cookie, CSRF, TOTP); the CRL fetched from the URLs **inside** the old and the new certificates and checked with `openssl verify -crl_check` | Tests what an admin does, not the engine alone; a second process would need killing by PID and free ports | Run the built binary as a subprocess |
+| The pki.sh runner moves from the ca tests to `legacytest.PkiSh` / `NeedPkiSh` (same skip rules: Linux, or Git Bash with `LEGACY_TEST_OPENSSL`) | Two packages need it now | – |
+| `init --demo` in the test (not `--stdin`) | `--stdin` confirms TOTP at the first sign-in – another API flow; the demo file has every secret | Use `--stdin` and the first-login flow |
+| **`myownpki healthcheck`**: reads the config, asks `https://<admin listen>/healthz` on loopback (0.0.0.0/:: → 127.0.0.1/::1), **pins the exact certificate file** the server serves (bootstrap or `admin.tls_cert_file`) instead of CA verification, no proxy, 5 s timeout; exit 0 / 1 | A distroless image has no curl; skipping TLS checks would talk to anything on the port; the bootstrap certificate is self-signed | Verify against a CA bundle instead |
+| A certificate file changed without a restart makes the check fail ("serves another certificate") | The server serves something else than what is on disk – worth an alarm | Accept both |
+| **New: `myownpki passphrase change` / `passphrase reset`** (console). The key ring had `ChangePassphrase` / `ResetPassphrase` since step 6, PLAN §5 promises "passphrase reset with the recovery key", but no command used them – a lost passphrase would have meant lost CA keys despite the recovery key. `change` unseals in its own process, changes, seals (all audited); `reset` works sealed. Two lines on stdin without a terminal | The operations guide's passphrase warning needs a way out that works | Remove the command; rotating the recovery key stays open |
+| Operations guide `docs/OPERATIONS.md`: passphrase warning first, secrets table, install, init, running, healthcheck, moving from pki.sh, backup/restore, passphrase, emergencies, upgrades | Step 20 list | – |
+| `deploy/config.example.yaml` gets `auth.passkey_origin` (missing since step 17) and a test that every setting is in the example | Found while writing the guide | – |
+
+### Done
+- `TestPkiShReplaced`: pki.sh (root, `server-ca`, two leaves, one revoked as *superseded*, CRL) →
+  `init --demo` → `import legacy` → server → `healthcheck` ok → API sign-in, issue
+  `new.homelab.example`, revoke as *keyCompromise* → the CRL from the legacy URL of the old
+  certificate and from the new URL are the same file; it lists both serials with their reasons,
+  its number continues the pki.sh numbering; `openssl verify -crl_check` says OK for the imported
+  valid leaf and "certificate revoked" for the new one; `openssl crl -text` shows both reasons →
+  `backup` while the server runs → `backup verify` → `restore` into a new data directory →
+  `audit verify` → the restored (sealed) server serves the identical CRL and `healthcheck` is ok.
+- `myownpki healthcheck` (`cmd/myownpki/healthcheck.go`, `server.AdminCertFile`).
+- `myownpki passphrase change|reset` (`cmd/myownpki/passphrase.go`).
+- `docs/OPERATIONS.md`; `deploy/config.example.yaml` with `passkey_origin`.
+- PLAN.md: status, roadmap row, §14 night-run rows for steps 18–20; PHASE1 row 20.
+
+### Tests
+- `TestPkiShReplaced` (Git Bash with `LEGACY_TEST_OPENSSL=/usr/bin/openssl`: green in 18 s; CI on
+  Linux runs it, skipped elsewhere like the step 15 fixture).
+- `TestHealthcheck` (TLS stand-in: missing file, ok, wrong answer, nothing listening),
+  `TestHealthcheckCommand`, `TestLocalAddr`.
+- `TestPassphraseCommands` (wrong proof, weak passphrase, one line only, change, reset with
+  another and with the right recovery key; both audited).
+- `TestExampleFileHasEveryKey`.
+- Mutation: the certificate pin of the healthcheck disabled → `TestPkiShReplaced` fails
+  ("healthcheck against another certificate: <nil>").
+
+### Not verifiable tonight
+- `healthcheck` inside the real container (step C builds the image; Docker isn't on this machine
+  – see the release part).
+- The operations guide followed by someone else on a fresh machine.
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,
