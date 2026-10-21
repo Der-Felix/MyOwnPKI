@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,15 +29,22 @@ func badRequest(field, format string, args ...any) error {
 // after it. Unknown fields are refused, so a typo like "valdity_days" never
 // passes silently.
 func (c *call) decode(v any) error {
-	dec := json.NewDecoder(c.r.Body)
+	// Read once (the body is limited by MaxBytesReader): an unknown field is
+	// looked up a second time to name its full path.
+	data, err := io.ReadAll(c.r.Body)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return &bodyError{status: http.StatusRequestEntityTooLarge, kind: "too-large", msg: fmt.Sprintf("the body is larger than %d KiB", MaxBody>>10)}
+	}
+	if err != nil {
+		return badRequest("", "the body can't be read")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		var tooLarge *http.MaxBytesError
 		var syntax *json.SyntaxError
 		var typeErr *json.UnmarshalTypeError
 		switch {
-		case errors.As(err, &tooLarge):
-			return &bodyError{status: http.StatusRequestEntityTooLarge, kind: "too-large", msg: fmt.Sprintf("the body is larger than %d KiB", MaxBody>>10)}
 		case errors.Is(err, io.EOF):
 			return badRequest("", "the body is empty – a JSON object is required")
 		case errors.As(err, &syntax):
@@ -44,8 +52,11 @@ func (c *call) decode(v any) error {
 		case errors.As(err, &typeErr):
 			return badRequest("/"+strings.ReplaceAll(typeErr.Field, ".", "/"), "wrong type: want %s", typeErr.Type)
 		case strings.HasPrefix(err.Error(), "json: unknown field "):
+			if path, ok := unknownFieldPath(data, v); ok {
+				return badRequest(path, "unknown field")
+			}
 			name := strings.Trim(strings.TrimPrefix(err.Error(), "json: unknown field "), `"`)
-			return badRequest("/"+name, "unknown field")
+			return badRequest("/"+pointerToken(name), "unknown field")
 		}
 		return badRequest("", "%v", err)
 	}

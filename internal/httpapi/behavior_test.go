@@ -192,6 +192,10 @@ func TestBodiesAreJSONOnly(t *testing.T) {
 	}
 	for body, field := range map[string]string{
 		strings.Replace(issue, `"preset"`, `"presett"`, 1): "/presett",
+		// Nested typos name the whole path (JSON Pointer), not just the last key.
+		strings.Replace(issue, `"preset":"server",`, `"preset":"server","subject":{"common_name":"a.homelab.lan","cn":"x"},`, 1): "/subject/cn",
+		strings.Replace(issue, `"sans":{"dns"`, `"sans":{"dnss"`, 1):                                                             "/sans/dnss",
+		strings.Replace(issue, `{"algorithm":"ecdsa-p256"}`, `{"algorithm":"ecdsa-p256","bits":256}`, 1):                         "/key/bits",
 		issue + ` {}`:   "",
 		`{"ca_id": 5}`:  "/ca_id",
 		`{"ca_id": "x"`: "",
