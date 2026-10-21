@@ -59,7 +59,13 @@ var shots = []shot{
 	{"certificate-detail", "/certificates/{detail}", light},
 	{"issue-wizard", "/certificates/new", light},
 	{"authorities", "/authorities", light},
+	{"users", "/admin/users", light},
+	{"audit-log", "/admin/audit?scope=instance", light},
+	{"offline-signing", "/authorities/{pending}/offline", light},
+	{"legacy-import", "/admin/import", light},
 	{"dashboard-dark", "/", dark},
+	{"certificate-detail-dark", "/certificates/{detail}", dark},
+	{"users-dark", "/admin/users", dark},
 }
 
 func main() {
@@ -118,7 +124,7 @@ func run(stdout, stderr io.Writer) int {
 			unsealed = true
 		}
 		base := bases[s.kind]
-		path := strings.ReplaceAll(s.path, "{detail}", in.detailID)
+		path := strings.NewReplacer("{detail}", in.detailID, "{pending}", in.pendingID).Replace(s.path)
 		file := filepath.Join(*out, s.name+".png")
 		if err := capture(*browser, base+path, file, *width, *height); err != nil {
 			fmt.Fprintf(stderr, "FAILED %s: %v\n", s.name, err)

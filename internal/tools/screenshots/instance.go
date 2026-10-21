@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
 )
 
@@ -47,6 +50,7 @@ type instance struct {
 	passphrase string // a copy per unseal: the keyring clears what it gets
 	session    string // cookie value of a signed-in "demo" user
 	detailID   string // the certificate shown on the detail page
+	pendingID  string // an intermediate that waits for the offline root (step 19)
 	close      func()
 }
 
@@ -126,15 +130,30 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 		ServerKeygen: func(context.Context) (bool, error) { return true, nil },
 	}
 	authSvc := auth.NewService(sys.Write, ia.Write, key, clk)
-	in.deps = web.AppDeps{Auth: authSvc, Engine: engine, Keys: in.ring, Presets: presets, Clock: clk, Demo: true, Tenant: store.DefaultTenant}
+	settings := &tenant.Store{DB: sys.Write, Clock: clk}
+	in.deps = web.AppDeps{Auth: authSvc, Engine: engine, Keys: in.ring, Presets: presets, Clock: clk, Demo: true, Tenant: store.DefaultTenant,
+		Settings: settings, TenantAudit: ta.Read, InstanceAudit: ia.Read}
 
 	if serr := in.sampleCertificates(ctx, engine); serr != nil {
+		in.close()
+		return nil, serr
+	}
+	if serr := in.sampleAdministration(ctx, engine, authSvc, settings); serr != nil {
 		in.close()
 		return nil, serr
 	}
 	if in.session, err = signIn(ctx, authSvc, password, secret); err != nil {
 		in.close()
 		return nil, err
+	}
+	// The audit log page shows delivered entries, as a running server has them.
+	d := &audit.Deliverer{Routes: []audit.Route{
+		{Source: "system", From: sys.Write, To: ia.Write, Scope: store.InstanceScope},
+		{Source: "pki", From: pki.Write, To: ta.Write, Scope: store.TenantScope(store.DefaultTenant)},
+	}, Clock: clk, Log: slog.New(slog.DiscardHandler)}
+	if _, derr := d.DeliverPending(ctx); derr != nil {
+		in.close()
+		return nil, derr
 	}
 	return in, nil
 }
@@ -222,4 +241,43 @@ func tempDir() (string, func(), error) {
 		return "", nil, err
 	}
 	return filepath.Join(dir, "data"), func() { _ = os.RemoveAll(dir) }, nil
+}
+
+// sampleAdministration: a second user, the tenant's subject defaults, and an
+// offline root with an intermediate that waits for its signature (step 19).
+func (in *instance) sampleAdministration(ctx context.Context, e *ca.Engine, s *auth.Service, settings *tenant.Store) error {
+	if err := in.ring.Unseal(ctx, []byte(in.passphrase), console); err != nil {
+		return err
+	}
+	defer func() { _ = in.ring.Seal(ctx, console) }()
+	if _, err := s.CreateUser(ctx, auth.NewUserRequest{Username: "alex", Password: "a long password for the screenshots",
+		Roles: []authz.Binding{{Tenant: store.DefaultTenant, CA: "issuing", Role: authz.Operator}}, Who: console}); err != nil {
+		return err
+	}
+	if err := settings.Set(ctx, store.DefaultTenant, tenant.Settings{AllowServerKeygen: true, Organization: "Homelab", Country: "DE"}, console); err != nil {
+		return err
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	now := time.Now() //nolint:forbidigo // the dev tool runs on the wall clock
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Homelab Offline Root", Organization: []string{"Homelab"}},
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, NotBefore: now.Add(-time.Hour), NotAfter: now.AddDate(20, 0, 0)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return err
+	}
+	if _, ierr := e.ImportRoot(ctx, ca.ImportRootRequest{CASettings: ca.CASettings{Name: "offline-root", BaseURL: "http://pki.homelab.example"},
+		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), Who: console}); ierr != nil {
+		return ierr
+	}
+	res, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{CASettings: ca.CASettings{Name: "branch-ca", BaseURL: "http://pki.homelab.example"},
+		Parent: "offline-root", Subject: ca.Subject{CommonName: "Homelab Branch CA", Organization: "Homelab"},
+		NameConstraints: ca.NameConstraints{PermittedDNS: []string{"branch.homelab.example"}, PermittedIP: []string{"192.0.2.0/24"}}, Who: console})
+	if err != nil {
+		return err
+	}
+	in.pendingID = res.ID
+	return nil
 }
