@@ -44,6 +44,29 @@ visible until you click *Publish*.
 
 4. Wait until CI on main is green (*Actions → CI*). Don't tag a red main.
 
+## Rehearsal: v0.1.0-rc.1
+
+Before the real tag, run the whole pipeline once with a release candidate – it is the first time
+the workflow, the image build and the signatures run for real:
+
+```bash
+git tag -a v0.1.0-rc.1 -m "MyOwnPKI v0.1.0-rc.1"
+```
+
+```bash
+git push origin v0.1.0-rc.1
+```
+
+- The release notes come from the `## [0.1.0]` section (a pre-release tag without its own section
+  takes the one of its base version).
+- GoReleaser marks the draft as **Pre-release** by itself (the `-rc.1` in the tag), and the image
+  gets the tag `0.1.0-rc.1`.
+- Check the draft and the image exactly as in "Check the draft" below, with `v0.1.0-rc.1` in the
+  cosign identities and `0.1.0-rc.1` as the image tag.
+
+Then remove the rehearsal completely – draft, tag and image version – as in "If something is
+wrong" (with `v0.1.0-rc.1` instead of `v0.1.0`), and don't publish it. Only then tag v0.1.0.
+
 ## The tag
 
 ```bash
@@ -108,7 +131,9 @@ Before publishing, everything can be undone:
    git tag -d v0.1.0
    ```
 
-3. Delete the image version in GHCR (*Package settings → Manage versions*).
+3. Delete the image version in GHCR (*Package settings → Manage versions*). If it is the
+   package's only version (after the rehearsal), GHCR deletes the whole package instead – that's
+   fine, the next release creates it again (private, see "Publish").
 4. Fix on a branch, merge, wait for green CI, tag again.
 
 After publishing, don't move a tag: fix forward with v0.1.1.
