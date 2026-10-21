@@ -537,6 +537,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | Passkeys | `github.com/go-webauthn/webauthn` v0.18.2 (approved for step 17; its modules in THIRD_PARTY.md); a virtual authenticator for tests in `internal/auth/passkeytest` (own minimal CBOR encoder) |
 | Two-week rule, exceptions | A module version already selected by the graph through approved modules is taken as it is, never forced down by downgrading those (§14 "CI and build"): `golang.org/x/crypto` v0.58.0 (2026-10-13), `golang.org/x/term` v0.47.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; owner 2026-10-16), `golang.org/x/text` v0.43.0 (released 2026-10-09, required by x/crypto v0.58.0 and x/net v0.61.0; pulled in by the test-only JSON Schema validator; owner 2026-10-17) |
 | Legacy ShellCheck | warnings fixed in a separate commit, then CI runs ShellCheck at severity `warning` (done in phase 1 step 0: entry scripts with followed sources, the standalone script in full, `lib/*.sh` without SC2034 because modules share globals – the standalone script covers it) |
+| Release tools | GoReleaser 2.18.2, cosign 3.1.3, syft 1.54.1 as pinned CI tools (SHA-256, approved 2026-10-21 for v0.1), base image `gcr.io/distroless/static-debian12:nonroot` by digest; `.goreleaser.yaml`, `.github/workflows/release.yml` (only on `v*` tags, draft release), `deploy/docker/Dockerfile`; owner checklist `docs/RELEASING.md` |
 
 ---
 
@@ -716,6 +717,7 @@ tables with "how to reverse".
 | UI part 2 with three generic templates (form, table, detail), still no JavaScript; pages that show a secret once (new user's authenticator, token, recovery codes, export file) answer the POST itself with `no-store` instead of PRG | A secret never travels in a cookie or URL and is shown once |
 | `myownpki healthcheck` pins the exact certificate file the admin listener serves (no CA check); `127.0.0.1` must be in `admin.allowed_networks` when that is set | Distroless has no curl; an unchecked TLS connection would talk to anything on the port |
 | `myownpki passphrase change` / `reset` (console): the key ring could since step 6, no command used it – the recovery key was a dead end | A lost passphrase must be recoverable with the recovery key (§5) |
+| Release v0.1: only the server binary; archives and image reproducible (commit time stamps, `-trimpath`, symbols kept); `checksums.txt` and the image signed keyless; image without `latest` tag and without buildx SBOM; multi-platform build through Docker's containerd image store instead of an extra BuildKit image; GoReleaser makes a draft, the GHCR package starts private | Nothing becomes public before the owner checks it; no tool or image beyond the approved ones |
 
 ### Web UI and dev mode
 | Decision | Why |

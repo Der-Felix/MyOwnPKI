@@ -1,0 +1,146 @@
+# GoReleaser configuration for MyOwnPKI releases (v0.1 onwards).
+#
+# Runs in .github/workflows/release.yml on a pushed v* tag and creates a DRAFT
+# GitHub release – nothing is visible before the owner publishes it
+# (docs/RELEASING.md). Locally: `task release:check`, `task release:snapshot`.
+#
+# Reproducible: pure Go (CGO_ENABLED=0, ADR-01), -trimpath, every time stamp
+# (binaries, version string, files in the archives) from the commit, not
+# from the build machine – the same commit gives byte-identical archives.
+#
+# Tool versions are pinned in release.yml (GoReleaser, cosign, syft with
+# SHA-256) and Taskfile.yml.
+version: 2
+
+project_name: myownpki
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  # Only the server: myownpki-agent and myownpki-ctl print --version only
+  # so far and are released once they do something.
+  - id: myownpki
+    main: ./cmd/myownpki
+    binary: myownpki
+    env:
+      - CGO_ENABLED=0
+    # No GOTOOLCHAIN here: locally the toolchain pinned in go.mod is fetched
+    # (auto); release.yml sets GOTOOLCHAIN=local with exactly that version.
+    flags:
+      - -trimpath
+    # Symbols stay in: govulncheck -mode=binary and stack traces need them.
+    ldflags:
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.version=v{{ .Version }}
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.commit={{ .FullCommit }}
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    targets:
+      - linux_amd64_v1
+      - linux_arm64_v8.0
+      - darwin_arm64_v8.0
+      - windows_amd64_v1
+      - freebsd_amd64_v1
+
+archives:
+  - id: myownpki
+    ids: [myownpki]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      mode: 0o755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: &fileinfo
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info: *fileinfo
+      - src: CHANGELOG.md
+        info: *fileinfo
+      - src: THIRD_PARTY.md
+        info: *fileinfo
+      - src: docs/OPERATIONS.md
+        info: *fileinfo
+      - src: deploy/config.example.yaml
+        info: *fileinfo
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SPDX SBOM per archive. No --enrich: it looks things up on the network
+# during the build, which a reproducible build must not do.
+sboms:
+  - artifacts: archive
+    args: ["$artifact", "--output", "spdx-json=$document"]
+
+# Keyless signature (Sigstore, GitHub OIDC) of the checksum file; it covers
+# the archives and the SBOMs. Check: README "Verify a download".
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+    output: true
+
+# The container image, built with docker buildx from the binaries above. The
+# release job uses Docker's containerd image store, so no extra BuildKit
+# image is needed; the Dockerfile has no RUN, so no emulation either.
+dockers_v2:
+  - id: myownpki
+    ids: [myownpki]
+    dockerfile: deploy/docker/Dockerfile
+    images:
+      - ghcr.io/der-felix/myownpki
+    # No "latest" before 1.0: an upgrade is a deliberate choice of a version.
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    # buildx's SBOM attestation needs a scanner image that is not approved;
+    # the archives carry SPDX SBOMs.
+    sbom: false
+    labels:
+      org.opencontainers.image.title: MyOwnPKI
+      org.opencontainers.image.source: https://github.com/Der-Felix/MyOwnPKI
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
+      org.opencontainers.image.licenses: Apache-2.0
+    annotations:
+      "index,manifest:org.opencontainers.image.source": https://github.com/Der-Felix/MyOwnPKI
+      "index,manifest:org.opencontainers.image.version": "{{ .Version }}"
+      "index,manifest:org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "index,manifest:org.opencontainers.image.created": "{{ .CommitDate }}"
+      "index,manifest:org.opencontainers.image.licenses": Apache-2.0
+      "index:org.opencontainers.image.description": Self-hosted PKI – CA engine, REST API and web UI
+
+docker_signs:
+  - cmd: cosign
+    args: ["sign", "${artifact}@${digest}", "--yes"]
+    output: true
+
+release:
+  github:
+    owner: Der-Felix
+    name: MyOwnPKI
+  # The owner checks the draft and publishes it by hand (docs/RELEASING.md).
+  draft: true
+  replace_existing_draft: true
+  prerelease: auto
+  name_template: "MyOwnPKI {{ .Tag }}"
+
+# The release notes come from CHANGELOG.md (release.yml passes the section
+# of the tag with --release-notes); no list of commit subjects.
+changelog:
+  disable: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
