@@ -387,6 +387,23 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
 - `cosign verify-blob` against our own release (the commands are the ones that verified
   GoReleaser's, syft's and cosign's own checksum files tonight).
 
+## Part D – Design documents for v0.2 and v0.3
+
+### Done
+- `docs/PHASE2.md` (v0.2): data model (domains, ACME accounts, EAB keys, orders, authorizations,
+  challenges, approved names; nonces and rate limits in memory), approval levels, configuration
+  (resolver, ACME base URL, a TLS port for ACME), 15 steps with test criteria, dependencies to ask
+  for, 9 open questions.
+- `docs/PHASE3.md` (v0.3): data model (agents, join tokens, deployments, heartbeats, endpoints,
+  alerts, notification channels), the agent configuration with its hook allowlist, 14 steps with
+  test criteria, dependencies to ask for, 9 open questions.
+- No code, no ADR change. Both documents keep ADR-19 (one issuance path), ADR-10/11 and the SSRF
+  and agent-trust rules of security.md as the frame.
+
+### Not verifiable tonight
+- Everything in them is a proposal; the open questions (above all PHASE2 Q1 "HTTPS for ACME" and
+  PHASE3 Q2/Q3 "Connect-RPC" and "lego") decide the shape.
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,
