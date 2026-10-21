@@ -1,0 +1,36 @@
+# MyOwnPKI configuration for the container image (deploy/docker-compose.yml).
+# Mounted read-only at /etc/myownpki/config.yaml. Every key is explained in
+# deploy/config.example.yaml; this file only sets what differs in a container.
+# Check it with:
+#   docker compose run --rm myownpki config check
+
+# The volume of the image.
+data_dir: /var/lib/myownpki
+
+log:
+  level: info
+  format: json
+
+admin:
+  # All interfaces *inside* the container – who can reach it is decided by
+  # the port mapping in docker-compose.yml (host loopback only by default).
+  # The server logs a warning about this; it is expected here.
+  listen: 0.0.0.0:9443
+  # The names you type into the browser, e.g. "pki.homelab.lan, 192.168.10.5"
+  # – the container's own host name is random.
+  tls_names: ""
+  # With a port published on other host addresses, set this to your admin
+  # networks. Keep 127.0.0.1 in it (the container healthcheck), and the
+  # Docker network (e.g. 172.16.0.0/12): with Docker's proxy, connections
+  # arrive from its gateway address.
+  allowed_networks: ""
+
+public:
+  # CRLs and CA certificates; publish it under the CA's base URL.
+  listen: 0.0.0.0:8080
+
+auth:
+  key_file: ""
+  trusted_proxies: ""
+  # e.g. https://pki.homelab.lan:9443 – the address users open the UI with.
+  passkey_origin: ""

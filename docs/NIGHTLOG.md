@@ -322,6 +322,71 @@ Nothing open for step 14; the owner's browser test of M1 is still to do.
   – see the release part).
 - The operations guide followed by someone else on a fresh machine.
 
+## Part C – Release pipeline for v0.1.0
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| Tool versions (two-week rule, cut-off 2026-10-07): **GoReleaser v2.18.2** (2026-09-17; v2.18.3 is from 2026-10-09), **cosign v3.1.3** (2026-08-06), **syft v1.54.1** (2026-10-06). SHA-256 from each project's `checksums.txt`, whose Sigstore signature was verified with cosign tonight (GoReleaser and syft: their release workflow identities; cosign: `keyless@projectsigstore.iam.gserviceaccount.com`) | Same pinning as golangci-lint; the checksum files themselves are signed | Newer versions after two weeks |
+| **distroless `static-debian12:nonroot` pinned by digest `sha256:afa5c872…7f7ab`** (the index of the `nonroot` tag, uploaded 2026-08-21) | Owner approval; two months old | New digest from `gcr.io/v2/distroless/static-debian12/manifests/nonroot` |
+| Only the server binary `myownpki` is released (archives and image); `myownpki-agent` and `myownpki-ctl` only print `--version` so far | A release must not ship stubs that look like features | Add them to `builds` when they do something |
+| Targets linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64; `CGO_ENABLED=0`, `-trimpath`, `mod_timestamp` and the version date from the **commit** time; archive files get the commit time too | Reproducible: the same commit gives byte-identical archives (checked locally with two snapshot runs) | – |
+| Symbols are **not** stripped (no `-s -w`) | `govulncheck -mode=binary` and stack traces work on release binaries; the size is secondary | Add `-s -w` |
+| Archives: `.tar.gz`, `.zip` for Windows, with LICENSE, README, CHANGELOG, THIRD_PARTY, docs/OPERATIONS.md, deploy/config.example.yaml | What an admin needs offline | – |
+| `checksums.txt` (SHA-256 of archives and SBOMs) signed keyless with cosign → `checksums.txt.sigstore.json`; archives are not signed one by one | GoReleaser's documented pattern; one signature covers everything, `sha256sum --check` does the rest | Sign each archive |
+| SBOM: SPDX JSON per archive with syft, **without `--enrich`** | `--enrich` looks up data on the network during the build – not reproducible | Add it back |
+| Image `ghcr.io/der-felix/myownpki:<version>` (e.g. `0.1.0`), linux/amd64 + linux/arm64, signed keyless with cosign; **no `latest` tag**, no buildx SBOM attestation | `latest` before 1.0 invites accidental upgrades; the buildx SBOM needs an extra scanner image (not approved) | Add `latest` / `sbom: true` |
+| Multi-platform build without an extra BuildKit image: the release job switches Docker to the **containerd image store** and restarts it; the Dockerfile has no `RUN`, so no QEMU either | The documented `docker buildx create` pulls an unpinned `moby/buildkit` image that would hold the registry credentials | Pin a BuildKit image by digest and use `buildx create` |
+| Dockerfile: the pinned base, the binary in `/usr/local/bin`, the data directory `/var/lib/myownpki` created empty and owned by `nonroot` (copied from the base image's empty `/home/nonroot`, no `RUN`), `VOLUME`, `EXPOSE 9443 8080`, `HEALTHCHECK myownpki healthcheck`, `CMD ["serve"]`; the config is mounted at `/etc/myownpki/config.yaml` | Owner: only the binary, a volume, a healthcheck; a new named volume takes over the directory's owner, so the non-root server can write | – |
+| `.github/workflows/release.yml`: only on pushed `v*` tags; `permissions: {}` at the top, `contents: write`, `packages: write`, `id-token: write` only on the job; actions pinned by SHA; tests before the build; release notes = the CHANGELOG section of the tag; GoReleaser makes a **draft** release | Owner list; a draft can be checked and deleted before anyone sees it | – |
+| The image is pushed already when the draft is created (GoReleaser can't hold it back); GHCR makes a new package **private** – the owner sets it public after checking (RELEASING.md) | Nothing is public before the owner looks at it | – |
+| `ci.yml`: only `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` | Owner: every main run finishes | – |
+| Taskfile: `release:check` (goreleaser check) and `release:snapshot` (snapshot without signing and without the image – no Docker here) | Local checks without remembering flags | – |
+| `deploy/docker-compose.yml` with `deploy/docker/config.yaml` (admin on `0.0.0.0:9443` in the container, published on the host's loopback only) | A single server; remote admin access is a deliberate change, as with the binary | Publish on all host addresses |
+| CHANGELOG.md (Keep a Changelog) with the date of the night; RELEASING.md tells the owner to correct it if the tag is pushed later | – | – |
+
+### Done
+- `.goreleaser.yaml`, `deploy/docker/Dockerfile`, `deploy/docker/config.yaml`,
+  `deploy/docker-compose.yml`, `.github/workflows/release.yml`; `ci.yml` cancels in-progress runs
+  only outside main; Taskfile `release:check` and `release:snapshot`.
+- `CHANGELOG.md` (Keep a Changelog, 0.1.0 dated 2026-10-22), README for v0.1 (status, install
+  from a release and with Docker, `cosign verify-blob` / `cosign verify`, new screenshots in the
+  table), `docs/RELEASING.md` (owner checklist incl. GitHub settings), THIRD_PARTY.md and PLAN §13
+  / §14 rows for the tools and the base image.
+- Changes against the design table, taken while building:
+  - `GOTOOLCHAIN=local` is **not** in `.goreleaser.yaml`: locally it built with the installed
+    Go 1.27.0 instead of the pinned 1.27.2 (seen in `--version` of the snapshot); now the local
+    build fetches go1.27.2 like `task`, and release.yml sets `GOTOOLCHAIN=local` with 1.27.2.
+  - Archive files get mode 0644 (the binary 0755) explicitly: a Windows checkout gave 0666.
+  - The release notes leave out the link definitions at the end of CHANGELOG.md; the links in
+    the 0.1.0 section are absolute (relative links don't work on the release page).
+
+### Tests
+- `goreleaser check` (2.18.2): valid, no deprecations.
+- `goreleaser release --snapshot --clean --skip=sign,docker` three times: archives for all five
+  targets with binary, LICENSE, README, CHANGELOG, THIRD_PARTY, OPERATIONS and the example config;
+  `--version` says `v0.0.1-snapshot (commit …, 2026-10-21T06:51:45Z, go1.27.2, windows/amd64)`;
+  build info `CGO_ENABLED=0`, `-trimpath=true`. **Runs 2 and 3: every archive byte-identical.**
+  The SBOMs differ only in `created` and `documentNamespace` – SPDX wants both unique per
+  document, and syft ignores `SOURCE_DATE_EPOCH`; their content is the same.
+- actionlint 1.7.12 (the CI version, SHA-256 checked) with ShellCheck 0.11.0 on both workflows:
+  no findings. The release-notes `awk` tried on CHANGELOG.md (section found; a missing version
+  gives nothing, so the job stops).
+- `TestDockerFiles`: the container config is valid; the Dockerfile has the ports, the volume, the
+  healthcheck and one pinned base image for both stages.
+- Checked by hand in the base image (layers downloaded from gcr.io): `/home/nonroot` is empty,
+  0700, owned by 65532 – the source of the data directory; the image config has `User 65532`.
+
+### Not verifiable tonight
+- **The release workflow itself** (it runs only on a pushed tag – the owner's step), in
+  particular: Docker's switch to the containerd image store on the runner, the multi-platform
+  push to GHCR, the keyless signatures (need GitHub's OIDC token), the draft release.
+- **The container image**: no Docker on this machine – neither the build, nor that a new named
+  volume takes over the owner of `/var/lib/myownpki`, nor `HEALTHCHECK` with
+  `myownpki healthcheck`, nor `deploy/docker-compose.yml` (`read_only`, `cap_drop`).
+- `cosign verify-blob` against our own release (the commands are the ones that verified
+  GoReleaser's, syft's and cosign's own checksum files tonight).
+
 # Night log – Phase 0, steps 4–8
 
 > Autonomous run, night of 2026-10-12 → 2026-10-13. Rules: local commits only, never push,

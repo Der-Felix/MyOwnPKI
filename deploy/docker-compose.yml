@@ -1,0 +1,43 @@
+# MyOwnPKI on a single server with Docker Compose.
+#
+# First start (once, at a terminal – it shows the recovery key and the
+# authenticator setup; write them down):
+#   docker compose run --rm -it myownpki init
+# Then:
+#   docker compose up -d
+#   docker compose logs myownpki        # admin certificate fingerprint
+# Open https://127.0.0.1:9443/ on this host, sign in, unseal.
+#
+# Backup (while it runs) into ./backup/<date> on the host:
+#   docker compose run --rm -v "$PWD/backup:/backup" myownpki backup /backup/myownpki-2026-10-21
+# (./backup must be writable for UID 65532, the user of the image.)
+# Keep the backups, the unseal passphrase and the recovery key apart:
+# docs/OPERATIONS.md.
+
+services:
+  myownpki:
+    # Pin the version you tested; there is no "latest" tag before 1.0.
+    image: ghcr.io/der-felix/myownpki:0.1.0
+    restart: unless-stopped
+    volumes:
+      - myownpki-data:/var/lib/myownpki
+      - ./docker/config.yaml:/etc/myownpki/config.yaml:ro
+    ports:
+      # Admin UI and API: on this host only. For remote administration use
+      # the host's admin address and set admin.allowed_networks.
+      - "127.0.0.1:9443:9443"
+      # CRLs and CA certificates: for every client that checks revocation
+      # (usually behind a reverse proxy on port 80 at the CA's base URL).
+      - "8080:8080"
+    read_only: true
+    # SQLite may need a scratch file for large sorts.
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # The image's HEALTHCHECK runs `myownpki healthcheck`; a sealed server is
+    # healthy but can't sign – watch the logs for "crl attention".
+    stop_grace_period: 30s
+
+volumes:
+  myownpki-data:

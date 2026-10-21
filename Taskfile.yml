@@ -18,6 +18,9 @@ vars:
   # Prebuilt binaries for lint:ci and lint:api (not part of `task check`).
   ACTIONLINT_VERSION: 1.7.12
   VACUUM_VERSION: 0.30.6
+  # Release tools (release:check, release:snapshot) – keep in sync with .github/workflows/release.yml.
+  GORELEASER_VERSION: 2.18.2
+  SYFT_VERSION: 1.54.1
 
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
@@ -144,6 +147,33 @@ tasks:
           echo "actionlint: found '$v', expected {{.ACTIONLINT_VERSION}} (https://github.com/rhysd/actionlint/releases)"; exit 1
         fi
       - actionlint
+
+  release:check:
+    desc: Check .goreleaser.yaml with the pinned GoReleaser (needs goreleaser, see Taskfile.yml)
+    cmds:
+      - task: release:tools
+      - goreleaser check
+
+  release:snapshot:
+    desc: Local release build into dist/ – archives, checksums, SBOMs; no signing, no image, nothing published (needs goreleaser and syft)
+    cmds:
+      - task: release:tools
+      - |
+        v=$(syft version | sed -n 's/^Version: *//p')
+        if [ "$v" != "{{.SYFT_VERSION}}" ]; then
+          echo "syft: found '$v', expected {{.SYFT_VERSION}} (https://github.com/anchore/syft/releases)"; exit 1
+        fi
+      - goreleaser release --snapshot --clean --skip=sign,docker
+
+  release:tools:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        v=$(goreleaser --version 2>&1 | sed -n 's/^GitVersion: *//p')
+        if [ "$v" != "{{.GORELEASER_VERSION}}" ]; then
+          echo "goreleaser: found '$v', expected {{.GORELEASER_VERSION}} (https://github.com/goreleaser/goreleaser/releases)"; exit 1
+        fi
 
   lint:api:
     desc: Lint api/openapi.yaml with vacuum (rules in api/vacuum.yaml; any warning fails)

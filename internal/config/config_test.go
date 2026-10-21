@@ -315,3 +315,38 @@ func TestExampleFileHasEveryKey(t *testing.T) {
 		}
 	}
 }
+
+// TestDockerFiles: the container config is valid, and the Dockerfile matches
+// it (ports, data directory) and pins one base image for both stages.
+func TestDockerFiles(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "docker", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Parse("config.yaml", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DataDir != "/var/lib/myownpki" || cfg.Admin.Listen != "0.0.0.0:9443" || cfg.Public.Listen != "0.0.0.0:8080" {
+		t.Errorf("container config: %+v", cfg)
+	}
+	cfg.DataDir = absDir(t)
+	if verr := cfg.Validate(); verr != nil {
+		t.Error(verr)
+	}
+	df, err := os.ReadFile(filepath.Join("..", "..", "deploy", "docker", "Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.ReplaceAll(string(df), "\r\n", "\n")
+	for _, want := range []string{"EXPOSE 9443 8080", `VOLUME ["/var/lib/myownpki"]`, " /var/lib/myownpki\n", `CMD ["/usr/local/bin/myownpki", "healthcheck"]`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile lacks %q", want)
+		}
+	}
+	const base = "gcr.io/distroless/static-debian12:nonroot@sha256:"
+	if n := strings.Count(text, base); n != 2 || strings.Count(text, "gcr.io/") != 2 {
+		t.Errorf("the Dockerfile must name the pinned base image twice (FROM and COPY --from), found %d", n)
+	}
+}

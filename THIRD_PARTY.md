@@ -10,6 +10,26 @@ bring). All Go modules are in `go.mod`; only permissive licenses are accepted (A
 |---|---|---|---|---|
 | `github.com/go-webauthn/webauthn` | v0.18.2 (2026-09-19) | BSD-3-Clause | passkeys (step 17) | `github.com/go-webauthn/x` v0.3.1 (BSD-3), `github.com/fxamacker/cbor/v2` v2.9.4 (MIT), `github.com/x448/float16` v0.8.4 (MIT), `github.com/golang-jwt/jwt/v5` v5.3.1 (MIT, metadata service), `github.com/google/go-tpm` v0.9.8 (Apache-2.0, TPM attestation), `github.com/go-viper/mapstructure/v2` v2.5.0 (MIT), `github.com/tinylib/msgp` v1.6.4 (MIT), `github.com/philhofer/fwd` v1.2.0 (MIT); `github.com/google/uuid` was already in the graph. Test-only modules of webauthn (testify, go.uber.org/mock) are not built in |
 
+## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
+
+Used only by `.github/workflows/release.yml` (and locally by `task release:check` /
+`task release:snapshot`); none of them is built into the binaries. Downloads are checked against
+the pinned SHA-256; each project's checksum file was verified against its Sigstore signature when
+the pins were chosen. Two-week rule: newest release older than 2026-10-07.
+
+| Tool / image | Version (release date) | License | For | Pin |
+|---|---|---|---|---|
+| [GoReleaser](https://github.com/goreleaser/goreleaser) | v2.18.2 (2026-09-17) | MIT | builds, archives, checksums, image, draft release | `goreleaser_Linux_x86_64.tar.gz` SHA-256 `0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3` |
+| [cosign](https://github.com/sigstore/cosign) | v3.1.3 (2026-08-06) | Apache-2.0 | keyless signatures of `checksums.txt` and the image | `cosign-linux-amd64` SHA-256 `4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71` |
+| [syft](https://github.com/anchore/syft) | v1.54.1 (2026-10-06) | Apache-2.0 | SPDX SBOM per archive | `syft_1.54.1_linux_amd64.tar.gz` SHA-256 `c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47` |
+| [distroless](https://github.com/GoogleContainerTools/distroless) `gcr.io/distroless/static-debian12:nonroot` | index uploaded 2026-08-21 | Apache-2.0 (the few Debian packages inside, such as CA certificates and time zone data, keep their own licenses) | base of the container image | `sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab` |
+
+New digest of the base image (update deliberately, then wait two weeks):
+
+```bash
+curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" https://gcr.io/v2/distroless/static-debian12/manifests/nonroot
+```
+
 ## Common passwords (`internal/auth/common-passwords.txt`)
 
 New passwords are checked against a list of common passwords, case-insensitively
