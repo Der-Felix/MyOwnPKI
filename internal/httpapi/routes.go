@@ -28,6 +28,17 @@ func (a *API) table() []Route {
 
 		{OperationID: "listCAs", Method: http.MethodGet, Path: "/cas", access: signedIn, handle: a.listCAs},
 		{OperationID: "getCA", Method: http.MethodGet, Path: "/cas/{caId}", access: signedIn, handle: a.getCA},
+		{OperationID: "createCA", Method: http.MethodPost, Path: "/cas", access: signedIn, body: true, handle: a.createCA},
+		{OperationID: "importCA", Method: http.MethodPost, Path: "/cas/import", access: signedIn, body: true, handle: a.importCA},
+		{OperationID: "updateCA", Method: http.MethodPatch, Path: "/cas/{caId}", access: signedIn, body: true, handle: a.updateCA},
+		{OperationID: "renewCA", Method: http.MethodPost, Path: "/cas/{caId}/renew", access: signedIn, body: true, handle: a.renewCA},
+		{OperationID: "retireCA", Method: http.MethodPost, Path: "/cas/{caId}/retire", access: signedIn, handle: a.retireCA},
+		{OperationID: "revokeCA", Method: http.MethodPost, Path: "/cas/{caId}/revoke", access: signedIn, body: true, handle: a.revokeCA},
+		{OperationID: "uploadSignedCACertificate", Method: http.MethodPut, Path: "/cas/{caId}/certificate", access: signedIn, body: true, handle: a.uploadSignedCACertificate},
+		{OperationID: "downloadCACSR", Method: http.MethodGet, Path: "/cas/{caId}/csr", access: signedIn, handle: a.downloadCACSR},
+		{OperationID: "downloadCRL", Method: http.MethodGet, Path: "/cas/{caId}/crl", access: signedIn, handle: a.downloadCRL},
+		{OperationID: "regenerateCRL", Method: http.MethodPost, Path: "/cas/{caId}/crl", access: signedIn, handle: a.regenerateCRL},
+		{OperationID: "uploadCRL", Method: http.MethodPut, Path: "/cas/{caId}/crl", access: signedIn, body: true, maxBody: 6 << 20, handle: a.uploadCRL},
 		{OperationID: "downloadCACertificate", Method: http.MethodGet, Path: "/cas/{caId}/certificate", access: signedIn, handle: a.downloadCACertificate},
 
 		{OperationID: "listCertificates", Method: http.MethodGet, Path: "/certificates", access: signedIn, handle: a.listCertificates},

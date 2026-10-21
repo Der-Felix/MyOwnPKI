@@ -394,3 +394,23 @@ func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, m
 	}
 	return total, perCA, nil
 }
+
+// LatestCRL returns the newest CRL of a CA's current generation (DER) for
+// who may read the CA – the same file the public listener serves.
+func (e *Engine) LatestCRL(ctx context.Context, who keys.Who, caID string) ([]byte, string, error) {
+	info, err := e.CA(ctx, who, caID)
+	if err != nil {
+		return nil, "", err
+	}
+	if info.CurrentGeneration == 0 {
+		return nil, "", deny("CA %q has no signed generation yet", info.Name)
+	}
+	row, err := pkidb.New(e.PKI).GetLatestCRL(ctx, pkidb.GetLatestCRLParams{CaID: info.ID, Generation: info.CurrentGeneration})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", deny("CA %q has no CRL yet", info.Name)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return row.CrlDer, info.Name, nil
+}

@@ -726,14 +726,14 @@ paths:
       operationId: createCA
       summary: Create a root or intermediate CA
       description: |
-        - `kind: intermediate` with `issuer_ca_id`: signed by an online CA of this server.
-        - `kind: intermediate` with `offline_signing: true`: only key + CSR are created; the
-          response contains the CSR for signing on the offline root (legacy `pki.sh`). Upload
-          the signed certificate with `PUT /cas/{caId}/certificate`.
-        - `kind: root`: allowed, but the UI warns – a root key online is a single point of compromise,
-          and a root can't really be revoked. Prefer an offline root.
-        The CA's `public_base_url` is baked into every certificate (AIA, CRL DP) and can never
-        change afterwards.
+        - `kind: intermediate` with `parent_ca_id`: signed at once when the parent's key is on this
+          server; below an offline root only key and CSR are created – the answer has the bundle
+          for the offline root (`offline_signing`), the certificate comes back with
+          `PUT /cas/{caId}/certificate`.
+        - `kind: root`: an online root (for tests and homelab); the answer warns. Prefer an offline
+          root (`POST /cas/import`). A root signs intermediates and CRLs only (decision 81).
+        `public_base_url` is baked into every certificate (AIA, CRL DP) and can never change once
+        used; a non-standard port or https gets a warning.
       x-required-role: admin
       x-step-up: true
       requestBody:
@@ -744,44 +744,50 @@ paths:
             schema: { $ref: "#/components/schemas/CACreate" }
       responses:
         "201":
-          description: CA created
+          description: CA created (or waiting for its offline signature)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CACreated" }
+              schema: { $ref: "#/components/schemas/CAChange" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
 
   /cas/import:
     post:
       tags: [cas]
       operationId: importCA
-      summary: Import an existing CA (certificate, optional encrypted key)
+      summary: Import the certificate of an offline root
       description: |
-        Without a key the CA is stored in `offline` mode: the server knows the certificate (for
-        chains and CRL checks) but can't sign. Keys are re-encrypted under the unseal key.
+        The root's key stays offline (legacy `pki.sh`, an air-gapped machine); the server uses the
+        certificate for chains and to check the root's uploaded CRLs. A known offline root with a
+        new key and the same name gets its next generation. Compare the SHA-256 fingerprint in
+        the notes with the one the offline root shows. A whole pki.sh directory is imported with
+        `POST /imports/legacy`.
       x-required-role: admin
       x-step-up: true
       requestBody:
-        description: "CA certificate in PEM, optionally with its private key"
+        description: "The root certificate"
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema: { $ref: "#/components/schemas/CAImport" }
       responses:
         "201":
           description: Imported
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CA" }
+              schema: { $ref: "#/components/schemas/CAChange" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
-        "503": { $ref: "#/components/responses/Sealed" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /cas/{caId}:
     parameters:
@@ -799,6 +805,119 @@ paths:
               schema: { $ref: "#/components/schemas/CA" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [cas]
+      operationId: updateCA
+      summary: Change the CRL lifetime or the maximum certificate validity
+      description: Name and base URL never change – they are inside certificates already.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "The limits to change (at least one)"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CAUpdate" }
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CAChange" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /cas/{caId}/renew:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    post:
+      tags: [cas]
+      operationId: renewCA
+      summary: Renew a CA with a new key (the next generation)
+      description: |
+        The new generation signs from now on; the old one keeps its CRL for what it signed. Below
+        an offline root the answer has the offline bundle, as at creation. An offline root is
+        renewed by importing its new certificate under the same name (`POST /cas/import`).
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "Optional key algorithm and validity"
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CARenew" }
+      responses:
+        "200":
+          description: Renewed (or waiting for the offline signature)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CAChange" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "503": { $ref: "#/components/responses/Sealed" }
+
+  /cas/{caId}/retire:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    post:
+      tags: [cas]
+      operationId: retireCA
+      summary: Retire a CA – it signs no new certificates, its CRLs go on
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Retired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CAChange" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /cas/{caId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/CAId"
+    post:
+      tags: [cas]
+      operationId: revokeCA
+      summary: Revoke an intermediate CA (irreversible)
+      description: |
+        Revoked on the CRL of its parent; whoever manages the parent revokes. A root can't be
+        revoked – remove it from the trust stores. A CA below an offline root is revoked on the
+        offline root (its next CRL upload).
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "Reason, optional generation and invalidity date"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CARevoke" }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CARevocationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /cas/{caId}/certificate:
     parameters:
@@ -824,17 +943,21 @@ paths:
               schema: { type: string }
             application/pkix-cert:
               schema: { type: string, contentEncoding: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [cas]
       operationId: uploadSignedCACertificate
       summary: Upload the certificate of an offline-signed intermediate
-      description: The certificate must match the pending key and chain to a known CA.
+      description: |
+        Checked against what was ordered (key, subject, CA:TRUE, key usage, path length, name
+        constraints, EKU, signature of exactly the parent generation, no SHA-1). The CA becomes
+        active and signs its first CRL at once.
       x-required-role: admin
       x-step-up: true
       requestBody:
-        description: "The certificate signed by the offline root, optionally with its chain"
+        description: "The certificate signed by the offline root"
         required: true
         content:
           application/json:
@@ -844,12 +967,15 @@ paths:
           description: CA is active
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CA" }
+              schema: { $ref: "#/components/schemas/CAChange" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "503": { $ref: "#/components/responses/Sealed" }
 
   /cas/{caId}/csr:
     parameters:
@@ -857,17 +983,21 @@ paths:
     get:
       tags: [cas]
       operationId: downloadCACSR
-      summary: Download the CSR of a CA that waits for offline signing
+      summary: The offline signing bundle of a CA that waits for its signature
+      description: |
+        The CSR, the OpenSSL extension file to sign it with (never the CSR's extensions), the days,
+        digest and serial, and the instructions for `pki ca-sign` and plain OpenSSL.
       x-required-role: admin
       responses:
         "200":
-          description: PKCS#10 request
+          description: Offline signing bundle
           content:
-            application/pkcs10:
-              schema: { type: string }
+            application/json:
+              schema: { $ref: "#/components/schemas/OfflineBundle" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   /cas/{caId}/crl:
     parameters:
@@ -891,23 +1021,63 @@ paths:
           content:
             application/pkix-crl:
               schema: { type: string, contentEncoding: binary }
+            application/x-pem-file:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
     post:
       tags: [cas]
       operationId: regenerateCRL
-      summary: Issue a new CRL now (CRL number + 1)
-      x-required-role: operator
+      summary: Sign a new CRL now (CRL number + 1)
+      x-required-role: admin
+      x-step-up: true
       responses:
         "200":
-          description: New CRL metadata
+          description: The new CRL
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CRLInfo" }
+              schema: { $ref: "#/components/schemas/CRLSigned" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
+    put:
+      tags: [cas]
+      operationId: uploadCRL
+      summary: Upload the CRL an offline root signed
+      description: |
+        Checked: signed by exactly that root generation, CRL number strictly increasing,
+        thisUpdate not in the future, nextUpdate in the future, at most 4 MiB. Intermediates the
+        CRL lists are marked revoked.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "The CRL in PEM"
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [crl_pem]
+              additionalProperties: false
+              properties:
+                crl_pem: { type: string, maxLength: 6291456, description: "PEM of a CRL of at most 4 MiB" }
+      responses:
+        "200":
+          description: Stored and served
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CRLUploaded" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
 
   # ---------------------------------------------------------------- certificates
   /certificates:
@@ -1957,54 +2127,155 @@ components:
     CACreate:
       description: "A CA to create"
       type: object
-      required: [name, kind, subject, key_algorithm, validity_days, public_base_url]
+      required: [name, kind, subject, public_base_url]
+      additionalProperties: false
       properties:
-        name: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+        name: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,62}$", description: "Immutable: part of every AIA/CRL URL" }
         kind: { $ref: "#/components/schemas/CAKind" }
+        parent_ca_id: { $ref: "#/components/schemas/ID" }
         subject: { $ref: "#/components/schemas/Subject" }
-        key_algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
-        validity_days: { type: integer, minimum: 1, maximum: 9125 }
-        issuer_ca_id: { $ref: "#/components/schemas/ID" }
-        offline_signing:
-          type: boolean
-          default: false
-          description: Create key + CSR only; the certificate comes from an offline root
-        path_len: { type: integer, minimum: 0, default: 0 }
-        name_constraints: { $ref: "#/components/schemas/NameConstraints" }
-        eku_limit: { type: array, items: { type: string } }
+        key_algorithm:
+          type: string
+          enum: [ecdsa-p384, ecdsa-p256, rsa-3072, rsa-4096]
+          description: Default ecdsa-p384
+        validity_days: { type: integer, minimum: 0, maximum: 9125, description: "0 = 7300 for a root, 3650 for an intermediate (never beyond the parent)" }
+        path_len: { type: integer, minimum: 0, description: "0 = may only issue end-entity certificates" }
+        name_constraints: { $ref: "#/components/schemas/NameConstraintsInput" }
+        eku_limit: { type: array, items: { type: string }, description: "EKU names or OIDs; empty = no limit" }
         public_base_url: { type: string, format: uri }
+        crl_days: { type: integer, minimum: 0, maximum: 366, description: "0 = the default for the kind" }
+        max_validity_days: { type: integer, minimum: 0, maximum: 3650, description: "0 = 397" }
 
-    CACreated:
-      description: "A created CA, with the CSR when it waits for offline signing"
-      allOf:
-        - $ref: "#/components/schemas/CA"
-        - type: object
-          properties:
-            csr_pem:
-              type: string
-              description: Only with offline_signing – sign it on the offline root
+    NameConstraintsInput:
+      description: "Name constraints of a new intermediate (RFC 5280 4.2.1.10)"
+      type: object
+      additionalProperties: false
+      properties:
+        permitted_dns: { type: array, items: { type: string } }
+        excluded_dns: { type: array, items: { type: string } }
+        permitted_ip: { type: array, items: { type: string, description: "CIDR prefix" } }
+        excluded_ip: { type: array, items: { type: string } }
+        permitted_email: { type: array, items: { type: string } }
+        excluded_email: { type: array, items: { type: string } }
+        permitted_uri: { type: array, items: { type: string } }
+        excluded_uri: { type: array, items: { type: string } }
+        not_critical: { type: boolean, description: "Compatibility switch; RFC 5280 wants critical" }
+
+    CAChange:
+      description: "A CA after a change, with the offline bundle when it waits for its signature"
+      type: object
+      required: [ca, offline_signing, notes, warnings]
+      additionalProperties: false
+      properties:
+        ca: { $ref: "#/components/schemas/CA" }
+        offline_signing:
+          oneOf:
+            - $ref: "#/components/schemas/OfflineBundle"
+            - type: "null"
+        notes: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+
+    OfflineBundle:
+      description: "What the offline root needs to sign an intermediate"
+      type: object
+      required: [csr_pem, csr_file, ext_config, ext_file, cert_file, days, digest, serial, instructions]
+      additionalProperties: false
+      properties:
+        csr_pem: { type: string }
+        csr_file: { type: string }
+        ext_config: { type: string, description: "The OpenSSL extension file – sign with exactly this, never the CSR's extensions" }
+        ext_file: { type: string }
+        cert_file: { type: string }
+        days: { type: integer }
+        digest: { type: string, description: "sha384 for a P-384 root; empty for Ed25519" }
+        serial: { type: string }
+        instructions: { type: string }
 
     CAImport:
-      description: "An existing CA to import"
+      description: "The certificate of an offline root"
       type: object
-      required: [name, certificate]
+      required: [name, certificate_pem, public_base_url]
+      additionalProperties: false
       properties:
-        name: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
-        certificate: { type: string, contentMediaType: application/x-pem-file }
-        private_key:
-          type: string
-          contentMediaType: application/x-pem-file
-          description: Optional; encrypted PEM recommended
-        key_passphrase: { type: string, format: password, writeOnly: true }
+        name: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }
+        certificate_pem: { type: string, maxLength: 65536 }
         public_base_url: { type: string, format: uri }
+        crl_days: { type: integer, minimum: 0, maximum: 366, description: "Lifetime of the root's CRLs; 0 = 180" }
+
+    CAUpdate:
+      description: "New limits of a CA (at least one)"
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        crl_days: { type: integer, minimum: 1, maximum: 366 }
+        max_validity_days: { type: integer, minimum: 1, maximum: 3650 }
+
+    CARenew:
+      description: "Options for a new CA generation"
+      type: object
+      additionalProperties: false
+      properties:
+        key_algorithm: { type: string, enum: [ecdsa-p384, ecdsa-p256, rsa-3072, rsa-4096] }
+        validity_days: { type: integer, minimum: 0, maximum: 9125 }
+
+    CARevoke:
+      description: "Revocation of a CA generation"
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [unspecified, keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, privilegeWithdrawn]
+        generation: { type: integer, minimum: 0, description: "0 = the current generation" }
+        invalidity_date: { type: string, format: date-time }
+
+    CARevocationResult:
+      description: "A revoked CA and whether its parent's CRL lists it already"
+      type: object
+      required: [ca, crl_published, crl_number, warnings]
+      additionalProperties: false
+      properties:
+        ca: { $ref: "#/components/schemas/CA" }
+        crl_published: { type: boolean }
+        crl_number: { type: [integer, "null"] }
+        warnings: { type: array, items: { type: string } }
+
+    CRLSigned:
+      description: "A CRL the server signed"
+      type: object
+      required: [ca, generation, number, this_update, next_update, entries]
+      additionalProperties: false
+      properties:
+        ca: { type: string }
+        generation: { type: integer }
+        number: { type: integer }
+        this_update: { type: string, format: date-time }
+        next_update: { type: string, format: date-time }
+        entries: { type: integer, minimum: 0 }
+
+    CRLUploaded:
+      description: "An uploaded offline root CRL"
+      type: object
+      required: [ca, generation, number, this_update, next_update, entries, warnings]
+      additionalProperties: false
+      properties:
+        ca: { type: string }
+        generation: { type: integer }
+        number: { type: integer }
+        this_update: { type: string, format: date-time }
+        next_update: { type: string, format: date-time }
+        entries: { type: integer, minimum: 0 }
+        warnings: { type: array, items: { type: string } }
 
     SignedCAUpload:
       description: "Certificate of an offline-signed intermediate"
       type: object
       required: [certificate_pem]
+      additionalProperties: false
       properties:
         certificate_pem: { type: string, maxLength: 65536 }
-        chain_pem: { type: string, maxLength: 262144 }
 
     CRLInfo:
       description: "The newest CRL of a CA generation and what it needs"
