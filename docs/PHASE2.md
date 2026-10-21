@@ -1,0 +1,190 @@
+# Phase 2 – plan (v0.2: ACME server and domains)
+
+> Written at the end of the night run 2026-10-21, after phase 1 (v0.1). A **proposal**: nothing in
+> it is decided until the owner has answered the open questions (§4). No code exists for it yet.
+
+Goal (PLAN §10.1, v0.2): an **ACME server (RFC 8555) for the internal CAs with http-01 and
+dns-01**, a **domain model** and **approval levels**, so that certbot, acme.sh, Traefik and Caddy
+get certificates from the own CA – integration level 1 (PLAN §6.3a). The server only *reads*
+dns-01 TXT records, through a **configurable DNS resolver** (internal DNS, split DNS); setting the
+record is the client's job.
+
+Rules that shape every step:
+
+- **One issuance path (ADR-19).** ACME finalize calls the same policy engine and the same
+  `ca.Engine` issuance as the UI and the API – no second signer, no shortcut. Presets give the
+  extensions; the CSR only gives names and the key.
+- **ACME payloads are attacker input** (security.md): JWS, CSRs, identifiers, account contact
+  fields. Size limits on every body.
+- **Validation is SSRF by design** (security.md "ACME validation"): only ports 80/53, resolve once
+  and connect to that IP, short timeouts, an address policy per CA, never the admin listener.
+- **Validity:** ACME issuances default to **90 days**, capped by the CA's maximum validity
+  (owner decision 6, 2026-10-13).
+- Same working rules as phase 1: step by step, `task check` green, commits after the owner's OK.
+
+---
+
+## 1. Data model
+
+Everything ACME lives in `tenants/<t>/pki.db` – an order and the certificate it produces must be
+in **one** transaction (ADR-06). Times UTC, IDs from `internal/ids`.
+
+### 1.1 Domains and policy (`pki.db`, migration 0008)
+
+```
+domains                               -- a name space the tenant issues for
+  id               TEXT PK
+  name             TEXT UNIQUE        -- "homelab.example" (punycode, lower case, no trailing dot)
+  ca_id            → cas.id           -- the intermediate that signs for it (its name constraints must permit it)
+  include_subdomains INTEGER          -- 1: *.homelab.example and deeper; 0: only the name itself
+  wildcards        INTEGER            -- 1: "*.x" may be requested (dns-01 only, RFC 8555 §7.1.3)
+  challenge_types  TEXT               -- JSON ["http-01","dns-01"]; the allowed subset
+  approval         TEXT               -- open | account | new_name (PLAN §6.3), see 1.3
+  preset           TEXT               -- preset used for ACME orders (default "server")
+  validity_days    INTEGER NULL       -- NULL = 90; capped by cas.max_validity_days
+  address_policy   TEXT               -- internal | public: which IPs http-01 may connect to (1.4)
+  created_at, updated_at
+
+domain_ips                            -- IP identifiers (RFC 8738), optional
+  domain_id → domains.id, cidr TEXT   -- e.g. 192.0.2.0/24
+```
+
+A name is served by the **most specific** domain that covers it; no domain → the order is refused
+with `rejectedIdentifier`. Two domains with the same name are impossible (UNIQUE).
+
+### 1.2 ACME objects (`pki.db`, migration 0009)
+
+```
+acme_accounts
+  id TEXT PK, key_thumbprint TEXT UNIQUE   -- RFC 7638 JWK thumbprint (SHA-256)
+  jwk TEXT                                  -- the public key (JSON), ES256/RS256/EdDSA only
+  status TEXT                               -- pending_approval | valid | deactivated | revoked
+  contact TEXT                              -- JSON ["mailto:…"], validated, shown escaped
+  eab_key_id TEXT NULL → acme_eab_keys.id
+  created_at, approved_at NULL, approved_by NULL
+
+acme_eab_keys                         -- external account binding (RFC 8555 §7.3.4), created in the UI
+  id TEXT PK, mac_key_hash TEXT       -- HMAC key shown once, stored hashed + encrypted (DEK) for verification
+  label TEXT, domain_ids TEXT         -- which domains an account bound with it may order for
+  expires_at, used_at NULL, created_by
+
+acme_orders
+  id TEXT PK, account_id → acme_accounts.id
+  status TEXT                         -- pending | ready | processing | valid | invalid
+  identifiers TEXT                    -- JSON [{"type":"dns","value":"…"}]
+  not_before NULL, not_after NULL, expires_at
+  certificate_id NULL → certificates.id
+  error TEXT NULL                     -- RFC 8555 problem document
+  created_at
+
+acme_authzs                           -- one per identifier and account; reused while valid
+  id TEXT PK, account_id, identifier_type, identifier_value, wildcard INTEGER
+  status TEXT                         -- pending | valid | invalid | deactivated | expired | revoked
+  expires_at                          -- pending: 1 hour; valid: 7 days (configurable, see §4)
+
+acme_challenges
+  id TEXT PK, authz_id → acme_authzs.id
+  type TEXT                           -- http-01 | dns-01
+  token TEXT                          -- 128 random bits, base64url
+  status TEXT                         -- pending | processing | valid | invalid
+  validated_at NULL, error TEXT NULL, attempts INTEGER
+
+acme_order_authzs (order_id, authz_id)  -- many to many
+
+acme_names                            -- names this tenant has issued for before (approval "new_name")
+  name TEXT PK, first_order_id, approved_at, approved_by
+```
+
+**Nonces** live in memory (a bounded set with expiry, 1 hour); a restart invalidates them, which
+RFC 8555 §6.5 allows (`badNonce`, the client retries). **Rate limits** are counters in memory per
+account and per IP (§2 step 11).
+
+### 1.3 Approval levels (PLAN §6.3)
+
+| Level | New account | Order for a name never issued before | Renewal |
+|---|---|---|---|
+| `open` | valid at once | issued after the challenge | issued |
+| `account` | `pending_approval` until an admin approves – or valid at once with an EAB key | issued | issued |
+| `new_name` | as `open` (or EAB) | order stays `pending` with an authorization that waits for approval (`acme_names`); the client retries | issued |
+
+The strictest level of all domains an order touches wins. Approval never happens per order (standard
+clients time out after finalize, PLAN §6.3 note).
+
+### 1.4 Configuration (`config.yaml`)
+
+```yaml
+acme:
+  # The DNS server that dns-01 asks (and http-01 uses to resolve names). Empty: the system resolver.
+  resolver: "10.0.0.53:53"
+  # Where the ACME directory is reachable from clients; part of every URL the server hands out.
+  base_url: "https://pki.homelab.lan:8443/acme"
+public:
+  listen: ":8080"          # CRL, AIA (HTTP, as in v0.1)
+  tls_listen: ":8443"      # ACME over HTTPS (RFC 8555 §6.1) – see open question Q1
+```
+
+Address policy (`domains.address_policy`): `internal` allows RFC 1918, ULA and the configured
+networks; `public` refuses private, loopback, link-local and CGNAT ranges. Both refuse the server's
+own listener addresses and `0.0.0.0/::`.
+
+---
+
+## 2. Work plan
+
+Each step ends with: summary for the owner (German), verification commands, a commit proposal.
+"Approval" marks a step that needs a new dependency.
+
+| # | Step | Approval needed | Verifies with |
+|---|---|---|---|
+| 1 | **Domain model**: migration 0008, `internal/domain` (create, change, delete when unused; lookup "most specific domain for a name"), checks against the CA's name constraints at creation, API `/domains` (spec first) and UI pages (list, form) | – | unit tests of the lookup (wildcards, sub-domains, IDN punycode, trailing dot); a domain outside the CA's name constraints is refused; contract tests |
+| 2 | **Policy engine extension**: `policy.CheckOrder(domain, names, preset)` used by UI/API issuance **and** ACME; the existing name checks move behind it unchanged | – | the phase 1 issuance tests pass unchanged; new table tests per domain setting |
+| 3 | **JOSE**: JWS (flattened JSON, RFC 7515) verification for ES256, RS256 (≥ 2048 bits), EdDSA; JWK thumbprint (RFC 7638); `kid` vs. `jwk` rules of RFC 8555 §6.2; nonce store | Q3 (own code or go-jose) | RFC 7515/7638 test vectors; tampered payload, wrong `url`, reused nonce, `alg: none`, HMAC with a public key – all refused |
+| 4 | **Public TLS listener and directory**: `public.tls_listen` with a certificate from the own CA (renewed by the server itself, like any ACME order) or an operator certificate; `GET /acme/directory`, `HEAD/GET newNonce`, `Replay-Nonce` on every answer, problem documents (`urn:ietf:params:acme:error:*`) | – | the directory with `curl`; a client without the root gets a clear TLS error (documented) |
+| 5 | **Accounts**: newAccount (incl. `onlyReturnExisting`), account update, deactivation, key change (RFC 8555 §7.3.5), EAB verification; approval queue in the UI; audit entries | – | certbot/lego register; EAB with a wrong MAC refused; a pending account can't order |
+| 6 | **Orders and authorizations**: newOrder, authz reuse, order status machine, expiry job; identifiers checked against the domains (`rejectedIdentifier`, `unsupportedIdentifier`) | – | state-machine table tests; an order for a name without domain is refused before any challenge |
+| 7 | **http-01 validator** (RFC 8555 §8.3): own `http.Client`, resolve once via the configured resolver and dial that IP, port 80 only, ≤ 10 redirects only to 80/443 on names of the same order, 10 s timeout, 1 KiB body limit, from two attempts with back-off; the address policy | – | tests with a local HTTP server; redirect to port 22 / to 169.254.169.254 / to the admin listener refused; DNS rebinding test (first answer public, second private) |
+| 8 | **dns-01 validator** (RFC 8555 §8.4): TXT `_acme-challenge.<name>` through the configured resolver, CNAME chain followed (≤ 8, PLAN §6.3 "CNAME delegation"), no cache, wildcard authz only by dns-01 | Q4 (stdlib resolver or `miekg/dns`) | tests with an in-process DNS server; split DNS (internal answer differs from public) documented with an example |
+| 9 | **Finalize and certificate**: CSR checks (key ≥ policy, names = order identifiers exactly, no extensions copied), issuance through `ca.Engine` in the order's transaction, 90 days default, chain download (`application/pem-certificate-chain`), alternate chains none | – | `openssl verify` of the result; a CSR with an extra name or `CA:TRUE` request gets exactly the preset's extensions; a CSR naming one name less is refused (`badCSR`) |
+| 10 | **revokeCert** (by account key or by certificate key, RFC 8555 §7.6) through the phase 1 revocation, reasons as in the UI; CRL signed at once | – | revoke with each key type; a third account can't revoke; CRL check with OpenSSL |
+| 11 | **Rate limits and abuse guards**: orders per account per hour, failed validations per name, new accounts per IP; `rateLimited` with `Retry-After`; limits in the tenant settings | – | tests with a fake clock |
+| 12 | **ARI** (RFC 9773): `renewalInfo` with the window at 2/3 of the lifetime plus jitter (pki-rules.md §4) | – | lego (and other clients with ARI support) ask for it; the window lies inside the lifetime |
+| 13 | **Approval levels in the UI**: account queue, new-name queue, EAB key creation (shown once), per-domain settings; dashboard counters "waiting for approval" | – | handler tests incl. no-inline-style; screenshots light/dark of the demo instance |
+| 14 | **Conformance**: Pebble's client test suite and real clients in CI – certbot (`--server`, http-01 standalone, dns-01 via `certbot-dns-rfc2136` against a BIND test container), lego, acme.sh; Traefik and Caddy as a documented manual test | Q5 (CI containers) | the CI job green on Linux |
+| 15 | **Docs and v0.2**: OPERATIONS.md chapter "ACME" (connecting certbot, Traefik, Caddy; trusting the root; split DNS), CHANGELOG 0.2.0, PLAN update, upgrade test from a v0.1 backup | – | the upgrade test: restore a v0.1 backup, migrate, issue by ACME |
+
+### Notes
+
+- **Order of work:** 1–2 make the domain the unit of policy; 3–6 are the protocol skeleton; 7–8 the
+  validators; 9 issues; 10–15 complete it. A walking skeleton with certbot (http-01) is possible
+  after step 9.
+- **Not in v0.2** (PLAN §10.1 "After v1.0"): tls-alpn-01, ACME client for Let's Encrypt, OCSP.
+- **The UI/API issuance stays** for manual cases; it uses the same policy engine (step 2).
+- **Names in the audit log:** account IDs and thumbprints, never contact e-mail addresses (personal
+  data, security.md "Audit log").
+
+---
+
+## 3. Dependencies
+
+| Module / tool | License | For | Status |
+|---|---|---|---|
+| `github.com/go-jose/go-jose/v4` | Apache-2.0 | JWS verification (step 3) | **to ask** (Q3) – alternative: ~300 lines of own code with RFC test vectors |
+| `github.com/miekg/dns` | BSD-3 | dns-01 queries without the system resolver's caching (step 8) | **to ask** (Q4) – alternative: `net.Resolver` with a custom `Dial` |
+| Pebble (test tool) | MPL-2.0 | conformance tests (step 14), not built in | **to ask** (Q5) |
+| certbot, lego, acme.sh, BIND containers in CI | Apache-2.0 / MIT / GPL-3.0 (acme.sh, only run as a tool) / MPL-2.0 | conformance tests only | **to ask** (Q5) |
+
+---
+
+## 4. Open questions to the owner
+
+| # | Question | Proposal |
+|---|---|---|
+| Q1 | **HTTPS for ACME.** RFC 8555 requires HTTPS; the public listener speaks HTTP (CRLs must stay HTTP, RFC 5280). A second public port `:8443` with a certificate from the own CA – or ACME behind a reverse proxy that terminates TLS? | `public.tls_listen` (default `:8443`) with an own-CA certificate the server renews itself; a reverse proxy stays possible. Clients must trust the root (documented per client) |
+| Q2 | **Default approval level** for a new domain: `open`, `account` or `new_name`? | `account` with EAB keys: certbot/Traefik get an EAB key from the UI, nobody else can register |
+| Q3 | **JOSE library or own code?** | `go-jose/v4` (widely reviewed; JWS mistakes are classic vulnerabilities) |
+| Q4 | **DNS library** for dns-01? | `net.Resolver` with `PreferGo` and a custom `Dial` to `acme.resolver` – no new module; `miekg/dns` only if TXT over TCP/EDNS turns out to be needed |
+| Q5 | **Conformance tests in CI** with containers (Pebble, certbot, BIND) – Node-free, but external images | Yes, pinned by digest, only in a separate CI job |
+| Q6 | **Authorization lifetime** – how long a passed challenge counts for new orders | 7 days (Let's Encrypt: 30); shorter means more challenges, longer means a lost name stays usable |
+| Q7 | **IP identifiers** (RFC 8738, certificates for `192.0.2.10`) in v0.2? | Yes for http-01 only, limited to `domain_ips` |
+| Q8 | **Wildcards** by dns-01 only (RFC 8555) – allowed per domain, default off? | Default off |
+| Q9 | **Which CA signs ACME certificates** when a tenant has several intermediates – per domain (as in §1.1) or one "ACME CA"? | Per domain |
