@@ -1,17 +1,23 @@
 package httpapi
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +31,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/api"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth/passkeytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -480,8 +487,8 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "listWebAuthnCredentials", as: anon, want: 401, note: "no-session"})
 	run(contractCase{op: "beginWebAuthnRegistration", as: anon, body: pw, want: 401, note: "no-session"})
 	run(contractCase{op: "beginWebAuthnRegistration", as: viewer, body: pw, want: 403, kind: "step-up-required", note: "step-up"})
-	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_x", body: pw, want: 403, kind: "step-up-required", note: "step-up"})
-	run(contractCase{op: "deleteWebAuthnCredential", as: anon, path: "/users/me/webauthn/pk_x", body: pw, want: 401, note: "no-session"})
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_x/remove", body: pw, want: 403, kind: "step-up-required", note: "step-up"})
+	run(contractCase{op: "deleteWebAuthnCredential", as: anon, path: "/users/me/webauthn/pk_x/remove", body: pw, want: 401, note: "no-session"})
 	run(contractCase{op: "finishWebAuthnRegistration", as: anon, body: map[string]any{}, want: 401, note: "no-session"})
 	run(contractCase{op: "beginWebAuthnLogin", as: anon, want: 401})
 	viewer.stepUp(t, "viewer")
@@ -521,8 +528,8 @@ func TestContract(t *testing.T) {
 	}
 	run(contractCase{op: "finishWebAuthnLogin", as: pk, body: json.RawMessage(answer), want: 200})
 	run(contractCase{op: "finishWebAuthnLogin", as: pk, body: json.RawMessage(answer), want: 409, kind: "conflict"}) // used once
-	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_nothere", body: pw, want: 404})
-	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/" + pkID, body: pw, want: 204})
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/pk_nothere/remove", body: pw, want: 404})
+	run(contractCase{op: "deleteWebAuthnCredential", as: viewer, path: "/users/me/webauthn/" + pkID + "/remove", body: pw, want: 204})
 
 	// CA management (step 18). The admin's step-up has run out by now.
 	v.clk.Advance(authz.StepUpWindow + time.Second)
@@ -702,6 +709,44 @@ func TestContract(t *testing.T) {
 	run(contractCase{op: "changeOwnPassword", as: self, body: map[string]string{"current_password": testPassword, "new_password": "short"}, want: 422, kind: "policy-violation"})
 	run(contractCase{op: "changeOwnPassword", as: self, body: pwChange, want: 204})
 
+	// Legacy import over the API and the audit log (step 18). The fixture's
+	// CA names (root, issuing) exist here already: the import is refused as
+	// a whole and recorded as a failed job.
+	fixtureDir := filepath.Join(t.TempDir(), "pki")
+	legacytest.Write(t, fixtureDir, v.clk.Now())
+	archive := map[string]any{"archive": tarGzBase64(t, fixtureDir), "dry_run": true}
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	for _, cc := range []contractCase{
+		{op: "startLegacyImport", as: anon, body: archive, want: 401, note: "no-session"},
+		{op: "startLegacyImport", as: viewer, body: archive, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "startLegacyImport", as: admin, body: archive, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "getImport", as: anon, path: "/imports/imp_x", want: 401, note: "no-session"},
+		{op: "getImport", as: viewer, path: "/imports/imp_x", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "getImport", as: rootview, path: "/imports/imp_x", want: 404, note: "no-read"},
+		{op: "getImport", as: admin, path: "/imports/imp_nothere", want: 404},
+		{op: "listAuditEntries", as: anon, want: 401, note: "no-session"},
+		{op: "listAuditEntries", as: viewer, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "listAuditEntries", as: admin, path: "/audit?limit=2", want: 200},
+		{op: "listAuditEntries", as: admin, path: "/audit?scope=instance&action=user.login&result=success", want: 200},
+		{op: "listAuditEntries", as: admin, path: "/audit?limit=500", want: 400},
+		{op: "verifyAuditChain", as: anon, body: map[string]any{}, want: 401, note: "no-session"},
+		{op: "verifyAuditChain", as: viewer, body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "verifyAuditChain", as: admin, body: map[string]any{}, want: 200},
+		{op: "verifyAuditChain", as: admin, body: map[string]string{"scope": "instance"}, want: 200},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	job := admin.do(t, http.MethodPost, "/imports/legacy", archive)
+	s.check(t, s.routeOf(t, v.api, "startLegacyImport"), job)
+	if job.Code != http.StatusCreated || job.body["status"] != "failed" || !strings.Contains(job.Body.String(), "exists already") {
+		t.Fatalf("import into an instance with the same CA names: %d %s", job.Code, job.Body.String())
+	}
+	mark("startLegacyImport", "success")
+	jobID, _ := job.body["id"].(string)
+	run(contractCase{op: "getImport", as: admin, path: "/imports/" + jobID, want: 200})
+	run(contractCase{op: "startLegacyImport", as: admin, body: map[string]any{"archive": "bm90IGFuIGFyY2hpdmU="}, want: 422, kind: "policy-violation"})
+
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {
 		o := s.operation(rt)
@@ -780,4 +825,74 @@ func totpCode(t *testing.T, secret string, at time.Time) string {
 		t.Fatalf("secret %q is not Base32", secret)
 	}
 	return code
+}
+
+// tarGzBase64 packs a directory (with its own name as the top folder) as a
+// base64 .tar.gz, the way the legacy import over the API takes it.
+func tarGzBase64(t *testing.T, dir string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, _ := filepath.Rel(filepath.Dir(dir), p)
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			return tw.WriteHeader(&tar.Header{Name: rel + "/", Typeflag: tar.TypeDir, Mode: 0o700})
+		}
+		body, rerr := os.ReadFile(p) // #nosec G304 G122 -- the test's own fixture in a temp dir
+		if rerr != nil {
+			return rerr
+		}
+		if herr := tw.WriteHeader(&tar.Header{Name: rel, Typeflag: tar.TypeReg, Mode: 0o600, Size: int64(len(body))}); herr != nil {
+			return herr
+		}
+		_, werr = tw.Write(body)
+		return werr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// TestEverySpecOperationIsServed (step 18): the spec and the route table
+// match in both directions – no operation is only on paper.
+func TestEverySpecOperationIsServed(t *testing.T) {
+	t.Parallel()
+	var spec struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(api.Spec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	served := map[string]bool{}
+	for _, rt := range New(Deps{}).Routes() {
+		served[rt.Method+" "+rt.Path] = true
+	}
+	n := 0
+	for path, ops := range spec.Paths {
+		for method := range ops {
+			m := strings.ToUpper(method)
+			if !slices.Contains([]string{"GET", "POST", "PUT", "PATCH", "DELETE"}, m) {
+				continue
+			}
+			n++
+			if !served[m+" "+path] {
+				t.Errorf("%s %s is in the spec but not served", m, path)
+			}
+		}
+	}
+	if n != len(served) {
+		t.Errorf("%d operations in the spec, %d routes", n, len(served))
+	}
 }

@@ -175,6 +175,76 @@ func (q *Queries) ListEntriesFrom(ctx context.Context, arg ListEntriesFromParams
 	return items, nil
 }
 
+const listEntriesPage = `-- name: ListEntriesPage :many
+SELECT seq, outbox_id, time, actor_type, actor_id, actor_name, action,
+       target_type, target_id, result, source_ip, details_json, prev_hash, hash
+FROM audit_entries
+WHERE (CAST(?1 AS INTEGER) = 0 OR seq < CAST(?1 AS INTEGER))
+  AND (CAST(?2 AS TEXT) = '' OR substr(action, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT))
+  AND (CAST(?3 AS TEXT) = '' OR result = CAST(?3 AS TEXT))
+  AND (CAST(?4 AS TEXT) = '' OR time >= CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = '' OR time < CAST(?5 AS TEXT))
+ORDER BY seq DESC
+LIMIT ?6
+`
+
+type ListEntriesPageParams struct {
+	Before   int64
+	Action   string
+	Result   string
+	Since    string
+	Until    string
+	PageSize int64
+}
+
+// One page of the log, newest first (step 18). before = 0 starts at the
+// newest entry; action is a prefix (” = all), result exact (” = all),
+// since/until bound the time (” = open).
+func (q *Queries) ListEntriesPage(ctx context.Context, arg ListEntriesPageParams) ([]AuditEntry, error) {
+	rows, err := q.db.QueryContext(ctx, listEntriesPage,
+		arg.Before,
+		arg.Action,
+		arg.Result,
+		arg.Since,
+		arg.Until,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditEntry{}
+	for rows.Next() {
+		var i AuditEntry
+		if err := rows.Scan(
+			&i.Seq,
+			&i.OutboxID,
+			&i.Time,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorName,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Result,
+			&i.SourceIp,
+			&i.DetailsJson,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setScope = `-- name: SetScope :exec
 INSERT INTO db_info (key, value) VALUES ('audit_scope', ?)
 ON CONFLICT (key) DO NOTHING
