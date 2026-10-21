@@ -1,16 +1,13 @@
 package ca
 
 import (
-	"context"
 	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +16,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -39,14 +37,7 @@ var legacyOnce struct {
 
 func legacyFixture(t *testing.T) string {
 	t.Helper()
-	bash, err := exec.LookPath("bash")
-	legacyOpenSSL := os.Getenv("LEGACY_TEST_OPENSSL")
-	if err != nil || (runtime.GOOS != "linux" && legacyOpenSSL == "") {
-		if runtime.GOOS == "linux" && os.Getenv("CI") != "" {
-			t.Fatal("bash missing in CI")
-		}
-		t.Skip("the legacy import test needs bash and POSIX paths: Linux, or LEGACY_TEST_OPENSSL=/usr/bin/openssl in Git Bash")
-	}
+	bash, legacyOpenSSL := legacytest.NeedPkiSh(t)
 	opensslBin(t)
 	legacyOnce.Do(func() {
 		legacyOnce.dir, legacyOnce.err = buildLegacyFixture(bash, legacyOpenSSL)
@@ -60,29 +51,12 @@ func legacyFixture(t *testing.T) string {
 // buildLegacyFixture runs pki.sh; the directory lives until the process
 // ends (TestMain removes the parent of the temp dirs).
 func buildLegacyFixture(bash, legacyOpenSSL string) (string, error) {
-	script, err := filepath.Abs("../../legacy/pki.sh")
-	if err != nil {
-		return "", err
-	}
 	dir, err := os.MkdirTemp("", "myownpki-legacy-")
 	if err != nil {
 		return "", err
 	}
-	pkiDir := filepath.Join(dir, "pki")
-	run := func(env []string, args ...string) error {
-		// #nosec G204 -- test: runs the repository's own legacy script
-		cmd := exec.CommandContext(context.Background(), bash, append([]string{posixPath(script), "--dir", posixPath(pkiDir), "-y", "--no-color"}, args...)...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), env...)
-		if legacyOpenSSL != "" {
-			cmd.Env = append(cmd.Env, "OPENSSL="+legacyOpenSSL)
-		}
-		if out, cerr := cmd.CombinedOutput(); cerr != nil {
-			return errors.New("pki " + strings.Join(args, " ") + ": " + cerr.Error() + "\n" + string(out))
-		}
-		return nil
-	}
-	steps := [][]string{
+	var steps []legacytest.Step
+	for _, s := range [][]string{
 		{"init", "--org", "Homelab", "--country", "DE", "--cn", "Legacy Root CA", "--key", "rsa3072", "--no-pass",
 			"--leaf-key", "rsa2048", "--aia-url", "http://pki.homelab.example", "--intermediate", "server-ca"},
 		{"ca-new", "client-ca", "--no-pass", "--key", "rsa3072", "--permit-dns", "homelab.example", "--permit-ip", "192.0.2.0/24"},
@@ -98,16 +72,14 @@ func buildLegacyFixture(bash, legacyOpenSSL string) (string, error) {
 		{"renew-ca", "server-ca"},
 		{"selfsigned", "server", "--cn", "self.homelab.example", "--dns", "self.homelab.example"},
 		{"crl"},
+	} {
+		steps = append(steps, legacytest.Step{Args: s})
 	}
-	for _, s := range steps {
-		if err := run(nil, s...); err != nil {
-			return "", err
-		}
-	}
-	if err := run([]string{"PKI_KEY_PASS=" + legacyKeyPass}, "issue", "server", "--cn", "enc.homelab.example", "--dns", "enc.homelab.example", "--ca", "server-ca", "--key-pass"); err != nil {
-		return "", err
-	}
-	return pkiDir, nil
+	steps = append(steps, legacytest.Step{
+		Args: []string{"issue", "server", "--cn", "enc.homelab.example", "--dns", "enc.homelab.example", "--ca", "server-ca", "--key-pass"},
+		Env:  []string{"PKI_KEY_PASS=" + legacyKeyPass},
+	})
+	return legacytest.PkiSh(bash, legacyOpenSSL, dir, steps)
 }
 
 func readLegacy(t *testing.T, dir string, leafPass string) *legacy.PKI {

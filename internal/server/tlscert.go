@@ -236,3 +236,13 @@ func Fingerprint(der []byte) string {
 	}
 	return strings.Join(parts, ":")
 }
+
+// AdminCertFile is the file of the certificate the admin listener serves:
+// the operator's file or the bootstrap certificate. `myownpki healthcheck`
+// pins it.
+func AdminCertFile(cfg config.Config) string {
+	if cfg.Admin.TLSCertFile != "" {
+		return cfg.Admin.TLSCertFile
+	}
+	return filepath.Join(cfg.DataDir, "tls", bootstrapCert)
+}

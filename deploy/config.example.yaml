@@ -56,3 +56,7 @@ auth:
   # comma-separated), for example "10.0.0.5, 192.168.1.0/24". Empty: the
   # direct peer is the client. Never list networks that clients use.
   trusted_proxies: ""
+  # The address users open the admin UI with, for example
+  # https://pki.homelab.lan:9443. Passkeys are bound to its host name and work
+  # only there. Empty: no passkeys, sign-in with an authenticator app (TOTP).
+  passkey_origin: ""
