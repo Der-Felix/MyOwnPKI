@@ -523,6 +523,7 @@ func (s *Server) buildHTTP(demo bool) error {
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
+		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
 	}})
 	if err != nil {
 		return err

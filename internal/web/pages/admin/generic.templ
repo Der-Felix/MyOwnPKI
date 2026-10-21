@@ -1,0 +1,353 @@
+package admin
+
+import (
+	"strconv"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Generic pages of the real UI, part 2 (PHASE1 step 19): a form page, a
+// table page and a detail page. They keep the many small administration
+// pages in one plain look and use only the classes in web/styles.
+
+// Field is one form control.
+type Field struct {
+	ID, Label, Type    string // text, password, textarea, select, checkbox, file, number, hidden
+	Value, Hint, Error string
+	Required, Checked  bool
+	Options            []Option
+	Rows               int
+	Autocomplete       string // "" = off for passwords, else as given
+	Accept             string // file inputs
+}
+
+// Option is one choice of a select.
+type Option struct {
+	Value, Label string
+	Selected     bool
+}
+
+// Pre is a block of text shown as is (CSR, extension file, instructions).
+type Pre struct {
+	Title, Text string
+}
+
+// FormData is a form with its fields.
+type FormData struct {
+	Messages  []view.Message
+	Title     string // a heading above the form (in sections)
+	Intro     []string
+	Pre       []Pre
+	Action    string
+	CSRF      string
+	Multipart bool
+	Fields    []Field
+	Submit    string
+	Danger    bool // the submit button is a dangerous action
+	Cancel    string
+	Method    string // "" = post; "get" for filters
+}
+
+// FormPage renders a page with one form.
+templ FormPage(p view.Page, d FormData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		@Form(d)
+	}
+}
+
+// Form renders a form; also used inside detail pages.
+templ Form(d FormData) {
+	<section class="section">
+		if d.Title != "" {
+			<div class="section-head"><h2>{ d.Title }</h2></div>
+		}
+		for _, t := range d.Intro {
+			<p class="muted">{ t }</p>
+		}
+		for _, b := range d.Pre {
+			@preBlock(b)
+		}
+		if d.Method == "get" {
+			<form class="form" action={ templ.SafeURL(d.Action) } method="get">
+				@fields(d)
+			</form>
+		} else if d.Multipart {
+			<form class="form" action={ templ.SafeURL(d.Action) } method="post" enctype="multipart/form-data">
+				<input type="hidden" name="csrf_token" value={ d.CSRF }/>
+				@fields(d)
+			</form>
+		} else {
+			<form class="form" action={ templ.SafeURL(d.Action) } method="post">
+				<input type="hidden" name="csrf_token" value={ d.CSRF }/>
+				@fields(d)
+			</form>
+		}
+	</section>
+}
+
+templ preBlock(b Pre) {
+	if b.Title != "" {
+		<h3>{ b.Title }</h3>
+	}
+	<pre class="pem">{ b.Text }</pre>
+}
+
+templ fields(d FormData) {
+	for _, f := range d.Fields {
+		@field(f)
+	}
+	<div class="form-actions">
+		if d.Danger {
+			<button type="submit" class="btn btn-danger">{ d.Submit }</button>
+		} else {
+			<button type="submit" class="btn btn-primary">{ d.Submit }</button>
+		}
+		if d.Cancel != "" {
+			<a class="btn" href={ templ.SafeURL(d.Cancel) }>Cancel</a>
+		}
+	</div>
+}
+
+func autocomplete(f Field) string {
+	if f.Autocomplete != "" {
+		return f.Autocomplete
+	}
+	return "off"
+}
+
+templ field(f Field) {
+	switch f.Type {
+		case "hidden":
+			<input type="hidden" name={ f.ID } value={ f.Value }/>
+		case "checkbox":
+			<div class="form-row">
+				<label class="choice" for={ f.ID }>
+					<input type="checkbox" id={ f.ID } name={ f.ID } value="yes" checked?={ f.Checked }/>
+					{ f.Label }
+				</label>
+				if f.Hint != "" {
+					<div class="hint">{ f.Hint }</div>
+				}
+			</div>
+		case "select":
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<select id={ f.ID } name={ f.ID }>
+					for _, o := range f.Options {
+						<option value={ o.Value } selected?={ o.Selected }>{ o.Label }</option>
+					}
+				</select>
+			}
+		case "textarea":
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<textarea id={ f.ID } name={ f.ID } rows={ strconv.Itoa(max(f.Rows, 4)) } spellcheck="false" required?={ f.Required }>{ f.Value }</textarea>
+			}
+		case "file":
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<input type="file" id={ f.ID } name={ f.ID } accept={ f.Accept } required?={ f.Required }/>
+			}
+		case "password":
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<input type="password" id={ f.ID } name={ f.ID } autocomplete={ autocomplete(f) } required?={ f.Required }/>
+			}
+		case "number":
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<input type="number" id={ f.ID } name={ f.ID } value={ f.Value } min="0" required?={ f.Required }/>
+			}
+		default:
+			@components.FormRow(f.ID, f.Label, f.Hint, f.Error, f.Required) {
+				<input type="text" id={ f.ID } name={ f.ID } value={ f.Value } autocomplete={ autocomplete(f) } spellcheck="false" required?={ f.Required }/>
+			}
+	}
+}
+
+// Cell is one table cell.
+type Cell struct {
+	Text, Href, Rel string
+	Status          view.Status // set: the text is a status
+	Mono, Num       bool
+}
+
+// Column is one table column.
+type Column struct {
+	Label string
+	Num   bool
+}
+
+// Command is a link in the command bar.
+type Command struct {
+	Label, Href string
+	Primary     bool
+}
+
+// TableData is a table with commands and filters.
+type TableData struct {
+	Messages []view.Message
+	Title    string // a heading (in sections)
+	Commands []Command
+	Filters  *FormData
+	Columns  []Column
+	Rows     [][]Cell
+	Empty    string
+	// More links to the next page (cursor).
+	More, MoreLabel string
+}
+
+// TablePage renders a page with one table.
+templ TablePage(p view.Page, d TableData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		@Table(d)
+	}
+}
+
+// Table renders a table; also used inside detail pages.
+templ Table(d TableData) {
+	<section class="section">
+		if d.Title != "" {
+			<div class="section-head"><h2>{ d.Title }</h2></div>
+		}
+		if len(d.Commands) > 0 {
+			@components.CommandBar("Commands") {
+				@components.CommandGroup("Commands") {
+					for _, c := range d.Commands {
+						if c.Primary {
+							<a class="cmd cmd-primary" href={ templ.SafeURL(c.Href) }>{ c.Label }</a>
+						} else {
+							<a class="cmd" href={ templ.SafeURL(c.Href) }>{ c.Label }</a>
+						}
+					}
+				}
+			}
+		}
+		if d.Filters != nil {
+			<form class="filters" action={ templ.SafeURL(d.Filters.Action) } method="get">
+				for _, f := range d.Filters.Fields {
+					@filter(f)
+				}
+				<button type="submit" class="btn">{ d.Filters.Submit }</button>
+			</form>
+		}
+		if len(d.Rows) == 0 {
+			<p class="empty">{ d.Empty }</p>
+		} else {
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
+						<tr>
+							for _, c := range d.Columns {
+								<th scope="col" class={ templ.KV("num", c.Num) }>{ c.Label }</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range d.Rows {
+							<tr>
+								for _, cell := range row {
+									@tableCell(cell)
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		if d.More != "" {
+			<p class="table-foot"><a href={ templ.SafeURL(d.More) }>{ d.MoreLabel }</a></p>
+		}
+	</section>
+}
+
+templ tableCell(c Cell) {
+	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono) }>
+		if c.Status != "" {
+			@components.Status(c.Status, c.Text)
+		} else if c.Href != "" {
+			<a href={ templ.SafeURL(c.Href) }>{ c.Text }</a>
+		} else {
+			{ c.Text }
+		}
+		if c.Rel != "" {
+			<span class="rel">{ c.Rel }</span>
+		}
+	</td>
+}
+
+templ filter(f Field) {
+	if f.Type == "select" {
+		<label class="filter">
+			{ f.Label }
+			<select name={ f.ID }>
+				for _, o := range f.Options {
+					<option value={ o.Value } selected?={ o.Selected }>{ o.Label }</option>
+				}
+			</select>
+		</label>
+	} else {
+		<label class="filter">
+			{ f.Label }
+			<input type="search" name={ f.ID } value={ f.Value }/>
+		</label>
+	}
+}
+
+// Section is one part of a detail page.
+type Section struct {
+	Title string
+	Text  []string
+	KV    []view.KV
+	Pre   []Pre
+	Table *TableData
+	Forms []FormData
+}
+
+// DetailData is a detail page: commands and sections.
+type DetailData struct {
+	Messages []view.Message
+	Commands []Command
+	Sections []Section
+}
+
+// DetailPage renders sections of key/value lists, tables and forms.
+templ DetailPage(p view.Page, d DetailData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		if len(d.Commands) > 0 {
+			@components.CommandBar("Commands") {
+				@components.CommandGroup("Commands") {
+					for _, c := range d.Commands {
+						if c.Primary {
+							<a class="cmd cmd-primary" href={ templ.SafeURL(c.Href) }>{ c.Label }</a>
+						} else {
+							<a class="cmd" href={ templ.SafeURL(c.Href) }>{ c.Label }</a>
+						}
+					}
+				}
+			}
+		}
+		for _, s := range d.Sections {
+			<section class="section">
+				if s.Title != "" {
+					<div class="section-head"><h2>{ s.Title }</h2></div>
+				}
+				for _, t := range s.Text {
+					<p class="muted">{ t }</p>
+				}
+				if len(s.KV) > 0 {
+					@components.KVList(s.KV)
+				}
+				for _, b := range s.Pre {
+					@preBlock(b)
+				}
+				if s.Table != nil {
+					@Table(*s.Table)
+				}
+				for _, f := range s.Forms {
+					@Form(f)
+				}
+			</section>
+		}
+	}
+}

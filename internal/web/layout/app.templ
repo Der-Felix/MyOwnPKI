@@ -9,6 +9,7 @@ type navItem struct {
 	Key, Label, Href string
 	Note             string // shown for entries that are not built yet
 	Primary          bool   // shown in layout C (no sidebar)
+	Real             bool   // exists only in the real UI (step 19); the prototype shows it disabled
 }
 
 type navGroup struct {
@@ -25,6 +26,7 @@ var nav = []navGroup{
 		{Key: "certificates", Label: "All certificates", Href: "/certificates", Primary: true},
 		{Key: "issue", Label: "Issue certificate", Href: "/certificates/new"},
 		{Key: "expiring", Label: "Expiring soon", Href: "/certificates?status=expiring"},
+		{Key: "presets", Label: "Presets", Href: "/presets", Real: true},
 	}},
 	{"Authorities", []navItem{
 		{Key: "authorities", Label: "Certificate authorities", Href: "/authorities", Primary: true},
@@ -39,8 +41,10 @@ var nav = []navGroup{
 		{Key: "enrollment", Label: "Enrollment requests", Note: "phase 3"},
 	}},
 	{"Administration", []navItem{
-		{Key: "users", Label: "Users and roles", Note: "phase 1"},
-		{Key: "audit", Label: "Audit log", Note: "phase 1"},
+		{Key: "users", Label: "Users and roles", Href: "/admin/users", Real: true},
+		{Key: "audit", Label: "Audit log", Href: "/admin/audit", Real: true},
+		{Key: "import", Label: "Legacy import", Href: "/admin/import", Real: true},
+		{Key: "settings", Label: "Tenant settings", Href: "/admin/settings", Real: true},
 		{Key: "appearance", Label: "Appearance", Href: "/admin/appearance", Primary: true},
 		{Key: "design", Label: "Design system", Href: "/design"},
 	}},
@@ -70,7 +74,7 @@ templ App(p view.Page) {
 					@components.DevBanner()
 				}
 				@header(p)
-				@sidebar(p.Section, p.BuiltOnly, p.Session != nil && !p.Session.CanIssue)
+				@sidebar(p.Section, p.BuiltOnly, p.HiddenNav())
 				<main id="main" class="app-main">
 					@components.Messages(p.Notices)
 					@pageHeader(p)
@@ -121,6 +125,7 @@ templ userMenu(s view.Session) {
 		<summary>{ s.Username }</summary>
 		<ul class="app-user-menu">
 			<li><span>{ s.Roles }</span></li>
+			<li><a href="/account">My account</a></li>
 			<li><a href="/admin/appearance">Appearance</a></li>
 			if s.CanSeal {
 				<li>
@@ -152,22 +157,22 @@ templ prototypeUserMenu(user string) {
 }
 
 // sidebar: builtOnly (the real UI) leaves out entries that don't exist yet
-// and groups that end up empty – no dead links; hideIssue leaves out "Issue
-// certificate" for users who may issue nowhere.
-templ sidebar(active string, builtOnly, hideIssue bool) {
+// and groups that end up empty – no dead links; hidden leaves out entries
+// the user may not use ("Issue certificate", users, audit log …).
+templ sidebar(active string, builtOnly bool, hidden map[string]bool) {
 	<nav class="app-nav" aria-label="Main">
 		for _, g := range nav {
 			if !builtOnly || g.hasBuilt() {
 				<ul class="nav-group" aria-label={ g.Title }>
 					<li class="nav-group-title" aria-hidden="true">{ g.Title }</li>
 					for _, it := range g.Items {
-						if hideIssue && it.Key == "issue" {
-							// not offered: the user may issue nowhere
-						} else if it.Href == "" && !builtOnly {
+						if hidden[it.Key] {
+							// not offered: the user may not use it (decision 82)
+						} else if (it.Href == "" || it.Real) && !builtOnly {
 							<li>
 								<span class={ "nav-link", "is-disabled", templ.KV("nav-primary", it.Primary) } aria-disabled="true">
 									{ it.Label }
-									<span class="nav-note">{ it.Note }</span>
+									<span class="nav-note">{ noteOf(it) }</span>
 								</span>
 							</li>
 						} else if it.Href != "" && it.Key == active {
@@ -249,4 +254,11 @@ templ pageHeader(p view.Page) {
 			<p class="page-desc">{ p.Description }</p>
 		}
 	</header>
+}
+
+func noteOf(it navItem) string {
+	if it.Real {
+		return "real UI"
+	}
+	return it.Note
 }

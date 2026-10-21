@@ -48,6 +48,8 @@ type Session struct {
 	// CanIssue: the user may issue at one CA at least – otherwise "Issue
 	// certificate" is not offered anywhere (no dead links, owner 2026-10-18).
 	CanIssue bool
+	// Hidden are navigation entries the user may not use (step 19).
+	Hidden []string
 }
 
 // WithActions returns a copy of p with the given header actions.
@@ -173,4 +175,19 @@ func Fingerprint(hex string) string {
 		return c
 	}
 	return c[:firstLine] + ":\n" + c[firstLine+1:]
+}
+
+// HiddenNav lists the navigation entries the signed-in user may not use.
+func (p Page) HiddenNav() map[string]bool {
+	if p.Session == nil {
+		return nil
+	}
+	h := map[string]bool{}
+	for _, k := range p.Session.Hidden {
+		h[k] = true
+	}
+	if !p.Session.CanIssue {
+		h["issue"] = true
+	}
+	return h
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -31,6 +32,7 @@ func newUIEnv(t *testing.T) *uiEnv {
 	v := &uiEnv{Instance: testinstance.New(t, testinstance.Options{})}
 	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
+		Settings: &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read,
 	}})
 	if err != nil {
 		t.Fatal(err)
