@@ -22,6 +22,9 @@ vars:
   # Release tools (release:check, release:snapshot) – keep in sync with .github/workflows/release.yml.
   GORELEASER_VERSION: 2.18.2
   SYFT_VERSION: 1.54.1
+  # ACME test tools (task acme:lego, the conformance CI job) – never in go.mod.
+  LEGO_VERSION: 5.5.2
+  PEBBLE_VERSION: 2.10.1
 
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
@@ -123,6 +126,12 @@ tasks:
     desc: Short fuzz runs of the parsers that read untrusted input (ACME JWS) – 30 seconds each
     cmds:
       - CGO_ENABLED=0 go test ./internal/acme/jose/ -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+
+  acme:lego:
+    desc: End-to-end check with the real ACME client lego (test tool, never in go.mod) – builds lego into .tools/ and runs the walking skeleton
+    cmds:
+      - GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools" go install github.com/go-acme/lego/v5@v{{.LEGO_VERSION}}
+      - CGO_ENABLED=0 LEGO_BIN="{{.ROOT_DIR}}/.tools/lego{{exeExt}}" go test ./internal/acme/ -run 'TestLego' -count=1 -v
 
   test:race:
     desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)

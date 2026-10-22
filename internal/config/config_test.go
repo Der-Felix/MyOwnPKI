@@ -187,7 +187,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
-		Auth: Auth{"marker", "marker", "marker"}}
+		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -348,5 +348,47 @@ func TestDockerFiles(t *testing.T) {
 	const base = "gcr.io/distroless/static-debian12:nonroot@sha256:"
 	if n := strings.Count(text, base); n != 2 || strings.Count(text, "gcr.io/") != 2 {
 		t.Errorf("the Dockerfile must name the pinned base image twice (FROM and COPY --from), found %d", n)
+	}
+}
+
+// TestACMEConfig (PHASE2, owner Q1): off without a base URL, https only,
+// its own port, a valid resolver and trusted proxies.
+func TestACMEConfig(t *testing.T) {
+	t.Parallel()
+	base := Default()
+	base.DataDir = absDir(t)
+	if err := base.Validate(); err != nil || base.ACME.BaseURL != "" || base.ACME.Listen != "127.0.0.1:8081" {
+		t.Fatalf("defaults: %v %+v", err, base.ACME)
+	}
+	for name, tc := range map[string]struct {
+		mod  func(*Config)
+		want string
+	}{
+		"http base URL":   {func(c *Config) { c.ACME.BaseURL = "http://pki.homelab.lan/acme" }, "must be https://"},
+		"query":           {func(c *Config) { c.ACME.BaseURL = "https://pki.homelab.lan/acme?x=1" }, "want https://host"},
+		"no host":         {func(c *Config) { c.ACME.BaseURL = "https:///acme" }, "want https://host"},
+		"public port":     {func(c *Config) { c.ACME.Listen = "0.0.0.0:8080" }, "public CRL port"},
+		"admin port":      {func(c *Config) { c.ACME.Listen = "127.0.0.1:9443" }, "collides with admin.listen"},
+		"host name":       {func(c *Config) { c.ACME.Listen = "localhost:8081" }, "acme.listen"},
+		"bad proxy":       {func(c *Config) { c.ACME.TrustedProxies = "10.0.0.1/8" }, "acme.trusted_proxies"},
+		"bad resolver":    {func(c *Config) { c.ACME.Resolver = "dns.homelab.lan" }, "acme.resolver"},
+		"resolver port 0": {func(c *Config) { c.ACME.Resolver = "10.0.0.53:0" }, "acme.resolver"},
+	} {
+		c := base
+		tc.mod(&c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+	good := base
+	good.ACME.BaseURL, good.ACME.Resolver = "https://pki.homelab.lan/acme/", "192.0.2.53"
+	if err := good.Validate(); err != nil {
+		t.Error(err)
+	}
+	if u, _ := ACMEBaseURL(good.ACME.BaseURL); u != "https://pki.homelab.lan/acme" {
+		t.Errorf("base URL %q", u)
+	}
+	if r, _ := ACMEResolver(good.ACME.Resolver); r != "192.0.2.53:53" {
+		t.Errorf("resolver %q", r)
 	}
 }

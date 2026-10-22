@@ -28,6 +28,10 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "AUTH_KEY_FILE":          &c.Auth.KeyFile,
 		EnvPrefix + "AUTH_TRUSTED_PROXIES":   &c.Auth.TrustedProxies,
 		EnvPrefix + "AUTH_PASSKEY_ORIGIN":    &c.Auth.PasskeyOrigin,
+		EnvPrefix + "ACME_LISTEN":            &c.ACME.Listen,
+		EnvPrefix + "ACME_BASE_URL":          &c.ACME.BaseURL,
+		EnvPrefix + "ACME_TRUSTED_PROXIES":   &c.ACME.TrustedProxies,
+		EnvPrefix + "ACME_RESOLVER":          &c.ACME.Resolver,
 	}
 }
 

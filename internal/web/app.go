@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -53,6 +54,14 @@ type AppDeps struct {
 	// (tenant settings, audit log); nil hides those pages.
 	Settings                   *tenant.Store
 	TenantAudit, InstanceAudit *sql.DB
+	// ACME is the ACME server (PHASE2); nil while ACME is off.
+	ACME ACMEAdmin
+}
+
+// ACMEAdmin is what the UI uses of the ACME server.
+type ACMEAdmin interface {
+	// Waiting counts orders whose certificate waits for the unseal.
+	Waiting(ctx context.Context) (int64, error)
 }
 
 // maxUIForm limits form bodies; a CSR upload is at most 64 KiB.

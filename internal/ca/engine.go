@@ -94,6 +94,10 @@ type Request struct {
 	// must lie in a domain, and CA, preset and validity come from the
 	// domains (PHASE2 step 2) – one policy engine for UI, API and ACME.
 	ACME *ACMEOrder
+	// acmeWildcards: set by acmeRequest when the domains allow wildcards –
+	// the names stay exactly the order's (no base domain is added, unlike
+	// the wildcard preset).
+	acmeWildcards bool
 }
 
 // ACMEOrder ties an issuance to an ACME order.
@@ -360,7 +364,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 	case p.CommonNameFrom == preset.SANDNS:
 		if _, err := netip.ParseAddr(cn); err == nil {
 			in.IPs = append([]string{cn}, in.IPs...)
-		} else if _, err := checkDNSName(cn, p.Wildcard); err == nil {
+		} else if _, err := checkDNSName(cn, p.Wildcard || req.acmeWildcards); err == nil {
 			in.DNS = append([]string{cn}, in.DNS...)
 		}
 	case p.CommonNameFrom == preset.SANEmail:
@@ -369,7 +373,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 		}
 	}
 
-	names, np := checkNames(in, p.Wildcard)
+	names, np := checkNames(in, p.Wildcard || req.acmeWildcards)
 	problems = append(problems, np...)
 	// Once a name was refused, "needs at least one name" is only its echo
 	// (owner 2026-10-17): the requester fixes the name, not the list.

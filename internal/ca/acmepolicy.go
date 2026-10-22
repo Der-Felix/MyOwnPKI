@@ -71,6 +71,11 @@ func (e *Engine) acmeRequest(ctx context.Context, req Request) (Request, error) 
 	}
 	req.CA, req.Preset, req.ValidityDays = first.CA, first.Preset, days
 	req.IgnoreCSRNames = true
+	for _, n := range req.DNSNames {
+		if strings.HasPrefix(n, "*.") {
+			req.acmeWildcards = true // DomainFor found a domain with wildcards on for it
+		}
+	}
 	req.DNSNames = lowerAll(req.DNSNames)
 	return req, nil
 }

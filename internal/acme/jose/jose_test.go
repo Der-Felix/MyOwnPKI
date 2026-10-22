@@ -359,3 +359,28 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestParseInner(t *testing.T) {
+	t.Parallel()
+	s := newSigner(t, ES256)
+	inner := `{"alg":"ES256","url":"https://acme.example/key-change","jwk":` + s.jwk + `}`
+	j, err := ParseInner(s.body(t, inner, `{"account":"https://acme.example/acct/1","oldKey":{}}`))
+	if err != nil || j.JWK == nil || j.Nonce != "" {
+		t.Fatalf("inner: %+v %v", j, err)
+	}
+	if verr := j.Verify(j.JWK); verr != nil {
+		t.Error(verr)
+	}
+	for name, h := range map[string]string{
+		"nonce": `{"alg":"ES256","nonce":"n","url":"https://acme.example/key-change","jwk":` + s.jwk + `}`,
+		"kid":   `{"alg":"ES256","url":"https://acme.example/key-change","kid":"https://acme.example/acct/1"}`,
+	} {
+		if _, perr := ParseInner(s.body(t, h, `{}`)); !errors.Is(perr, ErrMalformed) {
+			t.Errorf("inner with %s: %v", name, perr)
+		}
+	}
+	// The outer form without a nonce is still refused.
+	if _, perr := Parse(s.body(t, inner, `{}`)); !errors.Is(perr, ErrMalformed) {
+		t.Errorf("outer without nonce: %v", perr)
+	}
+}

@@ -28,7 +28,13 @@ var allowed = map[string]bool{ES256: true, ES384: true, RS256: true, EdDSA: true
 // exactly "protected", "payload" and "signature"; a protected header with
 // an allowed "alg", "nonce", "url" and exactly one of "jwk" and "kid"; no
 // "crit", no "b64". The signature is checked by Verify.
-func Parse(body []byte) (*JWS, error) {
+func Parse(body []byte) (*JWS, error) { return parse(body, false) }
+
+// ParseInner reads the inner JWS of a key change (RFC 8555 §7.3.5): like
+// Parse, but with "jwk" (the new key) and without "nonce" and "kid".
+func ParseInner(body []byte) (*JWS, error) { return parse(body, true) }
+
+func parse(body []byte, inner bool) (*JWS, error) {
 	top, err := object("request body", body)
 	if err != nil {
 		return nil, err
@@ -88,7 +94,14 @@ func Parse(body []byte) (*JWS, error) {
 	if err = checkAlg(j.Alg); err != nil {
 		return nil, err
 	}
-	if j.Nonce, err = str("nonce", h["nonce"]); err != nil || j.Nonce == "" {
+	if inner {
+		if _, ok := h["nonce"]; ok {
+			return nil, malformed("the inner JWS of a key change must not have a \"nonce\"")
+		}
+		if _, ok := h["kid"]; ok {
+			return nil, malformed("the inner JWS of a key change names the new key in \"jwk\", not \"kid\"")
+		}
+	} else if j.Nonce, err = str("nonce", h["nonce"]); err != nil || j.Nonce == "" {
 		return nil, malformed("the protected header needs a \"nonce\"")
 	}
 	if j.URL, err = str("url", h["url"]); err != nil || j.URL == "" {

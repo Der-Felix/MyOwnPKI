@@ -43,6 +43,7 @@ type Config struct {
 	Admin   Admin  `yaml:"admin"`
 	Public  Public `yaml:"public"`
 	Auth    Auth   `yaml:"auth"`
+	ACME    ACME   `yaml:"acme"`
 }
 
 // Log configures the process log (not the audit log).
@@ -91,6 +92,24 @@ type Auth struct {
 	PasskeyOrigin string `yaml:"passkey_origin"`
 }
 
+// ACME is the ACME server (PHASE2, owner Q1 2026-10-22): plain HTTP on its own
+// listener, only behind a reverse proxy that terminates TLS.
+type ACME struct {
+	// Listen is IP:port of the ACME listener – for the reverse proxy only, not
+	// the public CRL port, so nobody talks ACME in clear text past the proxy.
+	Listen string `yaml:"listen"`
+	// BaseURL is what clients use (the proxy's https URL, e.g.
+	// https://pki.homelab.lan/acme); every URL the server hands out is built
+	// from it. Empty: ACME is off.
+	BaseURL string `yaml:"base_url"`
+	// TrustedProxies may connect to Listen (others get 403), and only their
+	// X-Forwarded-For is believed (IPs or CIDRs, comma-separated).
+	TrustedProxies string `yaml:"trusted_proxies"`
+	// Resolver is the DNS server (IP or IP:port) for dns-01 and for resolving
+	// http-01 names. Empty: the system resolver.
+	Resolver string `yaml:"resolver"`
+}
+
 // Allowed values.
 var (
 	LogLevels  = []string{"debug", "info", "warn", "error"}
@@ -105,6 +124,7 @@ func Default() Config {
 		Log:    Log{Level: "info", Format: "json"},
 		Admin:  Admin{Listen: "127.0.0.1:9443"},
 		Public: Public{Listen: ":8080"},
+		ACME:   ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
 	}
 }
 
@@ -204,6 +224,7 @@ func (c Config) Validate() error {
 	if _, err := PasskeyRPID(c.Auth.PasskeyOrigin); err != nil {
 		add("auth.passkey_origin: %w", err)
 	}
+	c.validateACME(admin, add)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("%w:\n  %w", ErrInvalid, joinIndented(errs))
@@ -409,4 +430,62 @@ func PasskeyRPID(origin string) (string, error) {
 		return "", fmt.Errorf("%q: passkeys need a host name, not an IP address (WebAuthn RP ID)", origin)
 	}
 	return strings.ToLower(u.Hostname()), nil
+}
+
+// validateACME checks the acme section. An empty base URL switches ACME off;
+// then the other keys are still checked, so a typo shows before it matters.
+func (c Config) validateACME(admin listenAddr, add func(string, ...any)) {
+	if c.ACME.BaseURL != "" {
+		if _, err := ACMEBaseURL(c.ACME.BaseURL); err != nil {
+			add("acme.base_url: %w", err)
+		}
+	}
+	acme, err := parseListen(c.ACME.Listen)
+	switch {
+	case err != nil:
+		add("acme.listen: %w", err)
+	case admin.valid && overlaps(admin, acme):
+		add("acme.listen: %q collides with admin.listen %q", c.ACME.Listen, c.Admin.Listen)
+	default:
+		if public, perr := parseListen(c.Public.Listen); c.Public.Listen != "" && perr == nil && overlaps(public, acme) {
+			add("acme.listen: %q collides with public.listen %q – ACME must not share the public CRL port", c.ACME.Listen, c.Public.Listen)
+		}
+	}
+	if _, err := ParseNetworks(c.ACME.TrustedProxies); err != nil {
+		add("acme.trusted_proxies: %w", err)
+	}
+	if _, err := ACMEResolver(c.ACME.Resolver); err != nil {
+		add("acme.resolver: %w", err)
+	}
+}
+
+// ACMEBaseURL checks acme.base_url and returns it without a trailing slash:
+// https only (the proxy terminates TLS; RFC 8555 §6.1), a host, no user,
+// query or fragment.
+func ACMEBaseURL(s string) (string, error) {
+	u, err := url.Parse(s)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%q is not a URL", s)
+	case u.Scheme != "https":
+		return "", fmt.Errorf("%q: must be https:// – ACME runs behind a reverse proxy that terminates TLS (RFC 8555 §6.1)", s)
+	case u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "":
+		return "", fmt.Errorf("%q: want https://host[:port][/path], e.g. https://pki.homelab.lan/acme", s)
+	}
+	return strings.TrimRight(s, "/"), nil
+}
+
+// ACMEResolver checks acme.resolver: empty, an IP (port 53) or IP:port.
+func ACMEResolver(s string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	if ip, err := netip.ParseAddr(s); err == nil && ip.Zone() == "" {
+		return netip.AddrPortFrom(ip, 53).String(), nil
+	}
+	ap, err := netip.ParseAddrPort(s)
+	if err != nil || ap.Port() == 0 || ap.Addr().Zone() != "" {
+		return "", fmt.Errorf("want an IP or IP:port of a DNS server, got %q", s)
+	}
+	return ap.String(), nil
 }
