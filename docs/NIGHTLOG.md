@@ -11,9 +11,12 @@
 
 ## Report for the owner
 
-**Status: in progress – continuation run; done up to step 14 (parts A–C; C only checkable in CI).** (Updated after every finished step.)
+**Result: v0.2 is built – steps 1–15 of docs/PHASE2.md plus the security fix you asked for.**
+Everything is on the local branch `night/v0.2` – **not merged, not pushed, no tag, nothing
+published. No stash.** One part is only checkable in CI: the conformance job (part C).
 
 ### Commits on `night/v0.2` (oldest first, all local)
+
 | Commit | What |
 |---|---|
 | `7a1fa05` | docs: owner decisions for phase 2 |
@@ -31,16 +34,230 @@
 | `2a23f4c` | step 13 – approvals in the UI, EAB keys, screenshots |
 | `f0242ad` | night log – report after step 13 |
 | `d3daef9` | step 14 – conformance job (CI only) |
+| `b0e0b23` | night log – report after step 14 |
+| `7d6718d` | step 15 – upgrade test from v0.1.0 |
+| `539be49` | step 15 – OPERATIONS chapter 10, CHANGELOG 0.2.0, README |
+| _this commit_ | this report; restores the phase-1 report below (see "Found on the way") |
 
-### Stash
-None.
+### Done – in short
 
-### Decisions to confirm (since your review of `22bb2dd`)
-- Security fix: tables "Security fix after part A".
-- Step 11: table "Step 11 – rate limits" – notably `acme_limits` optional in PUT /settings (no breaking change for v0.1 clients).
-- Step 12: table "Step 12 – ARI" – notably the window (day 60–63 to 69–72 for 90 days).
-- Step 13: table "Step 13 – approvals in the UI".
-- Step 14: table "Part C" – notably Pebble as control (it has no server test suite).
+- **Security fix** (`b97053b`): the http-01 validator tells the client only status and length –
+  never the target's answer, transport or DNS error texts, or addresses; redirects only to
+  identifiers of the same order (an IP only to itself). Five mutation checks.
+- **Step 11** rate limits: three limits as tenant settings (system.db 0009, API, form), 429 with the
+  real `Retry-After`, IPv6 per /64, a capped counter map (oldest go first).
+- **Step 12** ARI: window at 2/3 of the lifetime with a per-certificate shift; revoked → renew now;
+  `replaces` checked (own account, shared name, once → 409); `renewal_of` recorded. **lego asks
+  renewalInfo, waits while the window is ahead, and renews a revoked certificate at once.**
+- **Step 13** UI: *ACME → Accounts / New names / EAB keys / Orders*, dashboard notices, EAB keys
+  shown once. **lego registers with EAB against the own HS256 code.** Screenshots light/dark.
+- **Step 14** conformance job: lego, certbot (http-01, dns-01 via certbot-dns-rfc2136 against
+  BIND, revoke), acme.sh; Pebble as control; images by digest – **only checkable in CI**.
+- **Step 15**: upgrade test (the released v0.1.0 → backup → restore → migrate → ACME issue,
+  `openssl verify`), OPERATIONS.md chapter 10 with Caddy/nginx/Traefik, CHANGELOG 0.2.0 under
+  `[Unreleased]` without a date.
+- Every step: `task check` and `task generate:check` green before its commit.
+
+### Decisions to confirm (since your review of `22bb2dd`; details and "how to reverse" in the tables below)
+
+1. Security fix: also network/DNS error texts and addresses are hidden (more than the body) – table "Security fix after part A".
+2. Step 11: `acme_limits` **optional** in `PUT /settings` (no break for v0.1 clients); the challenge-start limit stays a constant; cap 100 000 counters.
+3. Step 12: the window for 90 days: day 60–63 to 69–72; renewalInfo answers for every certificate of this PKI.
+4. Step 13: reads need a tenant-wide role; EAB keys 1–90 days (default 7); not built: deactivating accounts and deleting EAB keys in the UI.
+5. Step 14: **Pebble as control** – it has no suite that tests a server (your plan said "Pebble test suite"); BIND 9.18 because 9.20's tag is younger than two weeks; the conformance test is compiled and linted in every `task check`.
+6. Step 15: v0.1.0 via `go install …@v0.1.0` for the upgrade test; README status "v0.2 in preparation"; OPERATIONS title "v0.2".
+
+### Found on the way (worth knowing)
+
+- revokeCert with the certificate key was refused for **every** key type (`Equal(any)` vs.
+  `Equal(crypto.PublicKey)`); the test with a foreign key had passed by accident. Fixed in step 10.
+- v0.1 refuses unknown `MYOWNPKI_*` variables: a downgrade must remove `MYOWNPKI_ACME_*` (OPERATIONS §9).
+- A long URL in an order error ran past the table edge – seen in the screenshot; cells can now wrap.
+- **My report script had emptied the phase-1 report** further down in this file (commits `52adcdc`
+  to `b0e0b23`). This commit restores it byte for byte from `22bb2dd`; the script now touches only
+  the first report.
+
+### Not done / open
+
+- The conformance job has never run (no Docker here). Likely first-run points: the runner address
+  from `hostname -I`, certbot's credentials-file warning, acme.sh's standalone mode.
+- `task lint:api` (vacuum) not run locally (not installed) – CI runs it for the `acme_limits` schema.
+- Traefik and Caddy as ACME *clients*: documented (OPERATIONS 10.6), not tested.
+
+### What you should test
+
+1. **Locally**, one after the other:
+
+   ```bash
+   task check
+   ```
+
+   ```bash
+   task acme:lego
+   ```
+
+   ```bash
+   task upgrade:test
+   ```
+
+2. **CI after your push**: the `check` job now runs the upgrade test; the new job **"ACME
+   conformance"** runs lego (`task acme:lego`) and the conformance run. Expect to look at it once.
+3. **The screenshots** in `docs/screenshots/` (`acme-*.png`, all others regenerated with the new menu).
+4. **By hand: a certificate through Caddy with lego (and certbot)** – the guide below.
+
+### Guide: a certificate on this machine, Caddy as the proxy, lego as the client (PowerShell)
+
+You need Caddy (`caddy.exe` from caddyserver.com) and OpenSSL (Git for Windows). lego is in
+`.tools\` after `task acme:lego`. Names: `pki.homelab.lan` is the proxy, `nas.homelab.lan` the
+client – it must resolve to this machine's **LAN address**, because the validator never connects to
+loopback.
+
+1. Build and make a test directory:
+
+   ```powershell
+   task build
+   ```
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\acme-test
+   ```
+
+2. Write `C:\acme-test\config.yaml`:
+
+   ```yaml
+   data_dir: "C:/acme-test/data"
+   admin:
+     listen: "127.0.0.1:9443"
+   public:
+     listen: "127.0.0.1:8080"
+   acme:
+     base_url: "https://pki.homelab.lan:8443/acme"
+     listen: "127.0.0.1:8081"
+     trusted_proxies: "127.0.0.1, ::1"
+   ```
+
+3. Names in the hosts file (PowerShell as administrator; replace `192.168.10.5` with your LAN
+   address from `ipconfig`):
+
+   ```powershell
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "127.0.0.1 pki.homelab.lan"
+   ```
+
+   ```powershell
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "192.168.10.5 nas.homelab.lan"
+   ```
+
+4. A demo instance with the test CA, then start it (keep this window open):
+
+   ```powershell
+   bin\myownpki.exe init --demo --with-ca --ca-base-url http://pki.homelab.lan:8080 --config C:\acme-test\config.yaml
+   ```
+
+   ```powershell
+   bin\myownpki.exe serve --config C:\acme-test\config.yaml
+   ```
+
+   Open https://127.0.0.1:9443, sign in and unseal with the values from
+   `C:\acme-test\data\init-demo-secrets.txt`.
+
+5. In the UI: *ACME → Domains → New domain*: `homelab.lan`, CA `issuing`, approval *approved
+   accounts*, http-01 on.
+
+6. The proxy's certificate from your own CA (OPERATIONS 10.2) – key and CSR in Git Bash:
+
+   ```bash
+   openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout /c/acme-test/pki.homelab.lan.key -out /c/acme-test/pki.homelab.lan.csr -subj "/CN=pki.homelab.lan" -addext "subjectAltName=DNS:pki.homelab.lan"
+   ```
+
+   In the UI: *Issue certificate* → preset *server* → paste the CSR → issue → *Download fullchain*,
+   save as `C:\acme-test\pki.homelab.lan.fullchain.pem`.
+
+7. The root, as PEM:
+
+   ```powershell
+   curl.exe -o C:\acme-test\root.crt http://127.0.0.1:8080/ca/root/1.crt
+   ```
+
+   ```powershell
+   openssl x509 -inform DER -in C:\acme-test\root.crt -out C:\acme-test\root.pem
+   ```
+
+8. Write `C:\acme-test\Caddyfile` – `disable_redirects` keeps Caddy off port 80, which lego needs
+   for http-01:
+
+   ```
+   {
+   	auto_https disable_redirects
+   }
+
+   https://pki.homelab.lan:8443 {
+   	tls C:/acme-test/pki.homelab.lan.fullchain.pem C:/acme-test/pki.homelab.lan.key
+   	handle /acme/* {
+   		reverse_proxy 127.0.0.1:8081
+   	}
+   }
+   ```
+
+   Start Caddy in a second window and check the directory in a third:
+
+   ```powershell
+   caddy run --config C:\acme-test\Caddyfile --adapter caddyfile
+   ```
+
+   ```powershell
+   curl.exe --cacert C:\acme-test\root.pem https://pki.homelab.lan:8443/acme/directory
+   ```
+
+9. lego trusts your root through an environment variable; the first run is refused ("waits for
+   approval"):
+
+   ```powershell
+   $env:LEGO_CA_CERTIFICATES = "C:\acme-test\root.pem"
+   ```
+
+   ```powershell
+   .tools\lego.exe run --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego --email admin@homelab.lan --accept-tos --domains nas.homelab.lan --http
+   ```
+
+   The dashboard now says "1 ACME account(s) wait for approval" → *Review* → *Approve account*
+   (second factor). Run the same lego command again – this time it gets the certificate.
+
+10. Check it:
+
+    ```powershell
+    openssl verify -CAfile C:\acme-test\root.pem -untrusted C:\acme-test\lego\certificates\nas.homelab.lan.issuer.crt C:\acme-test\lego\certificates\nas.homelab.lan.crt
+    ```
+
+    *ACME → Orders* shows the order as *valid* with a link to the certificate.
+
+11. ARI and revocation: the same `lego run` again does **not** renew (window ahead). Then revoke –
+    and the next `lego run` renews at once:
+
+    ```powershell
+    .tools\lego.exe certificates revoke --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego --email admin@homelab.lan --cert.name nas.homelab.lan --reason 4 --keep
+    ```
+
+12. EAB: *ACME → EAB keys → New key*, copy kid and MAC, then a fresh lego account without the
+    queue:
+
+    ```powershell
+    .tools\lego.exe run --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego-eab --email admin@homelab.lan --accept-tos --domains nas.homelab.lan --http --eab --eab.kid <kid> --eab.hmac <MAC>
+    ```
+
+13. certbot has no current Windows build – use a Linux host with Docker in the same network. On it,
+    `pki.homelab.lan` must resolve to this machine and its own name (e.g. `web.homelab.lan`) to
+    itself; on this machine add `web.homelab.lan` with the Linux host's address to the hosts file.
+    Copy `root.pem` there, then:
+
+    ```bash
+    docker run --rm --network host -v /tmp/certbot:/etc/letsencrypt -v "$PWD/root.pem:/root.pem:ro" -e REQUESTS_CA_BUNDLE=/root.pem certbot/certbot:v5.8.0 certonly --server https://pki.homelab.lan:8443/acme/directory --standalone -d web.homelab.lan --agree-tos -m admin@homelab.lan
+    ```
+
+    Caddy listens on all interfaces; allow inbound port 8443 in the Windows firewall for the Linux
+    host, and port 80 on the Linux host for this machine (the validator connects there).
+
+14. Clean up: stop Caddy and the server (Ctrl+C), remove the two lines from the hosts file, delete
+    `C:\acme-test`.
 
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
@@ -210,6 +427,23 @@ Screenshots (`task screenshots`, headless Edge, neutral demo instance): new `acm
 - The whole run: BIND start, the dynamic updates, the clients against the server, port 80 on the runner.
 - Likely first-run issues to look at: the runner address from `hostname -I` (first address), certbot's credentials file warning (mode 600, read by root in the container), acme.sh's standalone mode (socat in the image).
 
+## Part D – Step 15: docs, CHANGELOG, upgrade test
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Upgrade test: `task upgrade:test` installs **the released v0.1.0** with `go install github.com/Der-Felix/MyOwnPKI/cmd/myownpki@v0.1.0` (pinned, checked against the Go checksum database) into `.tools/v0.1.0/`; v0.1.0 runs `init --demo --with-ca` and `backup`; this build restores, migrates (pki.db 0008–0010, system.db 0009) and issues by ACME with the CA of v0.1.0 (`openssl verify`) | A real v0.1.0 backup instead of a committed fixture (a fixture would hold a demo passphrase); `Taskfile.yml` `UPGRADE_FROM` names the release | Delete `internal/acme/upgrade_test.go` and the task |
+| `testinstance.OpenExisting(t, dataDir, secretsFile)`: opens a data directory made elsewhere and first runs `store.Migrate` – like `server.Open` | The upgrade test needs the migrated instance with the test network of the ACME tests | – |
+| CI: the upgrade test runs in the `check` job; `task acme:lego` (EAB, ARI, revoke) in the conformance job | Until now the lego tests ran only locally | Remove the two steps |
+| Found: **v0.1 refuses unknown `MYOWNPKI_*` variables** – so `MYOWNPKI_ACME_*` stops a v0.1 binary. The test runs v0.1.0 without `MYOWNPKI_*`; OPERATIONS §9 says it for a downgrade | Strict variables catch typos – right; but a downgrade must remove the new ones | – |
+| OPERATIONS.md: new **chapter 10 "ACME server"** at the end (sections 1–9 keep their numbers); title "v0.2"; ACME listener in the table of §1; v0.1 → v0.2 in §9 | The chapter the plan asked for; the numbers of 1–9 are referenced elsewhere | – |
+| The proxy's own certificate is made from a **CSR on the proxy host** (key never leaves it); the server-generated key with *Export* is the alternative | The safer default; matches the UI's two ways | – |
+| Every proxy example also serves the public listener on plain HTTP port 80, without a redirect to https | CRL and AIA URLs in the certificates are `http://`; a redirect breaks revocation checks on some clients | – |
+| CHANGELOG: 0.2.0 under `[Unreleased]` with a short upgrade note, *Added/Changed/Security*, no date | Owner: date at the release (RELEASING.md) | – |
+| README: status "v0.1 released; v0.2 (the ACME server) in preparation", a row of ACME screenshots, the docs table | The README must not claim ACME is still to come once this is merged | Your wording at the release |
+| `docs/PLAN.md` unchanged | Its release plan already describes v0.2 as built; it has no status column | – |
+
+Tests: `TestUpgradeFromV01` passes locally (Windows); mutation: without the migration it fails with "no such column acme_orders_per_hour" and "no such table domains".
+
 ### First stop (usage limit) – resolved in the continuation run
 - Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).
 - Not started: steps 11–15 (no stash – no unfinished code).
@@ -230,6 +464,106 @@ Screenshots (`task screenshots`, headless Edge, neutral demo instance): new `acm
 
 ## Report for the owner
 
+**Result:** phase 1 is complete (steps 14–20), v0.1.0 is ready to release (part C), and the plans
+for v0.2 and v0.3 are written (part D). Everything is on the local branch `night/v0.1` – **not
+merged into main, not pushed, no tag, nothing published.** No stash is left over.
+
+### Commits (22 plus the commit of this report, oldest first, all on `night/v0.1`)
+
+| Part | Commits |
+|---|---|
+| A – step 14 | `1f5e215` root issues no leaves · `81a3164` locked name costs a hash · `48cd708` certificate counts · `7b947b2` shared test instance · `a0b1c6f` real UI · `69cd693` UI on the admin listener · `2fe352b` screenshot tool · `6514131` docs |
+| 15 legacy import | `a3bbaf5` |
+| 16 backup / restore | `80b1c7f` |
+| 17 passkeys | `fc5f8ba` |
+| 18 REST API part 2 | `36f0cfe` PKCS#12 export · `00a08be` revoke/renew/CSR · `973417c` CA management · `96e6c43` users/tokens/settings · `8a4c425` import jobs, audit, all 58 operations |
+| 19 UI part 2 | `311088b` pages · `d4ab257` screenshots and notes |
+| 20 wrap-up | `1bbd1d7` healthcheck, passphrase change/reset, end-to-end test · `bb20b65` operations guide |
+| C release | `71aa10b` GoReleaser, Dockerfile, release workflow, CHANGELOG, README, RELEASING |
+| D plans | `4c7e7ed` PHASE2.md, PHASE3.md |
+
+Every commit was tested on its own (`go vet` + `go test ./...` in a separate worktree, with the
+pki.sh fixture); `task check` and `task generate:check` were green before each commit.
+`71aa10b` was reworded once right after it was made (a split into two commits failed and the docs
+landed in it – the message now says so; content unchanged).
+
+### Done – in short
+- **15** `myownpki import legacy` (and archive upload in UI/API): serials, revocations (time and
+  reason) and CRL numbers identical; CI builds the fixture with the real `pki.sh`.
+- **16** `myownpki backup` / `backup verify` / `restore` with manifest, hashes, audit chains and the
+  SAN index check.
+- **17** passkeys as second factor and step-up (API; tested with a virtual authenticator).
+- **18** all 58 API operations served and contract-tested, PKCS#12 export, "delete key after
+  download", API tokens; vacuum: 0 warnings.
+- **19** UI part 2: revoke, renew, export, CAs incl. the offline flow, legacy import, audit,
+  presets, users, tenant settings, own account; screenshots light/dark.
+- **20** `TestPkiShReplaced` (pki.sh → import → issue → revoke → `openssl verify -crl_check` →
+  backup → restore → same CRL), `myownpki healthcheck`, `docs/OPERATIONS.md` with the passphrase
+  warning, **new** `myownpki passphrase change` / `reset` (see decision 3 below).
+- **C** `.goreleaser.yaml`, `deploy/docker/Dockerfile`, `.github/workflows/release.yml`,
+  `deploy/docker-compose.yml`, CHANGELOG, README, `docs/RELEASING.md` (your checklist).
+  `goreleaser check` and three snapshot builds: **archives byte-identical** between runs.
+- **D** `docs/PHASE2.md` (ACME server) and `docs/PHASE3.md` (agent, monitoring) with open questions.
+
+### Decisions for you to confirm (each reversible; details in the step tables below)
+
+1. **Imported pki.sh root = offline root** by default (`--root-key online` imports its key). (15)
+2. Import refuses as a whole: existing CA name/subject, Ed25519 CA, a bad signature. (15)
+3. **New console command `myownpki passphrase change|reset`** – the recovery key had no command
+   that used it, so a lost passphrase would have meant lost CA keys. (20)
+4. **PKCS#12 written by our own code** (no module approved): AES-256 + PBKDF2-SHA256, 600,000
+   iterations, password ≥ 12 characters; no legacy 3DES format. (18)
+5. **API tokens never count as step-up** (no revoke, key download, CA management by token). (18)
+6. `DELETE /users/{id}` disables; a refused API import answers 201 with a `failed` job; passkey
+   removal is `POST …/remove`. (18)
+7. Pages that show a secret once answer the POST directly with `no-store` (exception to PRG). (19)
+8. **No passkey button in the UI** until esbuild or one small script is approved (ADR-04). (17)
+9. Backups are not signed; integrity = SHA-256 + audit chains + signed checkpoints. (16)
+10. `healthcheck` pins the served certificate file; `127.0.0.1` must stay in
+    `admin.allowed_networks` when that is set. (20)
+11. Release: only the **server binary** (agent/ctl are stubs); symbols kept; **no `latest`** image
+    tag; image tag `0.1.0`; no buildx SBOM on the image (archive SBOMs instead). (C)
+12. **Multi-arch image via Docker's containerd image store** on the runner instead of an extra
+    BuildKit image (not approved). (C)
+13. Tool versions: GoReleaser **2.18.2**, cosign **3.1.3**, syft **1.54.1**, distroless digest
+    `afa5c872…` (all ≥ 2 weeks old, checksum files verified with Sigstore). (C)
+14. CHANGELOG date **2026-10-22** – correct it if you tag later (RELEASING.md step 2). (C)
+15. The compose file publishes the admin port on the host's **loopback only**. (C)
+
+### What I could not check tonight
+- **The release workflow** (only runs on a pushed tag) and **the container image** – there is no
+  Docker on this machine. The first real tag is the test; RELEASING.md says how to undo a failed
+  attempt before publishing.
+- Passkeys in a real browser with a real authenticator; PKCS#12 import on Windows/macOS.
+- `TestPkiShReplaced` runs locally only in Git Bash with `LEGACY_TEST_OPENSSL=/usr/bin/openssl`
+  (green); in CI on Linux it always runs.
+
+### Tomorrow in the browser (demo instance)
+
+A test config `C:\pki-test\config.yaml` with one line: `data_dir: "C:/pki-test/data"`. Then, one
+after the other (the second keeps running; the demo password and the TOTP secret are in
+`C:\pki-test\data\init-demo-secrets.txt`), and open <https://127.0.0.1:9443/>:
+
+```bash
+go run ./cmd/myownpki init --demo --with-ca --ca-base-url http://pki.homelab.lan --config C:/pki-test/config.yaml
+```
+
+```bash
+go run ./cmd/myownpki serve --config C:/pki-test/config.yaml
+```
+
+1. Sign in, unseal; dashboard and the navigation (Presets, Users and roles, Audit log, Legacy
+   import, Tenant settings).
+2. Issue a certificate, open it, **Renew**, **Export** as PKCS#12 (open it with your OS), tick
+   "delete the key afterwards" once, **Revoke** – the step-up page should come first.
+3. CAs: new intermediate; import an offline root and walk the **offline signing** page (CSR,
+   extension file, upload the signed certificate, upload the root CRL).
+4. **Legacy import**: upload a `.tar.gz` of a real `pki.sh` directory, read the report.
+5. Users: create one (authenticator link shown once), change roles, disable; Tenant settings with
+   a wrong country code; Audit log filters and "older".
+6. My account: new API token (shown once), new recovery codes, the passkey list.
+7. Dark theme on two pages; keyboard only through one form.
+8. Read `docs/OPERATIONS.md` and `docs/RELEASING.md`, then the open questions in PHASE2/PHASE3.
 
 ## Step 14 – finish (review points 1–4)
 
