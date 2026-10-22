@@ -2386,8 +2386,7 @@ components:
 
     DomainUpdate:
       description: "Settings to change"
-      allOf:
-        - $ref: "#/components/schemas/DomainSettings"
+      $ref: "#/components/schemas/DomainSettings"
 
     Domain:
       description: "A domain ACME issues for"
