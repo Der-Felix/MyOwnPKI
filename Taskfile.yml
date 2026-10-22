@@ -119,6 +119,11 @@ tasks:
     cmds:
       - CGO_ENABLED=0 go test ./...
 
+  fuzz:
+    desc: Short fuzz runs of the parsers that read untrusted input (ACME JWS) – 30 seconds each
+    cmds:
+      - CGO_ENABLED=0 go test ./internal/acme/jose/ -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+
   test:race:
     desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)
     cmds:

@@ -69,6 +69,8 @@ jobs:
           printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
           bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
       - run: task generate:check
+      - name: Fuzz the ACME JWS parser (short run)
+        run: task fuzz
 
   race:
     name: tests with race detector
