@@ -30,7 +30,7 @@
 | `24e0a5a` | night log – report after step 12 |
 | `2a23f4c` | step 13 – approvals in the UI, EAB keys, screenshots |
 | `f0242ad` | night log – report after step 13 |
-| _this commit_ | step 14 – conformance job (CI only) |
+| `d3daef9` | step 14 – conformance job (CI only) |
 
 ### Stash
 None.
