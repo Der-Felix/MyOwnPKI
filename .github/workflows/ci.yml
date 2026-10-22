@@ -80,6 +80,8 @@ jobs:
     name: tests with race detector
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
+    # A hang ends as a clear timeout (a normal run takes a few minutes).
+    timeout-minutes: 20
     env:
       # The race detector needs cgo (gcc is preinstalled on the runner). Only this
       # job – release binaries stay pure Go (ADR-01, verified by task build:verify).
@@ -89,18 +91,43 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      # The output also goes to a file: on a failure the next step turns the
-      # failed tests into annotations, readable without signing in.
+      # go test -json streams every package's events as they happen; plain
+      # `go test ./...` holds a package's output back until the package ends,
+      # so a run killed in the middle showed only "ok …/api". The JSON goes to
+      # a file for the next step, the log gets readable text (started
+      # packages, ok lines, everything of a failed package). Memory is logged
+      # every 15 s: -race needs several times the memory of a plain run.
       - name: task test:race
         run: |
           set -o pipefail
-          task test:race 2>&1 | tee "$RUNNER_TEMP/test.log"
+          while sleep 15; do
+            free -m | awk -v t="$(date -u +%T)" '/^Mem:/ { printf "memory %s UTC: %d of %d MiB used, %d available\n", t, $3, $2, $7 }' |
+              tee -a "$RUNNER_TEMP/memory.log"
+          done &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true' EXIT
+          task --silent test:race -- -json | tee "$RUNNER_TEMP/test.json" | bash .github/scripts/failed-tests.sh --text
+      # Also after the timeout above: then the run was cancelled, and the
+      # report names the tests that had started and not ended.
       - name: Failed tests as annotations
-        if: failure()
+        if: failure() || cancelled()
         run: |
-          if [ ! -s "$RUNNER_TEMP/test.log" ]; then exit 0; fi
           printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
+          if [ -s "$RUNNER_TEMP/test.json" ]; then
+            bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.json" "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -s "$RUNNER_TEMP/memory.log" ]; then
+            {
+              printf '\n#### Memory, the last two minutes\n\n```text\n'
+              tail -n 8 "$RUNNER_TEMP/memory.log"
+              printf '```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The kernel's OOM killer, if it ended a test binary.
+          oom=$(sudo dmesg 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -n 5 || true)
+          if [ -n "$oom" ]; then
+            printf '::error title=out of memory::%s\n' "${oom//$'\n'/%0A}"
+          fi
 
   test-os:
     name: tests on ${{ matrix.os }}

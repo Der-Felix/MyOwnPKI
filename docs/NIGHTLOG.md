@@ -259,6 +259,65 @@ loopback.
 14. Clean up: stop Caddy and the server (Ctrl+C), remove the two lines from the hosts file, delete
     `C:\acme-test`.
 
+## CI run 39849783550 (PR 5) – three red jobs
+
+Green in that run: check, Windows, macOS, cross, vuln, Bash suite. One commit per fix, each with
+`task check` and `task generate:check` green; not pushed.
+
+| Job | Cause | Fix | How to reverse |
+|---|---|---|---|
+| ACME conformance (both certbot cases) | certbot runs as root in its image and writes `live/` with mode 0700 – the test (runner user) can't read `fullchain.pem` | Client containers run with `--user "$(id -u):$(id -g)"`; certbot's config/work/logs dirs are in the mounted work directory; the acme.sh image is built for any user (`chmod -R o+rwx` on `/acmebin` and `/acme.sh`, `HOME=/acme.sh` – read in its 3.1.5 Dockerfile). Port 80 without root: run.sh already lowers `ip_unprivileged_port_start`. No permission loosened | Remove the `--user` lines in `confEnv.docker` |
+| lint:api | vacuum `no-unnecessary-combinator`: `DomainUpdate` was an `allOf` with one `$ref` | Direct `$ref` (OpenAPI 3.1 allows `description` next to it). vacuum 0.30.6 now local in `~/go/bin`: the release's `checksums.txt` lists the linux archive with CI's `VACUUM_SHA256`, the windows archive was verified against that file. `task lint:api`: 0 warnings, 10 infos (allowed) | – |
+| race (exit 143 after ~3 min) | See below – most likely memory | Diagnostics and `timeout-minutes: 20` | Revert the race job and `failed-tests.sh` |
+
+### The race job: what a) found
+
+- **No test signals a process group.** No `Setpgid`/`Setsid`, no `kill`/`pkill`, no `syscall.Kill`,
+  no `Signal(` anywhere in Go code, scripts or workflows; every child process in tests is
+  `exec.CommandContext` (on cancel: SIGKILL to the child only). The only `timeout` is the legacy
+  `with_timeout` (`timeout 3 …`): GNU timeout puts itself in its own process group, so its
+  `kill(0)` reaches only that group. Upgrade, lego and conformance tests skip themselves in this job
+  (no `UPGRADE_FROM_BIN`/`LEGO_BIN`); there is no fuzz corpus on disk.
+- **But the tests need a lot of memory – because of Argon2id.** `testinstance` builds the key ring
+  with `keys.New`, that is with the **production** KDF parameters (t=4, **256 MiB**, p=4): every
+  instance derives three times (init, unseal in `setup.Run`, unseal in the test). Peak memory per
+  test binary measured here, **without** -race (4 CPUs like the runner):
+
+  | Package | Peak memory | Time | With test KDF parameters (8 MiB, t=1, p=1; tried and reverted) |
+  |---|---|---|---|
+  | internal/acme | 2366 MiB | 17.5 s | 408 MiB, 3.9 s |
+  | internal/server | 2379 MiB | 5.7 s | 520 MiB, 2.1 s |
+  | internal/httpapi | 2320 MiB | 13.1 s | – |
+  | internal/web | 2084 MiB | 15.3 s | 522 MiB, 5.5 s |
+  | cmd/myownpki | 1685 MiB | 8.0 s | – |
+
+  `go test ./...` runs up to 4 packages at once, the race detector needs 5–10× the memory (Go docs)
+  – far over the runner's 16 GB. Exit 143 (SIGTERM, not the OOM killer's SIGKILL) fits the runner
+  shutting the job down; the job log shows it if it says "The runner has received a shutdown
+  signal". internal/acme is new in v0.2 and is the largest of the five.
+- **Why only "ok …/api":** plain `go test ./...` holds each package's output back until the package
+  ends – the running ones were invisible, and a kill drops their buffers.
+
+### b) – what the next run shows
+
+- `go test -race -json` into `$RUNNER_TEMP/test.json` (via `tee`); the log gets readable text from
+  `failed-tests.sh --text`: "started <package>", ok lines, everything of a failed package.
+- `failed-tests.sh` reads the JSON: failures as before; **if a package started and never ended**
+  (killed or timed out), one more annotation lists those packages and the tests that had started
+  and not ended, latest first (parallel tests waiting for their turn are marked), with the last
+  output lines. Tested locally with a cut-off log, under gawk and gawk `--posix`.
+- Memory every 15 s in the log; on a failure the last two minutes go to the summary, and OOM-killer
+  lines from `dmesg` become an annotation.
+- `timeout-minutes: 20` for the job; the annotation step also runs after the timeout (`cancelled()`).
+
+### c) and a proposal (not built – your decision, it touches the key ring)
+
+If the next run shows memory near 16 GB, the fix is **test KDF parameters for `testinstance`**
+(as `internal/keys` and `internal/setup` already use in their own tests): an option on `keys.New` /
+`setup.Options` that only tests set – about 5× less memory and 3–4× faster tests. A stopgap without
+code: `go test -race -p 2`. If memory stays low, the exit was a one-off runner abort, and the
+report of b) names where it was.
+
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
 | Decision | Why | How to reverse |

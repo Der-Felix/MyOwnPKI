@@ -147,9 +147,9 @@ tasks:
       - LEGO_VERSION={{.LEGO_VERSION}} PEBBLE_VERSION={{.PEBBLE_VERSION}} bash test/conformance/run.sh
 
   test:race:
-    desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)
+    desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux; CI adds -json via "task test:race -- -json")
     cmds:
-      - CGO_ENABLED=1 go test -race ./...
+      - CGO_ENABLED=1 go test -race {{.CLI_ARGS}} ./...
 
   fmt:
     desc: Format all Go files (gofmt + goimports, settings in .golangci.yml)
