@@ -86,7 +86,10 @@ On *Releases*, the draft **MyOwnPKI v0.1.0** should have:
 - 5 archives (`myownpki_0.1.0_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`, `…_darwin_arm64.tar.gz`,
   `…_freebsd_amd64.tar.gz`, `…_windows_amd64.zip`) and 5 SBOMs (`*.sbom.json`);
 - `checksums.txt` and `checksums.txt.sigstore.json`;
-- the release notes from CHANGELOG.md.
+- the release notes from CHANGELOG.md – **the text is not empty**: it starts with the first lines
+  of the version's section and has no list of commits. An empty draft means GoReleaser skipped
+  its changelog step, which is the one that reads the notes (v0.1.0 had this,
+  `changelog: disable: true`); fill the text in by hand and fix the config before the next tag.
 
 Download `checksums.txt`, `checksums.txt.sigstore.json` and one archive, and check them as the
 README says (cosign from <https://github.com/sigstore/cosign/releases>):

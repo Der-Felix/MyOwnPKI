@@ -7,6 +7,12 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Fixed
+
+- Release notes on GitHub: the release draft had an empty text, because GoReleaser's changelog
+  step – the one that reads the notes from CHANGELOG.md – was disabled. (The v0.1.0 notes were
+  added by hand.)
+
 ## [0.1.0] - 2026-10-22
 
 The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (phase 1 of
