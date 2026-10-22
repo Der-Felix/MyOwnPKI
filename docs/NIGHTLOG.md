@@ -82,6 +82,14 @@ _Filled in at the end of the run._
 
 - Note: lego v5.5.2 prints `v5.6.1+dev-release` as its version – a constant in lego's source. `go version -m .tools/lego.exe` shows module `v5.5.2` with its checksum.
 
+### Where the run stopped (usage limit)
+- Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).
+- Not started: steps 11–15 (no stash – no unfinished code).
+- Found for step 11, not fixed yet:
+  - `fail()` sends a fixed `Retry-After: 30` on 429 instead of the limiter's real wait.
+  - The limiter map is bounded only by dropping expired windows. Many fresh keys (IPv6 addresses, failing sub-names) can grow it. Plan: group IPv6 by /64 for new accounts, plus a hard cap that evicts entries.
+  - "Limits in the tenant settings" needs a system.db migration (columns on `tenants`), `TenantSettings` in the OpenAPI spec, and the settings form.
+
 # Night log – Phase 1, steps 14–20 and release
 
 > Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).
