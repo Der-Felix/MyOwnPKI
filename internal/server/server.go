@@ -585,7 +585,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(),
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(),
 	}})
 	if err != nil {
 		return err
@@ -601,4 +601,12 @@ func (s *Server) acmeAdmin() web.ACMEAdmin {
 		return nil
 	}
 	return s.acme
+}
+
+// acmeDirectory is the directory URL clients use; "" while ACME is off.
+func (s *Server) acmeDirectory() string {
+	if s.acme == nil {
+		return ""
+	}
+	return s.acme.BaseURL() + "/directory"
 }

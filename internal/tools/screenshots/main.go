@@ -63,9 +63,14 @@ var shots = []shot{
 	{"audit-log", "/admin/audit?scope=instance", light},
 	{"offline-signing", "/authorities/{pending}/offline", light},
 	{"legacy-import", "/admin/import", light},
+	{"acme-accounts", "/acme/accounts", light},
+	{"acme-names", "/acme/names", light},
+	{"acme-orders", "/acme/orders", light},
 	{"dashboard-dark", "/", dark},
 	{"certificate-detail-dark", "/certificates/{detail}", dark},
 	{"users-dark", "/admin/users", dark},
+	{"acme-accounts-dark", "/acme/accounts", dark},
+	{"acme-names-dark", "/acme/names", dark},
 }
 
 func main() {

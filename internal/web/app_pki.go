@@ -165,6 +165,14 @@ func (a *app) dashboard(c *rc) {
 				d.Attention = append(d.Attention, view.Message{Kind: view.MessageInfo, Text: strconv.FormatInt(waiting, 10) + " ACME order(s) are being issued."})
 			}
 		}
+		if accounts, names, perr := a.d.ACME.Pending(ctx); perr == nil {
+			if accounts > 0 {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: strconv.FormatInt(accounts, 10) + " ACME account(s) wait for approval.", Href: "/acme/accounts", LinkText: "Review"})
+			}
+			if names > 0 {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: strconv.FormatInt(names, 10) + " new name(s) wait for approval.", Href: "/acme/names", LinkText: "Review"})
+			}
+		}
 	}
 	for _, info := range cas {
 		href := "/authorities/" + info.ID

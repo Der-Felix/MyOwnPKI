@@ -34,8 +34,10 @@ var nav = []navGroup{
 	}},
 	{"ACME", []navItem{
 		{Key: "domains", Label: "Domains", Href: "/domains", Real: true},
-		{Key: "acme-accounts", Label: "Accounts", Note: "phase 2"},
-		{Key: "acme-orders", Label: "Orders", Note: "phase 2"},
+		{Key: "acme-accounts", Label: "Accounts", Href: "/acme/accounts", Real: true},
+		{Key: "acme-names", Label: "New names", Href: "/acme/names", Real: true},
+		{Key: "acme-eab", Label: "EAB keys", Href: "/acme/eab", Real: true},
+		{Key: "acme-orders", Label: "Orders", Href: "/acme/orders", Real: true},
 	}},
 	{"Agents", []navItem{
 		{Key: "agents", Label: "Agents", Note: "phase 3"},

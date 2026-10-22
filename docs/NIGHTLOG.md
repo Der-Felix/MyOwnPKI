@@ -11,7 +11,7 @@
 
 ## Report for the owner
 
-**Status: in progress – continuation run; done up to step 12.** (Updated after every finished step.)
+**Status: in progress – continuation run; done up to step 13 (part B complete).** (Updated after every finished step.)
 
 ### Commits on `night/v0.2` (oldest first, all local)
 | Commit | What |
@@ -27,6 +27,8 @@
 | `39b90e5` | step 11 – rate limits as tenant settings |
 | `52adcdc` | night log – report after step 11 |
 | `d47d18a` | step 12 – ARI (renewalInfo, replaces) |
+| `24e0a5a` | night log – report after step 12 |
+| _this commit_ | step 13 – approvals in the UI, EAB keys, screenshots |
 
 ### Stash
 None.
@@ -35,6 +37,7 @@ None.
 - Security fix: tables "Security fix after part A".
 - Step 11: table "Step 11 – rate limits" – notably `acme_limits` optional in PUT /settings (no breaking change for v0.1 clients).
 - Step 12: table "Step 12 – ARI" – notably the window (day 60–63 to 69–72 for 90 days).
+- Step 13: table "Step 13 – approvals in the UI".
 
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
@@ -160,6 +163,25 @@ Not checked locally: `task lint:api` (vacuum is not installed here; the spec cha
 Tests: `TestRenewalInfo` (window inside the lifetime at 2/3, stable, unknown → 404, six malformed identifiers → 400 incl. a negative and a non-minimal serial, revoked → window in the past), `TestRenewalWindow` (50 serials, 90 days: start day 60–63, width 9 days, ≥ 40 different starts), `TestReplaces` (foreign account, no shared name, garbage, second renewal → 409, `renewal_of` stored). **lego**: a second `lego run` asks renewalInfo and does not renew; after `lego certificates revoke` the next `lego run` renews at once with `replaces`, and the new certificate's `renewal_of` is the old one.
 
 Mutation checks: revoked window not in the past, account not checked, no jitter, `replaces` not stored, no shared-name check – each made a test fail. Not testable: the second count inside the transaction (needs two requests in the same instant); the first count catches every sequential case.
+
+### Step 13 – approvals in the UI
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| New pages under ACME: **Accounts** (waiting queue, all accounts, account detail), **New names** (queue, decide, approve in advance), **EAB keys**, **Orders** (newest 200) | Owner Q2 and the plan; Orders replaces the "phase 2" placeholder | Remove the routes in `internal/web/app.go` |
+| Approving and deciding: one form with a select per queue (no button per row) | Calm and plain (frontend.md); one POST target per action, CSRF as everywhere | – |
+| Approve, decide and create EAB keys need **ca.manage on the tenant with a fresh second factor**; reading the pages needs a **tenant-wide** role | An approval lets an account obtain certificates; the pages show every account of the tenant – a role on one CA doesn't see them | `authorize()` / `readable()` in `internal/acme/admin.go` |
+| EAB key: 256 random bits, valid 1–90 days (default 7), shown **once** on the POST answer (`Cache-Control: no-store`, no redirect), with lego and certbot command lines; stored only as an envelope (key ring purpose `acme-eab`), overwritten when used; creating one needs an unsealed server | Owner Q2 "shown once"; an unused key should not live long | `CreateEABKey()` |
+| Dashboard: "N ACME account(s) wait for approval" and "N new name(s) wait for approval", each with a Review link | Owner plan step 13 "dashboard counters" | `app_pki.go` |
+| ACME off (no `acme.base_url`): the pages say how to switch it on | An admin who clicks the menu learns why it is empty | `acmeOff()` |
+| Table cells get an optional `Break` (the existing `.break` class) – used for error details and contacts | A long URL in an order error ran past the table edge (seen in the screenshot) | `admin.Cell.Break` |
+| Not built: deactivating an account and deleting an unused EAB key from the UI | Not in the plan; an unused key expires by itself | Later step |
+
+Tests: `TestEABKeys` (five bad inputs, waiting account can't order, wrong MAC, EAB account orders at once, key used twice, expiry, no MAC in the audit log or in plain text in the database, sealed → `ErrSealed`), `TestACMEApprovalPages` (dashboard counters, approve, approve twice refused, refuse/approve-in-advance/garbage name escaped, EAB shown once with `no-store` and not in the list, three bad EAB forms, viewer sees no forms and can't approve or create a key, CA-scoped operator gets 403), `TestACMEPagesOff`, the four pages in the page sweep (no inline style/script). **lego** `TestLegoEAB`: without EAB refused under "approved accounts", with `--eab` it registers and gets the certificate – the own HS256 code against a real client.
+
+Mutation checks: EAB without authorization, reads without a tenant role, dashboard counter off – each made a test fail. Not observable by a test: clearing the MAC from memory after use.
+
+Screenshots (`task screenshots`, headless Edge, neutral demo instance): new `acme-accounts`, `acme-names`, `acme-orders` (light) and `acme-accounts-dark`, `acme-names-dark`; all others regenerated (the menu has the new ACME entries; the dashboard shows the two waiting notices).
 
 ### First stop (usage limit) – resolved in the continuation run
 - Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).

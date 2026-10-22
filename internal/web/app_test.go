@@ -418,6 +418,7 @@ func realPages(t *testing.T) map[string]string {
 			"/authorities/new", "/authorities/import", "/authorities/" + v.CAIDs["issuing"] + "/manage", "/authorities/" + v.CAIDs["root"] + "/manage",
 			"/presets", "/presets/server", "/admin/users", "/admin/users/new", "/admin/users/" + v.UserID(t, "demo"), "/admin/settings",
 			"/admin/audit", "/admin/audit?scope=instance", "/admin/import", "/account",
+			"/acme/accounts", "/acme/names", "/acme/eab", "/acme/orders",
 		} {
 			out["real "+p] = b.get(t, p).html()
 		}
