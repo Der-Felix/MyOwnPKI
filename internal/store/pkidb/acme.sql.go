@@ -403,6 +403,34 @@ func (q *Queries) GetACMEOrderByCertificate(ctx context.Context, certificateID s
 	return i, err
 }
 
+const hasValidACMEAuthz = `-- name: HasValidACMEAuthz :one
+SELECT count(*) FROM acme_authzs
+WHERE account_id = ? AND identifier_type = ? AND identifier_value = ? AND wildcard = ?
+  AND status = 'valid' AND expires_at > ?
+`
+
+type HasValidACMEAuthzParams struct {
+	AccountID       string
+	IdentifierType  string
+	IdentifierValue string
+	Wildcard        int64
+	ExpiresAt       string
+}
+
+// revokeCert: does the account hold a valid authorization for the identifier?
+func (q *Queries) HasValidACMEAuthz(ctx context.Context, arg HasValidACMEAuthzParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, hasValidACMEAuthz,
+		arg.AccountID,
+		arg.IdentifierType,
+		arg.IdentifierValue,
+		arg.Wildcard,
+		arg.ExpiresAt,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertACMEAccount = `-- name: InsertACMEAccount :exec
 
 INSERT INTO acme_accounts (id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at)

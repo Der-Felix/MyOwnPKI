@@ -45,6 +45,43 @@ _Filled in at the end of the run._
 | http-01: port 80 only – the tests replace the dialer, never the port rule | A test switch must not become a production switch | – |
 | lego as the end-to-end check: a test that runs only with `LEGO_BIN` set (Taskfile `acme:lego` builds lego `@v4.x` with `go install` into a temp dir); a TLS reverse proxy in the test plays Caddy | Owner: test tool only, no go.mod entry | – |
 
+### Done (part A)
+- Step 1 `aa28744`: domains (pki.db 0008, engine, API `/domains` in the spec and the contract run, UI under ACME > Domains).
+- Step 2 `5b87980`: `ca.Request.ACME` – CA, preset and validity from the domains; the order set valid inside the storing transaction.
+- Step 3 `66f2f89`: `internal/acme/jose` (own JWS/JWK code, RFC vectors, a negative test per rule, `FuzzParse`, `task fuzz` and 30 s in CI).
+- Steps 4–9 `ab99474`: config `acme.*`, pki.db 0009, `internal/acme` (directory, nonces, accounts, key change, orders, authorizations, challenges, http-01/dns-01 validation, finalize, certificate), the third listener, finalize while sealed with the dashboard notice. **Walking skeleton reached: lego v5.5.2 registers, orders by http-01, gets the certificate, `openssl verify` OK.**
+- Changes against the design table, taken while building:
+  - EAB MAC keys are **not** rows of `keys` (its CHECK allows only `ca`/`leaf`; changing it means rebuilding the table with its triggers): `acme_eab_keys` holds the envelope itself, with a new key-ring purpose `acme-eab` bound into the encryption. Overwritten when used (one key, one account).
+  - Pending authorizations and orders live **24 hours** (Let's Encrypt: 7 days); valid authorizations 7 days (owner Q6).
+  - A domain's preset must allow **serverAuth** (`client` offers DNS names but is no TLS server certificate).
+  - ACME wildcards work with the domain's preset (`server`): the engine allows the wildcard names of an ACME order without the `wildcard` preset's extra base name – the certificate names exactly the order.
+  - lego and later pebble are built into **`.tools/`** (gitignored), not `bin/` – `task build:verify` checks every file in `bin/` for CGO.
+  - lego's module is `github.com/go-acme/lego/v5` (the CLI lives at the module root since v5).
+
+### Tests (part A)
+- `internal/ca`: domains (defaults, 21 refusals, lookup incl. suffix tricks, permissions), ACME policy (domains decide CA/preset/validity, CSR names ignored, hook rollback, lowered CA maximum).
+- `internal/acme`: directory/nonce/proxy/X-Forwarded-For, http-01 to certificate (incl. IP identifier, reuse, other account gets 404), dns-01 wildcard, failed challenges (loopback target, wrong content), unknown names/IPs, approval levels, finalize while sealed, five bad CSRs, `orderNotReady`, request rules (replayed nonce, wrong URL, jwk vs kid, foreign key, unknown account, content type, onlyReturnExisting, tel: contact), key change and deactivation; `TestLegoWalkingSkeleton`.
+- `internal/server`: the ACME listener and its directory; no ACME on the public port. `internal/config`: the `acme` section.
+- Mutations caught: CSR name check off; address policy off; wrong key authorization (lego fails with `incorrectResponse`); duplicate check and R‖S length in jose.
+
+### Not verifiable tonight (part A)
+- certbot, acme.sh, Traefik and Caddy (part C/D: CI job and the guide).
+- A real DNS server for dns-01 (the tests replace the lookup; BIND comes in the CI job).
+
+## Part B – Steps 10–13
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| revokeCert accepts the ordering account, an account with valid authorizations for **every** name of the certificate, or the certificate's own key (RFC 8555 §7.6) | The RFC's three ways; the key path lets someone report a leaked key without the account | Drop a branch in `revoker()` (`internal/acme/revoke.go`) |
+| `keyCompromise` only from the ordering account or the certificate key – not from an account that merely holds the names | keyCompromise blocks the key for all later certificates; an account that never held the key must not block it (Let's Encrypt does the same) | Remove the check in `revoker()` |
+| Certificates with email/URI names (or none) can't be revoked over ACME by name holders – "revoke it in the UI" | No ACME authorization covers those names | – (follows from RFC 8555) |
+| Reasons 2, 6, 8, 10 (and unknown codes) → `badRevocationReason` | Same list as the UI (`ca.LeafReasons`): no hold, no CA reasons | `revocationReason()` |
+| `alreadyRevoked` is answered only after the signer is authorized | Otherwise anyone could ask whether a certificate is revoked – that is the CRL's job | Swap the order in `revokeCert()` |
+| Refused revocations are audited as `certificate.revoke/denied` (actor: the account, or `key:<thumbprint>`) | An attempt to revoke a foreign certificate is worth a trace | `refuseRevoke()` |
+| Revocation while sealed: 200, stored at once, the CRL is signed at the unseal | Same as the UI (PHASE1 step 9); a revocation must never wait | – |
+
+- Note: lego v5.5.2 prints `v5.6.1+dev-release` as its version – a constant in lego's source. `go version -m .tools/lego.exe` shows module `v5.5.2` with its checksum.
+
 # Night log – Phase 1, steps 14–20 and release
 
 > Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).

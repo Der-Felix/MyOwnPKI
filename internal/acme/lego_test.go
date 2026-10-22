@@ -121,4 +121,26 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), ": OK") {
 		t.Fatalf("openssl verify: %v\n%s", err, out)
 	}
+
+	// Revoke (owner Q3): lego revokes with the account key, reason
+	// superseded; the issuing CA's new CRL lists the certificate, and
+	// OpenSSL with CRL checking refuses it.
+	run("certificates", "revoke", "--server", proxy.URL+"/acme/directory", "--path", legoDir, "--email", "admin@homelab.lan",
+		"--cert.name", "nas.homelab.lan", "--reason", "4", "--keep")
+	crlDER, _, err := inst.Engine.LatestCRL(t.Context(), testinstance.Console, inst.CAIDs["issuing"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	crl, err := x509.ParseRevocationList(crlDER)
+	if err != nil || len(crl.RevokedCertificateEntries) != 1 || crl.RevokedCertificateEntries[0].SerialNumber.Cmp(leaf.SerialNumber) != 0 ||
+		crl.RevokedCertificateEntries[0].ReasonCode != 4 {
+		t.Fatalf("CRL after lego revoke: %v %+v", err, crl)
+	}
+	crlFile := filepath.Join(dir, "issuing.crl")
+	_ = os.WriteFile(crlFile, pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: crlDER}), 0o600)
+	// #nosec G204 -- test: the openssl binary and temp files
+	out, err = exec.CommandContext(t.Context(), opensslBin, "verify", "-crl_check", "-CRLfile", crlFile, "-CAfile", rootFile, "-untrusted", interFile, leafFile).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "certificate revoked") {
+		t.Fatalf("openssl verify -crl_check after revoke: %v\n%s", err, out)
+	}
 }

@@ -93,6 +93,12 @@ WHERE account_id = ? AND identifier_type = ? AND identifier_value = ? AND wildca
   AND status IN ('valid', 'pending') AND expires_at > ?
 ORDER BY status = 'valid' DESC, expires_at DESC LIMIT 1;
 
+-- revokeCert: does the account hold a valid authorization for the identifier?
+-- name: HasValidACMEAuthz :one
+SELECT count(*) FROM acme_authzs
+WHERE account_id = ? AND identifier_type = ? AND identifier_value = ? AND wildcard = ?
+  AND status = 'valid' AND expires_at > ?;
+
 -- name: SetACMEAuthzStatus :exec
 UPDATE acme_authzs SET status = ?, expires_at = ?, updated_at = ? WHERE id = ?;
 
