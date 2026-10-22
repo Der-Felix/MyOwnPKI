@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math/big"
 	"net/http"
 	"os"
@@ -682,6 +683,8 @@ func TestContract(t *testing.T) {
 		{op: "updateSettings", as: viewer, body: settings, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "updateSettings", as: admin, body: settings, want: 200},
 		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
+		{op: "updateSettings", as: admin, body: withLimits(settings, 100, 3, 20), want: 200, note: "acme-limits"},
+		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
 	} {
 		run(cc)
 	}
@@ -971,4 +974,12 @@ func TestEverySpecOperationIsServed(t *testing.T) {
 	if n != len(served) {
 		t.Errorf("%d operations in the spec, %d routes", n, len(served))
 	}
+}
+
+// withLimits adds acme_limits to a settings body (PHASE2 step 11).
+func withLimits(settings map[string]any, orders, failed, accounts int) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["acme_limits"] = map[string]int{"orders_per_account": orders, "failed_per_name": failed, "accounts_per_ip": accounts}
+	return out
 }

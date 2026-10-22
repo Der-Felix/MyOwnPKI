@@ -54,6 +54,32 @@ type Options struct {
 	Log                               *slog.Logger
 	// Rand for tokens and IDs; nil = crypto/rand.
 	Rand io.Reader
+	// Limits returns the tenant's rate limits (its settings); nil or an
+	// error = DefaultLimits.
+	Limits func(ctx context.Context) (Limits, error)
+}
+
+// Limits are the rate limits per hour (PHASE2 step 11).
+type Limits struct {
+	OrdersPerAccount int // new orders per account
+	FailedPerName    int // failed validations per name
+	AccountsPerIP    int // new accounts per client address (IPv6: per /64)
+}
+
+// DefaultLimits apply without settings.
+var DefaultLimits = Limits{OrdersPerAccount: 300, FailedPerName: 5, AccountsPerIP: 10}
+
+// limitsNow reads the limits for this request.
+func (s *Server) limitsNow(ctx context.Context) Limits {
+	if s.opt.Limits == nil {
+		return DefaultLimits
+	}
+	l, err := s.opt.Limits(ctx)
+	if err != nil {
+		s.log.Error("acme limits", slog.Any("error", err))
+		return DefaultLimits
+	}
+	return l
 }
 
 // Server is the ACME server of one tenant.
@@ -218,6 +244,7 @@ type acmeError struct {
 	typ    string
 	detail string
 	extra  map[string]any
+	retry  time.Duration // Retry-After of a rate limit; 0 = the default
 }
 
 func (e *acmeError) Error() string { return e.typ + ": " + e.detail }
@@ -234,7 +261,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var denied *ca.DeniedError
 	switch {
 	case errors.As(err, &ae):
-		if ae.status == http.StatusTooManyRequests || ae.status == http.StatusServiceUnavailable {
+		switch {
+		case ae.retry > 0:
+			w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(ae.retry)))
+		case ae.status == http.StatusTooManyRequests || ae.status == http.StatusServiceUnavailable:
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		}
 		s.problem(w, ae.status, ae.typ, ae.detail, ae.extra)
@@ -431,4 +461,10 @@ func payload(r *request, v any) error {
 // newID makes an ID with prefix.
 func (s *Server) newID(prefix string) (string, error) {
 	return newID(prefix, s.now(), s.rnd)
+}
+
+// retrySeconds rounds a wait up to whole seconds, at least one.
+func retrySeconds(d time.Duration) int {
+	s := int((d + time.Second - 1) / time.Second)
+	return max(s, 1)
 }

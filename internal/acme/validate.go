@@ -404,7 +404,7 @@ func (v *validator) finish(j job, verr error) {
 		perr = sql.NullString{String: string(b), Valid: true}
 		status, authzStatus, expires, result = "invalid", "invalid", j.authz.ExpiresAt, audit.ResultFailure
 		details["error"] = ve.typ + ": " + clip(ve.detail)
-		s.limits.allow("failed:"+j.authz.IdentifierValue, limitFailedPerIdentifier, time.Hour)
+		s.limits.allow("failed:"+j.authz.IdentifierValue, s.limitsNow(ctx).FailedPerName, time.Hour)
 	}
 	validated := sql.NullString{}
 	if verr == nil {

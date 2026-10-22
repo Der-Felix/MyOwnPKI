@@ -114,7 +114,7 @@ func (s *Server) newAccount(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, problemErr(http.StatusBadRequest, "accountDoesNotExist", "there is no account for this key"))
 		return
 	}
-	if allowed, wait := s.limits.allow("new-account:"+req.ip, limitNewAccountsPerIP, time.Hour); !allowed {
+	if allowed, wait := s.limits.allow("new-account:"+ipKey(req.ip), s.limitsNow(r.Context()).AccountsPerIP, time.Hour); !allowed {
 		s.fail(w, r, rateLimited(wait, "too many new accounts from %s – try again later", req.ip))
 		return
 	}
@@ -378,8 +378,10 @@ func (s *Server) keyChange(w http.ResponseWriter, r *http.Request) {
 	s.reply(w, http.StatusOK, s.accountJSON(&acct))
 }
 
+// rateLimited: 429 with the real wait as Retry-After (RFC 8555 §6.6).
 func rateLimited(wait time.Duration, format string, args ...any) *acmeError {
 	e := problemErr(http.StatusTooManyRequests, "rateLimited", format, args...)
-	e.detail += fmt.Sprintf(" (in %s)", wait.Round(time.Second))
+	e.detail += fmt.Sprintf(" – try again in %s", (time.Duration(retrySeconds(wait)) * time.Second).String())
+	e.retry = wait
 	return e
 }

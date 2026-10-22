@@ -766,6 +766,7 @@ paths:
         `allow_server_keygen` switches server-side key generation (a CSR is always possible);
         the subject defaults fill fields that neither the request nor the CSR gives (like
         pki.conf of pki.sh) – never the common name.
+        `acme_limits` (since 0.2, optional here) are the rate limits of the ACME server.
       x-required-role: admin
       requestBody:
         description: "The settings"
@@ -2225,6 +2226,18 @@ components:
             locality: { type: string, maxLength: 128 }
             state: { type: string, maxLength: 128 }
             country: { type: string, pattern: "^([A-Z]{2})?$" }
+        acme_limits:
+          description: |
+            Rate limits of the ACME server, per hour (since 0.2). Always in the answer; optional in
+            a change – left out, the stored limits stay. A client over a limit gets 429
+            `rateLimited` with Retry-After.
+          type: object
+          required: [orders_per_account, failed_per_name, accounts_per_ip]
+          additionalProperties: false
+          properties:
+            orders_per_account: { type: integer, minimum: 1, maximum: 10000, description: "New orders per account" }
+            failed_per_name: { type: integer, minimum: 1, maximum: 100, description: "Failed validations per name" }
+            accounts_per_ip: { type: integer, minimum: 1, maximum: 1000, description: "New accounts per client address (IPv6 per /64)" }
 
     PasswordChange:
       description: "Password change of the logged-in user"

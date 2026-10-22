@@ -271,7 +271,12 @@ func (s *Server) build(key *auth.Key) error {
 	if base := s.opt.Config.ACME.BaseURL; base != "" {
 		acfg := s.opt.Config.ACME
 		var aerr error
-		if s.acme, aerr = acme.New(acme.Options{Engine: s.engine, BaseURL: base, TrustedProxies: acfg.TrustedProxies, Resolver: acfg.Resolver, Clock: s.clk, Log: s.log}); aerr != nil {
+		settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
+		limits := func(ctx context.Context) (acme.Limits, error) {
+			l, lerr := settings.ACMELimits(ctx, store.DefaultTenant)
+			return acme.Limits{OrdersPerAccount: l.OrdersPerAccount, FailedPerName: l.FailedPerName, AccountsPerIP: l.AccountsPerIP}, lerr
+		}
+		if s.acme, aerr = acme.New(acme.Options{Engine: s.engine, BaseURL: base, TrustedProxies: acfg.TrustedProxies, Resolver: acfg.Resolver, Clock: s.clk, Log: s.log, Limits: limits}); aerr != nil {
 			return aerr
 		}
 		s.jobs.add(jobACMEIssue, time.Minute, time.Minute, s.acme.ProcessPending)

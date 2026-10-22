@@ -386,6 +386,14 @@ func (a *API) revokeToken(c *call) error {
 type settingsJSON struct {
 	AllowServerKeygen bool        `json:"allow_server_keygen"`
 	SubjectDefaults   subjectPart `json:"subject_defaults"`
+	// Optional in a PUT (v0.1 clients don't send it): absent keeps the limits.
+	ACMELimits *acmeLimitsJSON `json:"acme_limits,omitempty"`
+}
+
+type acmeLimitsJSON struct {
+	OrdersPerAccount int `json:"orders_per_account"`
+	FailedPerName    int `json:"failed_per_name"`
+	AccountsPerIP    int `json:"accounts_per_ip"`
 }
 
 type subjectPart struct {
@@ -399,7 +407,8 @@ type subjectPart struct {
 func toSettingsJSON(s *tenant.Settings) settingsJSON {
 	return settingsJSON{AllowServerKeygen: s.AllowServerKeygen, SubjectDefaults: subjectPart{
 		Organization: s.Organization, OrganizationalUnit: s.OrganizationalUnit, Locality: s.Locality, State: s.State, Country: s.Country,
-	}}
+	},
+		ACMELimits: &acmeLimitsJSON{OrdersPerAccount: s.ACME.OrdersPerAccount, FailedPerName: s.ACME.FailedPerName, AccountsPerIP: s.ACME.AccountsPerIP}}
 }
 
 func (a *API) getSettings(c *call) error {
@@ -416,8 +425,12 @@ func (a *API) putSettings(c *call) error {
 		return err
 	}
 	d := req.SubjectDefaults
-	err := a.d.Settings.Set(c.ctx(), a.d.Tenant, tenant.Settings{AllowServerKeygen: req.AllowServerKeygen, Organization: d.Organization,
-		OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, State: d.State, Country: d.Country}, c.who())
+	v := tenant.Settings{AllowServerKeygen: req.AllowServerKeygen, Organization: d.Organization,
+		OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, State: d.State, Country: d.Country}
+	if l := req.ACMELimits; l != nil {
+		v.ACME = &tenant.ACMELimits{OrdersPerAccount: l.OrdersPerAccount, FailedPerName: l.FailedPerName, AccountsPerIP: l.AccountsPerIP}
+	}
+	err := a.d.Settings.Set(c.ctx(), a.d.Tenant, v, c.who())
 	if errors.Is(err, tenant.ErrInvalid) {
 		return c.problem(http.StatusUnprocessableEntity, "policy-violation", err.Error(), nil)
 	}

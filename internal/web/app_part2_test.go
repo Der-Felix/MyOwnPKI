@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/x509"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -214,11 +215,31 @@ func TestAdministrationPages(t *testing.T) {
 	token := b.csrf(t)
 
 	// Settings: the subject default reaches the next certificate.
-	r := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}})
+	// A tenant starts with the defaults of migration 0009.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="300"`) || !strings.Contains(page, `value="5"`) || !strings.Contains(page, `value="10"`) {
+		t.Errorf("default limits not shown")
+	}
+	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"}}
+	form := func(extra url.Values) url.Values {
+		out := url.Values{"csrf_token": {token}}
+		maps.Copy(out, limits)
+		maps.Copy(out, extra)
+		return out
+	}
+	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}}))
 	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
 		t.Fatalf("settings: %d", r.Code)
 	}
-	if rr := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "c": {"Germany"}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "country") {
+	// The ACME limits (PHASE2 step 11) are stored and shown.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) {
+		t.Errorf("limits not shown: %s", page)
+	}
+	for _, bad := range []url.Values{{"acme_orders": {"0"}}, {"acme_failed": {"101"}}, {"acme_accounts": {"many"}}} {
+		if rr := b.post(t, "/admin/settings", form(bad)); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "per hour") {
+			t.Errorf("bad limit %v: %d", bad, rr.Code)
+		}
+	}
+	if rr := b.post(t, "/admin/settings", form(url.Values{"c": {"Germany"}})); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "country") {
 		t.Errorf("bad country: %d", r.Code)
 	}
 

@@ -3,6 +3,8 @@ package acme
 import (
 	"encoding/base64"
 	"io"
+	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -81,11 +83,15 @@ func (n *nonceStore) Use(v string) bool {
 	return n.clk.Now().Before(exp)
 }
 
-// limiter counts events per key in fixed windows (PHASE2 step 11).
+// limiter counts events per key in fixed windows (PHASE2 step 11). It
+// holds at most maxKeys windows: expired ones go first, then the oldest –
+// an attacker with many addresses or names costs memory up to the cap, and
+// beyond it only resets the oldest counters, never the newest.
 type limiter struct {
-	mu   sync.Mutex
-	clk  clock.Clock
-	hits map[string]*window
+	mu      sync.Mutex
+	clk     clock.Clock
+	hits    map[string]*window
+	maxKeys int
 }
 
 type window struct {
@@ -93,7 +99,12 @@ type window struct {
 	n     int
 }
 
-func newLimiter(clk clock.Clock) *limiter { return &limiter{clk: clk, hits: map[string]*window{}} }
+// limiterKeys: about 100 bytes a window, so the cap is some 10 MB.
+const limiterKeys = 100_000
+
+func newLimiter(clk clock.Clock) *limiter {
+	return &limiter{clk: clk, hits: map[string]*window{}, maxKeys: limiterKeys}
+}
 
 // allow counts one event for key and reports whether it stays within max
 // per period; when not, it returns how long until the window resets.
@@ -103,12 +114,8 @@ func (l *limiter) allow(key string, max int, period time.Duration) (bool, time.D
 	now := l.clk.Now()
 	w := l.hits[key]
 	if w == nil || now.Sub(w.start) >= period {
-		if len(l.hits) > 100_000 { // forget old windows rather than grow without bound
-			for k, o := range l.hits {
-				if now.Sub(o.start) >= period {
-					delete(l.hits, k)
-				}
-			}
+		if w == nil && len(l.hits) >= l.maxKeys {
+			l.evict(now, period)
 		}
 		w = &window{start: now}
 		l.hits[key] = w
@@ -118,6 +125,31 @@ func (l *limiter) allow(key string, max int, period time.Duration) (bool, time.D
 	}
 	w.n++
 	return true, 0
+}
+
+// evict drops the expired windows and, if that is not enough, the oldest
+// tenth – one sort per many inserts, not one per insert.
+func (l *limiter) evict(now time.Time, period time.Duration) {
+	for k, o := range l.hits {
+		if now.Sub(o.start) >= period {
+			delete(l.hits, k)
+		}
+	}
+	if len(l.hits) < l.maxKeys {
+		return
+	}
+	type aged struct {
+		key   string
+		start time.Time
+	}
+	all := make([]aged, 0, len(l.hits))
+	for k, o := range l.hits {
+		all = append(all, aged{k, o.start})
+	}
+	slices.SortFunc(all, func(a, b aged) int { return a.start.Compare(b.start) })
+	for _, a := range all[:max(len(all)/10, 1)] {
+		delete(l.hits, a.key)
+	}
 }
 
 // peek reports whether key is still within max per period, without
@@ -131,4 +163,19 @@ func (l *limiter) peek(key string, max int, period time.Duration) (bool, time.Du
 		return true, 0
 	}
 	return false, w.start.Add(period).Sub(now)
+}
+
+// ipKey is the counting key of a client address: IPv4 as it is, IPv6 per
+// /64 – one host usually holds a whole /64.
+func ipKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		p, _ := a.Prefix(64)
+		return p.String()
+	}
+	return a.String()
 }

@@ -19,10 +19,9 @@ import (
 // Rate limits (PHASE2 step 11). Generous for a homelab, tight enough that a
 // broken client loop doesn't fill the database.
 const (
-	limitNewAccountsPerIP     = 10  // per hour and client address
-	limitOrdersPerAccount     = 300 // per hour
-	limitFailedPerIdentifier  = 5   // failed validations per hour and name
-	limitChallengesPerAccount = 300 // validation starts per hour
+	// Validation starts per account and hour; the other limits are tenant
+	// settings (Limits).
+	limitChallengesPerAccount = 300
 )
 
 type identifier struct {
@@ -185,7 +184,7 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, problemErr(http.StatusBadRequest, "malformed", "notBefore and notAfter are not supported – the domain sets the validity"))
 		return
 	}
-	if allowed, wait := s.limits.allow("orders:"+req.account.ID, limitOrdersPerAccount, time.Hour); !allowed {
+	if allowed, wait := s.limits.allow("orders:"+req.account.ID, s.limitsNow(r.Context()).OrdersPerAccount, time.Hour); !allowed {
 		s.fail(w, r, rateLimited(wait, "too many new orders for this account"))
 		return
 	}
@@ -492,7 +491,7 @@ func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, rateLimited(wait, "too many validations for this account"))
 			return
 		}
-		if allowed, wait := s.limits.peek("failed:"+a.IdentifierValue, limitFailedPerIdentifier, time.Hour); !allowed {
+		if allowed, wait := s.limits.peek("failed:"+a.IdentifierValue, s.limitsNow(r.Context()).FailedPerName, time.Hour); !allowed {
 			s.fail(w, r, rateLimited(wait, "too many failed validations for %s", a.IdentifierValue))
 			return
 		}

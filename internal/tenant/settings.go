@@ -29,6 +29,33 @@ type Settings struct {
 	Locality           string
 	State              string
 	Country            string
+	// ACME: the rate limits of the ACME server. Get always fills it; in
+	// Set, nil keeps the stored limits (a v0.1 client doesn't send them).
+	ACME *ACMELimits
+}
+
+// ACMELimits are per hour (PHASE2 step 11).
+type ACMELimits struct {
+	OrdersPerAccount int // new orders per account
+	FailedPerName    int // failed validations per name
+	AccountsPerIP    int // new accounts per client address (IPv6: per /64)
+}
+
+// DefaultACMELimits are the limits of a new tenant (migration 0009).
+var DefaultACMELimits = ACMELimits{OrdersPerAccount: 300, FailedPerName: 5, AccountsPerIP: 10}
+
+// check returns the problems of the limits (same ranges as the schema).
+func (l ACMELimits) check() []string {
+	var problems []string
+	for _, c := range []struct {
+		field  string
+		v, max int
+	}{{"acme_limits.orders_per_account", l.OrdersPerAccount, 10000}, {"acme_limits.failed_per_name", l.FailedPerName, 100}, {"acme_limits.accounts_per_ip", l.AccountsPerIP, 1000}} {
+		if c.v < 1 || c.v > c.max {
+			problems = append(problems, fmt.Sprintf("%s: 1 to %d per hour", c.field, c.max))
+		}
+	}
+	return problems
 }
 
 // Store reads and writes settings in system.db.
@@ -72,7 +99,8 @@ func (s *Store) read(ctx context.Context, tenant string) (*Settings, error) {
 		return nil, err
 	}
 	return &Settings{AllowServerKeygen: r.AllowServerKeygen == 1, Organization: r.SubjectO, OrganizationalUnit: r.SubjectOu,
-		Locality: r.SubjectL, State: r.SubjectSt, Country: r.SubjectC}, nil
+		Locality: r.SubjectL, State: r.SubjectSt, Country: r.SubjectC,
+		ACME: &ACMELimits{OrdersPerAccount: int(r.AcmeOrdersPerHour), FailedPerName: int(r.AcmeFailedPerName), AccountsPerIP: int(r.AcmeAccountsPerIp)}}, nil
 }
 
 // Defaults returns the settings without a permission check (for the
@@ -100,12 +128,19 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if v.Country != "" && (len(v.Country) != 2 || strings.Trim(v.Country, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "") {
 		problems = append(problems, "country: two upper-case letters (ISO 3166-1), e.g. DE")
 	}
+	if v.ACME != nil {
+		problems = append(problems, v.ACME.check()...)
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s", ErrInvalid, strings.Join(problems, "; "))
 	}
 	before, err := s.read(ctx, tenant)
 	if err != nil {
 		return err
+	}
+	limits := *before.ACME
+	if v.ACME != nil {
+		limits = *v.ACME
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -118,7 +153,8 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	}
 	n, err := systemdb.New(tx).SetTenantSettings(ctx, systemdb.SetTenantSettingsParams{
 		AllowServerKeygen: keygen, SubjectO: v.Organization, SubjectOu: v.OrganizationalUnit, SubjectL: v.Locality,
-		SubjectSt: v.State, SubjectC: v.Country, ID: tenant,
+		SubjectSt: v.State, SubjectC: v.Country,
+		AcmeOrdersPerHour: int64(limits.OrdersPerAccount), AcmeFailedPerName: int64(limits.FailedPerName), AcmeAccountsPerIp: int64(limits.AccountsPerIP), ID: tenant,
 	})
 	if err != nil {
 		return err
@@ -131,6 +167,7 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 		Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: map[string]any{
 			"allow_server_keygen": v.AllowServerKeygen, "was_allow_server_keygen": before.AllowServerKeygen,
 			"subject": subjectText(v), "was_subject": subjectText(*before),
+			"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
 		},
 	}); err != nil {
 		return err
@@ -152,4 +189,18 @@ func subjectText(v Settings) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+func limitsText(l ACMELimits) string {
+	return fmt.Sprintf("orders/account %d, failed/name %d, accounts/ip %d per hour", l.OrdersPerAccount, l.FailedPerName, l.AccountsPerIP)
+}
+
+// ACMELimits returns the limits without a permission check (for the ACME
+// server).
+func (s *Store) ACMELimits(ctx context.Context, tenant string) (ACMELimits, error) {
+	v, err := s.read(ctx, tenant)
+	if err != nil {
+		return DefaultACMELimits, err
+	}
+	return *v.ACME, nil
 }

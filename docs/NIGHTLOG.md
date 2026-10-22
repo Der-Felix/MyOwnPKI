@@ -105,6 +105,23 @@ Mutation checks (each made a test fail, then reverted):
 
 - Note: lego v5.5.2 prints `v5.6.1+dev-release` as its version – a constant in lego's source. `go version -m .tools/lego.exe` shows module `v5.5.2` with its checksum.
 
+### Step 11 – rate limits
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Three limits are tenant settings (system.db 0009, `acme_limits` in `/settings`, the settings form): orders per account, failed validations per name, new accounts per address – per hour, defaults 300 / 5 / 10 (the former constants) | Owner plan step 11; an admin tunes them without a restart – the ACME server reads them at every request | Drop migration 0009 before a release; the server falls back to `DefaultLimits` |
+| Validation starts per account (300/h) stays a constant | Not in the plan's list; a guard against a runaway client, not a policy | Add a column like the others |
+| `acme_limits` is **optional in PUT /settings**, always in the answer | v0.1 API clients send the settings without it – absent keeps the stored limits (no breaking change) | Make it required in the spec (breaking) |
+| 429 carries the real wait as `Retry-After` (rounded up, ≥ 1 s) and in the text | RFC 8555 §6.6; a fixed 30 s made clients retry 120 times an hour | `acmeError.retry` |
+| New accounts count per IPv6 **/64** | One host usually holds a whole /64; per address the limit is void | `ipKey()` |
+| Limiter cap 100 000 windows (~10 MB): expired go first, then the oldest tenth at once | Many addresses or failing names can't grow memory without bound; beyond the cap only the oldest counters reset, never the newest | `limiterKeys`, `evict()` |
+
+Tests: `TestRateLimits` (fake clock: accounts, orders, failed validations; `Retry-After` 3600 → 2400 after 20 minutes; open again after the hour; a raised limit counts at the next request), `TestLimiterCap` (50 000 addresses, cap 1 000, the newest keeps its count), `TestIPKeyAndRetry`, API contract cases (valid → 200, 0 → 422), UI (defaults shown, stored, three bad values refused).
+
+Mutation checks: fixed Retry-After, no eviction, newest evicted first, no /64 grouping, settings ignored – each made a test fail.
+
+Not checked locally: `task lint:api` (vacuum is not installed here; the spec change follows the existing schemas) – CI runs it.
+
 ### Where the run stopped (usage limit)
 - Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).
 - Not started: steps 11–15 (no stash – no unfinished code).
