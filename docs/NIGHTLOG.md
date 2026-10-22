@@ -1,3 +1,26 @@
+# Night log – v0.2
+
+> Autonomous run, night of 2026-10-22 → 2026-10-23, branch `night/v0.2` (from `fix/release-notes`,
+> not merged, not pushed). Plan: docs/PHASE2.md with the owner's decisions of 2026-10-22 (§4).
+> Rules: one local commit per finished part, only when `task check` and `task generate:check` are
+> green; never push, no tags, nothing published. No new module in the release binary; Pebble, lego
+> (`go run …@<version>`), certbot and BIND (containers, own CI job) only as test tools. No ADR
+> changes; decisions taken alone are the reversible variant and listed per step.
+>
+> Written in English (ADR-17). The owner's report is at the top; the step-by-step record follows.
+
+## Report for the owner
+
+_Filled in at the end of the run._
+
+## Owner decisions applied (commit "docs: owner decisions for phase 2")
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| ACME is **off while `acme.base_url` is empty**; when set it must be `https://`. `acme.listen` defaults to 127.0.0.1:8081 | A v0.1 config has no `acme` section – requiring `base_url` always would stop every upgraded server from starting | Make `base_url` required |
+| `acme.trusted_proxies` defaults to loopback (`127.0.0.1, ::1`) | Matches the default listener: a proxy on the same host works without extra settings | Empty default (nothing trusted → every request 403) |
+| Sealed server as the owner proposed: finalize stores the CSR, the order stays `processing` with `Retry-After`, issued at the unseal and by a job every minute | The CSR and the authorizations are already proven – waiting costs nothing and needs no new client action. The alternatives are worse: refusing finalize (`serverInternal`) makes the order `invalid` and the client must start again with new challenges; queueing in memory loses the request at a restart. Clients that stop polling (lego and certbot give up after a while) just run again later and get a new order – the old one is issued but unused, which is harmless | Refuse finalize while sealed |
+
 # Night log – Phase 1, steps 14–20 and release
 
 > Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).
