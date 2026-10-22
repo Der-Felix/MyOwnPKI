@@ -157,7 +157,7 @@ func TestFailedChallengeAndPolicy(t *testing.T) {
 	}
 	c.post(chURL, map[string]any{})
 	res := c.waitAuthz(az, "invalid")
-	if !strings.Contains(string(res.body), "never a validation target") {
+	if !strings.Contains(string(res.body), "the address policy of the domain refuses all 1 address") || strings.Contains(string(res.body), "127.0.0.1") {
 		t.Errorf("loopback: %s", res.body)
 	}
 	if o := c.post(order.header.Get("Location"), nil); o.json["status"] != "invalid" {
@@ -171,7 +171,7 @@ func TestFailedChallengeAndPolicy(t *testing.T) {
 		if ch, _ := x.(map[string]any); ch["type"] == "http-01" {
 			chURL, _ = ch["url"].(string)
 			tok, _ := ch["token"].(string)
-			v.chall.set(tok, "not the key authorization")
+			v.chall.set(tok, "something else")
 		}
 	}
 	c.post(chURL, map[string]any{})

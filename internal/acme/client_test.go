@@ -43,9 +43,12 @@ type env struct {
 }
 
 type challengeServer struct {
-	mu    sync.Mutex
-	files map[string]string // token -> body
-	srv   *httptest.Server
+	mu       sync.Mutex
+	files    map[string]string           // token -> body
+	handlers map[string]http.HandlerFunc // token -> own answer (redirect tests)
+	srv      *httptest.Server            // 192.0.2.10:80 and 192.0.2.11:80
+	tls      *httptest.Server            // 192.0.2.10:443
+	banner   net.Listener                // 192.0.2.12:80, not HTTP
 }
 
 func (c *challengeServer) set(token, body string) {
@@ -71,19 +74,43 @@ func newEnv(t *testing.T, approval string) *env {
 		t.Fatal(err)
 	}
 	v := &env{Instance: inst, s: s, txt: map[string][]string{}, addrFor: map[string]netip.Addr{}}
-	v.chall = &challengeServer{files: map[string]string{}}
-	v.chall.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	v.chall = &challengeServer{files: map[string]string{}, handlers: map[string]http.HandlerFunc{}}
+	serve := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
 		v.chall.mu.Lock()
 		body, ok := v.chall.files[token]
+		h := v.chall.handlers[token]
 		v.chall.mu.Unlock()
+		if h != nil {
+			h(w, r)
+			return
+		}
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		_, _ = io.WriteString(w, body)
-	}))
+	})
+	v.chall.srv = httptest.NewServer(serve)
 	t.Cleanup(v.chall.srv.Close)
+	v.chall.tls = httptest.NewTLSServer(serve)
+	t.Cleanup(v.chall.tls.Close)
+	banner, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.chall.banner = banner
+	t.Cleanup(func() { _ = banner.Close() })
+	go func() {
+		for {
+			conn, aerr := banner.Accept()
+			if aerr != nil {
+				return
+			}
+			_, _ = io.WriteString(conn, "SSH-2.0-SECRET-BANNER-4711\r\n")
+			_ = conn.Close()
+		}
+	}()
 	target := v.chall.srv.Listener.Addr().String()
 	s.valid.lookupIP = func(_ context.Context, host string) ([]netip.Addr, error) {
 		if a, ok := v.addrFor[host]; ok {
@@ -92,12 +119,18 @@ func newEnv(t *testing.T, approval string) *env {
 		return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
 	}
 	s.valid.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// Only the checked address on port 80 reaches the challenge server.
-		if addr != "192.0.2.10:80" && addr != "192.0.2.11:80" {
-			return nil, &net.OpError{Op: "dial", Net: network, Err: io.ErrUnexpectedEOF}
-		}
+		// Only checked addresses reach the test targets.
 		var d net.Dialer
-		return d.DialContext(ctx, network, target)
+		switch addr {
+		case "192.0.2.10:80", "192.0.2.11:80":
+			return d.DialContext(ctx, network, target)
+		case "192.0.2.10:443":
+			return d.DialContext(ctx, network, v.chall.tls.Listener.Addr().String())
+		case "192.0.2.12:80":
+			return d.DialContext(ctx, network, v.chall.banner.Addr().String())
+		}
+		// Like a real dialer, the error names the address.
+		return nil, &net.OpError{Op: "dial", Net: network, Addr: net.TCPAddrFromAddrPort(netip.MustParseAddrPort(addr)), Err: io.ErrUnexpectedEOF}
 	}
 	s.valid.lookupTXT = func(_ context.Context, name string) ([]string, error) {
 		v.txtMu.Lock()

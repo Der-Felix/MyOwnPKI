@@ -68,6 +68,29 @@ _Filled in at the end of the run._
 - certbot, acme.sh, Traefik and Caddy (part C/D: CI job and the guide).
 - A real DNS server for dns-01 (the tests replace the lookup; BIND comes in the CI job).
 
+## Security fix after part A: http-01 reads nothing back
+
+Owner finding: with the address policy `internal`, the validator could be used to read the inside network – a redirect to `http://192.168.1.1/` put the start of that page into the challenge error.
+
+| Change | Why | How to reverse |
+|---|---|---|
+| Errors carry only status and length (`answered 37 bytes that are not the key authorization`, `answered with status 401`) | The answer of a target never reaches the client | `http01()` in `internal/acme/validate.go` |
+| Network and DNS errors are named by kind (`timed out`, `could not connect`, `TLS handshake failed`, `the connection failed or the answer was not HTTP`, `no such name`) – never their text | Go's errors quote what the target sent (`malformed HTTP response "SSH-2.0-…"`), name inside addresses and the resolver | `netProblem()`, `dnsProblem()` |
+| Dial failures: counts of refused and unreachable addresses, no addresses; the details go to the server log (Info) | Resolved addresses of inside names are topology | `policyDial()` |
+| Redirects only to identifiers of an order the authorization belongs to; an IP identifier only to exactly that address; else `incorrectResponse` "redirect to a host outside this order" (PHASE2 §2 step 7, as planned) | The validator is not a free HTTP client; the dialer still checks the address policy on every hop | `CheckRedirect` + `orderHosts()` |
+
+Tests (`internal/acme/validate_test.go`): redirects to a foreign host in the domain, a host elsewhere, an IP outside, an IP in the range but not in the order, another IP for an IP order, the metadata address – all refused, the target not in the message; same host on 443 and another identifier of the order – valid. A target with a secret in the page, in an error page with a header, in a long page, in a redirect path, a non-HTTP banner, an unreachable address: the secret/address is in neither the challenge error, the audit entry (`details_json`) nor the server log.
+
+Mutation checks (each made a test fail, then reverted):
+
+| Mutation | Caught by |
+|---|---|
+| Redirect host check off | `TestHTTP01RedirectsStayInTheOrder` |
+| Old message `answered %q` with the body | `TestHTTP01ReadsNothingBack` |
+| Transport error text in the message | `TestHTTP01ReadsNothingBack` (banner) |
+| Other identifiers of the order not allowed | `TestHTTP01RedirectsStayInTheOrder` (www → nas) |
+| Dial error text in the message | `TestHTTP01ReadsNothingBack` (unreachable) – survived at first, because the test dialer's error had no address; the stub now names the address like a real dialer |
+
 ## Part B – Steps 10–13
 
 | Decision | Why | How to reverse |

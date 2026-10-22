@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -135,11 +136,15 @@ func (v *validator) validate(ctx context.Context, j job) error {
 	keyAuth := keyAuthorization(j.challenge.Token, j.thumbprint)
 	switch j.challenge.Type {
 	case ca.ChallengeHTTP01:
-		return v.http01(ctx, j.authz.IdentifierType, value, j.challenge.Token, keyAuth, d.AddressPolicy)
+		hosts, herr := v.orderHosts(ctx, j.authz)
+		if herr != nil {
+			return herr
+		}
+		return v.http01(ctx, j.authz.IdentifierType, value, j.challenge.Token, keyAuth, d.AddressPolicy, hosts)
 	case ca.ChallengeDNS01:
 		return v.dns01(ctx, value, keyAuth)
 	}
-	return vfail("malformed", "unknown challenge type %q", j.challenge.Type)
+	return vfail("malformed", "unknown challenge type %q", clip(j.challenge.Type))
 }
 
 // allowedAddr applies the address policy.
@@ -175,25 +180,66 @@ func (v *validator) policyDial(policy string) func(ctx context.Context, network,
 		if a, perr := netip.ParseAddr(host); perr == nil {
 			addrs = []netip.Addr{a}
 		} else if addrs, err = v.lookupIP(ctx, host); err != nil {
-			return nil, vfail("dns", "%s doesn't resolve: %v", host, err)
+			return nil, vfail("dns", "%s: %s", host, dnsProblem(err))
 		}
-		var refused []string
+		// The client learns counts and kinds, never addresses or what a
+		// target said: with the policy "internal" this would otherwise map
+		// the inside network. The server log keeps the details.
+		var policyRefused, dialFailed int
+		var kinds []string
 		for _, a := range addrs {
 			if perr := allowedAddr(a, policy); perr != nil {
-				refused = append(refused, perr.Error())
+				policyRefused++
+				v.s.log.Info("acme validation: address refused", slog.String("host", host), slog.String("reason", perr.Error()))
 				continue
 			}
 			conn, derr := v.dial(ctx, network, netip.AddrPortFrom(a.Unmap(), portNumber(port)).String())
 			if derr == nil {
 				return conn, nil
 			}
-			refused = append(refused, derr.Error())
+			dialFailed++
+			kinds = append(kinds, netProblem(derr))
+			v.s.log.Info("acme validation: connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", netProblem(derr)))
 		}
-		if len(refused) == 0 {
+		switch {
+		case len(addrs) == 0:
 			return nil, vfail("dns", "%s has no address", host)
+		case dialFailed == 0:
+			return nil, vfail("connection", "%s: the address policy of the domain refuses all %d address(es)", host, policyRefused)
 		}
-		return nil, vfail("connection", "%s: %s", host, strings.Join(refused, "; "))
+		return nil, vfail("connection", "%s: %d address(es) refused by the address policy, %d could not be reached (%s)",
+			host, policyRefused, dialFailed, strings.Join(slices.Compact(kinds), ", "))
 	}
+}
+
+// netProblem names the kind of a network error – never its text, which
+// can carry what the target sent (a malformed HTTP response quotes it).
+func netProblem(err error) string {
+	var ne net.Error
+	var op *net.OpError
+	var rh tls.RecordHeaderError
+	var alert tls.AlertError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return "timed out"
+	case errors.As(err, &rh), errors.As(err, &alert):
+		return "TLS handshake failed"
+	case errors.As(err, &op) && op.Op == "dial":
+		return "could not connect"
+	}
+	return "the connection failed or the answer was not HTTP"
+}
+
+// dnsProblem names the kind of a DNS error, without the resolver's address.
+func dnsProblem(err error) string {
+	var de *net.DNSError
+	switch {
+	case errors.As(err, &de) && de.IsNotFound:
+		return "no such name"
+	case errors.As(err, &de) && de.IsTimeout, errors.Is(err, context.DeadlineExceeded):
+		return "the DNS lookup timed out"
+	}
+	return "the DNS lookup failed"
 }
 
 func portNumber(p string) uint16 {
@@ -204,8 +250,11 @@ func portNumber(p string) uint16 {
 }
 
 // http01 fetches http://<identifier>/.well-known/acme-challenge/<token>
-// (RFC 8555 §8.3, RFC 8738 for IPs).
-func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, policy string) error {
+// (RFC 8555 §8.3, RFC 8738 for IPs). Redirects stay within the order:
+// only to hosts that are identifiers of an order this authorization
+// belongs to, an IP identifier only as exactly that address. The dialer
+// checks the address policy again on every hop.
+func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, policy string, hosts map[string]bool) error {
 	host := value
 	if typ == "ip" {
 		if a, err := netip.ParseAddr(value); err == nil && a.Is6() {
@@ -225,18 +274,21 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 			if len(via) >= maxRedirects {
 				return vfail("connection", "more than %d redirects", maxRedirects)
 			}
+			if !hosts[redirectHost(req.URL.Hostname())] {
+				return vfail("incorrectResponse", "redirect to a host outside this order")
+			}
 			port := req.URL.Port()
 			switch req.URL.Scheme {
 			case "http":
 				if port != "" && port != "80" {
-					return vfail("connection", "redirect to port %s: only 80 and 443", port)
+					return vfail("connection", "redirect to port %s: only 80 and 443", clip(port))
 				}
 			case "https":
 				if port != "" && port != "443" {
-					return vfail("connection", "redirect to port %s: only 80 and 443", port)
+					return vfail("connection", "redirect to port %s: only 80 and 443", clip(port))
 				}
 			default:
-				return vfail("connection", "redirect to %s: only http and https", req.URL.Scheme)
+				return vfail("connection", "redirect to a scheme other than http and https")
 			}
 			return nil
 		},
@@ -244,7 +296,7 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 	url := "http://" + host + "/.well-known/acme-challenge/" + token
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return vfail("malformed", "%v", err)
+		return vfail("malformed", "the challenge URL can't be built")
 	}
 	req.Header.Set("User-Agent", "MyOwnPKI-ACME-validator")
 	resp, err := client.Do(req)
@@ -253,23 +305,61 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 		if errors.As(err, &ve) {
 			return ve
 		}
-		return vfail("connection", "fetching %s: %v", url, err)
+		return vfail("connection", "fetching %s: %s", url, netProblem(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// Only status and length go back to the client – what the target said
+	// stays here (with the policy "internal" it may be an inside system).
 	if resp.StatusCode != http.StatusOK {
-		return vfail("incorrectResponse", "%s answered %d", url, resp.StatusCode)
+		return vfail("incorrectResponse", "%s answered with status %d", url, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBody+1))
 	if err != nil {
-		return vfail("connection", "reading %s: %v", url, err)
+		return vfail("connection", "reading the answer of %s: %s", url, netProblem(err))
 	}
 	if len(body) > maxHTTPBody {
 		return vfail("incorrectResponse", "%s answered more than %d bytes", url, maxHTTPBody)
 	}
 	if got := strings.TrimSpace(string(body)); got != keyAuth {
-		return vfail("incorrectResponse", "%s answered %q, not the key authorization", url, clip(got))
+		return vfail("incorrectResponse", "%s answered %d bytes that are not the key authorization", url, len(body))
 	}
 	return nil
+}
+
+// redirectHost is a redirect target as it is compared with identifiers:
+// lower case without a trailing dot, an IP in its canonical form.
+func redirectHost(h string) string {
+	if a, err := netip.ParseAddr(h); err == nil {
+		return "ip:" + a.Unmap().String()
+	}
+	return "dns:" + strings.TrimSuffix(strings.ToLower(h), ".")
+}
+
+// orderHosts are the identifiers of every order the authorization belongs
+// to (an authorization can serve several orders) plus its own.
+func (v *validator) orderHosts(ctx context.Context, a pkidb.AcmeAuthz) (map[string]bool, error) {
+	hosts := map[string]bool{a.IdentifierType + ":" + a.IdentifierValue: true}
+	q := pkidb.New(v.s.db)
+	ids, err := q.ListACMEOrdersOfAuthz(ctx, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		o, oerr := q.GetACMEOrder(ctx, id)
+		if oerr != nil {
+			return nil, oerr
+		}
+		var idents []identifier
+		if jerr := json.Unmarshal([]byte(o.Identifiers), &idents); jerr != nil {
+			return nil, jerr
+		}
+		for _, i := range idents {
+			if !strings.HasPrefix(i.Value, "*.") { // a wildcard is no host
+				hosts[i.key()] = true
+			}
+		}
+	}
+	return hosts, nil
 }
 
 // dns01 looks for the digest of the key authorization in the TXT records
@@ -286,7 +376,7 @@ func (v *validator) dns01(ctx context.Context, name, keyAuth string) error {
 		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			return vfail("dns", "%s has no TXT record", record)
 		}
-		return vfail("dns", "looking up %s: %v", record, err)
+		return vfail("dns", "%s: %s", record, dnsProblem(err))
 	}
 	for _, t := range txts {
 		if strings.TrimSpace(t) == want {
