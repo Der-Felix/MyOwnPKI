@@ -103,10 +103,16 @@ func (e *confEnv) must(t *testing.T, env []string, name string, args ...string) 
 }
 
 // docker runs a client image on the host network with the work directory
-// mounted at /work.
+// mounted at /work, as the user that runs the test: what the client writes
+// (certbot's live/ is 0700) stays readable for the checks, without loosening
+// any permission. Port 80 works without root because run.sh lowers
+// net.ipv4.ip_unprivileged_port_start and the network is the host's.
 func (e *confEnv) docker(t *testing.T, image string, mounts []string, args ...string) {
 	t.Helper()
 	full := []string{"run", "--rm", "--network", "host", "-v", e.work + ":/work"}
+	if uid := os.Getuid(); uid >= 0 { // -1 on Windows, where this test does not run
+		full = append(full, "--user", fmt.Sprintf("%d:%d", uid, os.Getgid()))
+	}
 	for _, m := range mounts {
 		full = append(full, "-v", m)
 	}
