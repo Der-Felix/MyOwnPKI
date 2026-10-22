@@ -61,6 +61,13 @@ func newEnv(t *testing.T, approval string) *env {
 	t.Helper()
 	inst := testinstance.New(t, testinstance.Options{})
 	inst.Unseal(t)
+	return newEnvOn(t, inst, approval)
+}
+
+// newEnvOn sets up the domain, the ACME server and the network edges on an
+// unsealed instance.
+func newEnvOn(t *testing.T, inst *testinstance.Instance, approval string) *env {
+	t.Helper()
 	ctx := t.Context()
 	issuing := "issuing"
 	wild := true

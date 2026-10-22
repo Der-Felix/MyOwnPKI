@@ -71,6 +71,10 @@ jobs:
       - run: task generate:check
       - name: Fuzz the ACME JWS parser (short run)
         run: task fuzz
+      # The previous release (Taskfile UPGRADE_FROM) makes an instance and a
+      # backup; this build restores, migrates and issues by ACME.
+      - name: Upgrade test from the previous release
+        run: task upgrade:test
 
   race:
     name: tests with race detector
@@ -206,6 +210,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # lego with the in-process test network: EAB, ARI renewal, revoke
+      # and the CRL check (the same tests as locally).
+      - name: lego walking skeleton, EAB, ARI
+        run: task acme:lego
       - name: Conformance run
         env:
           CONF_WORK: ${{ runner.temp }}/conformance
