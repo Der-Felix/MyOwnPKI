@@ -128,6 +128,22 @@ type DbInfo struct {
 	Value string
 }
 
+type Domain struct {
+	ID                string
+	Name              string
+	CaID              string
+	IncludeSubdomains int64
+	Wildcards         int64
+	ChallengeTypes    string
+	Approval          string
+	Preset            string
+	ValidityDays      sql.NullInt64
+	AddressPolicy     string
+	IpRanges          string
+	CreatedAt         string
+	UpdatedAt         string
+}
+
 type ImportJob struct {
 	ID         string
 	Kind       string

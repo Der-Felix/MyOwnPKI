@@ -38,6 +38,12 @@ func (a *API) table() []Route {
 		{OperationID: "finishWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/finish", access: signedIn, body: true, handle: a.passkeyRegisterFinish},
 		{OperationID: "deleteWebAuthnCredential", Method: http.MethodPost, Path: "/users/me/webauthn/{passkeyId}/remove", access: signedIn, body: true, handle: a.deletePasskey},
 
+		{OperationID: "listDomains", Method: http.MethodGet, Path: "/domains", access: signedIn, handle: a.listDomains},
+		{OperationID: "createDomain", Method: http.MethodPost, Path: "/domains", access: signedIn, body: true, handle: a.createDomain},
+		{OperationID: "getDomain", Method: http.MethodGet, Path: "/domains/{domainId}", access: signedIn, handle: a.getDomain},
+		{OperationID: "updateDomain", Method: http.MethodPatch, Path: "/domains/{domainId}", access: signedIn, body: true, handle: a.updateDomain},
+		{OperationID: "deleteDomain", Method: http.MethodDelete, Path: "/domains/{domainId}", access: signedIn, handle: a.deleteDomain},
+
 		{OperationID: "listPresets", Method: http.MethodGet, Path: "/presets", access: signedIn, handle: a.listPresets},
 		{OperationID: "getPreset", Method: http.MethodGet, Path: "/presets/{presetName}", access: signedIn, handle: a.getPreset},
 

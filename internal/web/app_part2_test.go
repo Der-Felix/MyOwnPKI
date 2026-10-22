@@ -294,3 +294,48 @@ func tarGz(t *testing.T, dir string) []byte {
 	_ = zw.Close()
 	return buf.Bytes()
 }
+
+// TestDomainPages (PHASE2 step 1): create, change, a refused change and the
+// deletion through the forms; viewers see the list without commands.
+func TestDomainPages(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	token := b.csrf(t)
+	form := url.Values{"csrf_token": {token}, "name": {"homelab.lan"}, "ca": {"issuing"}, "subdomains": {"yes"}, "http01": {"yes"},
+		"approval": {"open"}, "preset": {"server"}, "address": {"internal"}}
+	r := b.post(t, "/domains", form)
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/domains/dom_") {
+		t.Fatalf("create: %d %q", r.Code, r.location())
+	}
+	detail := r.location()
+	if got := b.get(t, detail).html(); !strings.Contains(got, "homelab.lan") || !strings.Contains(got, "open – any account") {
+		t.Errorf("detail:\n%s", got)
+	}
+	// Wildcards without dns-01: refused, with the reason on the page.
+	form.Set("wildcards", "yes")
+	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "dns-01") {
+		t.Errorf("refused change: %d", rr.Code)
+	}
+	form.Set("dns01", "yes")
+	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, detail), "saved") {
+		t.Errorf("change: %d", rr.Code)
+	}
+	if got := b.get(t, "/domains").html(); !strings.Contains(got, "http-01, dns-01") || !strings.Contains(got, "New domain") {
+		t.Errorf("list:\n%s", got)
+	}
+	v.User(t, "viewer", false, authz.Binding{Tenant: "default", Role: authz.Viewer})
+	vb := v.browser("192.0.2.2")
+	vb.signIn(t, "viewer", testinstance.Password)
+	if got := vb.get(t, "/domains").html(); !strings.Contains(got, "homelab.lan") || strings.Contains(got, "New domain") {
+		t.Errorf("viewer list:\n%s", got)
+	}
+	if got := vb.get(t, detail).html(); strings.Contains(got, "Delete domain") {
+		t.Error("the viewer is offered the deletion")
+	}
+	if rr := b.post(t, detail+"/delete", url.Values{"csrf_token": {token}}); rr.Code != http.StatusSeeOther || rr.location() != "/domains" {
+		t.Errorf("delete: %d %q", rr.Code, rr.location())
+	}
+}

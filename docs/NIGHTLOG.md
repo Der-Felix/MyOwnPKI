@@ -21,6 +21,30 @@ _Filled in at the end of the run._
 | `acme.trusted_proxies` defaults to loopback (`127.0.0.1, ::1`) | Matches the default listener: a proxy on the same host works without extra settings | Empty default (nothing trusted → every request 403) |
 | Sealed server as the owner proposed: finalize stores the CSR, the order stays `processing` with `Retry-After`, issued at the unseal and by a job every minute | The CSR and the authorizations are already proven – waiting costs nothing and needs no new client action. The alternatives are worse: refusing finalize (`serverInternal`) makes the order `invalid` and the client must start again with new challenges; queueing in memory loses the request at a restart. Clients that stop polling (lego and certbot give up after a while) just run again later and get a new order – the old one is issued but unused, which is harmless | Refuse finalize while sealed |
 
+## Part A – Steps 1–9: domains to finalize (walking skeleton)
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| Domain logic lives in `internal/ca` (engine methods, `domains.go`), not a new `internal/domain` package | It needs the CA's name constraints, `loadIssuer` and the pki.db writer; a package of its own would copy them | Move it out behind an interface |
+| Managing domains needs `ca.manage` (admins, with step-up); reading them `pki.read` | A domain decides what is issued automatically – as weighty as a CA setting. No new permission (authz stays as approved) | A permission `domain.manage` |
+| A domain name has at least two labels (no `lan`, no TLD), punycode, lower case, no wildcard; the CA must be an active intermediate with an online key, and its name constraints must permit the domain (and `x.<domain>` when sub-domains are included) | A one-label domain would hand out a whole namespace; a root never issues leaves | Allow one label with a warning |
+| IP ranges of a domain (RFC 8738 IP identifiers) are a JSON column `ip_ranges` of `domains`, not a table `domain_ips` | One row = one policy, read in one query; the list is short | A table |
+| Deleting a domain is always allowed and audited; finalize checks the domain again, so pending orders of a deleted domain fail there | Nothing dangles: no issuance without a domain | Refuse while orders are open |
+| **One policy engine:** `ca.Request` gets an optional `ACME *ACMEOrder` (order ID, account). The engine then requires every name to lie in a domain, all of one CA and one preset, and takes CA, preset and validity (default 90 days, capped by the CA) from the domains. UI/API issuance without it is unchanged | ADR-19: ACME goes through the same `Issue` – names, constraints, key policy, build, audit. Phase 1 issuance must not change (PHASE2 step 2) | – |
+| Order and certificate in **one pki.db transaction**: `Issue` takes an optional hook that runs in its storing transaction (ACME sets the order to `valid` with the certificate ID there) | ADR-06 / PHASE2 §1: a crash can't leave a certificate without its order, or a second issuance for the same order | Two transactions with an idempotent retry |
+| ACME issuances use the principal `authz.System("acme")` and the audit actor `acme_account:<id>` | ACME clients are not users; the ACME layer has already checked account, approvals and challenges | A role for ACME accounts |
+| JOSE in `internal/acme/jose`: strict top-level and header parsing with a token reader that refuses duplicate names; the algorithm from the key (P-256 → ES256, P-384 → ES384, RSA ≥ 2048 → RS256, Ed25519 → EdDSA), header must match; ES signatures exactly 64/96 bytes R‖S; a `jwk` with private members (`d`, …) refused; RSA exponent odd and ≥ 3 | Owner Q3 | – |
+| **EAB is the one place with HS256:** the inner JWS of `externalAccountBinding` is an HMAC by RFC 8555 §7.3.4; it is verified by a separate function with HS256 only, never by the outer verifier | The outer rule "no HS*" stays absolute | – |
+| ACME runs in `internal/acme` as an `http.Handler` on `acme.listen`; the server starts that listener only when `acme.base_url` is set | Off by default, like everything that opens a port | – |
+| Peers outside `acme.trusted_proxies` get **403** with an ACME problem; the client address for rate limits and audit is the last X-Forwarded-For entry that is not a trusted proxy | Owner Q1 | – |
+| Account status to the client is RFC's `valid`; whether it is **approved** is our own column. With approval level `account` an unapproved account's `newOrder` gets `unauthorized` "waits for approval in MyOwnPKI (account …)" – the client retries later. A valid EAB approves at once | RFC 8555 knows no "pending" account; standard clients handle a refused order and rerun | Refuse `newAccount` without EAB |
+| Approval level `new_name`: `newOrder` with a name never issued before records a request in `acme_names` and answers `unauthorized` "name … waits for approval" | Simpler and clearer than an authorization that waits; the same client rerun works | A pending authorization |
+| Nonces in memory (at most 100,000, 1 hour); a restart answers `badNonce`, which clients retry | RFC 8555 §6.5 | A table |
+| Validators run in a bounded pool (4 at a time) after the challenge POST; the answer is `processing`, the client polls | No long request; SSRF limits per security.md | – |
+| http-01: port 80 only – the tests replace the dialer, never the port rule | A test switch must not become a production switch | – |
+| lego as the end-to-end check: a test that runs only with `LEGO_BIN` set (Taskfile `acme:lego` builds lego `@v4.x` with `go install` into a temp dir); a TLS reverse proxy in the test plays Caddy | Owner: test tool only, no go.mod entry | – |
+
 # Night log – Phase 1, steps 14–20 and release
 
 > Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).
