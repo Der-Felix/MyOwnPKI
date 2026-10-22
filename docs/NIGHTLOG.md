@@ -28,7 +28,7 @@
 | `52adcdc` | night log – report after step 11 |
 | `d47d18a` | step 12 – ARI (renewalInfo, replaces) |
 | `24e0a5a` | night log – report after step 12 |
-| _this commit_ | step 13 – approvals in the UI, EAB keys, screenshots |
+| `2a23f4c` | step 13 – approvals in the UI, EAB keys, screenshots |
 
 ### Stash
 None.
