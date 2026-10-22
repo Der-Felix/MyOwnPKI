@@ -26,7 +26,7 @@
 | `b97053b` | **security fix**: http-01 reads nothing back, redirects only within the order |
 | `39b90e5` | step 11 – rate limits as tenant settings |
 | `52adcdc` | night log – report after step 11 |
-| _next_ | step 12 – ARI (renewalInfo, replaces) |
+| `d47d18a` | step 12 – ARI (renewalInfo, replaces) |
 
 ### Stash
 None.
