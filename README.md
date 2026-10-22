@@ -7,9 +7,9 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: v0.1 – phase 1 complete.** A working CA with web UI, REST API, legacy import and
-> backup – it replaces the `pki.sh` Bash suite. The ACME server follows in v0.2, the agent and
-> monitoring in v0.3. See [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
+> **Status: v0.1 released – phase 1 complete; v0.2 (the ACME server) in preparation.** A working CA
+> with web UI, REST API, legacy import and backup – it replaces the `pki.sh` Bash suite. The ACME
+> server comes with v0.2, the agent and monitoring with v0.3. See [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
 
 MyOwnPKI is a self-hosted certificate authority platform. v0.1 brings the CA, the web UI and the
 REST API, the import of a `pki.sh` PKI and backups; the rest of this list follows up to v1.0:
@@ -22,7 +22,7 @@ REST API, the import of a `pki.sh` PKI and backups; the rest of this list follow
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 
-> **Screenshots of v0.1** – a demo instance (`myownpki init --demo`) with sample certificates
+> **Screenshots** (the ACME pages: v0.2) – a demo instance (`myownpki init --demo`) with sample certificates
 > under homelab.example.
 
 <p><img src="docs/screenshots/dashboard.png" alt="Dashboard: figures, what needs attention, certificates expiring in 30 days" width="100%"></p>
@@ -47,6 +47,11 @@ REST API, the import of a `pki.sh` PKI and backups; the rest of this list follow
     <td><a href="docs/screenshots/users.png"><img src="docs/screenshots/users.png" alt="Users and roles"></a><br>Users and roles</td>
     <td><a href="docs/screenshots/audit-log.png"><img src="docs/screenshots/audit-log.png" alt="Audit log with filters"></a><br>Audit log</td>
     <td><a href="docs/screenshots/certificate-detail-dark.png"><img src="docs/screenshots/certificate-detail-dark.png" alt="Certificate detail in the dark theme"></a><br>Detail, dark theme</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/acme-accounts.png"><img src="docs/screenshots/acme-accounts.png" alt="ACME accounts: one waits for approval"></a><br>ACME accounts</td>
+    <td><a href="docs/screenshots/acme-names.png"><img src="docs/screenshots/acme-names.png" alt="New names waiting for approval"></a><br>ACME new names</td>
+    <td><a href="docs/screenshots/acme-orders.png"><img src="docs/screenshots/acme-orders.png" alt="ACME orders with their result"></a><br>ACME orders</td>
   </tr>
 </table>
 
@@ -114,7 +119,7 @@ are reproducible: the same tag built again gives byte-identical archives.
 | Path | Content |
 |---|---|
 | `docs/PLAN.md` | Project plan, architecture decisions (ADRs), roadmap |
-| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies |
+| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies, the ACME server behind a reverse proxy |
 | `docs/RELEASING.md` | How a release is made (owner checklist) |
 | `deploy/` | Example configuration, Dockerfile and Docker Compose file |
 | `CHANGELOG.md` | Changes per release |
