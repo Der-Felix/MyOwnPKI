@@ -183,8 +183,9 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 		return
 	}
 	req := ca.Request{
-		CSR: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: o.CsrDer}),
-		Who: keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: o.AccountID, Name: "acme:" + o.AccountID}, Principal: authz.System("acme")},
+		CSR:       pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: o.CsrDer}),
+		RenewalOf: o.Replaces.String, // RFC 9773 replaces; "" when not a renewal
+		Who:       keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: o.AccountID, Name: "acme:" + o.AccountID}, Principal: authz.System("acme")},
 		ACME: &ca.ACMEOrder{OrderID: o.ID, AccountID: o.AccountID, Stored: func(ctx context.Context, tx *sql.Tx, is *ca.Issued) error {
 			n, uerr := pkidb.New(tx).SetACMEOrderValid(ctx, pkidb.SetACMEOrderValidParams{CertificateID: sql.NullString{String: is.ID, Valid: true}, UpdatedAt: dbTime(s.now()), ID: o.ID})
 			if uerr != nil {

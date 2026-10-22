@@ -1,8 +1,11 @@
 package acme
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"io/fs"
 	"net"
@@ -13,9 +16,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
 )
@@ -42,7 +47,13 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := http.NotFoundHandler()
-	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
+	var ariCalls atomic.Int32 // lego asks renewalInfo (RFC 9773)
+	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/renewal-info/") {
+			ariCalls.Add(1)
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	proxy.StartTLS()
 	t.Cleanup(proxy.Close)
 	s, err := New(Options{Engine: inst.Engine, BaseURL: proxy.URL + "/acme", TrustedProxies: "127.0.0.1, ::1", Clock: inst.Clock})
@@ -86,8 +97,9 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 		}
 		return string(out)
 	}
-	run("run", "--server", proxy.URL+"/acme/directory", "--path", legoDir, "--email", "admin@homelab.lan", "--accept-tos",
-		"--domains", "nas.homelab.lan", "--http", "--http.address", legoHTTP, "--key-type", "EC256")
+	obtain := []string{"run", "--server", proxy.URL + "/acme/directory", "--path", legoDir, "--email", "admin@homelab.lan", "--accept-tos",
+		"--domains", "nas.homelab.lan", "--http", "--http.address", legoHTTP, "--key-type", "EC256", "--no-random-sleep"}
+	run(obtain...)
 
 	var leafFile string
 	_ = filepath.WalkDir(legoDir, func(p string, d fs.DirEntry, err error) error {
@@ -122,6 +134,16 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 		t.Fatalf("openssl verify: %v\n%s", err, out)
 	}
 
+	// ARI (step 12): a second run asks renewalInfo and leaves the
+	// certificate alone – its window lies in the future.
+	run(obtain...)
+	if ariCalls.Load() == 0 {
+		t.Error("lego did not ask renewalInfo")
+	}
+	if again, _ := os.ReadFile(leafFile); !bytes.Equal(again, data) { // #nosec G304 -- the test's own temp dir
+		t.Error("lego renewed although the window is in the future")
+	}
+
 	// Revoke (owner Q3): lego revokes with the account key, reason
 	// superseded; the issuing CA's new CRL lists the certificate, and
 	// OpenSSL with CRL checking refuses it.
@@ -142,5 +164,25 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 	out, err = exec.CommandContext(t.Context(), opensslBin, "verify", "-crl_check", "-CRLfile", crlFile, "-CAfile", rootFile, "-untrusted", interFile, leafFile).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "certificate revoked") {
 		t.Fatalf("openssl verify -crl_check after revoke: %v\n%s", err, out)
+	}
+
+	// ARI after the revocation: the window is in the past, so the next run
+	// renews at once and names the old certificate in "replaces"; the new
+	// certificate records it as renewal_of.
+	run(obtain...)
+	renewed, _ := os.ReadFile(leafFile) // #nosec G304 -- the test's own temp dir
+	nb, _ := pem.Decode(renewed)
+	if nb == nil || bytes.Equal(nb.Bytes, leaf.Raw) {
+		t.Fatal("lego did not renew the revoked certificate")
+	}
+	q := pkidb.New(inst.Engine.PKI)
+	fp := func(der []byte) string { s := sha256.Sum256(der); return strings.ToUpper(hex.EncodeToString(s[:])) }
+	oldRow, err := q.GetCertificateByFingerprint(t.Context(), fp(leaf.Raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRow, err := q.GetCertificateByFingerprint(t.Context(), fp(nb.Bytes))
+	if err != nil || newRow.RenewalOf.String != oldRow.ID {
+		t.Errorf("renewal_of %q, want %q (%v) – lego sent no replaces?", newRow.RenewalOf.String, oldRow.ID, err)
 	}
 }

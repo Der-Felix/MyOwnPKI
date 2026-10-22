@@ -92,6 +92,18 @@ func (q *Queries) CountACMEOrdersProcessing(ctx context.Context) (int64, error) 
 	return count, err
 }
 
+const countACMEOrdersReplacing = `-- name: CountACMEOrdersReplacing :one
+SELECT count(*) FROM acme_orders WHERE replaces = ? AND status <> 'invalid'
+`
+
+// RFC 9773: a certificate is replaced by one order at most that is not invalid.
+func (q *Queries) CountACMEOrdersReplacing(ctx context.Context, replaces sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countACMEOrdersReplacing, replaces)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deactivateACMEAuthzsOfAccount = `-- name: DeactivateACMEAuthzsOfAccount :execrows
 UPDATE acme_authzs SET status = 'deactivated', updated_at = ? WHERE account_id = ? AND status IN ('pending', 'valid')
 `
@@ -360,7 +372,7 @@ func (q *Queries) GetACMEName(ctx context.Context, name string) (AcmeName, error
 }
 
 const getACMEOrder = `-- name: GetACMEOrder :one
-SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at FROM acme_orders WHERE id = ?
+SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at, replaces FROM acme_orders WHERE id = ?
 `
 
 func (q *Queries) GetACMEOrder(ctx context.Context, id string) (AcmeOrder, error) {
@@ -377,12 +389,13 @@ func (q *Queries) GetACMEOrder(ctx context.Context, id string) (AcmeOrder, error
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Replaces,
 	)
 	return i, err
 }
 
 const getACMEOrderByCertificate = `-- name: GetACMEOrderByCertificate :one
-SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at FROM acme_orders WHERE certificate_id = ?
+SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at, replaces FROM acme_orders WHERE certificate_id = ?
 `
 
 func (q *Queries) GetACMEOrderByCertificate(ctx context.Context, certificateID sql.NullString) (AcmeOrder, error) {
@@ -399,6 +412,7 @@ func (q *Queries) GetACMEOrderByCertificate(ctx context.Context, certificateID s
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Replaces,
 	)
 	return i, err
 }
@@ -564,8 +578,8 @@ func (q *Queries) InsertACMEEABKey(ctx context.Context, arg InsertACMEEABKeyPara
 
 const insertACMEOrder = `-- name: InsertACMEOrder :exec
 
-INSERT INTO acme_orders (id, account_id, status, identifiers, expires_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO acme_orders (id, account_id, status, identifiers, expires_at, replaces, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertACMEOrderParams struct {
@@ -574,6 +588,7 @@ type InsertACMEOrderParams struct {
 	Status      string
 	Identifiers string
 	ExpiresAt   string
+	Replaces    sql.NullString
 	CreatedAt   string
 	UpdatedAt   string
 }
@@ -586,6 +601,7 @@ func (q *Queries) InsertACMEOrder(ctx context.Context, arg InsertACMEOrderParams
 		arg.Status,
 		arg.Identifiers,
 		arg.ExpiresAt,
+		arg.Replaces,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -798,7 +814,7 @@ func (q *Queries) ListACMENames(ctx context.Context, limit int64) ([]AcmeName, e
 }
 
 const listACMEOrders = `-- name: ListACMEOrders :many
-SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at FROM acme_orders ORDER BY created_at DESC LIMIT ?
+SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at, replaces FROM acme_orders ORDER BY created_at DESC LIMIT ?
 `
 
 func (q *Queries) ListACMEOrders(ctx context.Context, limit int64) ([]AcmeOrder, error) {
@@ -821,6 +837,7 @@ func (q *Queries) ListACMEOrders(ctx context.Context, limit int64) ([]AcmeOrder,
 			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Replaces,
 		); err != nil {
 			return nil, err
 		}
@@ -863,7 +880,7 @@ func (q *Queries) ListACMEOrdersOfAuthz(ctx context.Context, authzID string) ([]
 }
 
 const listACMEOrdersProcessing = `-- name: ListACMEOrdersProcessing :many
-SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at FROM acme_orders WHERE status = 'processing' ORDER BY updated_at LIMIT ?
+SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at, replaces FROM acme_orders WHERE status = 'processing' ORDER BY updated_at LIMIT ?
 `
 
 func (q *Queries) ListACMEOrdersProcessing(ctx context.Context, limit int64) ([]AcmeOrder, error) {
@@ -886,6 +903,7 @@ func (q *Queries) ListACMEOrdersProcessing(ctx context.Context, limit int64) ([]
 			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Replaces,
 		); err != nil {
 			return nil, err
 		}

@@ -2,6 +2,7 @@ package acme
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -175,6 +176,7 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 		Identifiers []identifier `json:"identifiers"`
 		NotBefore   string       `json:"notBefore"`
 		NotAfter    string       `json:"notAfter"`
+		Replaces    string       `json:"replaces"` // RFC 9773 section 5
 	}
 	if err := payload(req, &in); err != nil {
 		s.fail(w, r, err)
@@ -194,6 +196,13 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	var replaces string
+	if in.Replaces != "" {
+		if replaces, err = s.checkReplaces(ctx, req.account.ID, in.Replaces, plan.idents); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	now := s.now()
 	orderID, err := s.newID("ord")
 	if err != nil {
@@ -202,9 +211,17 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	idsJSON, _ := json.Marshal(plan.idents)
 	err = s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		if replaces != "" {
+			// Again inside the transaction: two renewals at once get one order.
+			if n, cerr := q.CountACMEOrdersReplacing(ctx, sql.NullString{String: replaces, Valid: true}); cerr != nil {
+				return cerr
+			} else if n > 0 {
+				return problemErr(http.StatusConflict, "alreadyReplaced", "another order replaces this certificate already")
+			}
+		}
 		if ierr := q.InsertACMEOrder(ctx, pkidb.InsertACMEOrderParams{
 			ID: orderID, AccountID: req.account.ID, Status: "pending", Identifiers: string(idsJSON),
-			ExpiresAt: dbTime(now.Add(pendingLifetime)), CreatedAt: dbTime(now), UpdatedAt: dbTime(now),
+			ExpiresAt: dbTime(now.Add(pendingLifetime)), Replaces: sql.NullString{String: replaces, Valid: replaces != ""}, CreatedAt: dbTime(now), UpdatedAt: dbTime(now),
 		}); ierr != nil {
 			return ierr
 		}
@@ -222,7 +239,7 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 			names = append(names, id.key())
 		}
 		return enqueue(ctx, tx, now, req.account.ID, req.ip, ActionOrderCreate, audit.Target{Type: "acme_order", ID: orderID}, audit.ResultSuccess,
-			map[string]any{"identifiers": strings.Join(names, ","), "ca": plan.domains[0].CA})
+			map[string]any{"identifiers": strings.Join(names, ","), "ca": plan.domains[0].CA, "replaces": replaces})
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -351,6 +368,13 @@ func (s *Server) orderJSON(ctx context.Context, o *pkidb.AcmeOrder) map[string]a
 	}
 	if o.Error.Valid {
 		out["error"] = json.RawMessage(o.Error.String)
+	}
+	if o.Replaces.Valid {
+		if c, err := pkidb.New(s.db).GetCertificate(ctx, o.Replaces.String); err == nil {
+			if cert, perr := x509.ParseCertificate(c.CertDer); perr == nil {
+				out["replaces"] = ariID(cert)
+			}
+		}
 	}
 	return out
 }

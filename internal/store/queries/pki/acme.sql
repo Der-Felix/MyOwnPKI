@@ -47,8 +47,12 @@ SELECT id, label, expires_at, used_at, used_by, created_by, created_at FROM acme
 -- Orders
 
 -- name: InsertACMEOrder :exec
-INSERT INTO acme_orders (id, account_id, status, identifiers, expires_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO acme_orders (id, account_id, status, identifiers, expires_at, replaces, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- RFC 9773: a certificate is replaced by one order at most that is not invalid.
+-- name: CountACMEOrdersReplacing :one
+SELECT count(*) FROM acme_orders WHERE replaces = ? AND status <> 'invalid';
 
 -- name: GetACMEOrder :one
 SELECT * FROM acme_orders WHERE id = ?;

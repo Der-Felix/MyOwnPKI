@@ -11,7 +11,7 @@
 
 ## Report for the owner
 
-**Status: in progress – continuation run; done up to step 11.** (Updated after every finished step.)
+**Status: in progress – continuation run; done up to step 12.** (Updated after every finished step.)
 
 ### Commits on `night/v0.2` (oldest first, all local)
 | Commit | What |
@@ -25,6 +25,8 @@
 | `22bb2dd` | night log after step 10 (first stop) |
 | `b97053b` | **security fix**: http-01 reads nothing back, redirects only within the order |
 | `39b90e5` | step 11 – rate limits as tenant settings |
+| `52adcdc` | night log – report after step 11 |
+| _next_ | step 12 – ARI (renewalInfo, replaces) |
 
 ### Stash
 None.
@@ -32,6 +34,7 @@ None.
 ### Decisions to confirm (since your review of `22bb2dd`)
 - Security fix: tables "Security fix after part A".
 - Step 11: table "Step 11 – rate limits" – notably `acme_limits` optional in PUT /settings (no breaking change for v0.1 clients).
+- Step 12: table "Step 12 – ARI" – notably the window (day 60–63 to 69–72 for 90 days).
 
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
@@ -141,6 +144,22 @@ Tests: `TestRateLimits` (fake clock: accounts, orders, failed validations; `Retr
 Mutation checks: fixed Retry-After, no eviction, newest evicted first, no /64 grouping, settings ignored – each made a test fail.
 
 Not checked locally: `task lint:api` (vacuum is not installed here; the spec change follows the existing schemas) – CI runs it.
+
+### Step 12 – ARI (RFC 9773)
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Window: opens at 2/3 of the lifetime plus a per-certificate shift of up to 1/30 of the lifetime, 1/10 of the lifetime wide. 90 days: from day 60–63 to day 69–72 | pki-rules.md §5 "2/3 with jitter"; the shift comes from the serial (stable between questions), so certificates issued in one batch don't renew in one hour; the client picks a random moment inside (RFC 9773 §4.2); at least 18 days stay before expiry | `renewalWindow()` in `internal/acme/ari.go` |
+| Revoked certificate: a window in the past (renew now) | RFC 9773 §4.2 – a revoked certificate should be replaced at once | – |
+| `Retry-After: 21600` (6 h) | RFC 9773 §4.3 suggests hours; often enough to notice a revocation the same day | `ariRetryAfter` |
+| `replaces` in newOrder is checked: the certificate belongs to an order of the **same account**, shares a name, and no other live order replaces it (else 409 `alreadyReplaced`, checked again inside the transaction) | RFC 9773 §5; unknown and foreign certificates get the same answer (no probing) | `checkReplaces()` |
+| The renewal's certificate records `renewal_of` (as a renewal in the UI) | The certificate history shows ACME renewals like the others | `RenewalOf` in `issue()` |
+| renewalInfo answers for every certificate of this PKI (also UI-issued), not for external ones | The identifier is in the certificate itself; the answer is a window, nothing secret | `certByARIID()` |
+| pki.db 0010: `acme_orders.replaces` and an index on `certificates.serial_hex` | renewalInfo looks certificates up by serial; the existing unique index starts with `ca_id` | Drop the migration before the release |
+
+Tests: `TestRenewalInfo` (window inside the lifetime at 2/3, stable, unknown → 404, six malformed identifiers → 400 incl. a negative and a non-minimal serial, revoked → window in the past), `TestRenewalWindow` (50 serials, 90 days: start day 60–63, width 9 days, ≥ 40 different starts), `TestReplaces` (foreign account, no shared name, garbage, second renewal → 409, `renewal_of` stored). **lego**: a second `lego run` asks renewalInfo and does not renew; after `lego certificates revoke` the next `lego run` renews at once with `replaces`, and the new certificate's `renewal_of` is the old one.
+
+Mutation checks: revoked window not in the past, account not checked, no jitter, `replaces` not stored, no shared-name check – each made a test fail. Not testable: the second count inside the transaction (needs two requests in the same instant); the first count catches every sequential case.
 
 ### First stop (usage limit) – resolved in the continuation run
 - Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).

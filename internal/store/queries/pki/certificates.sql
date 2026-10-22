@@ -66,3 +66,8 @@ SELECT id, serial_hex, cert_der FROM certificates WHERE id > ? ORDER BY id LIMIT
 -- ACME revokeCert names a certificate by its DER (RFC 8555 section 7.6).
 -- name: GetCertificateByFingerprint :one
 SELECT * FROM certificates WHERE fingerprint_sha256 = ?;
+
+-- ACME renewalInfo names a certificate by issuer key ID and serial; the
+-- caller compares the key ID (RFC 9773 section 4.1).
+-- name: ListCertificatesBySerial :many
+SELECT * FROM certificates WHERE serial_hex = ? LIMIT 20;

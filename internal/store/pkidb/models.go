@@ -78,6 +78,7 @@ type AcmeOrder struct {
 	Error         sql.NullString
 	CreatedAt     string
 	UpdatedAt     string
+	Replaces      sql.NullString
 }
 
 type AcmeOrderAuthz struct {
