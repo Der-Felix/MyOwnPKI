@@ -11,7 +11,7 @@
 
 ## Report for the owner
 
-**Status: in progress – continuation run; done up to step 13 (part B complete).** (Updated after every finished step.)
+**Status: in progress – continuation run; done up to step 14 (parts A–C; C only checkable in CI).** (Updated after every finished step.)
 
 ### Commits on `night/v0.2` (oldest first, all local)
 | Commit | What |
@@ -29,6 +29,8 @@
 | `d47d18a` | step 12 – ARI (renewalInfo, replaces) |
 | `24e0a5a` | night log – report after step 12 |
 | `2a23f4c` | step 13 – approvals in the UI, EAB keys, screenshots |
+| `f0242ad` | night log – report after step 13 |
+| _this commit_ | step 14 – conformance job (CI only) |
 
 ### Stash
 None.
@@ -38,6 +40,7 @@ None.
 - Step 11: table "Step 11 – rate limits" – notably `acme_limits` optional in PUT /settings (no breaking change for v0.1 clients).
 - Step 12: table "Step 12 – ARI" – notably the window (day 60–63 to 69–72 for 90 days).
 - Step 13: table "Step 13 – approvals in the UI".
+- Step 14: table "Part C" – notably Pebble as control (it has no server test suite).
 
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
@@ -182,6 +185,30 @@ Tests: `TestEABKeys` (five bad inputs, waiting account can't order, wrong MAC, E
 Mutation checks: EAB without authorization, reads without a tenant role, dashboard counter off – each made a test fail. Not observable by a test: clearing the MAC from memory after use.
 
 Screenshots (`task screenshots`, headless Edge, neutral demo instance): new `acme-accounts`, `acme-names`, `acme-orders` (light) and `acme-accounts-dark`, `acme-names-dark`; all others regenerated (the menu has the new ACME entries; the dashboard shows the two waiting notices).
+
+## Part C – Step 14: conformance job (**only checkable in CI**)
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| A Go test with the build tag `conformance` (`internal/acme/conformance_test.go`) plus `test/conformance/run.sh` for the environment, called by `task acme:conformance` and the new CI job `conformance` | The test reuses the instance and proxy of the lego test, with **nothing replaced**: `acme.resolver` is BIND, the dialer is real, the clients answer on port 80; the checks stay in Go, the script only starts BIND and builds the tools | Delete the job, the task and the two files |
+| **Pebble as control**, not as a "test suite": the same lego run goes against Pebble first | Pebble is Let's Encrypt's test *server*; it has no suite that tests a server. As a control it proves the harness (DNS, port 80, TLS trust): a client that works against Pebble and fails against us shows a fault of ours | Drop the subtest "control: lego against Pebble" |
+| Clients: lego (http-01 with revoke; dns-01 wildcard via RFC 2136 `dnsupdate`), certbot (register, http-01 standalone, revoke; dns-01 wildcard with certbot-dns-rfc2136), acme.sh (http-01 standalone); every certificate is checked with `openssl verify` against the root | The plan's list; each client also uses a different key type (RSA 2048, P-384, P-256) | – |
+| Images by digest (tag and push date beside it), all ≥ 2 weeks old on 2026-10-22: `internetsystemsconsortium/bind9:9.18` (2026-09-15), `certbot/dns-rfc2136:v5.8.0` (2026-09-01), `neilpang/acme.sh:3.1.5` (2026-09-19). Newer tags (bind9 9.20, acme.sh 3.1.6) were pushed within the last two weeks | Owner rule | Change the three lines in `run.sh` |
+| BIND on 127.0.0.1:5300, zone `homelab.lan` with a wildcard A record to the runner's address; a **TSIG key generated per run** (`openssl rand`), masked in the log, only in the work directory | No secret in the repository or the log; port 5300 avoids systemd-resolved on 53 | – |
+| Port 80 without root: `sysctl net.ipv4.ip_unprivileged_port_start=80` (sudo, CI only) | lego runs as the runner user | – |
+| The conformance test is compiled and linted in every `task check` (`build-tags: [conformance]` in `.golangci.yml`) | A job that runs rarely must not rot | Remove the line |
+| Pebble itself contains go-jose and miekg/dns | It is a test tool built into `.tools/`, never part of our module or release (owner rule: not in *our* code) | – |
+| Traefik and Caddy: a documented manual test (plan), not in CI | Part D, the guide in the report | – |
+
+### What I could check locally (Windows, no Docker)
+- `go vet -tags conformance` and golangci-lint with the tag: clean. ShellCheck on `run.sh`, actionlint on the workflow: clean.
+- The three image digests: read from the registry (manifest digest = the pinned one); **entrypoints read from the image configs**: bind9 `named -u bind` (so `run.sh` passes only `-g -c …`), certbot `certbot`, acme.sh `/entry.sh` with the verb as first argument.
+- Pebble v2.10.1 builds with `go install`; its module has `test/certs/localhost/{cert,key}.pem` and `pebble.minica.pem`.
+- lego's file names from its source (`*` → `_`); the test finds files by name anyway.
+
+### Erst in CI prüfbar
+- The whole run: BIND start, the dynamic updates, the clients against the server, port 80 on the runner.
+- Likely first-run issues to look at: the runner address from `hostname -I` (first address), certbot's credentials file warning (mode 600, read by root in the container), acme.sh's standalone mode (socat in the image).
 
 ### First stop (usage limit) – resolved in the continuation run
 - Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).

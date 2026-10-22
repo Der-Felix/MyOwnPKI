@@ -187,7 +187,26 @@ jobs:
           bash legacy/build.sh
           shellcheck --severity=warning --external-sources \
             legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
-            legacy/dist/pki-standalone.sh .github/scripts/*.sh
+            legacy/dist/pki-standalone.sh .github/scripts/*.sh test/conformance/run.sh
           shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
       - name: Smoke test (modular and standalone script, completion)
         run: bash legacy/tests/smoke.sh
+
+  # Real ACME clients against the ACME server (PHASE2 step 14, owner Q5):
+  # its own job because it runs containers (BIND, certbot, acme.sh) and binds
+  # port 80. The images are pinned by digest in test/conformance/run.sh; lego
+  # and Pebble by version in Taskfile.yml. Nothing of it reaches a release.
+  conformance:
+    name: ACME conformance (lego, certbot, acme.sh; Pebble as control)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Conformance run
+        env:
+          CONF_WORK: ${{ runner.temp }}/conformance
+        run: task acme:conformance

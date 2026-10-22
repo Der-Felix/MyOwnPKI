@@ -133,6 +133,11 @@ tasks:
       - GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools" go install github.com/go-acme/lego/v5@v{{.LEGO_VERSION}}
       - CGO_ENABLED=0 LEGO_BIN="{{.ROOT_DIR}}/.tools/lego{{exeExt}}" go test ./internal/acme/ -run 'TestLego' -count=1 -v
 
+  acme:conformance:
+    desc: ACME conformance with real clients (lego, certbot, acme.sh; Pebble as control) – Linux with Docker; CI runs it in its own job
+    cmds:
+      - LEGO_VERSION={{.LEGO_VERSION}} PEBBLE_VERSION={{.PEBBLE_VERSION}} bash test/conformance/run.sh
+
   test:race:
     desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)
     cmds:
