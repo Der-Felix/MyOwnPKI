@@ -76,7 +76,15 @@ $env:NO_PROXY = "github.com,api.github.com"
    awk -v head="## [${VERSION}]" 'index($0, head) == 1 { p = 1; next } p && /^## \[/ { exit } p && /^\[[^]]*\]: / { next } p' CHANGELOG.md
    ```
 
-3. Merge into main – through the pull request once its CI is green – and bring the local main up
+3. `deploy/install.sh`: `DEFAULT_VERSION=<version>` – the version `install.sh` installs without
+   `--version`. The workflow stops if it differs from the tag (for a candidate: from its base
+   version). Check it (Git Bash, or `Select-String` in PowerShell):
+
+   ```bash
+   grep "^DEFAULT_VERSION=" deploy/install.sh
+   ```
+
+4. Merge into main – through the pull request once its CI is green – and bring the local main up
    to date, so the tags below land on the merged commit:
 
    ```bash
@@ -87,7 +95,7 @@ $env:NO_PROXY = "github.com,api.github.com"
    git pull --ff-only origin main
    ```
 
-4. Wait until CI on main is green (*Actions → CI*). Don't tag a red main.
+5. Wait until CI on main is green (*Actions → CI*). Don't tag a red main.
 
 ## Rehearsal: the release candidate
 
@@ -149,9 +157,10 @@ gh release view "v${RELEASE}" --json name,isDraft,isPrerelease,assets --jq "{nam
 ```
 
 - `isDraft` true; `isPrerelease` true for a candidate, false for the real release.
-- 12 assets: 5 archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
+- 13 assets: 5 archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
   `…_darwin_arm64.tar.gz`, `…_freebsd_amd64.tar.gz`, `…_windows_amd64.zip`), 5 SBOMs
-  (`*.sbom.json`), `checksums.txt` and `checksums.txt.sigstore.json`.
+  (`*.sbom.json`), `install.sh`, `checksums.txt` and `checksums.txt.sigstore.json`. The archives
+  also hold `deploy/install.sh` and the systemd unit with its drop-in.
 
 The release notes – **the text must not be empty**: the length is more than 0, and the text starts
 with the first lines of the version's CHANGELOG section, without a list of commits:

@@ -1,8 +1,9 @@
 # Operations guide – MyOwnPKI v0.2
 
 For the administrator who runs MyOwnPKI: installing it, the first start, daily work, backup and
-restore, moving from `pki.sh`, and what to do when something is lost. Installing from a release or
-with Docker is in the [README](../README.md); the full design is in [PLAN.md](PLAN.md).
+restore, moving from `pki.sh`, and what to do when something is lost. Installing with `install.sh`
+as a systemd service is §2; Docker and the release archives are in the [README](../README.md); the
+full design is in [PLAN.md](PLAN.md).
 
 > **Read this first – the passphrase.** The unseal passphrase (or the recovery key) decrypts every
 > CA key. **Without one of the two, the CA keys are gone for good**: no support, no back door, no
@@ -37,8 +38,84 @@ The secrets you get at `init`, and what each one protects:
 
 ## 2. Install and configure
 
-1. Install the binary (release archive, package or Docker – see the README) and create a system
-   user, for example `myownpki`, that owns the data directory (mode 0700).
+### 2.1 With install.sh – the default
+
+On a Linux machine with systemd (Debian, Ubuntu and others; amd64 or arm64), `install.sh` installs
+MyOwnPKI as a service with one command. Download it with the checksum file, check it, then run it –
+never pipe a script from the internet into a shell:
+
+```bash
+v=0.2.1
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
+sha256sum --check --ignore-missing checksums.txt
+```
+
+With [cosign](https://github.com/sigstore/cosign/releases) installed, check the signature of
+`checksums.txt` too (as in the README) – `install.sh` then does the same for the archive it
+downloads. Then, as root:
+
+```bash
+sudo bash install.sh --tls-names "pki.homelab.lan, 192.168.10.5"
+```
+
+What it does:
+
+- It downloads the release archive of its own version (`--version` picks another one; `--archive`
+  installs a local archive – `checksums.txt` and, if you have it, `checksums.txt.sigstore.json`
+  next to it), checks its SHA-256 against `checksums.txt` and, when cosign is installed, the
+  signature of `checksums.txt` (it must come from the release workflow at that tag). A mismatch
+  stops it before anything is installed.
+- It creates the system user `myownpki` and `/var/lib/myownpki` (0700), and installs
+  `/usr/local/bin/myownpki` and the unit `/etc/systemd/system/myownpki.service`.
+- `/etc/myownpki/config.yaml` (root:myownpki, 0640) is written **only if there is none** – an
+  existing config is never changed. It is the example config with four values, each shown in the
+  result:
+
+  | Key | Default | Option |
+  |---|---|---|
+  | `admin.listen` | `0.0.0.0:9443` | `--admin-listen` |
+  | `admin.tls_names` | `hostname -f` and the machine's addresses | `--tls-names` |
+  | `admin.allowed_networks` | `127.0.0.1` and the /24 of each own IPv4 address | `--allowed-networks` (the address the health check uses is always added) |
+  | `public.listen` | `:8080` | `--public-port-80` sets `:80` |
+
+  The new file must pass `myownpki config check` before it is put in place.
+- The first installation **enables the service but doesn't start it**, and ends with the next
+  commands: `init` at the terminal as the service user (§3), `systemctl start myownpki`, the admin
+  certificate's fingerprint from the journal, and the address to unseal in the browser:
+
+  ```bash
+  runuser -u myownpki -- /usr/local/bin/myownpki init --config /etc/myownpki/config.yaml
+  ```
+
+  ```bash
+  systemctl start myownpki
+  ```
+
+  ```bash
+  journalctl -u myownpki -o cat | grep fingerprint_sha256
+  ```
+
+- Running it again changes nothing that is already in place ("Changes: none"). An update is §9.
+
+The unit runs the server in a strict sandbox: no capabilities, a read-only system except
+`/var/lib/myownpki`, private `/tmp`, devices and users, only IPv4/IPv6/Unix sockets, no
+namespaces, no writable-and-executable memory, the system calls of a normal service.
+`systemd-analyze security myownpki.service` rates it **1.2** ("OK"; measured 2026-10-23 on the
+GitHub runner ubuntu-24.04). The CI job fails above 2.0 and shows the value in its summary;
+other systemd versions may rate a little differently. Without a reverse proxy in front of the public listener,
+`--public-port-80` adds the drop-in `myownpki.service.d/public-port-80.conf`: binding port 80 is
+then the only capability the service has. With a `data_dir` other than `/var/lib/myownpki`,
+change `StateDirectory=` and `ReadWritePaths=` with `systemctl edit myownpki`.
+
+### 2.2 With Docker, or by hand
+
+The container image and `deploy/docker-compose.yml` are in the README. By hand – another init
+system, FreeBSD, macOS, Windows:
+
+1. Install the binary from a release archive and create a system user, for example `myownpki`, that
+   owns the data directory (mode 0700).
 2. Copy [`deploy/config.example.yaml`](../deploy/config.example.yaml) to the config path, set
    `data_dir`, and check it:
 
@@ -46,14 +123,18 @@ The secrets you get at `init`, and what each one protects:
    myownpki config check --config /etc/myownpki/config.yaml
    ```
 
-3. Decide who may reach the admin listener. Loopback is the default. For remote administration set
-   `admin.listen: 0.0.0.0:9443` **and** `admin.allowed_networks` (for example
+### 2.3 Settings to decide
+
+For a config written by hand (install.sh sets these from its defaults or options):
+
+1. Who may reach the admin listener. Loopback is the default of the example config. For remote
+   administration set `admin.listen: 0.0.0.0:9443` **and** `admin.allowed_networks` (for example
    `127.0.0.1, 192.168.10.0/24`). Keep `127.0.0.1` in the list: `myownpki healthcheck` connects
    through loopback. Never expose the admin listener to the internet.
-4. Add the names you type into the browser to `admin.tls_names` (for example
+2. Add the names you type into the browser to `admin.tls_names` (for example
    `pki.homelab.lan, 192.168.10.5`), or give your own certificate with `admin.tls_cert_file` /
    `admin.tls_key_file`.
-5. The public listener must be reachable under the base URL that is baked into every certificate
+3. The public listener must be reachable under the base URL that is baked into every certificate
    (AIA and CRL distribution point) – usually a reverse proxy on port 80 in front of `:8080`.
 
 ## 3. First start: `init`
@@ -201,6 +282,26 @@ keep the old one with those backups until they have aged out.
 | The admin certificate fingerprint changed unexpectedly | Don't sign in; check the log for "new admin TLS certificate" and why (renewal 30 days before expiry, new names) |
 
 ## 9. Upgrading
+
+**With install.sh** (§2.1): download and check the `install.sh` of the new release as in §2.1 and
+run it as root. Over an initialized instance with a different binary it updates:
+
+1. `myownpki config check` of your config with the new binary – if that fails, nothing changes;
+2. `myownpki backup` (with the running version) to `/var/backups/myownpki/<time>-<old version>`
+   and `myownpki backup verify` of it;
+3. the new binary (the old one stays as `/usr/local/bin/myownpki.previous`) – install.sh checks
+   that `/usr/local/bin/myownpki --version` is the new version –, `systemctl restart`,
+   `myownpki healthcheck` for up to 30 seconds, and that the running service is the new binary
+   (a healthy service could still be the old one);
+4. if one of these checks fails: the old binary back, a restart, and install.sh ends with an
+   error – an update is only reported as done when the new version runs. If the old one is not
+   healthy either (the new version may have migrated the databases), the message has the commands
+   to restore the backup from step 2.
+
+After the restart the server is **sealed** – unseal it in the browser. The config and the unit's
+drop-ins stay as they are.
+
+**By hand or with Docker:**
 
 1. `myownpki backup …` and `myownpki backup verify …`.
 2. Replace the binary (or pull the new image), start the server – migrations run at start.

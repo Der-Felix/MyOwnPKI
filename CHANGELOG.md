@@ -7,6 +7,32 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+Prepared as 0.2.1 – the installation as a systemd service without Docker. Upgrade from 0.2.0: as
+before (backup, replace the binary, start); or install once with `install.sh`, which keeps an
+existing `/etc/myownpki/config.yaml` and `/var/lib/myownpki`.
+
+### Added
+
+- **`install.sh`** – installs or updates MyOwnPKI as a systemd service with one command, on Linux
+  with systemd (amd64, arm64); a release asset of its own (listed in the signed `checksums.txt`)
+  and in every archive. It checks the archive's SHA-256 and, when cosign is installed, the Sigstore
+  signature before it installs anything; creates the user `myownpki`, `/var/lib/myownpki` and – only
+  if there is none – `/etc/myownpki/config.yaml` (admin listener on the own /24s, the names from
+  `hostname -f` and the own addresses, or `--tls-names`, `--admin-listen`, `--allowed-networks`);
+  enables the service without starting it and prints the next commands. An update makes a backup
+  and `backup verify` first and puts the old binary back – and ends with an error – unless the
+  service comes back healthy and runs the new version.
+  `--archive` installs from a local archive (machines without internet). docs/OPERATIONS.md §2.1.
+- **systemd unit** `deploy/systemd/myownpki.service` with a strict sandbox (no capabilities,
+  read-only system except the data directory, private users and devices, a system call filter;
+  `systemd-analyze security` below 2.0), and the drop-in `public-port-80.conf` for the public
+  listener on port 80 without a reverse proxy (`--public-port-80`).
+
+### Changed
+
+- The release has 13 assets (`install.sh` added); the archives also hold the unit, the drop-in and
+  `install.sh`.
+
 ## [0.2.0] - 2026-10-23
 
 The ACME server (phase 2 of docs/PLAN.md). Upgrade: back up, replace the binary, start – the
