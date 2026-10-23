@@ -1,9 +1,10 @@
 # MyOwnPKI
 
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
-templ + htmx web UI, multiple SQLite databases. Status: phase 1 complete (v0.1 release pipeline in preparation; phase 2 = ACME server next).
+templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 released;
+v0.2.0 = ACME server being released); phase 3 (agent, monitoring) next.
 
-- **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); current work plan in `docs/PHASE1.md`.
+- **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
   schemas, APIs, certificates or reviews – it holds the non-negotiables and the reference rules.
 - `legacy/` is the original Bash suite (offline root tool, reference for presets and on-disk format).

@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phase 1 complete (v0.1 ready for release, not released yet) · Last updated: 2026-10-21 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) being released 2026-10-23; next: phase 3 · Last updated: 2026-10-23 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
