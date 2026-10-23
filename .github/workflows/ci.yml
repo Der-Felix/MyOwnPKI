@@ -40,6 +40,9 @@ env:
   ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
   VACUUM_VERSION: "0.30.6"
   VACUUM_SHA256: "179f038a71cd88721738d6c739dd07fbeebc905b48301935f2416e66aead95c6"
+  # The same pin as in release.yml (the install job builds a snapshot).
+  GORELEASER_VERSION: "2.18.2"
+  GORELEASER_SHA256: "0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3"
   GOTOOLCHAIN: local
   CGO_ENABLED: "0"
 
@@ -246,3 +249,39 @@ jobs:
         env:
           CONF_WORK: ${{ runner.temp }}/conformance
         run: task acme:conformance
+
+  # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
+  # §2): a snapshot build, then test/install/systemd_test.sh as root on the
+  # runner – first installation, systemd-analyze, second run, init, start,
+  # health, CRL, update with a second build, one more run.
+  install:
+    name: systemd installation (install.sh)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # GoReleaser takes the version from the last tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          goreleaser: "true"
+      - name: Snapshot build (no SBOMs, no signatures, no image)
+        run: goreleaser release --snapshot --clean --skip=sign,docker,sbom
+      - name: install.sh functions (no root)
+        run: bash test/install/functions_test.sh dist/myownpki_linux_amd64_v1/myownpki
+      # A second binary with another version for the update path.
+      - name: Second build for the update
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/update/myownpki" \
+            -ldflags "-X github.com/Der-Felix/MyOwnPKI/internal/version.version=v0.2.1-ci.update" ./cmd/myownpki
+      - name: Install, start, update (as root)
+        run: |
+          archive=$(find dist -maxdepth 1 -name 'myownpki_*_linux_amd64.tar.gz')
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_STEP_SUMMARY \
+            bash test/install/systemd_test.sh "$archive" "$RUNNER_TEMP/update/myownpki"
+      - name: Service log
+        if: failure()
+        run: sudo journalctl -u myownpki.service --no-pager -n 200

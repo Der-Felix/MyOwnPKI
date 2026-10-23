@@ -381,12 +381,11 @@ install_units() {
 }
 
 healthy() {
-	local i
-	for i in $(seq 1 30); do
+	for _ in $(seq 1 30); do
 		if as_service "$BIN" healthcheck --config "$CONF" >/dev/null 2>&1; then return 0; fi
 		sleep 1
-		[ "$i" -lt 30 ] || return 1
 	done
+	return 1
 }
 
 # update: backup with the old binary, swap, restart, health check, roll back.

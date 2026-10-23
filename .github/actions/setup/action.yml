@@ -1,7 +1,7 @@
 # Shared setup for CI jobs: pinned Go toolchain, Task and optional tools.
 # Versions and checksums come from the `env:` block in .github/workflows/ci.yml.
 name: Set up Go and tools
-description: Install the pinned Go toolchain, Task and optionally golangci-lint, sqlc, ShellCheck, actionlint and vacuum
+description: Install the pinned Go toolchain, Task and optionally golangci-lint, sqlc, ShellCheck, actionlint, vacuum and GoReleaser
 
 inputs:
   golangci-lint:
@@ -18,6 +18,9 @@ inputs:
     default: "false"
   vacuum:
     description: Install vacuum ("true"/"false")
+    default: "false"
+  goreleaser:
+    description: Install GoReleaser ("true"/"false")
     default: "false"
 
 runs:
@@ -98,3 +101,15 @@ runs:
         mkdir -p "$RUNNER_TEMP/vacuum"
         tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/vacuum"
         install -m 0755 "$(find "$RUNNER_TEMP/vacuum" -type f -name vacuum)" "$RUNNER_TEMP/bin/"
+
+    - name: Install GoReleaser
+      if: inputs.goreleaser == 'true'
+      shell: bash
+      run: |
+        f="goreleaser_Linux_x86_64.tar.gz"
+        curl -fsSL -o "$RUNNER_TEMP/$f" \
+          "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/$f"
+        echo "${GORELEASER_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/goreleaser"
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/goreleaser" goreleaser
+        install -m 0755 "$RUNNER_TEMP/goreleaser/goreleaser" "$RUNNER_TEMP/bin/"
