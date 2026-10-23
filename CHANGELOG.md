@@ -20,7 +20,8 @@ existing `/etc/myownpki/config.yaml` and `/var/lib/myownpki`.
   if there is none – `/etc/myownpki/config.yaml` (admin listener on the own /24s, the names from
   `hostname -f` and the own addresses, or `--tls-names`, `--admin-listen`, `--allowed-networks`);
   enables the service without starting it and prints the next commands. An update makes a backup
-  and `backup verify` first and puts the old binary back if the new one is not healthy.
+  and `backup verify` first and puts the old binary back – and ends with an error – unless the
+  service comes back healthy and runs the new version.
   `--archive` installs from a local archive (machines without internet). docs/OPERATIONS.md §2.1.
 - **systemd unit** `deploy/systemd/myownpki.service` with a strict sandbox (no capabilities,
   read-only system except the data directory, private users and devices, a system call filter;

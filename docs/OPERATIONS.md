@@ -288,9 +288,12 @@ run it as root. Over an initialized instance with a different binary it updates:
 1. `myownpki config check` of your config with the new binary – if that fails, nothing changes;
 2. `myownpki backup` (with the running version) to `/var/backups/myownpki/<time>-<old version>`
    and `myownpki backup verify` of it;
-3. the new binary (the old one stays as `/usr/local/bin/myownpki.previous`), `systemctl restart`,
-   and `myownpki healthcheck` for up to 30 seconds;
-4. if the new version is not healthy: the old binary back and a restart. If the old one is not
+3. the new binary (the old one stays as `/usr/local/bin/myownpki.previous`) – install.sh checks
+   that `/usr/local/bin/myownpki --version` is the new version –, `systemctl restart`,
+   `myownpki healthcheck` for up to 30 seconds, and that the running service is the new binary
+   (a healthy service could still be the old one);
+4. if one of these checks fails: the old binary back, a restart, and install.sh ends with an
+   error – an update is only reported as done when the new version runs. If the old one is not
    healthy either (the new version may have migrated the databases), the message has the commands
    to restore the backup from step 2.
 

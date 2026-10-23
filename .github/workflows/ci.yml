@@ -253,7 +253,9 @@ jobs:
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the
   # runner – first installation, systemd-analyze, second run, init, start,
-  # health, CRL, update with a second build, one more run.
+  # health, CRL, an update that leaves the old binary running (rolled back),
+  # the update with a second build, one more run. The archive path stays
+  # relative: install.sh changes to / before it reads it.
   install:
     name: systemd installation (install.sh)
     if: github.event_name != 'schedule'

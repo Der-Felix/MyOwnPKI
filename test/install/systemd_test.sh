@@ -9,10 +9,16 @@
 #  4. init --stdin with throwaway values and the test CA, systemctl start,
 #     healthcheck, /healthz, the fingerprint in the journal, a CRL over the
 #     public listener
-#  5. update: UPDATE_BINARY packed into a second archive; install.sh makes a
+#  5. an update whose service comes back healthy but still runs the old
+#     binary (a test drop-in starts myownpki.previous) is rolled back and
+#     ends with an error – the health check alone would pass it
+#  6. update: UPDATE_BINARY packed into a second archive; install.sh makes a
 #     backup (backup verify passes), swaps the binary, the service is
-#     healthy again with the new version
-#  6. one more run changes nothing
+#     healthy again and runs the new version
+#  7. one more run changes nothing
+#
+# ARCHIVE stays relative in CI on purpose: install.sh changes to / before it
+# reads it.
 #
 # It refuses to run where MyOwnPKI is installed already – it is not a tool for
 # a real machine.
@@ -40,6 +46,9 @@ fail() {
 	exit 1
 }
 svc() { runuser -u myownpki -- env -i PATH=/usr/bin:/bin "$@"; }
+version_of() { "$1" --version | awk '{ print $2 }'; }
+# running is the version of the binary the service runs now.
+running() { version_of "/proc/$(systemctl show --property MainPID --value myownpki.service)/exe"; }
 healthy() {
 	for _ in $(seq 1 30); do
 		if svc "$bin" healthcheck --config "$conf" >/dev/null 2>&1; then return 0; fi
@@ -107,28 +116,49 @@ journalctl -u myownpki.service -o cat | grep -q fingerprint_sha256 || fail "no f
 curl -fsS -o "$tmp/crl.der" http://127.0.0.1:8080/crl/issuing/1.crl
 openssl crl -inform DER -in "$tmp/crl.der" -noout -issuer || fail "the public listener served no CRL"
 
-step "5. Update with a second build"
+step "5. An update that leaves the old binary running is rolled back"
 mkdir "$tmp/old" "$tmp/update"
 tar -xzf "$archive" -C "$tmp/old"
-new_version=$("$update_bin" --version | awk '{ print $2 }')
+old_version=$(version_of "$bin")
+new_version=$(version_of "$update_bin")
+[ "$old_version" != "$new_version" ] || fail "the update binary has the same version $old_version"
 install -m 0755 "$update_bin" "$tmp/old/myownpki"
 update_archive=$tmp/update/myownpki_${new_version#v}_linux_$(dpkg --print-architecture).tar.gz
 tar -czf "$update_archive" -C "$tmp/old" .
 (cd "$tmp/update" && sha256sum "$(basename "$update_archive")" >checksums.txt)
-bash "$install_sh" --archive "$update_archive" | tee "$tmp/run3.log"
-mapfile -t backups < <(find /var/backups/myownpki -mindepth 1 -maxdepth 1 -type d)
-[ ${#backups[@]} -eq 1 ] || fail "want one backup, found: ${backups[*]:-none}"
-svc "$bin" backup verify "${backups[0]}" || fail "backup verify ${backups[0]}"
+stale=/etc/systemd/system/myownpki.service.d/zz-ci-stale.conf
+install -d /etc/systemd/system/myownpki.service.d
+printf '[Service]\nExecStart=\nExecStart=%s.previous serve --config %s\n' "$bin" "$conf" >"$stale"
+systemctl daemon-reload
+if bash "$install_sh" --archive "$update_archive" >"$tmp/run3.log" 2>&1; then
+	cat "$tmp/run3.log"
+	fail "install.sh reported success although the service runs the old binary"
+fi
+cat "$tmp/run3.log"
+grep -q "the service runs $old_version, not $new_version" "$tmp/run3.log" || fail "install.sh did not name the running version"
+grep -q "rolled back to $old_version, which is healthy again" "$tmp/run3.log" || fail "no rollback"
+[ "$(version_of "$bin")" = "$old_version" ] || fail "the binary is not $old_version after the rollback"
+healthy || fail "not healthy after the rollback"
+rm "$stale"
+rmdir /etc/systemd/system/myownpki.service.d
+systemctl daemon-reload
+
+step "6. Update with a second build"
+bash "$install_sh" --archive "$update_archive" | tee "$tmp/run4.log"
+mapfile -t backups < <(find /var/backups/myownpki -mindepth 1 -maxdepth 1 -type d | sort)
+[ ${#backups[@]} -eq 2 ] || fail "want two backups (step 5 and 6), found: ${backups[*]:-none}"
+for b in "${backups[@]}"; do svc "$bin" backup verify "$b" || fail "backup verify $b"; done
 systemctl is-active --quiet myownpki.service || fail "not running after the update"
 healthy || fail "not healthy after the update"
-[ "$("$bin" --version | awk '{ print $2 }')" = "$new_version" ] || fail "the binary is not $new_version"
+[ "$(version_of "$bin")" = "$new_version" ] || fail "the binary is not $new_version"
+[ "$(running)" = "$new_version" ] || fail "the service runs $(running), not $new_version"
 [ -x "$bin.previous" ] || fail "no previous binary"
-printf 'Update: backup %s, now %s, healthy.\n\n' "${backups[0]}" "$new_version" >>"$summary"
+printf 'Update: backup %s, %s → %s, healthy and running.\n\n' "${backups[1]}" "$old_version" "$new_version" >>"$summary"
 
-step "6. Another run changes nothing"
+step "7. Another run changes nothing"
 before=$(state)
-bash "$install_sh" --archive "$update_archive" | tee "$tmp/run4.log"
-grep -q 'Changes:   none' "$tmp/run4.log" || fail "the run after the update reported changes"
+bash "$install_sh" --archive "$update_archive" | tee "$tmp/run5.log"
+grep -q 'Changes:   none' "$tmp/run5.log" || fail "the run after the update reported changes"
 [ "$before" = "$(state)" ] || fail "the run after the update changed files"
 
 step "All checks passed"

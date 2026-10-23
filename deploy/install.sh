@@ -23,7 +23,7 @@
 #   the next commands (init at the terminal, start, fingerprint, unseal);
 # - update (a new binary over an initialized instance): backup and backup
 #   verify first, then the new binary, restart, health check – and the old
-#   binary back if the new one is not healthy.
+#   binary back if the service is not healthy or does not run the new one.
 #
 # Running it again changes nothing that is already in place. It handles no
 # secrets: the unseal passphrase and the admin password are only asked by
@@ -113,6 +113,14 @@ parse_args() {
 	[[ -z $opt_tls_names || $opt_tls_names =~ ^[A-Za-z0-9.:,\ *_-]+$ ]] || die "--tls-names: only names, addresses, commas and spaces"
 	[[ -z $opt_admin_listen || $opt_admin_listen =~ ^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]*):[0-9]{1,5}$ ]] || die "--admin-listen: HOST:PORT, e.g. 0.0.0.0:9443"
 	[[ -z $opt_allowed || $opt_allowed =~ ^[0-9A-Fa-f.:/,\ ]+$ ]] || die "--allowed-networks: only addresses and CIDRs, separated by commas"
+	# main() changes to / before it reads the archive: make a relative path
+	# absolute now, and refuse a missing file with the path as it was given.
+	if [ -n "$archive" ]; then
+		local dir
+		[ -f "$archive" ] || die "--archive: no such file: $archive"
+		dir=$(CDPATH='' cd -- "$(dirname -- "$archive")" && pwd -P) || die "--archive: cannot open the directory of $archive"
+		archive=$dir/$(basename -- "$archive")
+	fi
 }
 
 # --- this machine --------------------------------------------------------------
@@ -301,16 +309,44 @@ unpack() {
 
 # --- installing ------------------------------------------------------------------
 
-# put SRC DST MODE OWNER GROUP: install a file atomically if it differs.
+# put SRC DST MODE OWNER GROUP: install a file atomically if it differs; sets
+# put_changed. It returns 0 whether it copied or not, so no caller needs
+# `put … || true` (which would also hide a failed copy). Every step has its
+# own `|| die`: set -e does not apply inside a function that is called in a
+# condition (`if put …`, `swap_binary || …`).
 put() {
 	local src=$1 dst=$2 mode=$3 owner=$4 group=$5
+	put_changed=false
 	if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+		return 0
+	fi
+	install -d -m 0755 "$(dirname "$dst")" || die "cannot create $(dirname "$dst")"
+	install -m "$mode" -o "$owner" -g "$group" "$src" "$dst.new" || die "cannot write $dst.new"
+	mv -f "$dst.new" "$dst" || die "cannot replace $dst"
+	put_changed=true
+	changed "$dst"
+}
+
+# swap_binary puts the new binary in place and checks that $BIN now reports
+# new_version – a swap that did not happen must never count as done.
+swap_binary() {
+	local got
+	put "$work/x/myownpki" "$BIN" 0755 root root
+	got=$("$BIN" --version 2>/dev/null | awk '{ print $2 }' || true)
+	if [ "$got" != "$new_version" ]; then
+		warn "$BIN reports ${got:-no version}, want $new_version"
 		return 1
 	fi
-	install -d -m 0755 "$(dirname "$dst")"
-	install -m "$mode" -o "$owner" -g "$group" "$src" "$dst.new"
-	mv -f "$dst.new" "$dst"
-	changed "$dst"
+}
+
+# running_version prints the version of the binary the running service was
+# started from – a healthy service may still be the old binary. /proc/PID/exe
+# is that file even after it was replaced on disk.
+running_version() {
+	local pid
+	pid=$(systemctl show --property MainPID --value "$SVC.service" 2>/dev/null || true)
+	case $pid in '' | 0) return 0 ;; esac
+	"/proc/$pid/exe" --version 2>/dev/null | awk '{ print $2 }' || true
 }
 
 ensure_user() {
@@ -369,9 +405,11 @@ ensure_config() {
 
 install_units() {
 	unit_changed=false
-	if put "$work/x/deploy/systemd/myownpki.service" "$UNIT" 0644 root root; then unit_changed=true; fi
+	put "$work/x/deploy/systemd/myownpki.service" "$UNIT" 0644 root root
+	if $put_changed; then unit_changed=true; fi
 	if $port80; then
-		if put "$work/x/deploy/systemd/public-port-80.conf" "$DROPIN" 0644 root root; then unit_changed=true; fi
+		put "$work/x/deploy/systemd/public-port-80.conf" "$DROPIN" 0644 root root
+		if $put_changed; then unit_changed=true; fi
 	fi
 	if $unit_changed; then systemctl daemon-reload; fi
 	if ! systemctl is-enabled --quiet "$SVC.service" 2>/dev/null; then
@@ -389,8 +427,9 @@ healthy() {
 }
 
 # update: backup with the old binary, swap, restart, health check, roll back.
+# It returns only when the service is healthy and runs new_version.
 update() {
-	local old_version stamp backup
+	local old_version stamp backup running
 	old_version=$("$BIN" --version | awk '{ print $2 }')
 	say "Update $old_version → $new_version"
 	as_service "$work/x/myownpki" config check --config "$CONF" >/dev/null ||
@@ -403,19 +442,29 @@ update() {
 	as_service "$BIN" backup verify "$backup" >/dev/null || die "backup verify failed for $backup – nothing changed"
 	changed "backup $backup"
 	install -m 0755 "$BIN" "$BIN.previous"
-	put "$work/x/myownpki" "$BIN" 0755 root root || true
+	if ! swap_binary; then rollback "the new binary was not installed"; fi
 	install_units
 	say "Restarting $SVC.service …"
-	systemctl restart "$SVC.service"
-	if healthy; then
-		say "Healthy. The server starts sealed – unseal it in the browser."
-		say "Backup: $backup (the previous binary: $BIN.previous)"
-		return 0
+	systemctl restart "$SVC.service" || warn "systemctl restart $SVC failed"
+	if ! healthy; then rollback "$new_version is not healthy"; fi
+	running=$(running_version)
+	if [ "$running" != "$new_version" ]; then
+		rollback "the service runs ${running:-an unknown version}, not $new_version"
 	fi
-	warn "$new_version is not healthy – putting $old_version back"
-	install -m 0755 "$BIN.previous" "$BIN"
+	say "Healthy, running $new_version. The server starts sealed – unseal it in the browser."
+	say "Backup: $backup (the previous binary: $BIN.previous)"
+}
+
+# rollback REASON: after a failed update, the previous binary back and a
+# restart; it always ends install.sh with an error. Uses update's
+# old_version, stamp and backup.
+rollback() {
+	warn "$1 – putting $old_version back"
+	if ! install -m 0755 "$BIN.previous" "$BIN.new" || ! mv -f "$BIN.new" "$BIN"; then
+		die "could not put $BIN.previous back as $BIN – do it by hand, then systemctl restart $SVC. Backup: $backup"
+	fi
 	systemctl restart "$SVC.service" || true
-	if healthy; then
+	if healthy && [ "$(running_version)" = "$old_version" ]; then
 		die "rolled back to $old_version, which is healthy again; see journalctl -u $SVC. Backup: $backup"
 	fi
 	die "rolled back to $old_version, but it is not healthy either – the new version may have migrated the
@@ -481,7 +530,7 @@ main() {
 	if $had_binary && $initialized && $binary_differs; then
 		update
 	else
-		put "$work/x/myownpki" "$BIN" 0755 root root || true
+		swap_binary || die "$BIN is not $new_version after the copy – check the file system"
 		install_units
 		if $initialized && $unit_changed && systemctl is-active --quiet "$SVC.service"; then
 			warn "the unit changed – restart when convenient: systemctl restart $SVC (the server starts sealed)"
