@@ -93,7 +93,7 @@ func newLogger(cfg config.Config, w io.Writer) *slog.Logger {
 }
 
 func printAdminBanner(w io.Writer, srv *server.Server) {
-	ci := srv.CertInfo
+	ci := srv.ServedAdminCertificate()
 	_, _ = fmt.Fprintf(w, `
   ==============================================================
     Admin:  https://%s/

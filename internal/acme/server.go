@@ -1,7 +1,9 @@
 // Package acme is the ACME server (RFC 8555) for the internal CAs
-// (PHASE2). It runs only behind a reverse proxy that terminates TLS (owner
-// Q1): plain HTTP on acme.listen, every URL built from acme.base_url,
-// requests only from acme.trusted_proxies.
+// (PHASE2). By default it runs behind a reverse proxy that terminates TLS
+// (owner Q1): plain HTTP on acme.listen, requests only from
+// acme.trusted_proxies. With acme.tls_issuer (v0.2.2) the server's own TLS
+// listener serves it and the peer is the client (Options.Direct). Every URL
+// is built from acme.base_url.
 //
 // Every request body is attacker input (security.md): the JWS is read by
 // internal/acme/jose, payloads are decoded into fixed structures, sizes are
@@ -50,8 +52,12 @@ type Options struct {
 	Engine *ca.Engine // the tenant's engine; its PKI writer holds the ACME tables
 	// BaseURL, TrustedProxies and Resolver as in config.ACME.
 	BaseURL, TrustedProxies, Resolver string
-	Clock                             clock.Clock
-	Log                               *slog.Logger
+	// Direct: the server's own TLS listener serves ACME (acme.tls_issuer,
+	// v0.2.2). Every peer may connect, TrustedProxies and X-Forwarded-For
+	// are ignored, and the peer is the client address (rate limits, audit).
+	Direct bool
+	Clock  clock.Clock
+	Log    *slog.Logger
 	// Rand for tokens and IDs; nil = crypto/rand.
 	Rand io.Reader
 	// Limits returns the tenant's rate limits (its settings); nil or an
@@ -165,13 +171,13 @@ func (s *Server) url(path string) string { return s.base + path }
 // ServeHTTP checks where the request comes from, then dispatches. Every
 // answer carries a fresh nonce and the directory link (RFC 8555 §6.5, §7.1).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	peer, ok := peerAddr(r.RemoteAddr)
-	if !ok || !s.isTrusted(peer) {
+	client, ok := s.client(r)
+	if !ok {
 		// Not through the proxy: refused before anything is read.
 		s.problem(w, http.StatusForbidden, "unauthorized", "the ACME server is reachable only through its reverse proxy", nil)
 		return
 	}
-	r = r.WithContext(context.WithValue(r.Context(), clientKey{}, s.clientIP(r, peer)))
+	r = r.WithContext(context.WithValue(r.Context(), clientKey{}, client))
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("Link", `<`+s.url("/directory")+`>;rel="index"`)
@@ -179,6 +185,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Set("Replay-Nonce", n)
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// client returns the client address of r, or false when the peer may not
+// connect. Behind the proxy only trusted peers may, and the client is the
+// last untrusted X-Forwarded-For hop. On the own TLS listener (Direct) every
+// peer may, and the peer is the client – no header is believed, because no
+// proxy wrote it.
+func (s *Server) client(r *http.Request) (string, bool) {
+	peer, ok := peerAddr(r.RemoteAddr)
+	switch {
+	case !ok:
+		return "", false
+	case s.opt.Direct:
+		return peer.String(), true
+	case !s.isTrusted(peer):
+		return "", false
+	}
+	return s.clientIP(r, peer), true
 }
 
 type clientKey struct{}

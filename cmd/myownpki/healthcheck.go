@@ -9,9 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
@@ -55,18 +58,27 @@ func runHealthcheck(ctx context.Context, args []string, stdout, stderr io.Writer
 }
 
 func healthcheck(ctx context.Context, cfg config.Config, timeout time.Duration) error {
-	certFile := server.AdminCertFile(cfg)
-	want, err := firstCertificate(certFile)
-	if err != nil {
-		return err
+	// One file, or with admin.tls_issuer two: the bootstrap and the issued
+	// certificate (the server switches between them without a restart). The
+	// issued one is missing until the first unseal.
+	files := server.AdminCertFiles(cfg)
+	var want [][]byte
+	for i, f := range files {
+		der, ferr := firstCertificate(f)
+		switch {
+		case ferr == nil:
+			want = append(want, der)
+		case i == 0 || !errors.Is(ferr, fs.ErrNotExist):
+			return ferr
+		}
 	}
 	addr, err := localAddr(cfg.Admin.Listen)
 	if err != nil {
 		return err
 	}
 	pinned := func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 || !bytes.Equal(cs.PeerCertificates[0].Raw, want) {
-			return fmt.Errorf("the admin listener serves another certificate than %s (changed without a restart?)", certFile)
+		if len(cs.PeerCertificates) == 0 || !slices.ContainsFunc(want, func(w []byte) bool { return bytes.Equal(cs.PeerCertificates[0].Raw, w) }) {
+			return fmt.Errorf("the admin listener serves another certificate than %s (changed without a restart?)", strings.Join(files, " or "))
 		}
 		return nil
 	}

@@ -7,6 +7,27 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Added
+
+- **The server issues its own TLS certificates** from a CA of the instance: `admin.tls_issuer` for
+  the admin listener (the names of `admin.tls_names`), `acme.tls_issuer` for the ACME listener (the
+  host of `acme.base_url`). Through the normal CA engine – preset *server*, ECDSA P-256, the CA's
+  name constraints, an audit entry by *system* – for 90 days at most (never beyond the CA's maximum
+  or end), renewed at 2/3 and at once after a revocation, a name change or a CA renewal. Issued
+  only while unsealed; key and fullchain lie in `<data_dir>/tls/` (key 0600), so a sealed restart
+  serves them. When one expires while sealed, the listener falls back to its bootstrap
+  certificate with a warning in the log and on the dashboard; the switch needs no restart.
+  docs/OPERATIONS.md §2.4.
+- **ACME without a reverse proxy:** with `acme.tls_issuer`, `acme.listen` speaks TLS itself (e.g.
+  `":443"`); every client may connect, the peer is the client address for rate limits and audit,
+  `acme.trusted_proxies` and `X-Forwarded-For` are ignored. The proxy way stays the default.
+  docs/OPERATIONS.md 10.10.
+
+### Changed
+
+- `myownpki healthcheck` accepts the bootstrap and the issued admin certificate (with
+  `admin.tls_issuer`).
+
 ## [0.2.1] - 2026-10-24
 
 Install and update MyOwnPKI as a hardened systemd service with one command: `install.sh`

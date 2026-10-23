@@ -764,3 +764,20 @@ this only changes tokens, component classes and the shell.
 | Number row as equal grid columns, semibold tabular figures | Figures line up like a table |
 | Serials truncated with "…" in tables (full value in `title` and on the detail page); SHA-256 fingerprints as `78:3D:…` in two lines of 16 bytes | Readable lists; fingerprints comparable with `openssl x509 -fingerprint -sha256` |
 | Consolas before Cascadia Mono | Optically closer to Segoe UI at the same size |
+
+### v0.2.2 – own TLS, daily backup, trust page (owner decisions 2026-10-24)
+From the production use of v0.2.1-rc.1 (Debian 13 LXC, install.sh through Salt). Built in the night
+run of 2026-10-24 (docs/NIGHTLOG.md); rows marked *(night)* were decided alone, as the cautious
+variant, for the owner to confirm.
+
+| Decision | Why |
+|---|---|
+| **Amends PHASE2 Q1 ("ACME only behind a reverse proxy")**: `acme.tls_issuer` is an alternative – the ACME listener speaks TLS itself. Without it nothing changes: plain HTTP behind the proxy stays the default and stays supported | A homelab without a proxy can run ACME; the proxy way keeps working for everybody who has one |
+| `admin.tls_issuer` / `acme.tls_issuer` name a CA of the instance; the server issues the listener's certificate through `ca.Engine.Issue` (preset *server*, a new ECDSA P-256 key per certificate, a CSR, `IgnoreCSRNames` with exactly the configured names), audited as *system / server* | One policy engine (ADR-19): name constraints, CA limits and the audit log apply to the server's own certificate too |
+| 90 days at most, capped by the CA's maximum and its end; renewed at 2/3, at once after a revocation, a name change or a CA renewal (the leaf no longer verifies against the CA's current certificate) | Short-lived like ACME certificates; nothing to renew by hand |
+| Key unencrypted in `<data_dir>/tls/<listener>.key` (0600), fullchain without the root in `<listener>.crt`; issuance only while unsealed; an expired certificate falls back to the bootstrap certificate per handshake (`GetCertificate`), with a warning every 15 minutes and on the dashboard | The listeners must work while sealed, like the bootstrap certificate (§5); no restart for a switch |
+| *(night)* Config keys `tls_issuer` (the owner's proposal) – not `tls_ca` | `tls_ca` reads like "the CA to verify clients against" (nginx, Traefik) – a dangerous misreading |
+| *(night)* `admin.tls_issuer` needs `admin.tls_names` and excludes `admin.tls_cert_file`; the issued certificate has exactly `admin.tls_names` – no host name, `localhost` or loopback added | Name constraints of a real intermediate (e.g. `u.lab`) would refuse `localhost`; the health check pins the file, it needs no name |
+| *(night)* A refused issuance is retried after 6 hours (other errors after 15 minutes), not at every check | Each refusal is an audit entry; a configuration error must not fill the log |
+| *(night)* With `acme.tls_issuer` the ACME listener serves its own self-signed bootstrap certificate (`acme-bootstrap.crt`) until the first issuance, instead of refusing the handshake | The same behaviour as the admin listener; clients refuse it with a clear "unknown authority" |
+| With `acme.tls_issuer`: `acme.listen` is its own listener (never the admin one), every peer may connect, `acme.trusted_proxies` and `X-Forwarded-For` are ignored, the peer is the client address for rate limits and audit | No header is believed when no proxy wrote it |

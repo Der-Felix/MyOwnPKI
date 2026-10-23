@@ -22,8 +22,8 @@ full design is in [PLAN.md](PLAN.md).
 |---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` |
 | Public listener | CRLs and CA certificates over plain HTTP, no login | `:8080` |
-| ACME listener | ACME for the reverse proxy only, plain HTTP; off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
-| Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificate), `auth.key` | `/var/lib/myownpki` |
+| ACME listener | ACME for the reverse proxy only, plain HTTP – or, with `acme.tls_issuer`, with its own TLS for the clients ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)); off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
+| Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificates and the ones the server issues itself, §2.4), `auth.key` | `/var/lib/myownpki` |
 | Config file | YAML, every key also as `MYOWNPKI_*` variable | `/etc/myownpki/config.yaml` (Windows: `%ProgramData%\MyOwnPKI\config.yaml`) |
 
 The secrets you get at `init`, and what each one protects:
@@ -133,9 +133,61 @@ For a config written by hand (install.sh sets these from its defaults or options
    through loopback. Never expose the admin listener to the internet.
 2. Add the names you type into the browser to `admin.tls_names` (for example
    `pki.homelab.lan, 192.168.10.5`), or give your own certificate with `admin.tls_cert_file` /
-   `admin.tls_key_file`.
+   `admin.tls_key_file` – or let the server issue its own from your CA with `admin.tls_issuer`
+   (§2.4).
 3. The public listener must be reachable under the base URL that is baked into every certificate
    (AIA and CRL distribution point) – usually a reverse proxy on port 80 in front of `:8080`.
+
+### 2.4 Certificates the server issues itself (`tls_issuer`)
+
+Since v0.2.2 the server can give the admin listener – and the ACME listener, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) –
+a certificate from **your own CA**, so browsers that trust your root show no warning and nobody
+compares fingerprints any more:
+
+```yaml
+admin:
+  tls_names: "pki.u.lab, 172.20.23.20"   # exactly the names of the certificate
+  tls_issuer: issuing                    # the name of the CA (as in `myownpki ca list`), not its CN
+```
+
+How it behaves:
+
+- **Issued while unsealed, through the normal policy.** At the unseal (and every 15 minutes after)
+  the server makes a new ECDSA P-256 key, sends a CSR through the same CA engine as the UI – preset
+  *server*, the CA's name constraints and limits apply – and gets a certificate for exactly the
+  names in `admin.tls_names`. The tenant audit log shows it as `certificate.issue` by the actor
+  *system / server*; the certificate is in *Certificates* like any other.
+- **Short-lived:** 90 days, less when the CA allows less (*max validity*) or ends earlier. Renewed
+  at 2/3 of the lifetime (after 60 days), and at once when the names change, the certificate was
+  revoked, or the CA got a new certificate (renewal with a new key).
+- **Works while sealed.** Signing needs the unsealed key ring, the listener doesn't: key and
+  certificate lie in `<data_dir>/tls/admin.key` (0600, unencrypted – like the bootstrap key) and
+  `admin.crt` (the certificate and the issuing CA, *fullchain* without the root). So a restart
+  serves the issued certificate at once, even before the unseal.
+- **Falls back to the bootstrap certificate** while there is no valid issued one: before the first
+  unseal, and when it expires while the server stays sealed (a warning in the log every 15 minutes
+  and on the dashboard). The unseal issues a new one. The switch happens per connection – **no
+  restart**, and `myownpki healthcheck` accepts both.
+- **A refused issuance** – a name outside the CA's name constraints, an unknown or offline CA – is
+  logged with the engine's reason and shown on the dashboard as an error; the server keeps the
+  bootstrap (or the still valid issued) certificate and tries again after 6 hours (other errors:
+  after 15 minutes), or at the first unseal after a restart.
+- `admin.tls_issuer` and `admin.tls_cert_file` exclude each other; `config check` says so.
+
+> **PKI background – why the key may lie unencrypted.** The CA keys are what must never leak: they
+> sign. The listener's key only proves "this is the server" for 90 days at most, for exactly the
+> names in its certificate – and the CA's name constraints limit even that. If it leaks, revoke the
+> certificate in the UI: the server issues a new one at once (with a new key).
+
+Check what the listener serves, and that it verifies against your root:
+
+```bash
+openssl s_client -connect pki.u.lab:9443 -servername pki.u.lab -CAfile root.pem -verify_return_error </dev/null | grep -E "Verify return code|subject=|issuer="
+```
+
+```bash
+journalctl -u myownpki -o cat | grep -E '"TLS certificate (issued|can.t be issued)"|tls_issuer'
+```
 
 ## 3. First start: `init`
 
@@ -327,8 +379,11 @@ client (certbot, Traefik, …) ──https──▶ reverse proxy ──http─�
          └───────── http-01: port 80 / dns-01: TXT record ◀── validator ─┘
 ```
 
-- ACME runs **only behind a reverse proxy** that ends TLS. MyOwnPKI has no TLS listener for ACME
-  of its own; `acme.listen` speaks plain HTTP and is meant for the proxy only.
+- By default ACME runs **behind a reverse proxy** that ends TLS; `acme.listen` speaks plain HTTP
+  and is meant for the proxy only. Since v0.2.2 there is a second way without a proxy:
+  `acme.tls_issuer` gives `acme.listen` its own TLS with a certificate the server issues itself
+  ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)). The proxy way stays supported
+  and is what you get when `acme.tls_issuer` is empty.
 - `acme.base_url` is the https URL clients use, including a path, e.g.
   `https://pki.homelab.lan/acme`. Every URL the server hands out is built from it – it never
   trusts `X-Forwarded-Host` or `X-Forwarded-Proto`.
@@ -605,3 +660,39 @@ The **validator** – the part of MyOwnPKI that checks a challenge – connects 
 | `rateLimited` | A limit of 10.8 | Wait for `Retry-After`, or raise the limit |
 | TLS error, unknown authority | The root is not trusted on the client | 10.4 |
 | `unauthorized: the ACME server is reachable only through its reverse proxy` | The proxy (or the client, past the proxy) is not in `acme.trusted_proxies` | 10.1 |
+| TLS error, unknown authority, or a certificate for "MyOwnPKI ACME (bootstrap)" | With `acme.tls_issuer`: no issued certificate yet (the server was not unsealed since the start) or it expired while sealed | 10.10, the dashboard |
+
+### 10.10 Without a reverse proxy: ACME with its own TLS
+
+Since v0.2.2 `acme.tls_issuer` names a CA of your instance, and the ACME listener speaks TLS
+itself with a certificate the server issues from it for the host of `acme.base_url` – the same
+mechanism as for the admin listener (§2.4: preset *server*, ECDSA P-256, 90 days at most, renewed
+at 2/3, issued only while unsealed, the CA's name constraints apply, audited as *system*):
+
+```yaml
+acme:
+  base_url: https://pki.u.lab/acme   # the host is the name in the certificate
+  listen: ":443"                     # the port of base_url; reachable by the clients
+  tls_issuer: issuing                # the CA's name (myownpki ca list)
+  resolver: 172.20.23.1
+```
+
+What changes against the proxy way:
+
+- `acme.listen` is **its own listener** with TLS – never the admin listener (that one is limited
+  by `admin.allowed_networks`) and never the public CRL port.
+- Every client may connect: `acme.trusted_proxies` and `X-Forwarded-For` are **ignored**. The
+  client address in the rate limits and the audit log is the direct peer – a client can't pick
+  another one with a header. The server logs this at start.
+- Until the first unseal after a start without an issued certificate (and when it expired while
+  sealed), the listener serves a self-signed *MyOwnPKI ACME (bootstrap)* certificate. Clients
+  refuse it – on purpose: an ACME client must never talk to a server it can't verify. The
+  dashboard and the log say so; the unseal fixes it.
+- Clients need your root as trust anchor (10.4) – for certbot `REQUESTS_CA_BUNDLE`, for lego
+  `LEGO_CA_CERTIFICATES`, for acme.sh `--ca-bundle`.
+
+Check it from a client:
+
+```bash
+curl --cacert root.pem https://pki.u.lab/acme/directory
+```
