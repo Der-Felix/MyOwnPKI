@@ -218,7 +218,8 @@ jobs:
           bash legacy/build.sh
           shellcheck --severity=warning --external-sources \
             legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
-            legacy/dist/pki-standalone.sh .github/scripts/*.sh test/conformance/run.sh
+            legacy/dist/pki-standalone.sh .github/scripts/*.sh test/conformance/run.sh \
+            deploy/install.sh test/install/*.sh
           shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
       - name: Smoke test (modular and standalone script, completion)
         run: bash legacy/tests/smoke.sh
