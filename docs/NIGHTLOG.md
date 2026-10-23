@@ -310,13 +310,38 @@ Green in that run: check, Windows, macOS, cross, vuln, Bash suite. One commit pe
   lines from `dmesg` become an annotation.
 - `timeout-minutes: 20` for the job; the annotation step also runs after the timeout (`cancelled()`).
 
-### c) and a proposal (not built – your decision, it touches the key ring)
+### c) The fix (owner decision 2026-10-23: the real fix, not `-p 2`)
 
-If the next run shows memory near 16 GB, the fix is **test KDF parameters for `testinstance`**
-(as `internal/keys` and `internal/setup` already use in their own tests): an option on `keys.New` /
-`setup.Options` that only tests set – about 5× less memory and 3–4× faster tests. A stopgap without
-code: `go test -race -p 2`. If memory stays low, the exit was a one-off runner abort, and the
-report of b) names where it was.
+| Decision | Why | How to reverse |
+|---|---|---|
+| `keys.TestKDF()` option on `keys.New`, `setup.Options.TestKDF`, `auth.TestParams()`; the weak values (t=1, 8 MiB, p=1) in **one** place, `keys.testArgon2` (exported via `keys.TestArgon2()`); used by `testinstance`, the server, ca and cmd test helpers, and the keys/setup/auth tests | Test instances derived 3× 256 MiB each; the values were copied in four places | Remove the option from the helpers (the guards can stay) |
+| Lock 1: the option, `TestArgon2` and `auth.TestParams` **panic** outside a test binary (`testing.Testing()`), `setup.Run` returns an error; no flag, config key or env variable | Weak parameters must never reach a real instance by accident | – |
+| Lock 2: **unseal refuses** a passphrase slot below t=4, 256 MiB, p=4 outside a test binary (`ErrWeakKDF`, audited `denied`/`weak_kdf`, before any derivation); same for every passphrase check; the recovery key still unseals and a new passphrase gets the production values | A key ring made by a test build must not protect real keys; the error names the way out | Remove the `checkUnsealParams` call in `openSlotWithPassphrase` |
+| The test mode is read once at `keys.New` into an unexported field, so a test can run the **whole** unseal path as a server binary | Otherwise the call site of lock 2 is untestable (a mutation removing it survived in the first draft) | – |
+| v0.1.0: `defaultArgon2` unchanged since its first commit (`abb0d18`), set only in `keys.New`; the upgrade test now reads the restored slot: `{"t":4,"m":262144,"p":4}` | Lock 2 must not lock out an existing installation | – |
+| `cmd/myownpki` stays at ~1.3 GB: `passphrase change/reset` through the real CLI code stores the production values (no flag allowed), and the test verifies them | A second test of the production path; one sequential test | – |
+
+Tests: `TestWeakKDFOnlyInTestBinaries` (option and minimum with the test mode as an argument; t, memory
+and lanes each one step below), `TestTestKDFIsStored` (the weak slot as a server binary: refused,
+`denied` in the audit log, recovery key → new passphrase → unseal works), `TestProductionArgon2Parameters`
+(init and unseal with t=4, 256 MiB, p=4: 474 ms here), `TestTestKDFOnlyInTestBinaries` (setup).
+Mutations, all caught: unseal ignores the minimum; option allowed outside tests; `allowTestKDF`
+always ok; minimum ignores t; minimum ignores p; setup guard off; TestKDF without effect.
+`task upgrade:test` green. The release binary has no `-test.*` flags (`testing` only for `Testing()`).
+
+Peak memory and time per test binary, without -race, 4 CPUs (same method as above):
+
+| Package | Before | After |
+|---|---|---|
+| internal/acme | 2366 MiB, 17.5 s | **121 MiB, 3.0 s** |
+| internal/server | 2379 MiB, 5.7 s | **229 MiB, 1.8 s** |
+| internal/web | 2084 MiB, 15.3 s | **139 MiB, 3.9 s** |
+| internal/httpapi | 2320 MiB, 13.1 s | 130 MiB, 2.8 s |
+| cmd/myownpki | 1685 MiB, 8.0 s | 1335 MiB, 3.5 s (see above) |
+| internal/keys | 571 MiB, 2.1 s | 937 MiB, 2.2 s (now init **and** unseal with production values) |
+
+`go test -race ./...` could not run here: no C compiler on this machine (cgo needs gcc). **Only
+checkable in CI** – the race job's memory log (b) shows the peak.
 
 ## Owner decisions applied (commit "docs: owner decisions for phase 2")
 
