@@ -63,22 +63,45 @@ follows up to v1.0:
 Read [docs/OPERATIONS.md](docs/OPERATIONS.md) first – above all the warning about the unseal
 passphrase. Releases: <https://github.com/Der-Felix/MyOwnPKI/releases>.
 
+### On Linux with systemd: install.sh (recommended)
+
+One command installs MyOwnPKI as a hardened systemd service (Debian, Ubuntu and other systemd
+distributions; amd64 or arm64). Download the script with the checksum file, check it, run it –
+never pipe it into a shell:
+
+```sh
+v=0.2.1
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
+sha256sum --check --ignore-missing checksums.txt
+sudo bash install.sh --tls-names "pki.homelab.lan, 192.168.10.5"
+```
+
+It checks the archive it downloads (SHA-256, and the Sigstore signature when cosign is installed –
+see "Verify a download"), creates the user, the config and the unit, enables the service without
+starting it and prints the next commands: `init` at the terminal, start, unseal in the browser.
+Running it again for a newer release updates – with a backup first. Everything it does and every
+option: [docs/OPERATIONS.md](docs/OPERATIONS.md) §2.
+
 ### From a release archive
 
 Archives for linux/amd64, linux/arm64, darwin/arm64, windows/amd64 and freebsd/amd64 hold the
-single `myownpki` binary, the operations guide and an example configuration.
+single `myownpki` binary, the operations guide, an example configuration, the systemd unit and
+`install.sh`.
 
 ```sh
-v=0.2.0
+v=0.2.1
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
 ```
 
 Then verify the download (next section), unpack it, copy `deploy/config.example.yaml` to
-`/etc/myownpki/config.yaml` and continue with `myownpki init` (docs/OPERATIONS.md §3).
+`/etc/myownpki/config.yaml` and continue with `myownpki init` (docs/OPERATIONS.md §3). On a
+machine without internet, `install.sh --archive` installs from this archive.
 
-### With Docker
+### With Docker (the alternative)
 
 The image `ghcr.io/der-felix/myownpki` (linux/amd64 and linux/arm64) is distroless and runs as a
 non-root user; the data directory is a volume, and the image's healthcheck runs
@@ -109,8 +132,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.2.0 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.2.0" \
+cosign verify ghcr.io/der-felix/myownpki:0.2.1 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.2.1" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -124,7 +147,7 @@ are reproducible: the same tag built again gives byte-identical archives.
 | `docs/PLAN.md` | Project plan, architecture decisions (ADRs), roadmap |
 | `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies, the ACME server behind a reverse proxy |
 | `docs/RELEASING.md` | How a release is made (owner checklist) |
-| `deploy/` | Example configuration, Dockerfile and Docker Compose file |
+| `deploy/` | Example configuration, `install.sh` and the systemd unit, Dockerfile and Docker Compose file |
 | `CHANGELOG.md` | Changes per release |
 | `cmd/` | The three binaries: `myownpki` (server), `myownpki-agent`, `myownpki-ctl` |
 | `internal/ca/preset` | Loader and validation for certificate presets |
