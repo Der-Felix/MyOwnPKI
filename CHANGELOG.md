@@ -7,9 +7,13 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-Prepared as 0.2.1 – the installation as a systemd service without Docker. Upgrade from 0.2.0: as
-before (backup, replace the binary, start); or install once with `install.sh`, which keeps an
-existing `/etc/myownpki/config.yaml` and `/var/lib/myownpki`.
+## [0.2.1] - 2026-10-24
+
+Install and update MyOwnPKI as a hardened systemd service with one command: `install.sh`
+(docs/OPERATIONS.md §2.1) – no Docker needed. The server itself is unchanged. **Docker
+installations:** nothing changes – back up, pull the 0.2.1 image, start, as before. Upgrade from
+0.2.0 without Docker: as before (backup, replace the binary, start); or run `install.sh` once – it
+keeps an existing `/etc/myownpki/config.yaml` and `/var/lib/myownpki`.
 
 ### Added
 
@@ -25,7 +29,7 @@ existing `/etc/myownpki/config.yaml` and `/var/lib/myownpki`.
   `--archive` installs from a local archive (machines without internet). docs/OPERATIONS.md §2.1.
 - **systemd unit** `deploy/systemd/myownpki.service` with a strict sandbox (no capabilities,
   read-only system except the data directory, private users and devices, a system call filter;
-  `systemd-analyze security` below 2.0), and the drop-in `public-port-80.conf` for the public
+  `systemd-analyze security` rates it 1.2, "OK"), and the drop-in `public-port-80.conf` for the public
   listener on port 80 without a reverse proxy (`--public-port-80`).
 
 ### Changed
@@ -148,6 +152,7 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Der-Felix/MyOwnPKI/releases/tag/v0.1.0
