@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.2.0-draft
-  summary: REST API of the MyOwnPKI admin listener (phase 1 scope)
+  version: 0.2.0
+  summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
-    Phase 1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation,
-    legacy import, login with mandatory second factor, RBAC, unseal and audit log.
-    ACME (phase 2), domains/policies (phase 2) and agents (phase 3) are not part of it.
-    Step 13 implements the operations needed for the first browser test (see docs/PHASE1.md);
-    the others follow in step 18 and answer 404 until then.
+    v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy
+    import, login with mandatory second factor, RBAC, unseal and audit log. v0.2 adds the ACME
+    domains and the ACME rate limits in the tenant settings. The ACME protocol itself (RFC 8555)
+    is not part of this API: it is served on its own listener, behind a reverse proxy that ends
+    TLS. Agents (phase 3) follow later.
 
     **Conventions**
     - Served only on the admin listener (ADR-08), base path `/api/v1`. The listener's own

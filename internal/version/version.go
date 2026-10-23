@@ -2,7 +2,7 @@
 //
 // Release builds set the values at link time, for example:
 //
-//	go build -ldflags "-X github.com/Der-Felix/MyOwnPKI/internal/version.version=v0.1.0" ./cmd/myownpki
+//	go build -ldflags "-X github.com/Der-Felix/MyOwnPKI/internal/version.version=v0.2.0" ./cmd/myownpki
 //
 // Local builds fall back to the VCS data the Go toolchain embeds automatically
 // (commit, commit time, uncommitted changes).
@@ -72,7 +72,7 @@ func applyBuildInfo(info *Info, bi *debug.BuildInfo) {
 
 // String formats the build information for --version output, e.g.
 //
-//	myownpki v0.1.0 (commit 1a2b3c4d5e6f, 2026-10-12T09:30:00Z, go1.27.0, linux/amd64)
+//	myownpki v0.2.0 (commit 1a2b3c4d5e6f, 2026-10-12T09:30:00Z, go1.27.0, linux/amd64)
 func (i Info) String(binary string) string {
 	c := "unknown"
 	if i.Commit != "" {
