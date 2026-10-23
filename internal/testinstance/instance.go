@@ -85,7 +85,7 @@ func New(t *testing.T, o Options) *Instance {
 		secrets: map[string][]byte{}, CAIDs: map[string]string{},
 	}
 	res, err := setup.Run(t.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console,
+		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock)
+	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock, keys.TestKDF())
 	if v.Presets, err = preset.Builtin(); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 		Clock: v.Clock, ServerKeygen: func(context.Context) (bool, error) { return true, nil },
 	}
 	v.Auth = auth.NewService(v.SystemDB.Write, v.InstanceAudit.Write, key, v.Clock)
-	v.Auth.Hasher = auth.NewHasher(auth.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}, 4, time.Second)
+	v.Auth.Hasher = auth.NewHasher(auth.TestParams(), 4, time.Second)
 	if !o.NoPasskeys {
 		if v.Auth.Passkeys, err = auth.NewPasskeys("pki.homelab.lan", BrowserOrigin); err != nil {
 			t.Fatal(err)

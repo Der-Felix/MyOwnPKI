@@ -71,7 +71,7 @@ func testConfig(t *testing.T) config.Config {
 func initialized(t *testing.T, cfg config.Config) string {
 	t.Helper()
 	res, err := setup.Run(t.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console,
+		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatal(err)

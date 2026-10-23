@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
@@ -87,8 +88,11 @@ type Options struct {
 	Rand            io.Reader   // nil = crypto/rand
 	Who             keys.Who    // the console operator
 
-	// argon replaces the Argon2id parameters of the auth service in tests.
-	argon *auth.Params
+	// TestKDF uses the weak Argon2id parameters of tests for the key ring and
+	// the passwords (keys.TestKDF, auth.TestParams). Test binaries only: Run
+	// fails otherwise, and no flag or configuration key sets it.
+	TestKDF bool
+
 	// failAfter stops after a write step (tests of the resume path).
 	failAfter string
 }
@@ -151,6 +155,9 @@ func Run(ctx context.Context, opt Options, ui UI) (*Result, error) {
 	}
 	if r.opt.Who.Principal == nil {
 		return nil, errors.New("setup: no console principal")
+	}
+	if err := checkTestKDF(opt.TestKDF, testing.Testing()); err != nil {
+		return nil, err
 	}
 	if err := r.readState(ctx); err != nil {
 		return nil, err
@@ -304,7 +311,7 @@ func (r *run) proveOperator(ctx context.Context) error {
 		return err
 	}
 	if err := r.writeDBs(ctx, func(sys, ia *store.DB) error {
-		return keys.New(sys.Write, ia.Write, r.clk).VerifyPassphrase(ctx, append([]byte(nil), pass...), r.opt.Who)
+		return r.keyring(sys, ia).VerifyPassphrase(ctx, append([]byte(nil), pass...), r.opt.Who)
 	}); err != nil {
 		clear(pass)
 		return err
@@ -600,7 +607,7 @@ func (r *run) rootKey(ctx context.Context) error {
 	}
 	return r.writeDBs(ctx, func(sys, ia *store.DB) error {
 		pass := append([]byte(nil), r.passphrase...) // Init clears its copy
-		return keys.New(sys.Write, ia.Write, r.clk).Init(ctx, pass, *r.recovery, r.opt.Who)
+		return r.keyring(sys, ia).Init(ctx, pass, *r.recovery, r.opt.Who)
 	})
 }
 
@@ -630,7 +637,7 @@ func (r *run) createUser(ctx context.Context) error {
 // 2026-10-16); only system.seal comes after, by design.
 func (r *run) unsealPart(ctx context.Context) error {
 	return r.writeTenantDBs(ctx, func(sys, ia, pki, ta *store.DB) error {
-		ring := keys.New(sys.Write, ia.Write, r.clk)
+		ring := r.keyring(sys, ia)
 		deliverer := &audit.Deliverer{
 			Routes: []audit.Route{
 				{Source: "system", From: sys.Write, To: ia.Write, Scope: store.InstanceScope},
@@ -782,8 +789,8 @@ func modeName(m Mode) string {
 func (r *run) authService(key *auth.Key) *auth.Service {
 	svc := auth.NewService(nil, nil, key, r.clk)
 	svc.Rand = r.rnd
-	if r.opt.argon != nil {
-		svc.Hasher = auth.NewHasher(*r.opt.argon, auth.MaxParallelHashes, auth.HashWait)
+	if r.opt.TestKDF {
+		svc.Hasher = auth.NewHasher(auth.TestParams(), auth.MaxParallelHashes, auth.HashWait)
 	}
 	return svc
 }
@@ -826,4 +833,20 @@ func (r *run) writeTenantDBs(ctx context.Context, fn func(sys, ia, pki, ta *stor
 		defer func() { _ = ta.Close() }()
 		return fn(sys, ia, pki, ta)
 	})
+}
+
+func checkTestKDF(set, testBinary bool) error {
+	if set && !testBinary {
+		return errors.New("setup: TestKDF is only for test binaries – weak Argon2id parameters never protect a real instance")
+	}
+	return nil
+}
+
+// keyring is a key ring on the given databases, with the test KDF if asked.
+func (r *run) keyring(sys, ia *store.DB) *keys.Keyring {
+	var opts []keys.Option
+	if r.opt.TestKDF {
+		opts = append(opts, keys.TestKDF())
+	}
+	return keys.New(sys.Write, ia.Write, r.clk, opts...)
 }

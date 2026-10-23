@@ -83,6 +83,10 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
   wraps a random root key; one DEK per key, AES-256-GCM, purpose and key ID bound as additional data.
   A recovery key is a second wrap of the root key. Never log or print the passphrase or recovery key
   (`RecoveryKey` is redacted except `Reveal()`); use the private key only inside `WithKey`/`WithSigner`.
+- Argon2id t=4, 256 MiB, p=4 is the default **and the minimum at unseal** – a slot with less is refused.
+  Tests that create instances use `keys.TestKDF()` / `setup.Options.TestKDF` / `auth.TestParams()`
+  (values in one place: `keys.TestArgon2`); they panic or fail outside a test binary. Never add a
+  flag, configuration key or environment variable that weakens the KDF.
 - The server starts **sealed**; no signing until unsealed. Unseal state is in memory only.
 - Private key material: keep in memory as briefly as possible, zero buffers where Go allows (best effort),
   never log, never put in error messages, never send to the browser except an explicit, audited,

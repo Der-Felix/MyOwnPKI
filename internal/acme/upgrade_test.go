@@ -75,6 +75,16 @@ func TestUpgradeFromV01(t *testing.T) {
 	if err != nil || limits != tenant.DefaultACMELimits {
 		t.Errorf("ACME limits after the migration: %+v %v", limits, err)
 	}
+	// The key ring of v0.1.0 has exactly the production Argon2id values, so a
+	// v0.2 server (which refuses anything below them, PLAN §5) unseals it. A
+	// test binary skips that check – hence the explicit look at the slot.
+	var kdf string
+	if qerr := inst.SystemDB.Read.QueryRowContext(ctx, `SELECT kdf_params FROM unseal WHERE slot = 'passphrase'`).Scan(&kdf); qerr != nil {
+		t.Fatal(qerr)
+	}
+	if kdf != `{"t":4,"m":262144,"p":4}` {
+		t.Errorf("Argon2id parameters of the v0.1.0 key ring: %s, want t=4, 256 MiB, p=4", kdf)
+	}
 	inst.Unseal(t)
 
 	// ACME issues with the CA of v0.1.0.

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/netip"
 	"sync"
+	"testing"
 	"time"
 	"unicode/utf8"
 
@@ -31,6 +32,9 @@ var (
 	ErrWrongSecret        = errors.New("wrong passphrase or recovery key")
 	ErrWeakPassphrase     = errors.New("the passphrase must have at least 16 characters")
 	ErrLocked             = errors.New("too many failed attempts")
+	// ErrWeakKDF: the passphrase slot asks for less than the production
+	// Argon2id parameters (a key ring of a test build).
+	ErrWeakKDF = errors.New("the key ring's Argon2id parameters are below the minimum")
 )
 
 // LockedError carries how long the caller must wait (HTTP 429 Retry-After).
@@ -65,6 +69,9 @@ type Keyring struct {
 	clock  clock.Clock
 	rand   io.Reader
 	params argon2Params
+	// testBinary is testing.Testing() at New: only a test binary accepts the
+	// weak KDF parameters (TestKDF, and at unseal). Tests may clear it.
+	testBinary bool
 	// Wake, if set, is called after an audit event was written to the
 	// outbox, so the deliverer picks it up at once.
 	Wake func()
@@ -84,8 +91,37 @@ type Keyring struct {
 
 // New returns a sealed keyring. system and auditLog are the writers of
 // system.db and of the instance audit log (<data>/audit.db).
-func New(system, auditLog *sql.DB, clk clock.Clock) *Keyring {
-	return &Keyring{system: system, audit: auditLog, clock: clk, rand: defaultRand, params: defaultArgon2, sealedSince: clk.Now()}
+func New(system, auditLog *sql.DB, clk clock.Clock, opts ...Option) *Keyring {
+	k := &Keyring{system: system, audit: auditLog, clock: clk, rand: defaultRand, params: defaultArgon2, sealedSince: clk.Now(), testBinary: testing.Testing()}
+	if err := k.apply(opts, k.testBinary); err != nil {
+		panic(err)
+	}
+	return k
+}
+
+// Option changes a new Keyring.
+type Option func(*options)
+
+type options struct{ testKDF bool }
+
+// TestKDF makes Init, ChangePassphrase and ResetPassphrase store the weak
+// Argon2id parameters of tests (TestArgon2) – a test instance then needs
+// 8 MiB per derivation instead of 256 MiB. New panics if it is used outside
+// a test binary; and outside a test binary Unseal refuses such a key ring.
+func TestKDF() Option { return func(o *options) { o.testKDF = true } }
+
+func (k *Keyring) apply(opts []Option, testBinary bool) error {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.testKDF {
+		if err := allowTestKDF(testBinary); err != nil {
+			return err
+		}
+		k.params = testArgon2
+	}
+	return nil
 }
 
 // Status is the seal state.
@@ -231,6 +267,9 @@ func (k *Keyring) checkSecret(ctx context.Context, action string, who Who, open 
 			return nil, 0, errors.Join(ErrWrongSecret, aerr)
 		}
 		return nil, 0, ErrWrongSecret
+	}
+	if errors.Is(err, ErrWeakKDF) {
+		_ = k.direct(ctx, who, action, audit.ResultDenied, map[string]any{"reason": "weak_kdf"})
 	}
 	if err != nil {
 		return nil, 0, err
@@ -486,6 +525,9 @@ func (k *Keyring) openSlotWithPassphrase(ctx context.Context, passphrase []byte)
 	params, err := parseArgon2Params(s.KdfParams)
 	if err != nil {
 		return nil, 0, err
+	}
+	if werr := checkUnsealParams(params, k.testBinary); werr != nil {
+		return nil, 0, werr
 	}
 	kek := passphraseKEK(passphrase, s.Salt, params)
 	defer clear(kek)

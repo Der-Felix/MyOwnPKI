@@ -37,7 +37,7 @@ func TestImportLegacyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	console := keys.Who{Actor: consoleWho().Actor, Principal: authz.Console()}
-	if ierr := keys.New(sys.Write, ia.Write, clock.System{}).Init(t.Context(), []byte(testPassphrase), recovery, console); ierr != nil {
+	if ierr := keys.New(sys.Write, ia.Write, clock.System{}, keys.TestKDF()).Init(t.Context(), []byte(testPassphrase), recovery, console); ierr != nil {
 		t.Fatal(ierr)
 	}
 	_ = sys.Close()

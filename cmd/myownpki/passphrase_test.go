@@ -37,7 +37,7 @@ func TestPassphraseCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ring := keys.New(sys.Write, ia.Write, clock.System{})
+	ring := keys.New(sys.Write, ia.Write, clock.System{}, keys.TestKDF())
 	if ierr := ring.Init(t.Context(), []byte(testPassphrase), recovery, console); ierr != nil {
 		t.Fatal(ierr)
 	}

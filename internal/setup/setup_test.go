@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
-	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
@@ -44,7 +43,7 @@ func options(t *testing.T, mode Mode) Options {
 	cfg.DataDir = filepath.Join(t.TempDir(), "data")
 	return Options{
 		Config: cfg, Mode: mode, Clock: clock.NewFake(t0), Hostname: "pki01.homelab.lan", Who: console,
-		argon: &auth.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1},
+		TestKDF: true,
 	}
 }
 
@@ -471,5 +470,18 @@ func TestInitIsSigned(t *testing.T) {
 	}
 	if initSeq >= rep.LastCheckpoint.Seq || strings.Join(after, ",") != "system.seal" {
 		t.Errorf("system.init at %d, last checkpoint at %d, after it: %v", initSeq, rep.LastCheckpoint.Seq, after)
+	}
+}
+
+// TestKDF is refused outside a test binary – before anything is written.
+func TestTestKDFOnlyInTestBinaries(t *testing.T) {
+	t.Parallel()
+	if err := checkTestKDF(true, false); err == nil {
+		t.Error("TestKDF accepted outside a test binary")
+	}
+	for _, c := range [][2]bool{{false, false}, {false, true}, {true, true}} {
+		if err := checkTestKDF(c[0], c[1]); err != nil {
+			t.Errorf("set=%v test binary=%v: %v", c[0], c[1], err)
+		}
 	}
 }
