@@ -69,10 +69,24 @@ archives:
         info: *fileinfo
       - src: deploy/config.example.yaml
         info: *fileinfo
+      # The systemd installation (docs/OPERATIONS.md §2): the unit, the port-80
+      # drop-in and install.sh, which also reads them from the archive.
+      - src: deploy/systemd/myownpki.service
+        info: *fileinfo
+      - src: deploy/systemd/public-port-80.conf
+        info: *fileinfo
+      - src: deploy/install.sh
+        info:
+          mode: 0o755
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  # install.sh is also an asset of its own, so it can be checked – and its
+  # signature is the one of checksums.txt – before it runs.
+  extra_files:
+    - glob: deploy/install.sh
 
 # One SPDX SBOM per archive. No --enrich: it looks things up on the network
 # during the build, which a reproducible build must not do.
@@ -136,6 +150,8 @@ release:
   replace_existing_draft: true
   prerelease: auto
   name_template: "MyOwnPKI {{ .Tag }}"
+  extra_files:
+    - glob: deploy/install.sh
 
 # The release notes come from CHANGELOG.md: release.yml always passes the
 # section of the tag with --release-notes (and stops if there is none), and
