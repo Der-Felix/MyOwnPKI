@@ -102,8 +102,9 @@ What it does:
 The unit runs the server in a strict sandbox: no capabilities, a read-only system except
 `/var/lib/myownpki`, private `/tmp`, devices and users, only IPv4/IPv6/Unix sockets, no
 namespaces, no writable-and-executable memory, the system calls of a normal service.
-`systemd-analyze security myownpki.service` rates it below 2.0 ("OK"; the CI job checks that and
-shows the value in its summary). Without a reverse proxy in front of the public listener,
+`systemd-analyze security myownpki.service` rates it **1.2** ("OK"; measured 2026-10-23 on the
+GitHub runner ubuntu-24.04). The CI job fails above 2.0 and shows the value in its summary;
+other systemd versions may rate a little differently. Without a reverse proxy in front of the public listener,
 `--public-port-80` adds the drop-in `myownpki.service.d/public-port-80.conf`: binding port 80 is
 then the only capability the service has. With a `data_dir` other than `/var/lib/myownpki`,
 change `StateDirectory=` and `ReadWritePaths=` with `systemctl edit myownpki`.
