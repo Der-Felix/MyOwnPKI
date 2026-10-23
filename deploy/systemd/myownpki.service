@@ -1,0 +1,73 @@
+# MyOwnPKI as a systemd service. Installed by deploy/install.sh to
+# /etc/systemd/system/myownpki.service – see docs/OPERATIONS.md §2.
+#
+# Paths: the binary /usr/local/bin/myownpki, the config /etc/myownpki/config.yaml
+# (root:myownpki 0640) and the data directory /var/lib/myownpki – the
+# config's data_dir. With another data_dir, change StateDirectory= and
+# ReadWritePaths= in a drop-in (systemctl edit myownpki).
+#
+# Check the sandbox: systemd-analyze security myownpki.service
+# Port 80 for the public listener without a reverse proxy: the drop-in
+# public-port-80.conf (install.sh --public-port-80).
+
+[Unit]
+Description=MyOwnPKI certificate authority
+Documentation=https://github.com/Der-Felix/MyOwnPKI/blob/main/docs/OPERATIONS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=myownpki
+Group=myownpki
+ExecStart=/usr/local/bin/myownpki serve --config /etc/myownpki/config.yaml
+Restart=on-failure
+RestartSec=5s
+# The server finishes requests, seals and writes a last audit checkpoint
+# within 8 seconds of SIGTERM (OPERATIONS §4).
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# /var/lib/myownpki, owned by the service user, 0700 – the only writable path.
+StateDirectory=myownpki
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/myownpki
+# /etc/myownpki, owned by root; the config file is root:myownpki 0640.
+ConfigurationDirectory=myownpki
+UMask=0077
+
+# Sandbox. Nothing here is needed by a pure-Go binary that only listens,
+# reads its config and writes its data directory.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+PrivateUsers=yes
+PrivateMounts=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+# Go never needs memory that is writable and executable (no JIT, no cgo).
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
