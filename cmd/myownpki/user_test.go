@@ -41,7 +41,7 @@ func TestUserConsoleCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ierr := keys.New(sys.Write, ia.Write, clock.System{}).Init(t.Context(), []byte(testPassphrase), recovery, console); ierr != nil {
+	if ierr := keys.New(sys.Write, ia.Write, clock.System{}, keys.TestKDF()).Init(t.Context(), []byte(testPassphrase), recovery, console); ierr != nil {
 		t.Fatal(ierr)
 	}
 	keyFile := filepath.Join(dataDir, "auth.key")

@@ -1,0 +1,22 @@
+// BIND for the ACME conformance run (PHASE2 step 14): authoritative for
+// homelab.lan on 127.0.0.1:5300, dynamic updates (RFC 2136) only with the
+// TSIG key that run.sh generates per run. No recursion.
+options {
+    directory "/var/cache/bind";
+    listen-on port 5300 { 127.0.0.1; };
+    listen-on-v6 { none; };
+    recursion no;
+    allow-query { any; };
+    dnssec-validation no;
+};
+
+key "acme-conformance" {
+    algorithm hmac-sha256;
+    secret "@TSIG_SECRET@";
+};
+
+zone "homelab.lan" {
+    type primary;
+    file "/var/lib/bind/homelab.lan.zone";
+    allow-update { key "acme-conformance"; };
+};

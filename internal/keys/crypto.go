@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"testing"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -109,6 +110,46 @@ type argon2Params struct {
 // defaultArgon2 (owner decision 2026-10-13): t=4, 256 MiB, p=4 – about
 // 0.1 s on a 4-core server, 1–2 s on a Raspberry Pi; fits a 512 MB container.
 var defaultArgon2 = argon2Params{Time: 4, MemoryKiB: 256 * 1024, Threads: 4}
+
+// testArgon2 are the weak parameters of tests – the only place for them:
+// the key ring uses them through TestKDF, the password hasher through
+// auth.TestParams (both via TestArgon2). 8 MiB is the floor check accepts.
+var testArgon2 = argon2Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
+
+// TestArgon2 returns the weak Argon2id parameters of tests (t=1, 8 MiB,
+// p=1). It panics outside a test binary: there is no way to make a server
+// use them – no flag, no configuration key, no environment variable.
+func TestArgon2() (timeCost, memoryKiB uint32, threads uint8) {
+	if err := allowTestKDF(testing.Testing()); err != nil {
+		panic(err)
+	}
+	return testArgon2.Time, testArgon2.MemoryKiB, testArgon2.Threads
+}
+
+func allowTestKDF(testBinary bool) error {
+	if !testBinary {
+		return errors.New("keys: the weak test KDF parameters are only for test binaries")
+	}
+	return nil
+}
+
+// checkUnsealParams refuses a passphrase slot whose parameters are below the
+// production values (owner decision 2026-10-23): such a key ring was made by
+// a test binary and must not protect real keys. Every key ring of v0.1.0 has
+// exactly defaultArgon2 – it was the only value outside tests. Test binaries
+// accept the weak values of testArgon2.
+func checkUnsealParams(p argon2Params, testBinary bool) error {
+	if testBinary {
+		return nil
+	}
+	m := defaultArgon2
+	if p.Time < m.Time || p.MemoryKiB < m.MemoryKiB || p.Threads < m.Threads {
+		return fmt.Errorf("%w: the passphrase slot asks for Argon2id t=%d, %d MiB, p=%d; the minimum is t=%d, %d MiB, p=%d "+
+			"(a key ring made by a test build) – unseal with the recovery key and set a new passphrase",
+			ErrWeakKDF, p.Time, p.MemoryKiB/1024, p.Threads, m.Time, m.MemoryKiB/1024, m.Threads)
+	}
+	return nil
+}
 
 // check rejects stored parameters that would make one unseal attempt
 // exhaust the machine (a tampered row must not become a denial of service).

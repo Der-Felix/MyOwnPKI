@@ -169,6 +169,7 @@ type Cell struct {
 	Status          view.Status // set: the text is a status
 	Mono, Num       bool
 	NoWrap          bool
+	Break           bool // long values (URLs, errors) wrap anywhere
 }
 
 // Column is one table column.
@@ -262,7 +263,7 @@ templ Table(d TableData) {
 }
 
 templ tableCell(c Cell) {
-	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap) }>
+	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap), templ.KV("break", c.Break) }>
 		if c.Status != "" {
 			@components.Status(c.Status, c.Text)
 		} else if c.Href != "" {

@@ -403,7 +403,13 @@ func realPages(t *testing.T) map[string]string {
 		if err != nil {
 			t.Fatal(err)
 		}
+		issuingCA := "issuing"
+		dom, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuingCA}, Who: testinstance.Console})
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, p := range []string{
+			"/domains", "/domains/new", "/domains/" + dom.ID,
 			"/", "/certificates", "/certificates?status=expiring&q=nas", "/certificates/" + issued.ID,
 			"/certificates/" + issued.ID + "/extensions", "/certificates/" + issued.ID + "/chain", "/certificates/new",
 			"/authorities", "/authorities/" + v.CAIDs["issuing"], "/authorities/" + v.CAIDs["root"],
@@ -412,6 +418,7 @@ func realPages(t *testing.T) map[string]string {
 			"/authorities/new", "/authorities/import", "/authorities/" + v.CAIDs["issuing"] + "/manage", "/authorities/" + v.CAIDs["root"] + "/manage",
 			"/presets", "/presets/server", "/admin/users", "/admin/users/new", "/admin/users/" + v.UserID(t, "demo"), "/admin/settings",
 			"/admin/audit", "/admin/audit?scope=instance", "/admin/import", "/account",
+			"/acme/accounts", "/acme/names", "/acme/eab", "/acme/orders",
 		} {
 			out["real "+p] = b.get(t, p).html()
 		}

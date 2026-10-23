@@ -22,6 +22,11 @@ vars:
   # Release tools (release:check, release:snapshot) – keep in sync with .github/workflows/release.yml.
   GORELEASER_VERSION: 2.18.2
   SYFT_VERSION: 1.54.1
+  # ACME test tools (task acme:lego, the conformance CI job) – never in go.mod.
+  LEGO_VERSION: 5.5.2
+  PEBBLE_VERSION: 2.10.1
+  # The release the upgrade test starts from (task upgrade:test).
+  UPGRADE_FROM: 0.1.0
 
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
@@ -119,10 +124,32 @@ tasks:
     cmds:
       - CGO_ENABLED=0 go test ./...
 
-  test:race:
-    desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux)
+  fuzz:
+    desc: Short fuzz runs of the parsers that read untrusted input (ACME JWS) – 30 seconds each
     cmds:
-      - CGO_ENABLED=1 go test -race ./...
+      - CGO_ENABLED=0 go test ./internal/acme/jose/ -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+
+  acme:lego:
+    desc: End-to-end check with the real ACME client lego (test tool, never in go.mod) – builds lego into .tools/ and runs the walking skeleton
+    cmds:
+      - GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools" go install github.com/go-acme/lego/v5@v{{.LEGO_VERSION}}
+      - CGO_ENABLED=0 LEGO_BIN="{{.ROOT_DIR}}/.tools/lego{{exeExt}}" go test ./internal/acme/ -run 'TestLego' -count=1 -v
+
+  upgrade:test:
+    desc: Upgrade test – the previous release (UPGRADE_FROM) makes an instance and a backup; this build restores, migrates and issues by ACME
+    cmds:
+      - GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools/v{{.UPGRADE_FROM}}" go install github.com/Der-Felix/MyOwnPKI/cmd/myownpki@v{{.UPGRADE_FROM}}
+      - CGO_ENABLED=0 UPGRADE_FROM_BIN="{{.ROOT_DIR}}/.tools/v{{.UPGRADE_FROM}}/myownpki{{exeExt}}" go test ./internal/acme/ -run 'TestUpgradeFrom' -count=1 -v
+
+  acme:conformance:
+    desc: ACME conformance with real clients (lego, certbot, acme.sh; Pebble as control) – Linux with Docker; CI runs it in its own job
+    cmds:
+      - LEGO_VERSION={{.LEGO_VERSION}} PEBBLE_VERSION={{.PEBBLE_VERSION}} bash test/conformance/run.sh
+
+  test:race:
+    desc: Run all tests with the race detector (needs CGO and a C compiler – runs in CI on Linux; CI adds -json via "task test:race -- -json")
+    cmds:
+      - CGO_ENABLED=1 go test -race {{.CLI_ARGS}} ./...
 
   fmt:
     desc: Format all Go files (gofmt + goimports, settings in .golangci.yml)

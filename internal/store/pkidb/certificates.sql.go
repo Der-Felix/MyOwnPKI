@@ -108,6 +108,38 @@ func (q *Queries) GetCertificate(ctx context.Context, id string) (Certificate, e
 	return i, err
 }
 
+const getCertificateByFingerprint = `-- name: GetCertificateByFingerprint :one
+SELECT id, ca_id, ca_generation, source, preset, serial_hex, subject_dn, common_name, not_before, not_after, key_algorithm, key_id, cert_der, fingerprint_sha256, renewal_of, requested_by, custom_ku, custom_eku, created_at FROM certificates WHERE fingerprint_sha256 = ?
+`
+
+// ACME revokeCert names a certificate by its DER (RFC 8555 section 7.6).
+func (q *Queries) GetCertificateByFingerprint(ctx context.Context, fingerprintSha256 string) (Certificate, error) {
+	row := q.db.QueryRowContext(ctx, getCertificateByFingerprint, fingerprintSha256)
+	var i Certificate
+	err := row.Scan(
+		&i.ID,
+		&i.CaID,
+		&i.CaGeneration,
+		&i.Source,
+		&i.Preset,
+		&i.SerialHex,
+		&i.SubjectDn,
+		&i.CommonName,
+		&i.NotBefore,
+		&i.NotAfter,
+		&i.KeyAlgorithm,
+		&i.KeyID,
+		&i.CertDer,
+		&i.FingerprintSha256,
+		&i.RenewalOf,
+		&i.RequestedBy,
+		&i.CustomKu,
+		&i.CustomEku,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertCertificate = `-- name: InsertCertificate :exec
 
 INSERT INTO certificates (id, ca_id, ca_generation, source, preset, serial_hex, subject_dn, common_name,
@@ -342,6 +374,55 @@ func (q *Queries) ListCertificates(ctx context.Context, arg ListCertificatesPara
 			&i.RevocationReason,
 			&i.RevokedAt,
 			&i.InvalidityDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCertificatesBySerial = `-- name: ListCertificatesBySerial :many
+SELECT id, ca_id, ca_generation, source, preset, serial_hex, subject_dn, common_name, not_before, not_after, key_algorithm, key_id, cert_der, fingerprint_sha256, renewal_of, requested_by, custom_ku, custom_eku, created_at FROM certificates WHERE serial_hex = ? LIMIT 20
+`
+
+// ACME renewalInfo names a certificate by issuer key ID and serial; the
+// caller compares the key ID (RFC 9773 section 4.1).
+func (q *Queries) ListCertificatesBySerial(ctx context.Context, serialHex string) ([]Certificate, error) {
+	rows, err := q.db.QueryContext(ctx, listCertificatesBySerial, serialHex)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Certificate{}
+	for rows.Next() {
+		var i Certificate
+		if err := rows.Scan(
+			&i.ID,
+			&i.CaID,
+			&i.CaGeneration,
+			&i.Source,
+			&i.Preset,
+			&i.SerialHex,
+			&i.SubjectDn,
+			&i.CommonName,
+			&i.NotBefore,
+			&i.NotAfter,
+			&i.KeyAlgorithm,
+			&i.KeyID,
+			&i.CertDer,
+			&i.FingerprintSha256,
+			&i.RenewalOf,
+			&i.RequestedBy,
+			&i.CustomKu,
+			&i.CustomEku,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

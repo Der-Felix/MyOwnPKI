@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
@@ -25,15 +27,28 @@ type uiEnv struct {
 	*testinstance.Instance
 	h    http.Handler
 	logs bytes.Buffer
+	acme *acme.Server // nil: ACME off
 }
 
-func newUIEnv(t *testing.T) *uiEnv {
+// newUIEnv has the ACME server on; newUIEnvWith(t, false) has it off.
+func newUIEnv(t *testing.T) *uiEnv { t.Helper(); return newUIEnvWith(t, true) }
+
+func newUIEnvWith(t *testing.T, acmeOn bool) *uiEnv {
 	t.Helper()
 	v := &uiEnv{Instance: testinstance.New(t, testinstance.Options{})}
-	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: &AppDeps{
+	deps := &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read,
-	}})
+	}
+	if acmeOn {
+		s, aerr := acme.New(acme.Options{Engine: v.Engine, BaseURL: "https://pki.homelab.test/acme", Clock: v.Clock})
+		if aerr != nil {
+			t.Fatal(aerr)
+		}
+		t.Cleanup(s.Close)
+		v.acme, deps.ACME, deps.ACMEDirectory = s, s, s.BaseURL()+"/directory"
+	}
+	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: deps})
 	if err != nil {
 		t.Fatal(err)
 	}

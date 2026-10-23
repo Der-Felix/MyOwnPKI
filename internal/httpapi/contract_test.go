@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math/big"
 	"net/http"
 	"os"
@@ -682,6 +683,8 @@ func TestContract(t *testing.T) {
 		{op: "updateSettings", as: viewer, body: settings, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "updateSettings", as: admin, body: settings, want: 200},
 		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
+		{op: "updateSettings", as: admin, body: withLimits(settings, 100, 3, 20), want: 200, note: "acme-limits"},
+		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
 	} {
 		run(cc)
 	}
@@ -754,6 +757,57 @@ func TestContract(t *testing.T) {
 	jobID, _ := job.body["id"].(string)
 	run(contractCase{op: "getImport", as: admin, path: "/imports/" + jobID, want: 200})
 	run(contractCase{op: "startLegacyImport", as: admin, body: map[string]any{"archive": "bm90IGFuIGFyY2hpdmU="}, want: 422, kind: "policy-violation"})
+
+	// Domains (PHASE2 step 1): two domains – one stays for the token replay
+	// below, the other is deleted.
+	admin.stepUp(t, "demo")
+	newDomain := func(name string) string {
+		t.Helper()
+		r := admin.do(t, http.MethodPost, "/domains", map[string]any{"name": name, "ca_id": issuing, "approval": "open", "ip_ranges": []string{}})
+		s.check(t, s.routeOf(t, v.api, "createDomain"), r)
+		if r.Code != http.StatusCreated {
+			t.Fatalf("create domain %s: %d %s", name, r.Code, r.Body.String())
+		}
+		id, _ := r.body["id"].(string)
+		return id
+	}
+	keepID, dropID := newDomain("homelab.lan"), newDomain("other.lan")
+	mark("createDomain", "success")
+	domainBody := map[string]any{"name": "third.lan", "ca_id": issuing}
+	for _, cc := range []contractCase{
+		{op: "createDomain", as: admin, body: map[string]any{"name": "homelab.lan", "ca_id": issuing}, want: 422, kind: "policy-violation"},
+		{op: "createDomain", as: admin, body: map[string]any{"name": "x.lan", "ca_id": issuing, "approval": "never"}, want: 422, kind: "policy-violation"},
+		{op: "createDomain", as: admin, body: map[string]any{"name": "x.lan"}, want: 400},
+		{op: "listDomains", as: anon, want: 401, note: "no-session"},
+		{op: "listDomains", as: viewer, want: 200},
+		{op: "listDomains", as: rootview, want: 200},
+		{op: "getDomain", as: anon, path: "/domains/" + keepID, want: 401, note: "no-session"},
+		{op: "getDomain", as: viewer, path: "/domains/" + keepID, want: 200},
+		{op: "getDomain", as: rootview, path: "/domains/" + keepID, want: 404, note: "no-read"},
+		{op: "getDomain", as: viewer, path: "/domains/dom_doesnotexist0000000000", want: 404},
+		{op: "updateDomain", as: admin, path: "/domains/" + keepID, body: map[string]any{"wildcards": true}, want: 200},
+		{op: "updateDomain", as: admin, path: "/domains/" + keepID, body: map[string]any{"preset": "nope"}, want: 422, kind: "policy-violation"},
+		{op: "updateDomain", as: admin, path: "/domains/" + keepID, body: map[string]any{"wildcard": true}, want: 400},
+		{op: "deleteDomain", as: admin, path: "/domains/" + dropID, want: 204},
+	} {
+		run(cc)
+	}
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	for _, cc := range []contractCase{
+		{op: "createDomain", as: anon, body: domainBody, want: 401, note: "no-session"},
+		{op: "createDomain", as: viewer, body: domainBody, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createDomain", as: admin, body: domainBody, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "updateDomain", as: anon, path: "/domains/" + keepID, body: map[string]any{"wildcards": false}, want: 401, note: "no-session"},
+		{op: "updateDomain", as: viewer, path: "/domains/" + keepID, body: map[string]any{"wildcards": false}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateDomain", as: rootview, path: "/domains/" + keepID, body: map[string]any{"wildcards": false}, want: 404, note: "no-read"},
+		{op: "updateDomain", as: admin, path: "/domains/" + keepID, body: map[string]any{"wildcards": false}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "deleteDomain", as: anon, path: "/domains/" + keepID, want: 401, note: "no-session"},
+		{op: "deleteDomain", as: viewer, path: "/domains/" + keepID, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "deleteDomain", as: rootview, path: "/domains/" + keepID, want: 404, note: "no-read"},
+		{op: "deleteDomain", as: admin, path: "/domains/" + keepID, want: 403, kind: "step-up-required", note: "step-up"},
+	} {
+		run(cc)
+	}
 
 	// Every step-up operation once more with an API token of the admin: a
 	// plain refusal (forbidden), never step-up-required – no POST
@@ -920,4 +974,12 @@ func TestEverySpecOperationIsServed(t *testing.T) {
 	if n != len(served) {
 		t.Errorf("%d operations in the spec, %d routes", n, len(served))
 	}
+}
+
+// withLimits adds acme_limits to a settings body (PHASE2 step 11).
+func withLimits(settings map[string]any, orders, failed, accounts int) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["acme_limits"] = map[string]int{"orders_per_account": orders, "failed_per_name": failed, "accounts_per_ip": accounts}
+	return out
 }

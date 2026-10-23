@@ -1,3 +1,541 @@
+# Night log – v0.2
+
+> Autonomous run, night of 2026-10-22 → 2026-10-23, branch `night/v0.2` (from `fix/release-notes`,
+> not merged, not pushed). Plan: docs/PHASE2.md with the owner's decisions of 2026-10-22 (§4).
+> Rules: one local commit per finished part, only when `task check` and `task generate:check` are
+> green; never push, no tags, nothing published. No new module in the release binary; Pebble, lego
+> (`go run …@<version>`), certbot and BIND (containers, own CI job) only as test tools. No ADR
+> changes; decisions taken alone are the reversible variant and listed per step.
+>
+> Written in English (ADR-17). The owner's report is at the top; the step-by-step record follows.
+
+## Report for the owner
+
+**Result: v0.2 is built – steps 1–15 of docs/PHASE2.md plus the security fix you asked for.**
+Everything is on the local branch `night/v0.2` – **not merged, not pushed, no tag, nothing
+published. No stash.** One part is only checkable in CI: the conformance job (part C).
+
+### Commits on `night/v0.2` (oldest first, all local)
+
+| Commit | What |
+|---|---|
+| `7a1fa05` | docs: owner decisions for phase 2 |
+| `aa28744` | step 1 – domains |
+| `5b87980` | step 2 – ACME issuance through the engine |
+| `66f2f89` | step 3 – JWS/JWK in own code |
+| `ab99474` | steps 4–9 – ACME server (walking skeleton) |
+| `26a0b93` | step 10 – revokeCert |
+| `22bb2dd` | night log after step 10 (first stop) |
+| `b97053b` | **security fix**: http-01 reads nothing back, redirects only within the order |
+| `39b90e5` | step 11 – rate limits as tenant settings |
+| `52adcdc` | night log – report after step 11 |
+| `d47d18a` | step 12 – ARI (renewalInfo, replaces) |
+| `24e0a5a` | night log – report after step 12 |
+| `2a23f4c` | step 13 – approvals in the UI, EAB keys, screenshots |
+| `f0242ad` | night log – report after step 13 |
+| `d3daef9` | step 14 – conformance job (CI only) |
+| `b0e0b23` | night log – report after step 14 |
+| `7d6718d` | step 15 – upgrade test from v0.1.0 |
+| `539be49` | step 15 – OPERATIONS chapter 10, CHANGELOG 0.2.0, README |
+| _this commit_ | this report; restores the phase-1 report below (see "Found on the way") |
+
+### Done – in short
+
+- **Security fix** (`b97053b`): the http-01 validator tells the client only status and length –
+  never the target's answer, transport or DNS error texts, or addresses; redirects only to
+  identifiers of the same order (an IP only to itself). Five mutation checks.
+- **Step 11** rate limits: three limits as tenant settings (system.db 0009, API, form), 429 with the
+  real `Retry-After`, IPv6 per /64, a capped counter map (oldest go first).
+- **Step 12** ARI: window at 2/3 of the lifetime with a per-certificate shift; revoked → renew now;
+  `replaces` checked (own account, shared name, once → 409); `renewal_of` recorded. **lego asks
+  renewalInfo, waits while the window is ahead, and renews a revoked certificate at once.**
+- **Step 13** UI: *ACME → Accounts / New names / EAB keys / Orders*, dashboard notices, EAB keys
+  shown once. **lego registers with EAB against the own HS256 code.** Screenshots light/dark.
+- **Step 14** conformance job: lego, certbot (http-01, dns-01 via certbot-dns-rfc2136 against
+  BIND, revoke), acme.sh; Pebble as control; images by digest – **only checkable in CI**.
+- **Step 15**: upgrade test (the released v0.1.0 → backup → restore → migrate → ACME issue,
+  `openssl verify`), OPERATIONS.md chapter 10 with Caddy/nginx/Traefik, CHANGELOG 0.2.0 under
+  `[Unreleased]` without a date.
+- Every step: `task check` and `task generate:check` green before its commit.
+
+### Decisions to confirm (since your review of `22bb2dd`; details and "how to reverse" in the tables below)
+
+1. Security fix: also network/DNS error texts and addresses are hidden (more than the body) – table "Security fix after part A".
+2. Step 11: `acme_limits` **optional** in `PUT /settings` (no break for v0.1 clients); the challenge-start limit stays a constant; cap 100 000 counters.
+3. Step 12: the window for 90 days: day 60–63 to 69–72; renewalInfo answers for every certificate of this PKI.
+4. Step 13: reads need a tenant-wide role; EAB keys 1–90 days (default 7); not built: deactivating accounts and deleting EAB keys in the UI.
+5. Step 14: **Pebble as control** – it has no suite that tests a server (your plan said "Pebble test suite"); BIND 9.18 because 9.20's tag is younger than two weeks; the conformance test is compiled and linted in every `task check`.
+6. Step 15: v0.1.0 via `go install …@v0.1.0` for the upgrade test; README status "v0.2 in preparation"; OPERATIONS title "v0.2".
+
+### Found on the way (worth knowing)
+
+- revokeCert with the certificate key was refused for **every** key type (`Equal(any)` vs.
+  `Equal(crypto.PublicKey)`); the test with a foreign key had passed by accident. Fixed in step 10.
+- v0.1 refuses unknown `MYOWNPKI_*` variables: a downgrade must remove `MYOWNPKI_ACME_*` (OPERATIONS §9).
+- A long URL in an order error ran past the table edge – seen in the screenshot; cells can now wrap.
+- **My report script had emptied the phase-1 report** further down in this file (commits `52adcdc`
+  to `b0e0b23`). This commit restores it byte for byte from `22bb2dd`; the script now touches only
+  the first report.
+
+### Not done / open
+
+- The conformance job has never run (no Docker here). Likely first-run points: the runner address
+  from `hostname -I`, certbot's credentials-file warning, acme.sh's standalone mode.
+- `task lint:api` (vacuum) not run locally (not installed) – CI runs it for the `acme_limits` schema.
+- Traefik and Caddy as ACME *clients*: documented (OPERATIONS 10.6), not tested.
+
+### What you should test
+
+1. **Locally**, one after the other:
+
+   ```bash
+   task check
+   ```
+
+   ```bash
+   task acme:lego
+   ```
+
+   ```bash
+   task upgrade:test
+   ```
+
+2. **CI after your push**: the `check` job now runs the upgrade test; the new job **"ACME
+   conformance"** runs lego (`task acme:lego`) and the conformance run. Expect to look at it once.
+3. **The screenshots** in `docs/screenshots/` (`acme-*.png`, all others regenerated with the new menu).
+4. **By hand: a certificate through Caddy with lego (and certbot)** – the guide below.
+
+### Guide: a certificate on this machine, Caddy as the proxy, lego as the client (PowerShell)
+
+You need Caddy (`caddy.exe` from caddyserver.com) and OpenSSL (Git for Windows). lego is in
+`.tools\` after `task acme:lego`. Names: `pki.homelab.lan` is the proxy, `nas.homelab.lan` the
+client – it must resolve to this machine's **LAN address**, because the validator never connects to
+loopback.
+
+1. Build and make a test directory:
+
+   ```powershell
+   task build
+   ```
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\acme-test
+   ```
+
+2. Write `C:\acme-test\config.yaml`:
+
+   ```yaml
+   data_dir: "C:/acme-test/data"
+   admin:
+     listen: "127.0.0.1:9443"
+   public:
+     listen: "127.0.0.1:8080"
+   acme:
+     base_url: "https://pki.homelab.lan:8443/acme"
+     listen: "127.0.0.1:8081"
+     trusted_proxies: "127.0.0.1, ::1"
+   ```
+
+3. Names in the hosts file (PowerShell as administrator; replace `192.168.10.5` with your LAN
+   address from `ipconfig`):
+
+   ```powershell
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "127.0.0.1 pki.homelab.lan"
+   ```
+
+   ```powershell
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "192.168.10.5 nas.homelab.lan"
+   ```
+
+4. A demo instance with the test CA, then start it (keep this window open):
+
+   ```powershell
+   bin\myownpki.exe init --demo --with-ca --ca-base-url http://pki.homelab.lan:8080 --config C:\acme-test\config.yaml
+   ```
+
+   ```powershell
+   bin\myownpki.exe serve --config C:\acme-test\config.yaml
+   ```
+
+   Open https://127.0.0.1:9443, sign in and unseal with the values from
+   `C:\acme-test\data\init-demo-secrets.txt`.
+
+5. In the UI: *ACME → Domains → New domain*: `homelab.lan`, CA `issuing`, approval *approved
+   accounts*, http-01 on.
+
+6. The proxy's certificate from your own CA (OPERATIONS 10.2) – key and CSR in Git Bash:
+
+   ```bash
+   openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout /c/acme-test/pki.homelab.lan.key -out /c/acme-test/pki.homelab.lan.csr -subj "/CN=pki.homelab.lan" -addext "subjectAltName=DNS:pki.homelab.lan"
+   ```
+
+   In the UI: *Issue certificate* → preset *server* → paste the CSR → issue → *Download fullchain*,
+   save as `C:\acme-test\pki.homelab.lan.fullchain.pem`.
+
+7. The root, as PEM:
+
+   ```powershell
+   curl.exe -o C:\acme-test\root.crt http://127.0.0.1:8080/ca/root/1.crt
+   ```
+
+   ```powershell
+   openssl x509 -inform DER -in C:\acme-test\root.crt -out C:\acme-test\root.pem
+   ```
+
+8. Write `C:\acme-test\Caddyfile` – `disable_redirects` keeps Caddy off port 80, which lego needs
+   for http-01:
+
+   ```
+   {
+   	auto_https disable_redirects
+   }
+
+   https://pki.homelab.lan:8443 {
+   	tls C:/acme-test/pki.homelab.lan.fullchain.pem C:/acme-test/pki.homelab.lan.key
+   	handle /acme/* {
+   		reverse_proxy 127.0.0.1:8081
+   	}
+   }
+   ```
+
+   Start Caddy in a second window and check the directory in a third:
+
+   ```powershell
+   caddy run --config C:\acme-test\Caddyfile --adapter caddyfile
+   ```
+
+   ```powershell
+   curl.exe --cacert C:\acme-test\root.pem https://pki.homelab.lan:8443/acme/directory
+   ```
+
+9. lego trusts your root through an environment variable; the first run is refused ("waits for
+   approval"):
+
+   ```powershell
+   $env:LEGO_CA_CERTIFICATES = "C:\acme-test\root.pem"
+   ```
+
+   ```powershell
+   .tools\lego.exe run --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego --email admin@homelab.lan --accept-tos --domains nas.homelab.lan --http
+   ```
+
+   The dashboard now says "1 ACME account(s) wait for approval" → *Review* → *Approve account*
+   (second factor). Run the same lego command again – this time it gets the certificate.
+
+10. Check it:
+
+    ```powershell
+    openssl verify -CAfile C:\acme-test\root.pem -untrusted C:\acme-test\lego\certificates\nas.homelab.lan.issuer.crt C:\acme-test\lego\certificates\nas.homelab.lan.crt
+    ```
+
+    *ACME → Orders* shows the order as *valid* with a link to the certificate.
+
+11. ARI and revocation: the same `lego run` again does **not** renew (window ahead). Then revoke –
+    and the next `lego run` renews at once:
+
+    ```powershell
+    .tools\lego.exe certificates revoke --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego --email admin@homelab.lan --cert.name nas.homelab.lan --reason 4 --keep
+    ```
+
+12. EAB: *ACME → EAB keys → New key*, copy kid and MAC, then a fresh lego account without the
+    queue:
+
+    ```powershell
+    .tools\lego.exe run --server https://pki.homelab.lan:8443/acme/directory --path C:\acme-test\lego-eab --email admin@homelab.lan --accept-tos --domains nas.homelab.lan --http --eab --eab.kid <kid> --eab.hmac <MAC>
+    ```
+
+13. certbot has no current Windows build – use a Linux host with Docker in the same network. On it,
+    `pki.homelab.lan` must resolve to this machine and its own name (e.g. `web.homelab.lan`) to
+    itself; on this machine add `web.homelab.lan` with the Linux host's address to the hosts file.
+    Copy `root.pem` there, then:
+
+    ```bash
+    docker run --rm --network host -v /tmp/certbot:/etc/letsencrypt -v "$PWD/root.pem:/root.pem:ro" -e REQUESTS_CA_BUNDLE=/root.pem certbot/certbot:v5.8.0 certonly --server https://pki.homelab.lan:8443/acme/directory --standalone -d web.homelab.lan --agree-tos -m admin@homelab.lan
+    ```
+
+    Caddy listens on all interfaces; allow inbound port 8443 in the Windows firewall for the Linux
+    host, and port 80 on the Linux host for this machine (the validator connects there).
+
+14. Clean up: stop Caddy and the server (Ctrl+C), remove the two lines from the hosts file, delete
+    `C:\acme-test`.
+
+## CI run 39849783550 (PR 5) – three red jobs
+
+Green in that run: check, Windows, macOS, cross, vuln, Bash suite. One commit per fix, each with
+`task check` and `task generate:check` green; not pushed.
+
+| Job | Cause | Fix | How to reverse |
+|---|---|---|---|
+| ACME conformance (both certbot cases) | certbot runs as root in its image and writes `live/` with mode 0700 – the test (runner user) can't read `fullchain.pem` | Client containers run with `--user "$(id -u):$(id -g)"`; certbot's config/work/logs dirs are in the mounted work directory; the acme.sh image is built for any user (`chmod -R o+rwx` on `/acmebin` and `/acme.sh`, `HOME=/acme.sh` – read in its 3.1.5 Dockerfile). Port 80 without root: run.sh already lowers `ip_unprivileged_port_start`. No permission loosened | Remove the `--user` lines in `confEnv.docker` |
+| lint:api | vacuum `no-unnecessary-combinator`: `DomainUpdate` was an `allOf` with one `$ref` | Direct `$ref` (OpenAPI 3.1 allows `description` next to it). vacuum 0.30.6 now local in `~/go/bin`: the release's `checksums.txt` lists the linux archive with CI's `VACUUM_SHA256`, the windows archive was verified against that file. `task lint:api`: 0 warnings, 10 infos (allowed) | – |
+| race (exit 143 after ~3 min) | See below – most likely memory | Diagnostics and `timeout-minutes: 20` | Revert the race job and `failed-tests.sh` |
+
+### The race job: what a) found
+
+- **No test signals a process group.** No `Setpgid`/`Setsid`, no `kill`/`pkill`, no `syscall.Kill`,
+  no `Signal(` anywhere in Go code, scripts or workflows; every child process in tests is
+  `exec.CommandContext` (on cancel: SIGKILL to the child only). The only `timeout` is the legacy
+  `with_timeout` (`timeout 3 …`): GNU timeout puts itself in its own process group, so its
+  `kill(0)` reaches only that group. Upgrade, lego and conformance tests skip themselves in this job
+  (no `UPGRADE_FROM_BIN`/`LEGO_BIN`); there is no fuzz corpus on disk.
+- **But the tests need a lot of memory – because of Argon2id.** `testinstance` builds the key ring
+  with `keys.New`, that is with the **production** KDF parameters (t=4, **256 MiB**, p=4): every
+  instance derives three times (init, unseal in `setup.Run`, unseal in the test). Peak memory per
+  test binary measured here, **without** -race (4 CPUs like the runner):
+
+  | Package | Peak memory | Time | With test KDF parameters (8 MiB, t=1, p=1; tried and reverted) |
+  |---|---|---|---|
+  | internal/acme | 2366 MiB | 17.5 s | 408 MiB, 3.9 s |
+  | internal/server | 2379 MiB | 5.7 s | 520 MiB, 2.1 s |
+  | internal/httpapi | 2320 MiB | 13.1 s | – |
+  | internal/web | 2084 MiB | 15.3 s | 522 MiB, 5.5 s |
+  | cmd/myownpki | 1685 MiB | 8.0 s | – |
+
+  `go test ./...` runs up to 4 packages at once, the race detector needs 5–10× the memory (Go docs)
+  – far over the runner's 16 GB. Exit 143 (SIGTERM, not the OOM killer's SIGKILL) fits the runner
+  shutting the job down; the job log shows it if it says "The runner has received a shutdown
+  signal". internal/acme is new in v0.2 and is the largest of the five.
+- **Why only "ok …/api":** plain `go test ./...` holds each package's output back until the package
+  ends – the running ones were invisible, and a kill drops their buffers.
+
+### b) – what the next run shows
+
+- `go test -race -json` into `$RUNNER_TEMP/test.json` (via `tee`); the log gets readable text from
+  `failed-tests.sh --text`: "started <package>", ok lines, everything of a failed package.
+- `failed-tests.sh` reads the JSON: failures as before; **if a package started and never ended**
+  (killed or timed out), one more annotation lists those packages and the tests that had started
+  and not ended, latest first (parallel tests waiting for their turn are marked), with the last
+  output lines. Tested locally with a cut-off log, under gawk and gawk `--posix`.
+- Memory every 15 s in the log; on a failure the last two minutes go to the summary, and OOM-killer
+  lines from `dmesg` become an annotation.
+- `timeout-minutes: 20` for the job; the annotation step also runs after the timeout (`cancelled()`).
+
+### c) The fix (owner decision 2026-10-23: the real fix, not `-p 2`)
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| `keys.TestKDF()` option on `keys.New`, `setup.Options.TestKDF`, `auth.TestParams()`; the weak values (t=1, 8 MiB, p=1) in **one** place, `keys.testArgon2` (exported via `keys.TestArgon2()`); used by `testinstance`, the server, ca and cmd test helpers, and the keys/setup/auth tests | Test instances derived 3× 256 MiB each; the values were copied in four places | Remove the option from the helpers (the guards can stay) |
+| Lock 1: the option, `TestArgon2` and `auth.TestParams` **panic** outside a test binary (`testing.Testing()`), `setup.Run` returns an error; no flag, config key or env variable | Weak parameters must never reach a real instance by accident | – |
+| Lock 2: **unseal refuses** a passphrase slot below t=4, 256 MiB, p=4 outside a test binary (`ErrWeakKDF`, audited `denied`/`weak_kdf`, before any derivation); same for every passphrase check; the recovery key still unseals and a new passphrase gets the production values | A key ring made by a test build must not protect real keys; the error names the way out | Remove the `checkUnsealParams` call in `openSlotWithPassphrase` |
+| The test mode is read once at `keys.New` into an unexported field, so a test can run the **whole** unseal path as a server binary | Otherwise the call site of lock 2 is untestable (a mutation removing it survived in the first draft) | – |
+| v0.1.0: `defaultArgon2` unchanged since its first commit (`abb0d18`), set only in `keys.New`; the upgrade test now reads the restored slot: `{"t":4,"m":262144,"p":4}` | Lock 2 must not lock out an existing installation | – |
+| `cmd/myownpki` stays at ~1.3 GB: `passphrase change/reset` through the real CLI code stores the production values (no flag allowed), and the test verifies them | A second test of the production path; one sequential test | – |
+
+Tests: `TestWeakKDFOnlyInTestBinaries` (option and minimum with the test mode as an argument; t, memory
+and lanes each one step below), `TestTestKDFIsStored` (the weak slot as a server binary: refused,
+`denied` in the audit log, recovery key → new passphrase → unseal works), `TestProductionArgon2Parameters`
+(init and unseal with t=4, 256 MiB, p=4: 474 ms here), `TestTestKDFOnlyInTestBinaries` (setup).
+Mutations, all caught: unseal ignores the minimum; option allowed outside tests; `allowTestKDF`
+always ok; minimum ignores t; minimum ignores p; setup guard off; TestKDF without effect.
+`task upgrade:test` green. The release binary has no `-test.*` flags (`testing` only for `Testing()`).
+
+Peak memory and time per test binary, without -race, 4 CPUs (same method as above):
+
+| Package | Before | After |
+|---|---|---|
+| internal/acme | 2366 MiB, 17.5 s | **121 MiB, 3.0 s** |
+| internal/server | 2379 MiB, 5.7 s | **229 MiB, 1.8 s** |
+| internal/web | 2084 MiB, 15.3 s | **139 MiB, 3.9 s** |
+| internal/httpapi | 2320 MiB, 13.1 s | 130 MiB, 2.8 s |
+| cmd/myownpki | 1685 MiB, 8.0 s | 1335 MiB, 3.5 s (see above) |
+| internal/keys | 571 MiB, 2.1 s | 937 MiB, 2.2 s (now init **and** unseal with production values) |
+
+`go test -race ./...` could not run here: no C compiler on this machine (cgo needs gcc). **Only
+checkable in CI** – the race job's memory log (b) shows the peak.
+
+## Owner decisions applied (commit "docs: owner decisions for phase 2")
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| ACME is **off while `acme.base_url` is empty**; when set it must be `https://`. `acme.listen` defaults to 127.0.0.1:8081 | A v0.1 config has no `acme` section – requiring `base_url` always would stop every upgraded server from starting | Make `base_url` required |
+| `acme.trusted_proxies` defaults to loopback (`127.0.0.1, ::1`) | Matches the default listener: a proxy on the same host works without extra settings | Empty default (nothing trusted → every request 403) |
+| Sealed server as the owner proposed: finalize stores the CSR, the order stays `processing` with `Retry-After`, issued at the unseal and by a job every minute | The CSR and the authorizations are already proven – waiting costs nothing and needs no new client action. The alternatives are worse: refusing finalize (`serverInternal`) makes the order `invalid` and the client must start again with new challenges; queueing in memory loses the request at a restart. Clients that stop polling (lego and certbot give up after a while) just run again later and get a new order – the old one is issued but unused, which is harmless | Refuse finalize while sealed |
+
+## Part A – Steps 1–9: domains to finalize (walking skeleton)
+
+### Design (decided before building)
+| Decision | Why | How to reverse |
+|---|---|---|
+| Domain logic lives in `internal/ca` (engine methods, `domains.go`), not a new `internal/domain` package | It needs the CA's name constraints, `loadIssuer` and the pki.db writer; a package of its own would copy them | Move it out behind an interface |
+| Managing domains needs `ca.manage` (admins, with step-up); reading them `pki.read` | A domain decides what is issued automatically – as weighty as a CA setting. No new permission (authz stays as approved) | A permission `domain.manage` |
+| A domain name has at least two labels (no `lan`, no TLD), punycode, lower case, no wildcard; the CA must be an active intermediate with an online key, and its name constraints must permit the domain (and `x.<domain>` when sub-domains are included) | A one-label domain would hand out a whole namespace; a root never issues leaves | Allow one label with a warning |
+| IP ranges of a domain (RFC 8738 IP identifiers) are a JSON column `ip_ranges` of `domains`, not a table `domain_ips` | One row = one policy, read in one query; the list is short | A table |
+| Deleting a domain is always allowed and audited; finalize checks the domain again, so pending orders of a deleted domain fail there | Nothing dangles: no issuance without a domain | Refuse while orders are open |
+| **One policy engine:** `ca.Request` gets an optional `ACME *ACMEOrder` (order ID, account). The engine then requires every name to lie in a domain, all of one CA and one preset, and takes CA, preset and validity (default 90 days, capped by the CA) from the domains. UI/API issuance without it is unchanged | ADR-19: ACME goes through the same `Issue` – names, constraints, key policy, build, audit. Phase 1 issuance must not change (PHASE2 step 2) | – |
+| Order and certificate in **one pki.db transaction**: `Issue` takes an optional hook that runs in its storing transaction (ACME sets the order to `valid` with the certificate ID there) | ADR-06 / PHASE2 §1: a crash can't leave a certificate without its order, or a second issuance for the same order | Two transactions with an idempotent retry |
+| ACME issuances use the principal `authz.System("acme")` and the audit actor `acme_account:<id>` | ACME clients are not users; the ACME layer has already checked account, approvals and challenges | A role for ACME accounts |
+| JOSE in `internal/acme/jose`: strict top-level and header parsing with a token reader that refuses duplicate names; the algorithm from the key (P-256 → ES256, P-384 → ES384, RSA ≥ 2048 → RS256, Ed25519 → EdDSA), header must match; ES signatures exactly 64/96 bytes R‖S; a `jwk` with private members (`d`, …) refused; RSA exponent odd and ≥ 3 | Owner Q3 | – |
+| **EAB is the one place with HS256:** the inner JWS of `externalAccountBinding` is an HMAC by RFC 8555 §7.3.4; it is verified by a separate function with HS256 only, never by the outer verifier | The outer rule "no HS*" stays absolute | – |
+| ACME runs in `internal/acme` as an `http.Handler` on `acme.listen`; the server starts that listener only when `acme.base_url` is set | Off by default, like everything that opens a port | – |
+| Peers outside `acme.trusted_proxies` get **403** with an ACME problem; the client address for rate limits and audit is the last X-Forwarded-For entry that is not a trusted proxy | Owner Q1 | – |
+| Account status to the client is RFC's `valid`; whether it is **approved** is our own column. With approval level `account` an unapproved account's `newOrder` gets `unauthorized` "waits for approval in MyOwnPKI (account …)" – the client retries later. A valid EAB approves at once | RFC 8555 knows no "pending" account; standard clients handle a refused order and rerun | Refuse `newAccount` without EAB |
+| Approval level `new_name`: `newOrder` with a name never issued before records a request in `acme_names` and answers `unauthorized` "name … waits for approval" | Simpler and clearer than an authorization that waits; the same client rerun works | A pending authorization |
+| Nonces in memory (at most 100,000, 1 hour); a restart answers `badNonce`, which clients retry | RFC 8555 §6.5 | A table |
+| Validators run in a bounded pool (4 at a time) after the challenge POST; the answer is `processing`, the client polls | No long request; SSRF limits per security.md | – |
+| http-01: port 80 only – the tests replace the dialer, never the port rule | A test switch must not become a production switch | – |
+| lego as the end-to-end check: a test that runs only with `LEGO_BIN` set (Taskfile `acme:lego` builds lego `@v4.x` with `go install` into a temp dir); a TLS reverse proxy in the test plays Caddy | Owner: test tool only, no go.mod entry | – |
+
+### Done (part A)
+- Step 1 `aa28744`: domains (pki.db 0008, engine, API `/domains` in the spec and the contract run, UI under ACME > Domains).
+- Step 2 `5b87980`: `ca.Request.ACME` – CA, preset and validity from the domains; the order set valid inside the storing transaction.
+- Step 3 `66f2f89`: `internal/acme/jose` (own JWS/JWK code, RFC vectors, a negative test per rule, `FuzzParse`, `task fuzz` and 30 s in CI).
+- Steps 4–9 `ab99474`: config `acme.*`, pki.db 0009, `internal/acme` (directory, nonces, accounts, key change, orders, authorizations, challenges, http-01/dns-01 validation, finalize, certificate), the third listener, finalize while sealed with the dashboard notice. **Walking skeleton reached: lego v5.5.2 registers, orders by http-01, gets the certificate, `openssl verify` OK.**
+- Changes against the design table, taken while building:
+  - EAB MAC keys are **not** rows of `keys` (its CHECK allows only `ca`/`leaf`; changing it means rebuilding the table with its triggers): `acme_eab_keys` holds the envelope itself, with a new key-ring purpose `acme-eab` bound into the encryption. Overwritten when used (one key, one account).
+  - Pending authorizations and orders live **24 hours** (Let's Encrypt: 7 days); valid authorizations 7 days (owner Q6).
+  - A domain's preset must allow **serverAuth** (`client` offers DNS names but is no TLS server certificate).
+  - ACME wildcards work with the domain's preset (`server`): the engine allows the wildcard names of an ACME order without the `wildcard` preset's extra base name – the certificate names exactly the order.
+  - lego and later pebble are built into **`.tools/`** (gitignored), not `bin/` – `task build:verify` checks every file in `bin/` for CGO.
+  - lego's module is `github.com/go-acme/lego/v5` (the CLI lives at the module root since v5).
+
+### Tests (part A)
+- `internal/ca`: domains (defaults, 21 refusals, lookup incl. suffix tricks, permissions), ACME policy (domains decide CA/preset/validity, CSR names ignored, hook rollback, lowered CA maximum).
+- `internal/acme`: directory/nonce/proxy/X-Forwarded-For, http-01 to certificate (incl. IP identifier, reuse, other account gets 404), dns-01 wildcard, failed challenges (loopback target, wrong content), unknown names/IPs, approval levels, finalize while sealed, five bad CSRs, `orderNotReady`, request rules (replayed nonce, wrong URL, jwk vs kid, foreign key, unknown account, content type, onlyReturnExisting, tel: contact), key change and deactivation; `TestLegoWalkingSkeleton`.
+- `internal/server`: the ACME listener and its directory; no ACME on the public port. `internal/config`: the `acme` section.
+- Mutations caught: CSR name check off; address policy off; wrong key authorization (lego fails with `incorrectResponse`); duplicate check and R‖S length in jose.
+
+### Not verifiable tonight (part A)
+- certbot, acme.sh, Traefik and Caddy (part C/D: CI job and the guide).
+- A real DNS server for dns-01 (the tests replace the lookup; BIND comes in the CI job).
+
+## Security fix after part A: http-01 reads nothing back
+
+Owner finding: with the address policy `internal`, the validator could be used to read the inside network – a redirect to `http://192.168.1.1/` put the start of that page into the challenge error.
+
+| Change | Why | How to reverse |
+|---|---|---|
+| Errors carry only status and length (`answered 37 bytes that are not the key authorization`, `answered with status 401`) | The answer of a target never reaches the client | `http01()` in `internal/acme/validate.go` |
+| Network and DNS errors are named by kind (`timed out`, `could not connect`, `TLS handshake failed`, `the connection failed or the answer was not HTTP`, `no such name`) – never their text | Go's errors quote what the target sent (`malformed HTTP response "SSH-2.0-…"`), name inside addresses and the resolver | `netProblem()`, `dnsProblem()` |
+| Dial failures: counts of refused and unreachable addresses, no addresses; the details go to the server log (Info) | Resolved addresses of inside names are topology | `policyDial()` |
+| Redirects only to identifiers of an order the authorization belongs to; an IP identifier only to exactly that address; else `incorrectResponse` "redirect to a host outside this order" (PHASE2 §2 step 7, as planned) | The validator is not a free HTTP client; the dialer still checks the address policy on every hop | `CheckRedirect` + `orderHosts()` |
+
+Tests (`internal/acme/validate_test.go`): redirects to a foreign host in the domain, a host elsewhere, an IP outside, an IP in the range but not in the order, another IP for an IP order, the metadata address – all refused, the target not in the message; same host on 443 and another identifier of the order – valid. A target with a secret in the page, in an error page with a header, in a long page, in a redirect path, a non-HTTP banner, an unreachable address: the secret/address is in neither the challenge error, the audit entry (`details_json`) nor the server log.
+
+Mutation checks (each made a test fail, then reverted):
+
+| Mutation | Caught by |
+|---|---|
+| Redirect host check off | `TestHTTP01RedirectsStayInTheOrder` |
+| Old message `answered %q` with the body | `TestHTTP01ReadsNothingBack` |
+| Transport error text in the message | `TestHTTP01ReadsNothingBack` (banner) |
+| Other identifiers of the order not allowed | `TestHTTP01RedirectsStayInTheOrder` (www → nas) |
+| Dial error text in the message | `TestHTTP01ReadsNothingBack` (unreachable) – survived at first, because the test dialer's error had no address; the stub now names the address like a real dialer |
+
+## Part B – Steps 10–13
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| revokeCert accepts the ordering account, an account with valid authorizations for **every** name of the certificate, or the certificate's own key (RFC 8555 §7.6) | The RFC's three ways; the key path lets someone report a leaked key without the account | Drop a branch in `revoker()` (`internal/acme/revoke.go`) |
+| `keyCompromise` only from the ordering account or the certificate key – not from an account that merely holds the names | keyCompromise blocks the key for all later certificates; an account that never held the key must not block it (Let's Encrypt does the same) | Remove the check in `revoker()` |
+| Certificates with email/URI names (or none) can't be revoked over ACME by name holders – "revoke it in the UI" | No ACME authorization covers those names | – (follows from RFC 8555) |
+| Reasons 2, 6, 8, 10 (and unknown codes) → `badRevocationReason` | Same list as the UI (`ca.LeafReasons`): no hold, no CA reasons | `revocationReason()` |
+| `alreadyRevoked` is answered only after the signer is authorized | Otherwise anyone could ask whether a certificate is revoked – that is the CRL's job | Swap the order in `revokeCert()` |
+| Refused revocations are audited as `certificate.revoke/denied` (actor: the account, or `key:<thumbprint>`) | An attempt to revoke a foreign certificate is worth a trace | `refuseRevoke()` |
+| Revocation while sealed: 200, stored at once, the CRL is signed at the unseal | Same as the UI (PHASE1 step 9); a revocation must never wait | – |
+
+- Note: lego v5.5.2 prints `v5.6.1+dev-release` as its version – a constant in lego's source. `go version -m .tools/lego.exe` shows module `v5.5.2` with its checksum.
+
+### Step 11 – rate limits
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Three limits are tenant settings (system.db 0009, `acme_limits` in `/settings`, the settings form): orders per account, failed validations per name, new accounts per address – per hour, defaults 300 / 5 / 10 (the former constants) | Owner plan step 11; an admin tunes them without a restart – the ACME server reads them at every request | Drop migration 0009 before a release; the server falls back to `DefaultLimits` |
+| Validation starts per account (300/h) stays a constant | Not in the plan's list; a guard against a runaway client, not a policy | Add a column like the others |
+| `acme_limits` is **optional in PUT /settings**, always in the answer | v0.1 API clients send the settings without it – absent keeps the stored limits (no breaking change) | Make it required in the spec (breaking) |
+| 429 carries the real wait as `Retry-After` (rounded up, ≥ 1 s) and in the text | RFC 8555 §6.6; a fixed 30 s made clients retry 120 times an hour | `acmeError.retry` |
+| New accounts count per IPv6 **/64** | One host usually holds a whole /64; per address the limit is void | `ipKey()` |
+| Limiter cap 100 000 windows (~10 MB): expired go first, then the oldest tenth at once | Many addresses or failing names can't grow memory without bound; beyond the cap only the oldest counters reset, never the newest | `limiterKeys`, `evict()` |
+
+Tests: `TestRateLimits` (fake clock: accounts, orders, failed validations; `Retry-After` 3600 → 2400 after 20 minutes; open again after the hour; a raised limit counts at the next request), `TestLimiterCap` (50 000 addresses, cap 1 000, the newest keeps its count), `TestIPKeyAndRetry`, API contract cases (valid → 200, 0 → 422), UI (defaults shown, stored, three bad values refused).
+
+Mutation checks: fixed Retry-After, no eviction, newest evicted first, no /64 grouping, settings ignored – each made a test fail.
+
+Not checked locally: `task lint:api` (vacuum is not installed here; the spec change follows the existing schemas) – CI runs it.
+
+### Step 12 – ARI (RFC 9773)
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Window: opens at 2/3 of the lifetime plus a per-certificate shift of up to 1/30 of the lifetime, 1/10 of the lifetime wide. 90 days: from day 60–63 to day 69–72 | pki-rules.md §5 "2/3 with jitter"; the shift comes from the serial (stable between questions), so certificates issued in one batch don't renew in one hour; the client picks a random moment inside (RFC 9773 §4.2); at least 18 days stay before expiry | `renewalWindow()` in `internal/acme/ari.go` |
+| Revoked certificate: a window in the past (renew now) | RFC 9773 §4.2 – a revoked certificate should be replaced at once | – |
+| `Retry-After: 21600` (6 h) | RFC 9773 §4.3 suggests hours; often enough to notice a revocation the same day | `ariRetryAfter` |
+| `replaces` in newOrder is checked: the certificate belongs to an order of the **same account**, shares a name, and no other live order replaces it (else 409 `alreadyReplaced`, checked again inside the transaction) | RFC 9773 §5; unknown and foreign certificates get the same answer (no probing) | `checkReplaces()` |
+| The renewal's certificate records `renewal_of` (as a renewal in the UI) | The certificate history shows ACME renewals like the others | `RenewalOf` in `issue()` |
+| renewalInfo answers for every certificate of this PKI (also UI-issued), not for external ones | The identifier is in the certificate itself; the answer is a window, nothing secret | `certByARIID()` |
+| pki.db 0010: `acme_orders.replaces` and an index on `certificates.serial_hex` | renewalInfo looks certificates up by serial; the existing unique index starts with `ca_id` | Drop the migration before the release |
+
+Tests: `TestRenewalInfo` (window inside the lifetime at 2/3, stable, unknown → 404, six malformed identifiers → 400 incl. a negative and a non-minimal serial, revoked → window in the past), `TestRenewalWindow` (50 serials, 90 days: start day 60–63, width 9 days, ≥ 40 different starts), `TestReplaces` (foreign account, no shared name, garbage, second renewal → 409, `renewal_of` stored). **lego**: a second `lego run` asks renewalInfo and does not renew; after `lego certificates revoke` the next `lego run` renews at once with `replaces`, and the new certificate's `renewal_of` is the old one.
+
+Mutation checks: revoked window not in the past, account not checked, no jitter, `replaces` not stored, no shared-name check – each made a test fail. Not testable: the second count inside the transaction (needs two requests in the same instant); the first count catches every sequential case.
+
+### Step 13 – approvals in the UI
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| New pages under ACME: **Accounts** (waiting queue, all accounts, account detail), **New names** (queue, decide, approve in advance), **EAB keys**, **Orders** (newest 200) | Owner Q2 and the plan; Orders replaces the "phase 2" placeholder | Remove the routes in `internal/web/app.go` |
+| Approving and deciding: one form with a select per queue (no button per row) | Calm and plain (frontend.md); one POST target per action, CSRF as everywhere | – |
+| Approve, decide and create EAB keys need **ca.manage on the tenant with a fresh second factor**; reading the pages needs a **tenant-wide** role | An approval lets an account obtain certificates; the pages show every account of the tenant – a role on one CA doesn't see them | `authorize()` / `readable()` in `internal/acme/admin.go` |
+| EAB key: 256 random bits, valid 1–90 days (default 7), shown **once** on the POST answer (`Cache-Control: no-store`, no redirect), with lego and certbot command lines; stored only as an envelope (key ring purpose `acme-eab`), overwritten when used; creating one needs an unsealed server | Owner Q2 "shown once"; an unused key should not live long | `CreateEABKey()` |
+| Dashboard: "N ACME account(s) wait for approval" and "N new name(s) wait for approval", each with a Review link | Owner plan step 13 "dashboard counters" | `app_pki.go` |
+| ACME off (no `acme.base_url`): the pages say how to switch it on | An admin who clicks the menu learns why it is empty | `acmeOff()` |
+| Table cells get an optional `Break` (the existing `.break` class) – used for error details and contacts | A long URL in an order error ran past the table edge (seen in the screenshot) | `admin.Cell.Break` |
+| Not built: deactivating an account and deleting an unused EAB key from the UI | Not in the plan; an unused key expires by itself | Later step |
+
+Tests: `TestEABKeys` (five bad inputs, waiting account can't order, wrong MAC, EAB account orders at once, key used twice, expiry, no MAC in the audit log or in plain text in the database, sealed → `ErrSealed`), `TestACMEApprovalPages` (dashboard counters, approve, approve twice refused, refuse/approve-in-advance/garbage name escaped, EAB shown once with `no-store` and not in the list, three bad EAB forms, viewer sees no forms and can't approve or create a key, CA-scoped operator gets 403), `TestACMEPagesOff`, the four pages in the page sweep (no inline style/script). **lego** `TestLegoEAB`: without EAB refused under "approved accounts", with `--eab` it registers and gets the certificate – the own HS256 code against a real client.
+
+Mutation checks: EAB without authorization, reads without a tenant role, dashboard counter off – each made a test fail. Not observable by a test: clearing the MAC from memory after use.
+
+Screenshots (`task screenshots`, headless Edge, neutral demo instance): new `acme-accounts`, `acme-names`, `acme-orders` (light) and `acme-accounts-dark`, `acme-names-dark`; all others regenerated (the menu has the new ACME entries; the dashboard shows the two waiting notices).
+
+## Part C – Step 14: conformance job (**only checkable in CI**)
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| A Go test with the build tag `conformance` (`internal/acme/conformance_test.go`) plus `test/conformance/run.sh` for the environment, called by `task acme:conformance` and the new CI job `conformance` | The test reuses the instance and proxy of the lego test, with **nothing replaced**: `acme.resolver` is BIND, the dialer is real, the clients answer on port 80; the checks stay in Go, the script only starts BIND and builds the tools | Delete the job, the task and the two files |
+| **Pebble as control**, not as a "test suite": the same lego run goes against Pebble first | Pebble is Let's Encrypt's test *server*; it has no suite that tests a server. As a control it proves the harness (DNS, port 80, TLS trust): a client that works against Pebble and fails against us shows a fault of ours | Drop the subtest "control: lego against Pebble" |
+| Clients: lego (http-01 with revoke; dns-01 wildcard via RFC 2136 `dnsupdate`), certbot (register, http-01 standalone, revoke; dns-01 wildcard with certbot-dns-rfc2136), acme.sh (http-01 standalone); every certificate is checked with `openssl verify` against the root | The plan's list; each client also uses a different key type (RSA 2048, P-384, P-256) | – |
+| Images by digest (tag and push date beside it), all ≥ 2 weeks old on 2026-10-22: `internetsystemsconsortium/bind9:9.18` (2026-09-15), `certbot/dns-rfc2136:v5.8.0` (2026-09-01), `neilpang/acme.sh:3.1.5` (2026-09-19). Newer tags (bind9 9.20, acme.sh 3.1.6) were pushed within the last two weeks | Owner rule | Change the three lines in `run.sh` |
+| BIND on 127.0.0.1:5300, zone `homelab.lan` with a wildcard A record to the runner's address; a **TSIG key generated per run** (`openssl rand`), masked in the log, only in the work directory | No secret in the repository or the log; port 5300 avoids systemd-resolved on 53 | – |
+| Port 80 without root: `sysctl net.ipv4.ip_unprivileged_port_start=80` (sudo, CI only) | lego runs as the runner user | – |
+| The conformance test is compiled and linted in every `task check` (`build-tags: [conformance]` in `.golangci.yml`) | A job that runs rarely must not rot | Remove the line |
+| Pebble itself contains go-jose and miekg/dns | It is a test tool built into `.tools/`, never part of our module or release (owner rule: not in *our* code) | – |
+| Traefik and Caddy: a documented manual test (plan), not in CI | Part D, the guide in the report | – |
+
+### What I could check locally (Windows, no Docker)
+- `go vet -tags conformance` and golangci-lint with the tag: clean. ShellCheck on `run.sh`, actionlint on the workflow: clean.
+- The three image digests: read from the registry (manifest digest = the pinned one); **entrypoints read from the image configs**: bind9 `named -u bind` (so `run.sh` passes only `-g -c …`), certbot `certbot`, acme.sh `/entry.sh` with the verb as first argument.
+- Pebble v2.10.1 builds with `go install`; its module has `test/certs/localhost/{cert,key}.pem` and `pebble.minica.pem`.
+- lego's file names from its source (`*` → `_`); the test finds files by name anyway.
+
+### Erst in CI prüfbar
+- The whole run: BIND start, the dynamic updates, the clients against the server, port 80 on the runner.
+- Likely first-run issues to look at: the runner address from `hostname -I` (first address), certbot's credentials file warning (mode 600, read by root in the container), acme.sh's standalone mode (socat in the image).
+
+## Part D – Step 15: docs, CHANGELOG, upgrade test
+
+| Decision | Why | How to reverse |
+|---|---|---|
+| Upgrade test: `task upgrade:test` installs **the released v0.1.0** with `go install github.com/Der-Felix/MyOwnPKI/cmd/myownpki@v0.1.0` (pinned, checked against the Go checksum database) into `.tools/v0.1.0/`; v0.1.0 runs `init --demo --with-ca` and `backup`; this build restores, migrates (pki.db 0008–0010, system.db 0009) and issues by ACME with the CA of v0.1.0 (`openssl verify`) | A real v0.1.0 backup instead of a committed fixture (a fixture would hold a demo passphrase); `Taskfile.yml` `UPGRADE_FROM` names the release | Delete `internal/acme/upgrade_test.go` and the task |
+| `testinstance.OpenExisting(t, dataDir, secretsFile)`: opens a data directory made elsewhere and first runs `store.Migrate` – like `server.Open` | The upgrade test needs the migrated instance with the test network of the ACME tests | – |
+| CI: the upgrade test runs in the `check` job; `task acme:lego` (EAB, ARI, revoke) in the conformance job | Until now the lego tests ran only locally | Remove the two steps |
+| Found: **v0.1 refuses unknown `MYOWNPKI_*` variables** – so `MYOWNPKI_ACME_*` stops a v0.1 binary. The test runs v0.1.0 without `MYOWNPKI_*`; OPERATIONS §9 says it for a downgrade | Strict variables catch typos – right; but a downgrade must remove the new ones | – |
+| OPERATIONS.md: new **chapter 10 "ACME server"** at the end (sections 1–9 keep their numbers); title "v0.2"; ACME listener in the table of §1; v0.1 → v0.2 in §9 | The chapter the plan asked for; the numbers of 1–9 are referenced elsewhere | – |
+| The proxy's own certificate is made from a **CSR on the proxy host** (key never leaves it); the server-generated key with *Export* is the alternative | The safer default; matches the UI's two ways | – |
+| Every proxy example also serves the public listener on plain HTTP port 80, without a redirect to https | CRL and AIA URLs in the certificates are `http://`; a redirect breaks revocation checks on some clients | – |
+| CHANGELOG: 0.2.0 under `[Unreleased]` with a short upgrade note, *Added/Changed/Security*, no date | Owner: date at the release (RELEASING.md) | – |
+| README: status "v0.1 released; v0.2 (the ACME server) in preparation", a row of ACME screenshots, the docs table | The README must not claim ACME is still to come once this is merged | Your wording at the release |
+| `docs/PLAN.md` unchanged | Its release plan already describes v0.2 as built; it has no status column | – |
+
+Tests: `TestUpgradeFromV01` passes locally (Windows); mutation: without the migration it fails with "no such column acme_orders_per_hour" and "no such table domains".
+
+### First stop (usage limit) – resolved in the continuation run
+- Done in part B: step 10 (`26a0b93`) – revokeCert; lego registers, orders **and revokes**; `openssl verify -crl_check` refuses the revoked certificate; revocation with P-256, P-384, RSA-2048 and Ed25519 certificate keys; P-521 by the account (P-521 is not on the JWS allowlist).
+- Not started: steps 11–15 (no stash – no unfinished code).
+- Found for step 11, not fixed yet:
+  - `fail()` sends a fixed `Retry-After: 30` on 429 instead of the limiter's real wait.
+  - The limiter map is bounded only by dropping expired windows. Many fresh keys (IPv6 addresses, failing sub-names) can grow it. Plan: group IPv6 by /64 for new accounts, plus a hard cap that evicts entries.
+  - "Limits in the tenant settings" needs a system.db migration (columns on `tenants`), `TenantSettings` in the OpenAPI spec, and the settings form.
+
 # Night log – Phase 1, steps 14–20 and release
 
 > Autonomous run, night of 2026-10-21 → 2026-10-22, branch `night/v0.1` (not merged, not pushed).

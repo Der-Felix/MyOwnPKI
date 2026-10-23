@@ -142,6 +142,16 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 		in.close()
 		return nil, serr
 	}
+	acmeServer, serr := in.sampleACME(ctx, engine, clk)
+	if serr != nil {
+		in.close()
+		return nil, serr
+	}
+	closeDBs := in.close
+	in.close = func() {
+		acmeServer.Close()
+		closeDBs()
+	}
 	if in.session, err = signIn(ctx, authSvc, password, secret); err != nil {
 		in.close()
 		return nil, err

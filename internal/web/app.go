@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -53,6 +55,26 @@ type AppDeps struct {
 	// (tenant settings, audit log); nil hides those pages.
 	Settings                   *tenant.Store
 	TenantAudit, InstanceAudit *sql.DB
+	// ACME is the ACME server (PHASE2); nil while ACME is off.
+	ACME ACMEAdmin
+	// ACMEDirectory is the directory URL clients use (shown with EAB keys).
+	ACMEDirectory string
+}
+
+// ACMEAdmin is what the UI uses of the ACME server.
+type ACMEAdmin interface {
+	// Waiting counts orders whose certificate waits for the unseal.
+	Waiting(ctx context.Context) (int64, error)
+	// Pending counts accounts and names that wait for an admin.
+	Pending(ctx context.Context) (accounts, names int64, err error)
+	Accounts(ctx context.Context, who keys.Who) ([]acme.AccountInfo, error)
+	Account(ctx context.Context, who keys.Who, id string) (*acme.AccountInfo, error)
+	ApproveAccount(ctx context.Context, id string, who keys.Who) error
+	Names(ctx context.Context, who keys.Who) ([]acme.NameInfo, error)
+	DecideName(ctx context.Context, name string, approve bool, who keys.Who) error
+	Orders(ctx context.Context, who keys.Who) ([]acme.OrderInfo, error)
+	EABKeys(ctx context.Context, who keys.Who) ([]acme.EABKeyInfo, error)
+	CreateEABKey(ctx context.Context, label string, days int, who keys.Who) (*acme.NewEABKey, error)
 }
 
 // maxUIForm limits form bodies; a CSR upload is at most 64 KiB.
@@ -112,6 +134,20 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("POST /authorities/{id}/renew", a.signedIn(a.caRenew))
 	mux.HandleFunc("POST /authorities/{id}/retire", a.signedIn(a.caRetire))
 	mux.HandleFunc("POST /authorities/{id}/revoke", a.signedIn(a.caRevoke))
+	mux.HandleFunc("GET /domains", a.signedIn(a.domainList))
+	mux.HandleFunc("GET /domains/new", a.signedIn(a.domainNew))
+	mux.HandleFunc("POST /domains", a.signedIn(a.domainCreate))
+	mux.HandleFunc("GET /domains/{id}", a.signedIn(a.domainDetail))
+	mux.HandleFunc("POST /domains/{id}", a.signedIn(a.domainUpdate))
+	mux.HandleFunc("POST /domains/{id}/delete", a.signedIn(a.domainDelete))
+	mux.HandleFunc("GET /acme/accounts", a.signedIn(a.acmeAccounts))
+	mux.HandleFunc("GET /acme/accounts/{id}", a.signedIn(a.acmeAccount))
+	mux.HandleFunc("POST /acme/accounts/approve", a.signedIn(a.acmeApprove))
+	mux.HandleFunc("GET /acme/names", a.signedIn(a.acmeNames))
+	mux.HandleFunc("POST /acme/names/decide", a.signedIn(a.acmeDecide))
+	mux.HandleFunc("GET /acme/eab", a.signedIn(a.acmeEAB))
+	mux.HandleFunc("POST /acme/eab", a.signedIn(a.acmeEABCreate))
+	mux.HandleFunc("GET /acme/orders", a.signedIn(a.acmeOrders))
 	mux.HandleFunc("GET /presets", a.signedIn(a.presetList))
 	mux.HandleFunc("GET /presets/{name}", a.signedIn(a.presetDetail))
 	mux.HandleFunc("GET /admin/users", a.signedIn(a.userList))

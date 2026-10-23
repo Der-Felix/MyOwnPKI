@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/x509"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -214,11 +215,31 @@ func TestAdministrationPages(t *testing.T) {
 	token := b.csrf(t)
 
 	// Settings: the subject default reaches the next certificate.
-	r := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}})
+	// A tenant starts with the defaults of migration 0009.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="300"`) || !strings.Contains(page, `value="5"`) || !strings.Contains(page, `value="10"`) {
+		t.Errorf("default limits not shown")
+	}
+	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"}}
+	form := func(extra url.Values) url.Values {
+		out := url.Values{"csrf_token": {token}}
+		maps.Copy(out, limits)
+		maps.Copy(out, extra)
+		return out
+	}
+	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}}))
 	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
 		t.Fatalf("settings: %d", r.Code)
 	}
-	if rr := b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "c": {"Germany"}}); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "country") {
+	// The ACME limits (PHASE2 step 11) are stored and shown.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) {
+		t.Errorf("limits not shown: %s", page)
+	}
+	for _, bad := range []url.Values{{"acme_orders": {"0"}}, {"acme_failed": {"101"}}, {"acme_accounts": {"many"}}} {
+		if rr := b.post(t, "/admin/settings", form(bad)); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "per hour") {
+			t.Errorf("bad limit %v: %d", bad, rr.Code)
+		}
+	}
+	if rr := b.post(t, "/admin/settings", form(url.Values{"c": {"Germany"}})); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "country") {
 		t.Errorf("bad country: %d", r.Code)
 	}
 
@@ -293,4 +314,49 @@ func tarGz(t *testing.T, dir string) []byte {
 	_ = tw.Close()
 	_ = zw.Close()
 	return buf.Bytes()
+}
+
+// TestDomainPages (PHASE2 step 1): create, change, a refused change and the
+// deletion through the forms; viewers see the list without commands.
+func TestDomainPages(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	token := b.csrf(t)
+	form := url.Values{"csrf_token": {token}, "name": {"homelab.lan"}, "ca": {"issuing"}, "subdomains": {"yes"}, "http01": {"yes"},
+		"approval": {"open"}, "preset": {"server"}, "address": {"internal"}}
+	r := b.post(t, "/domains", form)
+	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/domains/dom_") {
+		t.Fatalf("create: %d %q", r.Code, r.location())
+	}
+	detail := r.location()
+	if got := b.get(t, detail).html(); !strings.Contains(got, "homelab.lan") || !strings.Contains(got, "open – any account") {
+		t.Errorf("detail:\n%s", got)
+	}
+	// Wildcards without dns-01: refused, with the reason on the page.
+	form.Set("wildcards", "yes")
+	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "dns-01") {
+		t.Errorf("refused change: %d", rr.Code)
+	}
+	form.Set("dns01", "yes")
+	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, detail), "saved") {
+		t.Errorf("change: %d", rr.Code)
+	}
+	if got := b.get(t, "/domains").html(); !strings.Contains(got, "http-01, dns-01") || !strings.Contains(got, "New domain") {
+		t.Errorf("list:\n%s", got)
+	}
+	v.User(t, "viewer", false, authz.Binding{Tenant: "default", Role: authz.Viewer})
+	vb := v.browser("192.0.2.2")
+	vb.signIn(t, "viewer", testinstance.Password)
+	if got := vb.get(t, "/domains").html(); !strings.Contains(got, "homelab.lan") || strings.Contains(got, "New domain") {
+		t.Errorf("viewer list:\n%s", got)
+	}
+	if got := vb.get(t, detail).html(); strings.Contains(got, "Delete domain") {
+		t.Error("the viewer is offered the deletion")
+	}
+	if rr := b.post(t, detail+"/delete", url.Values{"csrf_token": {token}}); rr.Code != http.StatusSeeOther || rr.location() != "/domains" {
+		t.Errorf("delete: %d %q", rr.Code, rr.location())
+	}
 }

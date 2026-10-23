@@ -1,4 +1,4 @@
-# Operations guide – MyOwnPKI v0.1
+# Operations guide – MyOwnPKI v0.2
 
 For the administrator who runs MyOwnPKI: installing it, the first start, daily work, backup and
 restore, moving from `pki.sh`, and what to do when something is lost. Installing from a release or
@@ -21,6 +21,7 @@ with Docker is in the [README](../README.md); the full design is in [PLAN.md](PL
 |---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` |
 | Public listener | CRLs and CA certificates over plain HTTP, no login | `:8080` |
+| ACME listener | ACME for the reverse proxy only, plain HTTP; off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
 | Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificate), `auth.key` | `/var/lib/myownpki` |
 | Config file | YAML, every key also as `MYOWNPKI_*` variable | `/etc/myownpki/config.yaml` (Windows: `%ProgramData%\MyOwnPKI\config.yaml`) |
 
@@ -205,3 +206,301 @@ keep the old one with those backups until they have aged out.
 2. Replace the binary (or pull the new image), start the server – migrations run at start.
 3. `myownpki db status` shows the versions; a newer database than the binary is refused, so going
    back means restoring the backup from step 1.
+
+From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`) and the ACME rate
+limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
+([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
+`MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+## 10. ACME server
+
+Since v0.2 MyOwnPKI issues certificates over ACME (RFC 8555) – the protocol of Let's Encrypt –
+to certbot, acme.sh, lego, Traefik, Caddy and every other ACME client. Clients renew on their own;
+nobody copies certificates by hand any more.
+
+### 10.1 How it fits together
+
+```
+client (certbot, Traefik, …) ──https──▶ reverse proxy ──http──▶ acme.listen (127.0.0.1:8081)
+         ▲                                (TLS ends here)                │
+         └───────── http-01: port 80 / dns-01: TXT record ◀── validator ─┘
+```
+
+- ACME runs **only behind a reverse proxy** that ends TLS. MyOwnPKI has no TLS listener for ACME
+  of its own; `acme.listen` speaks plain HTTP and is meant for the proxy only.
+- `acme.base_url` is the https URL clients use, including a path, e.g.
+  `https://pki.homelab.lan/acme`. Every URL the server hands out is built from it – it never
+  trusts `X-Forwarded-Host` or `X-Forwarded-Proto`.
+- `acme.trusted_proxies` lists who may connect to `acme.listen`; everybody else gets 403. Only from
+  those addresses is `X-Forwarded-For` believed (for rate limits and the audit log): the server
+  takes the last entry that is not a trusted proxy, so a client can't fake its address.
+- Without `acme.base_url` ACME is off – an upgraded v0.1 configuration keeps working unchanged.
+
+The configuration (all keys also as `MYOWNPKI_ACME_*` variables):
+
+```yaml
+acme:
+  base_url: https://pki.homelab.lan/acme   # empty = ACME off
+  listen: 127.0.0.1:8081                    # for the proxy only, plain HTTP
+  trusted_proxies: "127.0.0.1, ::1"         # the proxy's address(es)
+  resolver: 192.168.10.53                   # DNS server that knows your internal names (split DNS)
+```
+
+Check it, then restart the server:
+
+```bash
+myownpki config check --config /etc/myownpki/config.yaml
+```
+
+### 10.2 The proxy's own certificate
+
+The proxy needs a TLS certificate before any client can talk ACME – get it once from your own CA.
+The key is made on the proxy host and never leaves it:
+
+1. On the proxy host, make a key and a CSR:
+
+   ```bash
+   openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout pki.homelab.lan.key -out pki.homelab.lan.csr -subj "/CN=pki.homelab.lan" -addext "subjectAltName=DNS:pki.homelab.lan"
+   ```
+
+2. In the UI: *Issue certificate* → preset *server* → paste the CSR → issue. Click *Download
+   fullchain* and save the file as `pki.homelab.lan.fullchain.pem` next to the key. (With the
+   REST API: `POST /api/v1/certificates` with the CSR, then
+   `GET /api/v1/certificates/{id}/download/fullchain`.)
+3. Put a reminder in your calendar, or watch *Expiring soon* on the dashboard: this one certificate
+   is renewed by hand (or, once ACME runs, by the proxy itself – Caddy and Traefik can be ACME
+   clients of your own CA, see 10.6).
+
+Alternatively the server makes the key: *Issue certificate* with a server-generated key, then
+*Export* → *Certificate, chain and key in one PEM* (needs a fresh second factor; audited).
+
+### 10.3 Proxy examples
+
+Each example serves ACME under `/acme/` with TLS **and** the public listener (CRLs, CA
+certificates) on plain HTTP port 80 – certificates point to `http://…` for CRLs, and a redirect to
+https there would break revocation checks on some clients.
+
+**Caddy** (`Caddyfile`):
+
+```
+https://pki.homelab.lan {
+	tls /etc/caddy/pki.homelab.lan.fullchain.pem /etc/caddy/pki.homelab.lan.key
+	handle /acme/* {
+		reverse_proxy 127.0.0.1:8081
+	}
+}
+
+# Plain HTTP for CRLs and CA certificates – no redirect to https.
+http://pki.homelab.lan {
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+Use `handle`, not `handle_path`: the path `/acme/…` must reach MyOwnPKI unchanged.
+
+**nginx**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name pki.homelab.lan;
+    ssl_certificate     /etc/nginx/pki/pki.homelab.lan.fullchain.pem;
+    ssl_certificate_key /etc/nginx/pki/pki.homelab.lan.key;
+
+    location /acme/ {
+        proxy_pass http://127.0.0.1:8081;   # no URI after the port: the path stays /acme/…
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+server {
+    listen 80;
+    server_name pki.homelab.lan;
+    location / {
+        proxy_pass http://127.0.0.1:8080;   # CRLs and CA certificates
+    }
+}
+```
+
+**Traefik** (file provider, dynamic configuration):
+
+```yaml
+http:
+  routers:
+    myownpki-acme:
+      rule: "Host(`pki.homelab.lan`) && PathPrefix(`/acme/`)"
+      entryPoints: [websecure]
+      service: myownpki-acme
+      tls: {}
+    myownpki-public:
+      rule: "Host(`pki.homelab.lan`)"
+      entryPoints: [web]
+      service: myownpki-public
+  services:
+    myownpki-acme:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8081"
+    myownpki-public:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+tls:
+  certificates:
+    - certFile: /etc/traefik/pki/pki.homelab.lan.fullchain.pem
+      keyFile: /etc/traefik/pki/pki.homelab.lan.key
+```
+
+If the proxy runs in a container, `127.0.0.1` is the container itself: let MyOwnPKI listen where
+the proxy can reach it (e.g. `acme.listen: 0.0.0.0:8081` as in the Docker example) and put the
+container network into `acme.trusted_proxies` (the Docker example has `172.16.0.0/12`).
+
+Check from any machine that trusts your root (10.4):
+
+```bash
+curl https://pki.homelab.lan/acme/directory
+```
+
+The answer lists `newAccount`, `newOrder`, `revokeCert` and `renewalInfo` – all under
+`https://pki.homelab.lan/acme/`. The answer "reachable only through its reverse proxy" (403) means
+the proxy's address is not in `acme.trusted_proxies`.
+
+### 10.4 Trusting your root on the clients
+
+Clients check the proxy's certificate like any website, so they must trust your root CA. The root
+is on the public listener as `/ca/<root name>/<generation>.crt` (DER):
+
+```bash
+curl -o homelab-root.crt http://pki.homelab.lan/ca/root/1.crt
+```
+
+```bash
+openssl x509 -inform DER -in homelab-root.crt -out homelab-root.pem
+```
+
+Compare the fingerprint with the one in the UI (*Certificate authorities* → the root) before you
+trust it:
+
+```bash
+openssl x509 -in homelab-root.pem -noout -fingerprint -sha256
+```
+
+Then either install it system-wide (Debian/Ubuntu: copy the `.pem` as `.crt` into
+`/usr/local/share/ca-certificates/` and run `update-ca-certificates`; Windows:
+`certutil -addstore Root homelab-root.crt`; macOS: Keychain Access → System → trust), or give it
+to the one client only: certbot `REQUESTS_CA_BUNDLE=/path/homelab-root.pem`, lego
+`LEGO_CA_CERTIFICATES=/path/homelab-root.pem`, acme.sh `--ca-bundle /path/homelab-root.pem`, Caddy
+`acme_ca_root`, Traefik `LEGO_CA_CERTIFICATES` in its environment.
+
+### 10.5 Domains, approvals and EAB keys
+
+ACME issues for a name only when a **domain** covers it (*ACME → Domains*). A domain says:
+
+| Setting | Meaning |
+|---|---|
+| Signing CA | An online intermediate whose name constraints permit the domain |
+| Names below it | `nas.homelab.lan` for the domain `homelab.lan` |
+| Challenges | http-01 (the server fetches a file from the client's port 80) and/or dns-01 (it reads a TXT record) |
+| Wildcards | `*.homelab.lan` – proven by dns-01 only; off by default |
+| Approval | *open*: any account that passes the challenge. *approved accounts* (default): a new account waits in *ACME → Accounts* until an admin approves it, or brings an EAB key. *new names*: the first certificate for a name waits in *ACME → New names* |
+| Preset, validity | The certificate's profile (must allow serverAuth); 90 days by default, never beyond the CA |
+| Addresses http-01 may reach | *internal networks too* (homelab) or *public only* – loopback and link-local are never reached |
+| IP ranges | Which IP addresses may be in certificates (http-01 only) |
+
+An **EAB key** (*ACME → EAB keys*, external account binding) lets one client skip the approval
+queue: create it, copy the key ID and the MAC key (shown once), and give both to the client – the
+page shows the certbot and lego command lines. A key binds one account and expires (7 days by
+default). Creating keys and approving need `ca.manage` on the tenant with a fresh second factor;
+the dashboard shows what waits.
+
+### 10.6 Connecting clients
+
+With the root trusted (10.4) and a domain in place:
+
+```bash
+certbot certonly --server https://pki.homelab.lan/acme/directory --standalone -d nas.homelab.lan
+```
+
+```bash
+lego run --server https://pki.homelab.lan/acme/directory --email admin@homelab.lan --accept-tos --domains nas.homelab.lan --http
+```
+
+```bash
+acme.sh --issue --server https://pki.homelab.lan/acme/directory --standalone -d nas.homelab.lan
+```
+
+With an EAB key add `--eab-kid … --eab-hmac-key …` (certbot), `--eab --eab.kid … --eab.hmac …`
+(lego), or register first with `acme.sh --register-account --eab-kid … --eab-hmac-key …`.
+
+**Caddy** as a client for its own sites (global options):
+
+```
+{
+	acme_ca https://pki.homelab.lan/acme/directory
+	acme_ca_root /etc/caddy/homelab-root.pem
+}
+```
+
+**Traefik** as a client (static configuration; `LEGO_CA_CERTIFICATES=/etc/traefik/homelab-root.pem`
+in its environment):
+
+```yaml
+certificatesResolvers:
+  homelab:
+    acme:
+      caServer: https://pki.homelab.lan/acme/directory
+      email: admin@homelab.lan
+      storage: /etc/traefik/acme-homelab.json
+      httpChallenge:
+        entryPoint: web
+```
+
+**Renewal** needs no setup: clients with ARI (RFC 9773, e.g. lego, Caddy) ask the server when to
+renew; the window opens at about 2/3 of the lifetime (day 60–63 of 90) and lasts 9 days. A revoked
+certificate gets a window in the past, so its client renews at once. Clients without ARI renew by
+their own rule (certbot: 30 days before expiry) – also fine.
+
+**Revocation** from the client – `certbot revoke --cert-path …`, `lego certificates revoke …` – signs
+the CRL at once. The certificate's own key can revoke it too (a leaked key, without the account).
+
+### 10.7 Split DNS and the network
+
+The **validator** – the part of MyOwnPKI that checks a challenge – connects to the client:
+
+- It resolves names through `acme.resolver` (empty: the system resolver). With split DNS point it
+  to the DNS server that knows your **internal** names; otherwise `nas.homelab.lan` doesn't
+  resolve, or resolves to the public address.
+- http-01: the PKI host must reach the client's port 80 (firewall!). Redirects are followed only to
+  names of the same order and to ports 80/443. With *public only* the address must be public.
+- dns-01: the TXT record `_acme-challenge.<name>` must be in the zone the resolver reads. With split
+  DNS that is the **internal** zone – point the client's DNS plugin (e.g. certbot-dns-rfc2136) at
+  the internal server. A zone hosted at a provider works the same way with the provider's plugin
+  (e.g. certbot-dns-cloudflare), as long as `acme.resolver` sees that zone.
+- The error a client gets names only the kind of problem ("could not connect", "answered with
+  status 404", "no TXT record") – never what the target answered. The server log (level info) has
+  the addresses.
+
+### 10.8 Sealed server, rate limits, audit
+
+- **Sealed**: accounts, orders and challenges still work. A *finalize* waits: the order stays
+  *processing* (clients poll with Retry-After) and is issued at the unseal; the dashboard says how
+  many wait. New accounts with an EAB key and new EAB keys need an unsealed server.
+- **Rate limits** (*Administration → Tenant settings*, per hour): new orders per account (300),
+  failed validations per name (5), new accounts per client address (10; IPv6 per /64). Over a
+  limit the client gets 429 with `Retry-After` – the real wait.
+- **Audit**: every account, order, validation, approval, EAB key, issuance and revocation is in the
+  audit log (actor `acme:<account>`).
+
+### 10.9 When a client fails
+
+| The client says | Usually | Check |
+|---|---|---|
+| `rejectedIdentifier: no domain covers …` | No domain for the name, or a wildcard on a domain without wildcards | *ACME → Domains* |
+| `unauthorized: account … waits for approval` | Approval level *approved accounts* | *ACME → Accounts*, or an EAB key |
+| `connection: … could not be reached` | The client's port 80 is closed for the PKI host, or the name resolves elsewhere | `acme.resolver`, firewall; the server log has the address |
+| `connection: … address policy … refuses` | The name resolves to loopback or link-local, or to a private address on a *public only* domain | The domain's address setting |
+| `incorrectResponse: … answered with status 404` | The client's web server doesn't serve `/.well-known/acme-challenge/` | The client's http-01 mode (standalone, webroot) |
+| `dns: … has no TXT record` | The TXT record went to another zone than the resolver reads | Split DNS (10.7) |
+| `rateLimited` | A limit of 10.8 | Wait for `Retry-After`, or raise the limit |
+| TLS error, unknown authority | The root is not trusted on the client | 10.4 |
+| `unauthorized: the ACME server is reachable only through its reverse proxy` | The proxy (or the client, past the proxy) is not in `acme.trusted_proxies` | 10.1 |

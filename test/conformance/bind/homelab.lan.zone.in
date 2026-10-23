@@ -1,0 +1,7 @@
+; Every name below homelab.lan points to the runner (@HOST_IP@): the ACME
+; clients answer http-01 on its port 80.
+$TTL 60
+@       IN SOA  ns.homelab.lan. hostmaster.homelab.lan. ( 1 60 60 600 60 )
+@       IN NS   ns.homelab.lan.
+ns      IN A    127.0.0.1
+*       IN A    @HOST_IP@

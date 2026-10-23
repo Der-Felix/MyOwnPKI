@@ -34,3 +34,12 @@ auth:
   trusted_proxies: ""
   # e.g. https://pki.homelab.lan:9443 – the address users open the UI with.
   passkey_origin: ""
+
+acme:
+  # Off until set: the proxy's https URL, e.g. https://pki.homelab.lan/acme.
+  base_url: ""
+  # The proxy reaches the container over the Docker network.
+  listen: 0.0.0.0:8081
+  # The Docker network the proxy container is in (and loopback).
+  trusted_proxies: "127.0.0.1, ::1, 172.16.0.0/12"
+  resolver: ""

@@ -21,7 +21,7 @@ import (
 )
 
 // fastParams keep tests fast; TestProductionParams pins the real ones.
-var fastParams = Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
+var fastParams = TestParams()
 
 func testKey(t *testing.T) *Key {
 	t.Helper()

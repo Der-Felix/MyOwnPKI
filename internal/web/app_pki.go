@@ -157,6 +157,23 @@ func (a *app) dashboard(c *rc) {
 		Attention: []view.Message{},
 	}
 	sealed := a.d.Keys.Status().Sealed
+	if a.d.ACME != nil {
+		if waiting, werr := a.d.ACME.Waiting(ctx); werr == nil && waiting > 0 {
+			if sealed {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: strconv.FormatInt(waiting, 10) + " ACME order(s) wait for the unseal – their certificates are issued as soon as the server is unsealed.", Href: "/unseal", LinkText: "Unseal"})
+			} else {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageInfo, Text: strconv.FormatInt(waiting, 10) + " ACME order(s) are being issued."})
+			}
+		}
+		if accounts, names, perr := a.d.ACME.Pending(ctx); perr == nil {
+			if accounts > 0 {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: strconv.FormatInt(accounts, 10) + " ACME account(s) wait for approval.", Href: "/acme/accounts", LinkText: "Review"})
+			}
+			if names > 0 {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: strconv.FormatInt(names, 10) + " new name(s) wait for approval.", Href: "/acme/names", LinkText: "Review"})
+			}
+		}
+	}
 	for _, info := range cas {
 		href := "/authorities/" + info.ID
 		if info.Status == ca.StatusPendingSignature {

@@ -75,6 +75,9 @@ type Tenant struct {
 	SubjectL          string
 	SubjectSt         string
 	SubjectC          string
+	AcmeOrdersPerHour int64
+	AcmeFailedPerName int64
+	AcmeAccountsPerIp int64
 }
 
 type Unseal struct {

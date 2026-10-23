@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/argon2"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 )
 
 // Params are the Argon2id parameters of a password hash. They are stored in
@@ -28,6 +30,14 @@ type Params struct {
 // (19 MiB, t=2). The unseal passphrase uses 256 MiB, but it is checked
 // rarely; logins are frequent.
 var DefaultParams = Params{Time: 3, MemoryKiB: 64 * 1024, Threads: 1}
+
+// TestParams are the weak Argon2id parameters of tests – the same values as
+// the key ring's test KDF, kept in one place (keys.TestArgon2). It panics
+// outside a test binary.
+func TestParams() Params {
+	t, m, p := keys.TestArgon2()
+	return Params{Time: t, MemoryKiB: m, Threads: p}
+}
 
 const (
 	// MaxParallelHashes bounds the memory a login flood can take:

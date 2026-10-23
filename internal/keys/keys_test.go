@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,9 +30,6 @@ import (
 )
 
 var t0 = time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
-
-// testParams keep tests fast; the production values are checked separately.
-var testParams = argon2Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 
 // admin is a signed-in instance admin (unseal needs no step-up).
 var admin = Who{
@@ -67,8 +65,7 @@ func newEnv(t *testing.T) *env {
 	e.sysPath = e.l.SystemDB()
 	e.pkiPath, _ = e.l.TenantDB(store.DefaultTenant, store.KindPKI)
 	e.system, e.ia, e.pki = open(e.sysPath), open(e.l.InstanceAuditDB()), open(e.pkiPath)
-	e.k = New(e.system, e.ia, e.clk)
-	e.k.params = testParams
+	e.k = New(e.system, e.ia, e.clk, TestKDF()) // the production values: TestProductionArgon2Parameters
 	d := &audit.Deliverer{
 		Routes: []audit.Route{{Source: "system", From: e.system, To: e.ia, Scope: store.InstanceScope}},
 		Clock:  e.clk, Log: slog.New(slog.DiscardHandler),
@@ -519,14 +516,117 @@ func TestProductionArgon2Parameters(t *testing.T) {
 	if err := defaultArgon2.check(); err != nil {
 		t.Error(err)
 	}
-	if testing.Short() {
-		t.Skip("one real derivation takes 256 MiB")
+	if err := checkUnsealParams(defaultArgon2, false); err != nil {
+		t.Errorf("the production values fail their own minimum: %v", err)
 	}
+	if testing.Short() {
+		t.Skip("init and unseal with the real parameters take 256 MiB each")
+	}
+	// The whole path with the production values: a key ring without TestKDF,
+	// as the server builds it.
+	e := newEnv(t)
+	e.k = New(e.system, e.ia, e.clk)
 	start := time.Now()
-	kek := passphraseKEK([]byte("benchmark passphrase"), make([]byte, 32), defaultArgon2)
-	t.Logf("Argon2id t=4 m=256MiB p=4 on %d CPUs: %v", runtime.NumCPU(), time.Since(start).Round(time.Millisecond))
-	if len(kek) != keySize {
-		t.Error("KEK length")
+	e.init(t)
+	s, err := e.k.slot(t.Context(), slotPassphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, perr := parseArgon2Params(s.KdfParams); perr != nil || p != defaultArgon2 {
+		t.Errorf("stored parameters %s (%v), want the production values", s.KdfParams, perr)
+	}
+	e.unseal(t)
+	t.Logf("init and unseal with Argon2id t=4 m=256MiB p=4 on %d CPUs: %v", runtime.NumCPU(), time.Since(start).Round(time.Millisecond))
+	if e.k.Status().Sealed {
+		t.Error("still sealed")
+	}
+}
+
+// Outside a test binary the weak parameters are refused twice: the option
+// can't be set, and a key ring that has them can't be unsealed.
+func TestWeakKDFOnlyInTestBinaries(t *testing.T) {
+	t.Parallel()
+	k := &Keyring{params: defaultArgon2}
+	if err := k.apply([]Option{TestKDF()}, false); err == nil {
+		t.Error("TestKDF accepted outside a test binary")
+	}
+	if k.params != defaultArgon2 {
+		t.Errorf("parameters changed to %+v by a refused option", k.params)
+	}
+	if err := k.apply([]Option{TestKDF()}, true); err != nil || k.params != testArgon2 {
+		t.Errorf("in a test binary: %v, %+v", err, k.params)
+	}
+
+	weaker := []argon2Params{
+		testArgon2,
+		{Time: 3, MemoryKiB: 256 * 1024, Threads: 4},
+		{Time: 4, MemoryKiB: 255 * 1024, Threads: 4},
+		{Time: 4, MemoryKiB: 256 * 1024, Threads: 3},
+	}
+	for _, p := range weaker {
+		err := checkUnsealParams(p, false)
+		if !errors.Is(err, ErrWeakKDF) || !strings.Contains(err.Error(), "minimum is t=4, 256 MiB, p=4") {
+			t.Errorf("%+v outside a test binary: %v", p, err)
+		}
+		if err := checkUnsealParams(p, true); err != nil {
+			t.Errorf("%+v in a test binary: %v", p, err)
+		}
+	}
+	for _, p := range []argon2Params{defaultArgon2, {Time: 8, MemoryKiB: 1024 * 1024, Threads: 8}} {
+		if err := checkUnsealParams(p, false); err != nil {
+			t.Errorf("%+v refused: %v", p, err)
+		}
+	}
+	if tc, m, p := TestArgon2(); (argon2Params{Time: tc, MemoryKiB: m, Threads: p}) != testArgon2 {
+		t.Error("TestArgon2 returns other values than testArgon2")
+	}
+}
+
+// A key ring made with TestKDF stores the weak values – the unseal check
+// sees them (in this test binary it lets them pass).
+func TestTestKDFIsStored(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.init(t)
+	s, err := e.k.slot(t.Context(), slotPassphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := parseArgon2Params(s.KdfParams)
+	if err != nil || p != testArgon2 {
+		t.Fatalf("stored %s (%v)", s.KdfParams, err)
+	}
+	if err := checkUnsealParams(p, false); !errors.Is(err, ErrWeakKDF) {
+		t.Errorf("a production binary would unseal this key ring: %v", err)
+	}
+	e.unseal(t)
+	if err := e.k.Seal(t.Context(), admin); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same key ring opened as a server binary would: refused and audited,
+	// before any key derivation.
+	prod := New(e.system, e.ia, e.clk)
+	prod.testBinary = false
+	if err := prod.Unseal(t.Context(), []byte(e.passphrase), admin); !errors.Is(err, ErrWeakKDF) {
+		t.Fatalf("unseal of a weak key ring outside a test binary: %v", err)
+	}
+	if err := prod.VerifyPassphrase(t.Context(), []byte(e.passphrase), admin); !errors.Is(err, ErrWeakKDF) {
+		t.Errorf("verify: %v", err)
+	}
+	if !prod.Status().Sealed {
+		t.Fatal("unsealed")
+	}
+	if got := e.actions(t); !slices.Contains(got, "system.unseal/denied") {
+		t.Errorf("no denied entry for the refused unseal: %v", got)
+	}
+	// The way out the error names: the recovery key, then a new passphrase –
+	// stored with the production values.
+	if err := prod.ResetPassphrase(t.Context(), e.recovery, []byte("another long passphrase"), admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := prod.Unseal(t.Context(), []byte("another long passphrase"), admin); err != nil {
+		t.Errorf("unseal after the reset: %v", err)
 	}
 }
 
@@ -835,8 +935,7 @@ func TestUnsealIsFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ro.Close() })
-	k := New(e.system, ro.Read, e.clk)
-	k.params = testParams
+	k := New(e.system, ro.Read, e.clk, TestKDF())
 	if err := k.Unseal(t.Context(), []byte(e.passphrase), admin); err == nil || !strings.Contains(err.Error(), "audit entry can't be written") {
 		t.Errorf("unseal without audit: %v", err)
 	}
@@ -847,8 +946,7 @@ func TestUnsealIsFailClosed(t *testing.T) {
 		t.Error("the root key is usable after a refused unseal")
 	}
 	// Seal: the key goes even when the entry fails.
-	w := New(e.system, e.ia, e.clk)
-	w.params = testParams
+	w := New(e.system, e.ia, e.clk, TestKDF())
 	if err := w.Unseal(t.Context(), []byte(e.passphrase), admin); err != nil {
 		t.Fatal(err)
 	}

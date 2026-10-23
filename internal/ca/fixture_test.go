@@ -89,7 +89,7 @@ func runTests(m *testing.M) (int, error) {
 		return 0, err
 	}
 	defer func() { _ = ia.Close() }()
-	unsealed = keys.New(sys.Write, ia.Write, clk)
+	unsealed = keys.New(sys.Write, ia.Write, clk, keys.TestKDF())
 	rk, err := keys.NewRecoveryKey(nil)
 	if err != nil {
 		return 0, err

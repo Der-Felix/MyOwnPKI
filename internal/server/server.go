@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -56,6 +57,8 @@ const (
 	jobSessions   = "sessions-prune"
 	jobOutbox     = "outbox-cleanup"
 	jobRefusals   = "admin-refusals"
+	jobACMEIssue  = "acme-issue-waiting"
+	jobACMEExpire = "acme-expire"
 
 	tickEvery = 5 * time.Second
 )
@@ -98,6 +101,11 @@ type Server struct {
 
 	admin, public     *http.Server
 	adminLn, publicLn net.Listener
+
+	// The ACME server (PHASE2): nil while acme.base_url is empty.
+	acme   *acme.Server
+	acmeHS *http.Server
+	acmeLn net.Listener
 
 	closeOnce sync.Once
 }
@@ -227,6 +235,11 @@ func (s *Server) build(key *auth.Key) error {
 		if _, err := s.engine.RenewCRLs(ctx, "unseal"); err != nil {
 			s.log.Warn("CRL renewal at unseal", slog.Any("error", err))
 		}
+		if s.acme != nil {
+			if err := s.acme.ProcessPending(ctx); err != nil {
+				s.log.Warn("ACME orders at unseal", slog.Any("error", err))
+			}
+		}
 	}
 	s.ring.BeforeSeal = func(ctx context.Context) {
 		s.deliver(ctx)
@@ -255,6 +268,20 @@ func (s *Server) build(key *auth.Key) error {
 		return err
 	})
 	s.jobs.add(jobRefusals, time.Minute, time.Minute, func(context.Context) error { s.refused.flush(); return nil })
+	if base := s.opt.Config.ACME.BaseURL; base != "" {
+		acfg := s.opt.Config.ACME
+		var aerr error
+		settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
+		limits := func(ctx context.Context) (acme.Limits, error) {
+			l, lerr := settings.ACMELimits(ctx, store.DefaultTenant)
+			return acme.Limits{OrdersPerAccount: l.OrdersPerAccount, FailedPerName: l.FailedPerName, AccountsPerIP: l.AccountsPerIP}, lerr
+		}
+		if s.acme, aerr = acme.New(acme.Options{Engine: s.engine, BaseURL: base, TrustedProxies: acfg.TrustedProxies, Resolver: acfg.Resolver, Clock: s.clk, Log: s.log, Limits: limits}); aerr != nil {
+			return aerr
+		}
+		s.jobs.add(jobACMEIssue, time.Minute, time.Minute, s.acme.ProcessPending)
+		s.jobs.add(jobACMEExpire, 5*time.Minute, 5*time.Minute, s.acme.ExpireStale)
+	}
 	return nil
 }
 
@@ -376,12 +403,40 @@ func (s *Server) Listen(ctx context.Context) error {
 			MaxHeaderBytes: 8 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
 		}
 	}
+	if s.acme != nil {
+		if s.acmeLn, err = lc.Listen(ctx, "tcp", cfg.ACME.Listen); err != nil {
+			_ = s.adminLn.Close()
+			if s.publicLn != nil {
+				_ = s.publicLn.Close()
+			}
+			return fmt.Errorf("acme listener %s: %w", cfg.ACME.Listen, err)
+		}
+		// Plain HTTP for the reverse proxy only; the handler refuses every
+		// peer outside acme.trusted_proxies.
+		s.acmeHS = &http.Server{
+			Handler:           s.acme,
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+			MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+		}
+		s.log.Info("ACME listening", slog.String("listen", "http://"+s.acmeLn.Addr().String()), slog.String("directory", s.acme.BaseURL()+"/directory"))
+	}
 	s.log.Info("listening", slog.String("admin", "https://"+s.adminLn.Addr().String()), slog.String("public", s.PublicAddr()))
 	return nil
 }
 
 // AdminAddr and PublicAddr are the bound addresses (tests use port 0).
 func (s *Server) AdminAddr() string { return s.adminLn.Addr().String() }
+
+// ACMEAddr is "" when ACME is off; else the listener's address (tests use port 0).
+func (s *Server) ACMEAddr() string {
+	if s.acmeLn == nil {
+		return ""
+	}
+	return s.acmeLn.Addr().String()
+}
+
+// ACME is the ACME server, nil while ACME is off.
+func (s *Server) ACME() *acme.Server { return s.acme }
 
 // PublicAddr is "" when the public listener is off.
 func (s *Server) PublicAddr() string {
@@ -443,10 +498,13 @@ func (s *Server) Sealed() bool { return s.ring.Status().Sealed }
 // ShutdownBudget: no new connections, in-flight requests get a few seconds,
 // then the seal with its last checkpoint, then the databases close.
 func (s *Server) Serve(ctx context.Context) error {
-	errc := make(chan error, 2)
+	errc := make(chan error, 3)
 	go func() { errc <- serveErr("admin", s.admin.Serve(s.adminLn)) }()
 	if s.public != nil {
 		go func() { errc <- serveErr("public", s.public.Serve(s.publicLn)) }()
+	}
+	if s.acmeHS != nil {
+		go func() { errc <- serveErr("acme", s.acmeHS.Serve(s.acmeLn)) }()
 	}
 	jobCtx, stopJobs := context.WithCancel(ctx)
 	jobsDone := make(chan struct{})
@@ -479,7 +537,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.log.Info("shutting down")
 		// Requests get at most half of the budget; the seal must fit after.
 		reqCtx, reqCancel := context.WithTimeout(sctx, ShutdownBudget/2)
-		for _, srv := range []*http.Server{s.admin, s.public} {
+		for _, srv := range []*http.Server{s.admin, s.public, s.acmeHS} {
 			if srv == nil {
 				continue
 			}
@@ -488,6 +546,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			}
 		}
 		reqCancel()
+		if s.acme != nil {
+			s.acme.Close() // running validations finish before the databases close
+		}
 		if err := s.ring.Seal(sctx, systemWho); err != nil {
 			errs = append(errs, fmt.Errorf("seal: %w", err))
 			s.log.Error("seal at shutdown", slog.Any("error", err))
@@ -524,10 +585,28 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(),
 	}})
 	if err != nil {
 		return err
 	}
 	s.ui = ui
 	return nil
+}
+
+// acmeAdmin returns the ACME server as the UI's interface – nil (not a
+// typed nil) while ACME is off.
+func (s *Server) acmeAdmin() web.ACMEAdmin {
+	if s.acme == nil {
+		return nil
+	}
+	return s.acme
+}
+
+// acmeDirectory is the directory URL clients use; "" while ACME is off.
+func (s *Server) acmeDirectory() string {
+	if s.acme == nil {
+		return ""
+	}
+	return s.acme.BaseURL() + "/directory"
 }

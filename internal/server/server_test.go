@@ -71,7 +71,7 @@ func testConfig(t *testing.T) config.Config {
 func initialized(t *testing.T, cfg config.Config) string {
 	t.Helper()
 	res, err := setup.Run(t.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console,
+		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatal(err)
@@ -545,5 +545,50 @@ func TestBootstrapNamesHaveNoDuplicates(t *testing.T) {
 	}
 	if len(names) != 1 || len(ips) != 2 {
 		t.Errorf("duplicates: %v %v", names, ips)
+	}
+}
+
+// TestACMEListener (PHASE2, owner Q1): with acme.base_url the server opens
+// its own plain-HTTP ACME listener; the directory names the base URL; the
+// public CRL port has no ACME.
+func TestACMEListener(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	initialized(t, cfg)
+	cfg.ACME.BaseURL, cfg.ACME.Listen = "https://pki.homelab.lan/acme", "127.0.0.1:0"
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.DiscardHandler), Hostname: "pki01", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lerr := srv.Listen(t.Context()); lerr != nil {
+		t.Fatal(lerr)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	get := func(u string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, u, nil)
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if srv.ACMEAddr() == "" {
+		t.Fatal("no ACME listener")
+	}
+	code, body := get("http://" + srv.ACMEAddr() + "/acme/directory")
+	if code != http.StatusOK || !strings.Contains(body, `"newAccount":"https://pki.homelab.lan/acme/new-account"`) {
+		t.Errorf("directory: %d %s", code, body)
+	}
+	if code, _ := get(srv.PublicAddr() + "/acme/directory"); code != http.StatusNotFound {
+		t.Errorf("ACME on the public CRL port: %d", code)
 	}
 }

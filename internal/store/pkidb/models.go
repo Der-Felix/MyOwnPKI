@@ -8,6 +8,84 @@ import (
 	"database/sql"
 )
 
+type AcmeAccount struct {
+	ID            string
+	KeyThumbprint string
+	Jwk           string
+	Status        string
+	Contact       string
+	EabKeyID      sql.NullString
+	ApprovedAt    sql.NullString
+	ApprovedBy    sql.NullString
+	CreatedAt     string
+	CreatedIp     string
+	UpdatedAt     string
+}
+
+type AcmeAuthz struct {
+	ID              string
+	AccountID       string
+	IdentifierType  string
+	IdentifierValue string
+	Wildcard        int64
+	Status          string
+	ExpiresAt       string
+	CreatedAt       string
+	UpdatedAt       string
+}
+
+type AcmeChallenge struct {
+	ID          string
+	AuthzID     string
+	Type        string
+	Token       string
+	Status      string
+	ValidatedAt sql.NullString
+	Error       sql.NullString
+	UpdatedAt   string
+}
+
+type AcmeEabKey struct {
+	ID             string
+	Label          string
+	RootKeyVersion int64
+	WrappedDek     []byte
+	MacCiphertext  []byte
+	ExpiresAt      string
+	UsedAt         sql.NullString
+	UsedBy         sql.NullString
+	CreatedBy      string
+	CreatedAt      string
+}
+
+type AcmeName struct {
+	Name        string
+	Status      string
+	RequestedBy string
+	RequestedAt string
+	DecidedBy   sql.NullString
+	DecidedAt   sql.NullString
+}
+
+type AcmeOrder struct {
+	ID            string
+	AccountID     string
+	Status        string
+	Identifiers   string
+	ExpiresAt     string
+	CsrDer        []byte
+	CertificateID sql.NullString
+	Error         sql.NullString
+	CreatedAt     string
+	UpdatedAt     string
+	Replaces      sql.NullString
+}
+
+type AcmeOrderAuthz struct {
+	OrderID string
+	AuthzID string
+}
+
 type BlockedKey struct {
 	SpkiSha256 string
 	Reason     string
@@ -126,6 +204,22 @@ type Crl struct {
 type DbInfo struct {
 	Key   string
 	Value string
+}
+
+type Domain struct {
+	ID                string
+	Name              string
+	CaID              string
+	IncludeSubdomains int64
+	Wildcards         int64
+	ChallengeTypes    string
+	Approval          string
+	Preset            string
+	ValidityDays      sql.NullInt64
+	AddressPolicy     string
+	IpRanges          string
+	CreatedAt         string
+	UpdatedAt         string
 }
 
 type ImportJob struct {

@@ -85,12 +85,36 @@ func New(t *testing.T, o Options) *Instance {
 		secrets: map[string][]byte{}, CAIDs: map[string]string{},
 	}
 	res, err := setup.Run(t.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console,
+		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatal(err)
 	}
-	demo, err := os.ReadFile(res.DemoSecretsFile)
+	return v.open(t, cfg, res.DemoSecretsFile, o)
+}
+
+// OpenExisting opens a data directory made elsewhere – an older release, a
+// restored backup – with the secrets file of its `init --demo`. Like
+// server.Open it first applies the migrations of this build (the upgrade
+// test, PHASE2 step 15).
+func OpenExisting(t *testing.T, dataDir, demoSecretsFile string) *Instance {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDir = dataDir
+	v := &Instance{
+		Clock:   clock.NewFake(clock.System{}.Now().UTC().Truncate(time.Second).Add(700 * time.Millisecond)),
+		secrets: map[string][]byte{}, CAIDs: map[string]string{},
+	}
+	if _, err := store.Migrate(t.Context(), store.Layout{DataDir: dataDir}, store.DefaultTenant, v.Clock.Now); err != nil {
+		t.Fatalf("migrate %s: %v", dataDir, err)
+	}
+	return v.open(t, cfg, demoSecretsFile, Options{})
+}
+
+// open reads the demo secrets and wires the services to the databases.
+func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string, o Options) *Instance {
+	t.Helper()
+	demo, err := os.ReadFile(demoSecretsFile) // #nosec G304 -- test: the instance's own secrets file
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +152,7 @@ func New(t *testing.T, o Options) *Instance {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock)
+	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock, keys.TestKDF())
 	if v.Presets, err = preset.Builtin(); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +161,7 @@ func New(t *testing.T, o Options) *Instance {
 		Clock: v.Clock, ServerKeygen: func(context.Context) (bool, error) { return true, nil },
 	}
 	v.Auth = auth.NewService(v.SystemDB.Write, v.InstanceAudit.Write, key, v.Clock)
-	v.Auth.Hasher = auth.NewHasher(auth.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}, 4, time.Second)
+	v.Auth.Hasher = auth.NewHasher(auth.TestParams(), 4, time.Second)
 	if !o.NoPasskeys {
 		if v.Auth.Passkeys, err = auth.NewPasskeys("pki.homelab.lan", BrowserOrigin); err != nil {
 			t.Fatal(err)

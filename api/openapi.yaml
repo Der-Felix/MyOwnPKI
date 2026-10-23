@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.2.0-draft
-  summary: REST API of the MyOwnPKI admin listener (phase 1 scope)
+  version: 0.2.0
+  summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
-    Phase 1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation,
-    legacy import, login with mandatory second factor, RBAC, unseal and audit log.
-    ACME (phase 2), domains/policies (phase 2) and agents (phase 3) are not part of it.
-    Step 13 implements the operations needed for the first browser test (see docs/PHASE1.md);
-    the others follow in step 18 and answer 404 until then.
+    v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy
+    import, login with mandatory second factor, RBAC, unseal and audit log. v0.2 adds the ACME
+    domains and the ACME rate limits in the tenant settings. The ACME protocol itself (RFC 8555)
+    is not part of this API: it is served on its own listener, behind a reverse proxy that ends
+    TLS. Agents (phase 3) follow later.
 
     **Conventions**
     - Served only on the admin listener (ADR-08), base path `/api/v1`. The listener's own
@@ -62,6 +62,8 @@ tags:
     description: API tokens
   - name: settings
     description: Tenant settings (server key generation, subject defaults)
+  - name: domains
+    description: Name spaces ACME issues for (CA, challenges, approval level)
   - name: presets
     description: Certificate presets (read-only, built in)
   - name: cas
@@ -764,6 +766,7 @@ paths:
         `allow_server_keygen` switches server-side key generation (a CSR is always possible);
         the subject defaults fill fields that neither the request nor the CSR gives (like
         pki.conf of pki.sh) – never the common name.
+        `acme_limits` (since 0.2, optional here) are the rate limits of the ACME server.
       x-required-role: admin
       requestBody:
         description: "The settings"
@@ -785,6 +788,114 @@ paths:
         "422": { $ref: "#/components/responses/PolicyViolation" }
 
   # ---------------------------------------------------------------- presets
+  /domains:
+    get:
+      tags: [domains]
+      operationId: listDomains
+      summary: List the domains ACME issues for
+      description: Only domains whose CA the caller may read; by name.
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Domains
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Domain" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [domains]
+      operationId: createDomain
+      summary: Create a domain
+      description: |
+        A name space ACME issues for: the signing CA (an intermediate whose name constraints permit
+        the domain), the challenges that prove control, the approval level, preset and validity.
+        Absent settings take the defaults: sub-domains included, no wildcards, http-01 and dns-01,
+        approval `account`, preset `server`, 90 days, address policy `internal`.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "Name, CA and optional settings"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DomainCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              description: URL of the new domain
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Domain" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /domains/{domainId}:
+    parameters:
+      - $ref: "#/components/parameters/DomainId"
+    get:
+      tags: [domains]
+      operationId: getDomain
+      summary: Get a domain
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Domain
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Domain" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [domains]
+      operationId: updateDomain
+      summary: Change a domain's settings
+      description: The name never changes. Absent fields keep their value.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "The settings to change"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DomainUpdate" }
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Domain" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+    delete:
+      tags: [domains]
+      operationId: deleteDomain
+      summary: Delete a domain
+      description: |
+        Issued certificates stay. Open ACME orders for its names fail at finalize, which checks the
+        domain again.
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /presets:
     get:
       tags: [presets]
@@ -1678,6 +1789,13 @@ components:
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
+    DomainId:
+      description: "ID of the domain"
+      name: domainId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
     CertificateId:
       description: "ID of the certificate"
       name: certificateId
@@ -2108,6 +2226,18 @@ components:
             locality: { type: string, maxLength: 128 }
             state: { type: string, maxLength: 128 }
             country: { type: string, pattern: "^([A-Z]{2})?$" }
+        acme_limits:
+          description: |
+            Rate limits of the ACME server, per hour (since 0.2). Always in the answer; optional in
+            a change – left out, the stored limits stay. A client over a limit gets 429
+            `rateLimited` with Retry-After.
+          type: object
+          required: [orders_per_account, failed_per_name, accounts_per_ip]
+          additionalProperties: false
+          properties:
+            orders_per_account: { type: integer, minimum: 1, maximum: 10000, description: "New orders per account" }
+            failed_per_name: { type: integer, minimum: 1, maximum: 100, description: "Failed validations per name" }
+            accounts_per_ip: { type: integer, minimum: 1, maximum: 1000, description: "New accounts per client address (IPv6 per /64)" }
 
     PasswordChange:
       description: "Password change of the logged-in user"
@@ -2218,6 +2348,70 @@ components:
       type: string
       description: ADR-09 – offline (certificate only), online_encrypted (unseal needed), hsm
       enum: [offline, online_encrypted, hsm]
+
+    DomainSettings:
+      description: "Changeable settings of a domain"
+      type: object
+      properties:
+        ca_id: { $ref: "#/components/schemas/ID" }
+        include_subdomains: { type: boolean, description: "Names below the domain are covered too" }
+        wildcards: { type: boolean, description: "`*.name` may be ordered (dns-01 only; needs include_subdomains)" }
+        challenge_types:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [http-01, dns-01] }
+        approval:
+          type: string
+          enum: [open, account, new_name]
+          description: "open: any account; account: approved or EAB-bound accounts; new_name: the first issuance per name needs approval"
+        preset: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+        validity_days: { type: integer, minimum: 0, description: "0 = 90 days; capped by the CA's maximum" }
+        address_policy:
+          type: string
+          enum: [internal, public]
+          description: "Which addresses the http-01 check may connect to"
+        ip_ranges:
+          type: array
+          items: { type: string, maxLength: 43 }
+          description: "IPs or CIDRs for IP identifiers (http-01 only)"
+
+    DomainCreate:
+      description: "A new domain"
+      allOf:
+        - $ref: "#/components/schemas/DomainSettings"
+        - type: object
+          required: [name, ca_id]
+          properties:
+            name: { type: string, maxLength: 253, description: "Lower case, punycode, at least two labels" }
+
+    DomainUpdate:
+      description: "Settings to change"
+      $ref: "#/components/schemas/DomainSettings"
+
+    Domain:
+      description: "A domain ACME issues for"
+      type: object
+      required: [id, name, ca_id, ca_name, include_subdomains, wildcards, challenge_types, approval, preset,
+                 validity_days, address_policy, ip_ranges, created_at, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        ca_id: { $ref: "#/components/schemas/ID" }
+        ca_name: { type: string }
+        include_subdomains: { type: boolean }
+        wildcards: { type: boolean }
+        challenge_types:
+          type: array
+          items: { type: string, enum: [http-01, dns-01] }
+        approval: { type: string, enum: [open, account, new_name] }
+        preset: { type: string }
+        validity_days: { type: integer, minimum: 1 }
+        address_policy: { type: string, enum: [internal, public] }
+        ip_ranges:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     CA:
       description: "A certificate authority of this tenant with its generations (one per key)"

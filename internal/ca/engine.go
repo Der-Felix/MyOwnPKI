@@ -90,6 +90,22 @@ type Request struct {
 	CustomKeyUsage, CustomExtKeyUsage []string
 	RenewalOf                         string // certificate ID, optional
 	Who                               keys.Who
+	// ACME, if set, makes this the issuance of an ACME order: every name
+	// must lie in a domain, and CA, preset and validity come from the
+	// domains (PHASE2 step 2) – one policy engine for UI, API and ACME.
+	ACME *ACMEOrder
+	// acmeWildcards: set by acmeRequest when the domains allow wildcards –
+	// the names stay exactly the order's (no base domain is added, unlike
+	// the wildcard preset).
+	acmeWildcards bool
+}
+
+// ACMEOrder ties an issuance to an ACME order.
+type ACMEOrder struct {
+	OrderID, AccountID string
+	// Stored runs inside the transaction that stores the certificate, so the
+	// order and its certificate are written together (ADR-06).
+	Stored func(ctx context.Context, tx *sql.Tx, issued *Issued) error
 }
 
 // Issued is a stored certificate.
@@ -136,6 +152,12 @@ func (e *Engine) rand() io.Reader {
 }
 
 func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued, error) {
+	if req.ACME != nil {
+		var err error
+		if req, err = e.acmeRequest(ctx, req); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.authorize(req.Who, authz.IssueCert, short(req.CA), now); err != nil {
 		return nil, err
 	}
@@ -342,7 +364,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 	case p.CommonNameFrom == preset.SANDNS:
 		if _, err := netip.ParseAddr(cn); err == nil {
 			in.IPs = append([]string{cn}, in.IPs...)
-		} else if _, err := checkDNSName(cn, p.Wildcard); err == nil {
+		} else if _, err := checkDNSName(cn, p.Wildcard || req.acmeWildcards); err == nil {
 			in.DNS = append([]string{cn}, in.DNS...)
 		}
 	case p.CommonNameFrom == preset.SANEmail:
@@ -351,7 +373,7 @@ func subjectAndNames(p *preset.Preset, req Request, csr *x509.CertificateRequest
 		}
 	}
 
-	names, np := checkNames(in, p.Wildcard)
+	names, np := checkNames(in, p.Wildcard || req.acmeWildcards)
 	problems = append(problems, np...)
 	// Once a name was refused, "needs at least one name" is only its echo
 	// (owner 2026-10-17): the requester fixes the name, not the list.
@@ -522,6 +544,10 @@ func (e *Engine) store(ctx context.Context, req Request, now time.Time, is *issu
 	if req.RenewalOf != "" {
 		details["renewal_of"] = req.RenewalOf
 	}
+	if req.ACME != nil {
+		details["acme_order"] = req.ACME.OrderID
+		details["acme_account"] = req.ACME.AccountID
+	}
 	if len(out.Notes) > 0 {
 		details["notes"] = out.Notes
 	}
@@ -560,6 +586,11 @@ func (e *Engine) store(ctx context.Context, req Request, now time.Time, is *issu
 	}
 	if err := audit.Enqueue(ctx, tx, now, entry); err != nil {
 		return nil, err
+	}
+	if req.ACME != nil && req.ACME.Stored != nil {
+		if err := req.ACME.Stored(ctx, tx, out); err != nil {
+			return nil, fmt.Errorf("store ACME order: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store certificate: %w", err)

@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phase 1 complete (v0.1 ready for release, not released yet) · Last updated: 2026-10-21 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) being released 2026-10-23; next: phase 3 · Last updated: 2026-10-23 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -165,7 +165,7 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 - **Server-side key generation** for leaves is available but **switchable off per tenant**; CSR
   signing is the default in UI and API *(decided 2026-10-13)*.
 - **Key hierarchy** *(phase 1 step 6, decided 2026-10-13)*: passphrase →Argon2id (t=4, 256 MiB,
-  p=4; parameters stored)→ KEK → **root key** (random, wrapped in `system.db`) → one DEK per private
+  p=4; parameters stored; unseal refuses less – *minimum, decided 2026-10-23*)→ KEK → **root key** (random, wrapped in `system.db`) → one DEK per private
   key → private key (PKCS#8), all AES-256-GCM with additional data that binds each ciphertext to its
   purpose and key ID. Changing the passphrase rewraps only the root key (one row, atomic); the root
   key's GCM tag proves the passphrase, no separate verifier. Sealed after every start; when
@@ -616,6 +616,7 @@ keeps the reasons. None of them changes an ADR.
 | Root key only in memory while unsealed; DEK and private key decrypted per operation (`WithKey`/`WithSigner`), buffers cleared afterwards; seal waits for running signatures | Shortest possible lifetime of key material; Go can't clear parsed key objects – docs recommend no core dumps and no unencrypted swap |
 | One secret check at a time; 3 free failures, then 1 min doubling to 1 h; every attempt audited (success, failure, denied) in the instance log; nothing about the secret is logged | Each attempt costs 256 MiB – no memory exhaustion by parallel guesses; guessing is slowed and visible |
 | Stored Argon2id parameters are bounds-checked before use | A tampered row can't turn an unseal attempt into a denial of service |
+| *(2026-10-23)* The production values are also the **minimum at unseal**: a passphrase slot with less (t, memory or lanes) is refused and audited (`denied`, `weak_kdf`); the way out is the recovery key and a new passphrase. Weaker values exist only for tests (`keys.TestKDF`, `auth.TestParams` – one place, `keys.TestArgon2`) and only in test binaries (`testing.Testing()`): no flag, configuration key or environment variable; outside a test binary the option panics. Every v0.1.0 key ring has exactly t=4, 256 MiB, p=4 (checked by the upgrade test) | A key ring made by a test build must never protect real keys; tests need 8 MiB instead of 256 MiB per derivation (the race job ran out of memory) |
 | Recovery key: Crockford Base32, 9 groups of 6, 2 check characters (typos are caught before a real attempt); redacted in `%v`, JSON and slog – only `Reveal()` prints it | It can't reach a log by accident |
 | Recovery key output and confirmation are prepared for `myownpki init` (step 11): terminal only if interactive, otherwise `--recovery-key-file` (0600, never overwritten); two random groups re-typed before anything is stored | Owner decision 2026-10-13 |
 | `golang.org/x/crypto/openpgp` is blocked by depguard | GO-2026-5932: unmaintained and unsafe by design; it ships in the same module as argon2 |

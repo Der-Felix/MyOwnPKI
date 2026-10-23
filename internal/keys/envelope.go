@@ -15,6 +15,9 @@ import (
 const (
 	PurposeCA   = "ca"
 	PurposeLeaf = "leaf"
+	// PurposeEAB: the MAC key of an ACME external account binding (PHASE2
+	// step 13); stored in acme_eab_keys, never in the keys table.
+	PurposeEAB = "acme-eab"
 )
 
 // Envelope is an encrypted private key as stored in pki.db.
@@ -28,7 +31,7 @@ type Envelope struct {
 // and algorithm are bound into the ciphertext: the same bytes in another row
 // won't decrypt. The caller should clear pkcs8 afterwards.
 func (k *Keyring) EncryptKey(keyID, purpose, algorithm string, pkcs8 []byte) (Envelope, error) {
-	if purpose != PurposeCA && purpose != PurposeLeaf {
+	if purpose != PurposeCA && purpose != PurposeLeaf && purpose != PurposeEAB {
 		return Envelope{}, fmt.Errorf("unknown key purpose %q", purpose)
 	}
 	k.mu.RLock()

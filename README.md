@@ -7,22 +7,25 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: v0.1 – phase 1 complete.** A working CA with web UI, REST API, legacy import and
-> backup – it replaces the `pki.sh` Bash suite. The ACME server follows in v0.2, the agent and
-> monitoring in v0.3. See [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
+> **Status: v0.2 – phases 1 and 2 complete.** A working CA with web UI, REST API, legacy import and
+> backup – it replaces the `pki.sh` Bash suite – and, new in v0.2, an **ACME server** for your own CA
+> (only behind a reverse proxy that ends TLS). The agent and monitoring come with v0.3. See
+> [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
 
-MyOwnPKI is a self-hosted certificate authority platform. v0.1 brings the CA, the web UI and the
-REST API, the import of a `pki.sh` PKI and backups; the rest of this list follows up to v1.0:
+MyOwnPKI is a self-hosted certificate authority platform. v0.1 brought the CA, the web UI and the
+REST API, the import of a `pki.sh` PKI and backups; v0.2 adds the ACME server; the rest of this list
+follows up to v1.0:
 
 - **Secure web UI** with dashboards, upload/download and role-based access
-- **ACME server** for your internal CA – use certbot, acme.sh, Traefik, Caddy or win-acme
+- **ACME server** for your internal CA *(v0.2)* – use certbot, acme.sh, lego, Traefik, Caddy or
+  win-acme; it runs only behind a reverse proxy that ends TLS (docs/OPERATIONS.md chapter 10)
 - **ACME client** for public certificates from Let's Encrypt / ZeroSSL (http-01, dns-01)
 - **Optional agent** that deploys certificates to Linux, Windows and FreeBSD hosts, reloads
   services safely and monitors what is actually being served
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 
-> **Screenshots of v0.1** – a demo instance (`myownpki init --demo`) with sample certificates
+> **Screenshots** (the ACME pages: v0.2) – a demo instance (`myownpki init --demo`) with sample certificates
 > under homelab.example.
 
 <p><img src="docs/screenshots/dashboard.png" alt="Dashboard: figures, what needs attention, certificates expiring in 30 days" width="100%"></p>
@@ -48,6 +51,11 @@ REST API, the import of a `pki.sh` PKI and backups; the rest of this list follow
     <td><a href="docs/screenshots/audit-log.png"><img src="docs/screenshots/audit-log.png" alt="Audit log with filters"></a><br>Audit log</td>
     <td><a href="docs/screenshots/certificate-detail-dark.png"><img src="docs/screenshots/certificate-detail-dark.png" alt="Certificate detail in the dark theme"></a><br>Detail, dark theme</td>
   </tr>
+  <tr>
+    <td><a href="docs/screenshots/acme-accounts.png"><img src="docs/screenshots/acme-accounts.png" alt="ACME accounts: one waits for approval"></a><br>ACME accounts</td>
+    <td><a href="docs/screenshots/acme-names.png"><img src="docs/screenshots/acme-names.png" alt="New names waiting for approval"></a><br>ACME new names</td>
+    <td><a href="docs/screenshots/acme-orders.png"><img src="docs/screenshots/acme-orders.png" alt="ACME orders with their result"></a><br>ACME orders</td>
+  </tr>
 </table>
 
 ## Install
@@ -61,7 +69,7 @@ Archives for linux/amd64, linux/arm64, darwin/arm64, windows/amd64 and freebsd/a
 single `myownpki` binary, the operations guide and an example configuration.
 
 ```sh
-v=0.1.0
+v=0.2.0
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -101,8 +109,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.1.0 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.1.0" \
+cosign verify ghcr.io/der-felix/myownpki:0.2.0 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.2.0" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -114,7 +122,7 @@ are reproducible: the same tag built again gives byte-identical archives.
 | Path | Content |
 |---|---|
 | `docs/PLAN.md` | Project plan, architecture decisions (ADRs), roadmap |
-| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies |
+| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies, the ACME server behind a reverse proxy |
 | `docs/RELEASING.md` | How a release is made (owner checklist) |
 | `deploy/` | Example configuration, Dockerfile and Docker Compose file |
 | `CHANGELOG.md` | Changes per release |

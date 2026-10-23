@@ -137,10 +137,13 @@ release:
   prerelease: auto
   name_template: "MyOwnPKI {{ .Tag }}"
 
-# The release notes come from CHANGELOG.md (release.yml passes the section
-# of the tag with --release-notes); no list of commit subjects.
-changelog:
-  disable: true
+# The release notes come from CHANGELOG.md: release.yml always passes the
+# section of the tag with --release-notes (and stops if there is none), and
+# with that file GoReleaser writes no list of commit subjects.
+#
+# The changelog step must NOT be disabled: it is the step that reads the
+# --release-notes file (internal/pipe/changelog, GoReleaser v2.18.2). With
+# `changelog: disable: true` the v0.1.0 draft had an empty text.
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"

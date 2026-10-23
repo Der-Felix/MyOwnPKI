@@ -9,6 +9,9 @@ version: "2"
 
 run:
   timeout: 5m
+  # The conformance test (internal/acme, PHASE2 step 14) runs only in its CI
+  # job, but is compiled and linted with everything else.
+  build-tags: [conformance]
 
 linters:
   # standard = errcheck, govet, ineffassign, staticcheck, unused

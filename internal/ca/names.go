@@ -341,3 +341,9 @@ func short(s string) string {
 	}
 	return s
 }
+
+// NormalizeDNSName checks a DNS name like a SAN and returns its canonical
+// (lower-case) form – for ACME identifiers, which follow the same rules.
+func NormalizeDNSName(s string, allowWildcard bool) (string, error) {
+	return checkDNSName(s, allowWildcard)
+}
