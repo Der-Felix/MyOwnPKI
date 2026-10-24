@@ -696,3 +696,18 @@
   width: auto;
   height: var(--logo-header);
 }
+
+/* ---------- Fingerprint to compare by eye (trust page) ---------- */
+/* Large and never wrapped inside the value: two lines of 16 bytes. */
+.fingerprint {
+  margin: 0 0 var(--s-12);
+  padding: var(--s-8) var(--s-12);
+  overflow-x: auto;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--fs-subtitle);
+  line-height: var(--lh-subtitle);
+  white-space: pre;
+}

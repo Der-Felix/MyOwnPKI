@@ -767,6 +767,7 @@ paths:
         the subject defaults fill fields that neither the request nor the CSR gives (like
         pki.conf of pki.sh) – never the common name.
         `acme_limits` (since 0.2, optional here) are the rate limits of the ACME server.
+        `trust_page` (since 0.2.2, optional here) switches the public trust page.
       x-required-role: admin
       requestBody:
         description: "The settings"
@@ -2238,6 +2239,14 @@ components:
             orders_per_account: { type: integer, minimum: 1, maximum: 10000, description: "New orders per account" }
             failed_per_name: { type: integer, minimum: 1, maximum: 100, description: "Failed validations per name" }
             accounts_per_ip: { type: integer, minimum: 1, maximum: 1000, description: "New accounts per client address (IPv6 per /64)" }
+        trust_page:
+          description: |
+            The public listener serves the trust page at `/`: the CA certificates with their
+            SHA-256 fingerprints, install guides and the Windows helpers (since 0.2.2, default
+            on). Always in the answer; optional in a change – left out, the stored value stays.
+            Off, the public listener serves only what certificates point to (CA certificates,
+            CRLs) and the PEM copies.
+          type: boolean
 
     PasswordChange:
       description: "Password change of the logged-in user"

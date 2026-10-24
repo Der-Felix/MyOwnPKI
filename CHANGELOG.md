@@ -32,6 +32,16 @@ change the API, the configuration and the database schema; the release notes say
   backups (named like `20261025T003512Z`, a valid `manifest.json`, exactly the listed files) –
   never install.sh's update backups, a backup that failed its check (`…-unverified`) or anything
   else.
+- **Public trust page** at `/` of the public listener, without sign-in: every active CA (roots
+  first) with name, common name, validity and SHA-256 fingerprint, DER and PEM downloads, guides
+  for Windows, macOS, iPhone/iPad, Android, Linux and Firefox. No JavaScript, a strict CSP,
+  cached. On by default; *Tenant settings* or `trust_page` in `PUT /api/v1/settings` switch it off
+  (system.db migration 0010). docs/OPERATIONS.md chapter 11.
+- **Windows helpers** per root on the trust page: a `.cmd` (Batch/PowerShell in one file, ASCII,
+  CRLF) for *this computer* (asks for administrator rights) or *my user only*; it checks the
+  SHA-256 of the embedded root before the import and stops if the file was changed; `/check`
+  only checks, an unknown switch never imports.
+- `/ca/<name>/<generation>.pem`: the CA certificate as PEM.
 - **`install.sh --acme https://NAME/acme`** (with `--acme-ca`, default `issuing`) writes the ACME
   keys for its own TLS into a new config and installs the drop-in for port 443.
 

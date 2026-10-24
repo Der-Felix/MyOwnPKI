@@ -469,7 +469,7 @@ func (s *Server) Listen(ctx context.Context) error {
 			return fmt.Errorf("public listener %s: %w", cfg.Public.Listen, err)
 		}
 		s.public = &http.Server{
-			Handler:           publish.New(s.pki.Read, s.log),
+			Handler:           s.publicHandler(),
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 			MaxHeaderBytes: 8 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
 		}
@@ -703,4 +703,14 @@ func (s *Server) acmeDirectory() string {
 		return ""
 	}
 	return s.acme.BaseURL() + "/directory"
+}
+
+// publicHandler: CA certificates and CRLs, and the trust page at / unless
+// the tenant switched it off (asked per request).
+func (s *Server) publicHandler() http.Handler {
+	settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
+	return publish.New(s.pki.Read, s.log).WithTrustPage(publish.TrustPage{
+		Enabled: func(ctx context.Context) (bool, error) { return settings.TrustPage(ctx, store.DefaultTenant) },
+		Clock:   s.clk,
+	})
 }

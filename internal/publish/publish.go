@@ -3,8 +3,11 @@
 // listener, no login (PHASE1 step 9; wired into the listener in step 12).
 //
 //	/ca/<name>/<generation>.crt   DER, application/pkix-cert (RFC 2585)
+//	/ca/<name>/<generation>.pem   the same as PEM (v0.2.2)
 //	/crl/<name>/<generation>.crl  DER, application/pkix-crl, the newest CRL
 //	/<name>.crt, /<name>.crl      legacy URLs of imported CAs: generation 1
+//
+// With WithTrustPage also the trust page at / (trust.go).
 //
 // Caching: a short max-age (15 minutes) plus ETag and Last-Modified, so a
 // new CRL after a revocation gets through proxies quickly while unchanged
@@ -34,14 +37,15 @@ const MaxAge = 15 * time.Minute
 
 var (
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-	genPattern  = regexp.MustCompile(`^([1-9][0-9]{0,8})\.(crt|crl)$`)
+	genPattern  = regexp.MustCompile(`^([1-9][0-9]{0,8})\.(crt|crl|pem)$`)
 )
 
 // Handler serves one tenant's CA certificates and CRLs.
 type Handler struct {
-	db  *sql.DB // read connection of tenants/<t>/pki.db
-	log *slog.Logger
-	mux *http.ServeMux
+	db    *sql.DB // read connection of tenants/<t>/pki.db
+	log   *slog.Logger
+	mux   *http.ServeMux
+	trust *TrustPage // nil: no trust page
 }
 
 // New returns the handler. db should be a read-only connection.
@@ -66,12 +70,12 @@ func (h *Handler) caFile(kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		m := genPattern.FindStringSubmatch(r.PathValue("file"))
-		if !namePattern.MatchString(name) || m == nil || m[2] != kind {
+		if !namePattern.MatchString(name) || m == nil || (m[2] != kind && (kind != "crt" || m[2] != "pem")) {
 			http.NotFound(w, r)
 			return
 		}
 		gen, _ := strconv.ParseInt(m[1], 10, 64)
-		h.serve(w, r, name, gen, kind, false)
+		h.serve(w, r, name, gen, m[2], false)
 	}
 }
 
@@ -107,7 +111,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, name string, gen
 	var data []byte
 	var modified time.Time
 	switch kind {
-	case "crt":
+	case "crt", "pem":
 		g, err := q.GetCAGeneration(ctx, pkidb.GetCAGenerationParams{CaID: ca.ID, Generation: gen})
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && g.CertDer == nil) {
 			http.NotFound(w, r)
@@ -119,6 +123,10 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, name string, gen
 		}
 		data, modified = g.CertDer, parseStamp(g.CreatedAt)
 		w.Header().Set("Content-Type", "application/pkix-cert")
+		if kind == "pem" {
+			data = pemOf(data)
+			w.Header().Set("Content-Type", "application/x-pem-file")
+		}
 	case "crl":
 		c, err := q.GetLatestCRL(ctx, pkidb.GetLatestCRLParams{CaID: ca.ID, Generation: gen})
 		if errors.Is(err, sql.ErrNoRows) {

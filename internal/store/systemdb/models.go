@@ -78,6 +78,7 @@ type Tenant struct {
 	AcmeOrdersPerHour int64
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
+	TrustPage         int64
 }
 
 type Unseal struct {

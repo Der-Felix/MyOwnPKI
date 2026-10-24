@@ -21,7 +21,7 @@ full design is in [PLAN.md](PLAN.md).
 | Part | What it is | Default |
 |---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` |
-| Public listener | CRLs and CA certificates over plain HTTP, no login | `:8080` |
+| Public listener | CRLs and CA certificates over plain HTTP, no login; the trust page at `/` ([chapter 11](#11-the-public-trust-page)) | `:8080` |
 | ACME listener | ACME for the reverse proxy only, plain HTTP – or, with `acme.tls_issuer`, with its own TLS for the clients ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)); off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
 | Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificates and the ones the server issues itself, §2.4), `auth.key` | `/var/lib/myownpki` |
 | Config file | YAML, every key also as `MYOWNPKI_*` variable | `/etc/myownpki/config.yaml` (Windows: `%ProgramData%\MyOwnPKI\config.yaml`) |
@@ -597,7 +597,9 @@ the proxy's address is not in `acme.trusted_proxies`.
 
 ### 10.4 Trusting your root on the clients
 
-Clients check the proxy's certificate like any website, so they must trust your root CA. The root
+Clients check the proxy's certificate like any website, so they must trust your root CA. Since
+v0.2.2 the trust page at `/` of the public listener walks every platform through it ([chapter
+11](#11-the-public-trust-page)). By hand: the root
 is on the public listener as `/ca/<root name>/<generation>.crt` (DER):
 
 ```bash
@@ -774,3 +776,53 @@ Check it from a client:
 ```bash
 curl --cacert root.pem https://pki.u.lab/acme/directory
 ```
+
+## 11. The public trust page
+
+Since v0.2.2 the public listener serves a page at `/` – `http://pki.u.lab/` behind port 80 –
+that everybody may open without signing in. Send people there instead of mailing root files:
+
+- every active CA, **roots first**: name, common name, validity and the **SHA-256 fingerprint**
+  in large type; after a root renewal also the older generation while it is valid;
+- downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
+  and PEM (`/ca/<name>/<generation>.pem`, new);
+- per root two **Windows helpers** (`.cmd`): *this computer* (LocalMachine, asks for administrator
+  rights itself) and *my user only* (CurrentUser, no administrator rights);
+- guides for Windows, macOS, iPhone/iPad (including *Certificate Trust Settings* – without that
+  step iOS installs a root but doesn't trust it for websites), Android, Linux and Firefox.
+
+Only public data, no JavaScript, a strict Content Security Policy (`default-src 'none'`, the own
+stylesheets and logo only), cached for 5 minutes (the files for 15) with ETags.
+
+**Switch it off** in *Administration → Tenant settings* (*Public trust page*), or through the API
+(`PUT /api/v1/settings` with `"trust_page": false`). Off, `/` and the Windows helpers answer 404;
+the CA certificates, their PEM copies and the CRLs stay – certificates point to them.
+
+> **PKI background – why compare the fingerprint.** A root is the anchor every check ends at:
+> whoever slips you a false root can impersonate every website for you. The page comes over plain
+> HTTP (it must work before anything trusts your PKI), so someone in the network path could change
+> it. The fingerprint is the check: compare it with one you got another way – the admin UI
+> (*Certificate authorities*), a printout, your administrator.
+
+### 11.1 The Windows helpers
+
+Each `.cmd` is one file that is both a batch file and a PowerShell script. Double-clicked, it:
+
+1. shows the SHA-256 fingerprint of the root it carries, computed from the embedded certificate;
+2. compares it with the fingerprint written into the file and **stops** (exit code 2, nothing
+   imported) if they differ – a file changed on the way;
+3. *this computer*: asks for administrator rights (UAC) and runs again elevated;
+4. imports the root into *Trusted Root Certification Authorities* of the computer or the user
+   (Windows asks once to confirm the user variant) and waits for Enter.
+
+Switches: `/check` only checks (exit 0 when the fingerprint fits), `/quiet` doesn't wait for
+Enter. Any other argument stops it with exit code 64 – a typo never becomes an import. The file is
+ASCII with CRLF line ends. Check a downloaded helper without importing:
+
+```bat
+cmd /c root-trust-computer.cmd /check
+```
+
+Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
+normal for scripts from the network. The fingerprint check proves that the file is intact; that it
+is **your** root, only the comparison with a fingerprint from another way proves.

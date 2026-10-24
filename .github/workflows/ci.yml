@@ -162,6 +162,13 @@ jobs:
         shell: bash
         run: command -v openssl && openssl version
       - run: go test ./...
+      # The Windows helpers of the trust page (v0.2.2) for real: cmd.exe runs
+      # each with /check (no import) – the fingerprint passes, a changed copy
+      # and an unknown switch stop before anything is imported. Part of the
+      # run above too; its own step so the log shows it.
+      - name: Windows helper of the trust page (cmd.exe, /check)
+        if: runner.os == 'Windows'
+        run: go test -count=1 -run '^TestWindowsHelper' -v ./internal/publish/
 
   cross:
     name: cross-compile (linux, darwin, windows, freebsd)

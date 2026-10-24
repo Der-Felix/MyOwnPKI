@@ -318,6 +318,11 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 	if code, _, _ := get(srv.PublicAddr() + "/healthz"); code != http.StatusNotFound {
 		t.Errorf("public /healthz: %d", code)
 	}
+	// The trust page (v0.2.2, on by default) – no script, nothing of the admin side.
+	if code, body, h := get(srv.PublicAddr() + "/"); code != http.StatusOK || !strings.Contains(body, "Trust this PKI") ||
+		!strings.Contains(body, "/trust/root/1/machine.cmd") || strings.Contains(h.Get("Content-Security-Policy"), "script") {
+		t.Errorf("trust page: %d %v", code, h)
+	}
 
 	// A wrong passphrase leaves the server running sealed.
 	if uerr := srv.Unseal(t.Context(), []byte("wrong passphrase, long enough"), console); !errors.Is(uerr, keys.ErrWrongSecret) || !srv.Sealed() {

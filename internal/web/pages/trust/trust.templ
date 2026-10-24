@@ -1,0 +1,138 @@
+// Package trust renders the public trust page (v0.2.2): the CA certificates
+// with their fingerprints, downloads and install guides, served by the
+// public listener at / without a sign-in. Only public data; no JavaScript.
+package trust
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// CA is one certificate of a CA (one generation).
+type CA struct {
+	Name       string // the CA's name, part of every URL
+	Kind       string // "Root CA" or "Intermediate CA"
+	Root       bool
+	Generation int64
+	Current    bool
+	CommonName string
+	Valid      string // "2026-10-22 – 2046-10-17"
+	// Fingerprint is the SHA-256, colon-separated, in two lines.
+	Fingerprint string
+	DER, PEM    string // download paths
+	// FileDER and FilePEM are the names the browser saves them as.
+	FileDER, FilePEM string
+	// WinMachine and WinUser are the Windows helpers (roots only).
+	WinMachine, WinUser string
+}
+
+// Data is the page.
+type Data struct {
+	CAs []CA
+	// Example is the root the guides name in their commands (the first one).
+	Example *CA
+}
+
+templ Page(p view.Page, d Data) {
+	@layout.Plain(p) {
+		<section class="section" aria-labelledby="h-check">
+			<p>
+				Install a <strong>root CA</strong> once on every device and browser that should trust the
+				certificates of this PKI. Intermediate CAs need no installation – servers send them along.
+			</p>
+			@components.Messages([]view.Message{{Kind: view.MessageWarning, Text: "This page comes over plain HTTP: anyone in the network path could change it. Before you trust a root, compare its SHA-256 fingerprint with one you got another way – from your administrator, or from the admin UI (Certificate authorities)."}})
+		</section>
+		if len(d.CAs) == 0 {
+			<p class="muted">There is no certificate authority to show yet.</p>
+		}
+		for _, c := range d.CAs {
+			<section class="section" aria-labelledby={ "h-" + c.Name + "-" + itoa(c.Generation) }>
+				<div class="section-head">
+					<h2 id={ "h-" + c.Name + "-" + itoa(c.Generation) }>{ c.Name } – { c.Kind }</h2>
+					if !c.Current {
+						<span class="muted">older generation { itoa(c.Generation) }, still valid</span>
+					}
+				</div>
+				@components.KVList([]view.KV{
+					{Key: "Common name", Value: c.CommonName},
+					{Key: "Valid", Value: c.Valid},
+				})
+				<h3>SHA-256 fingerprint</h3>
+				<pre class="fingerprint">{ c.Fingerprint }</pre>
+				<div class="btn-row">
+					<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileDER }>Download { c.FileDER } (DER)</a>
+					<a class="btn" href={ templ.SafeURL(c.PEM) } download={ c.FilePEM }>Download { c.FilePEM } (PEM)</a>
+					if c.Root {
+						<a class="btn" href={ templ.SafeURL(c.WinMachine) }>Windows helper: this computer</a>
+						<a class="btn" href={ templ.SafeURL(c.WinUser) }>Windows helper: my user only</a>
+					}
+				</div>
+			</section>
+		}
+		if d.Example != nil {
+			@guides(*d.Example)
+		}
+	}
+}
+
+templ guides(r CA) {
+	<section class="section" aria-labelledby="h-windows">
+		<div class="section-head"><h2 id="h-windows">Windows</h2></div>
+		<p>
+			The <strong>Windows helper</strong> does it in one double-click: it shows the SHA-256 of the root it
+			carries, checks it against the fingerprint written into it, stops if the file was changed, and imports
+			the root into <em>Trusted Root Certification Authorities</em>. <em>This computer</em> asks for
+			administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to
+			confirm). Run it with <code>/check</code> to only check. Edge and Chrome use this store.
+		</p>
+		<p>By hand, in a command prompt as administrator – for your user only, add <code>-user</code> after <code>certutil</code>:</p>
+		<pre class="pem">certutil -addstore -f Root { r.FileDER }</pre>
+	</section>
+	<section class="section" aria-labelledby="h-macos">
+		<div class="section-head"><h2 id="h-macos">macOS</h2></div>
+		<ol>
+			<li>Download <code>{ r.FileDER }</code> and double-click it; Keychain Access opens. Add it to the <em>System</em> keychain.</li>
+			<li>Double-click the certificate in Keychain Access, open <em>Trust</em>, set <em>When using this certificate</em> to <em>Always Trust</em>, close the window and confirm with your password.</li>
+		</ol>
+		<p>Or in Terminal:</p>
+		<pre class="pem">sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain { r.FileDER }</pre>
+		<p>Safari, Chrome and Edge use the keychain.</p>
+	</section>
+	<section class="section" aria-labelledby="h-ios">
+		<div class="section-head"><h2 id="h-ios">iPhone and iPad</h2></div>
+		<ol>
+			<li>Open this page in <strong>Safari</strong> and tap <a href={ templ.SafeURL(r.DER) }>{ r.Name + " for iPhone and iPad" }</a>; allow the download of the configuration profile.</li>
+			<li>Open <em>Settings</em> – <em>Profile Downloaded</em> at the top (or <em>General → VPN &amp; Device Management</em>), choose the profile, tap <em>Install</em> and enter your passcode.</li>
+			<li>
+				Open <em>Settings → General → About → Certificate Trust Settings</em> and switch on full trust for
+				<em>{ r.CommonName }</em>. <strong>Without this step</strong> the root is installed but not trusted for
+				websites.
+			</li>
+		</ol>
+	</section>
+	<section class="section" aria-labelledby="h-android">
+		<div class="section-head"><h2 id="h-android">Android</h2></div>
+		<ol>
+			<li>Download <code>{ r.FileDER }</code>.</li>
+			<li>Open <em>Settings → Security and privacy → More security settings → Encryption and credentials → Install a certificate → CA certificate</em> (names differ between vendors), confirm the warning and choose the file.</li>
+		</ol>
+		<p class="muted">Chrome trusts such a user CA; many apps don't. A device management (MDM) can install it for all apps.</p>
+	</section>
+	<section class="section" aria-labelledby="h-linux">
+		<div class="section-head"><h2 id="h-linux">Linux</h2></div>
+		<p>Debian, Ubuntu – the file must be PEM and end in <code>.crt</code>:</p>
+		<pre class="pem">{ "sudo cp " + r.FilePEM + " /usr/local/share/ca-certificates/" + r.Name + ".crt\nsudo update-ca-certificates" }</pre>
+		<p>Fedora, RHEL, Rocky, Alma:</p>
+		<pre class="pem">{ "sudo cp " + r.FilePEM + " /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust" }</pre>
+		<p class="muted">curl, wget, Python and most programs use this store; Firefox and Chrome on Linux keep their own (see Firefox).</p>
+	</section>
+	<section class="section" aria-labelledby="h-firefox">
+		<div class="section-head"><h2 id="h-firefox">Firefox</h2></div>
+		<ol>
+			<li>Open <em>Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities</em>.</li>
+			<li><em>Import</em> <code>{ r.FileDER }</code> and tick <em>Trust this CA to identify websites</em>.</li>
+		</ol>
+		<p class="muted">On Windows and macOS Firefox can use the system store instead: <code>about:config</code>, <code>security.enterprise_roots.enabled</code> = true.</p>
+	</section>
+}

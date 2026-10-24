@@ -32,6 +32,10 @@ type Settings struct {
 	// ACME: the rate limits of the ACME server. Get always fills it; in
 	// Set, nil keeps the stored limits (a v0.1 client doesn't send them).
 	ACME *ACMELimits
+	// TrustPage: the public listener serves the trust page at / (v0.2.2,
+	// default on). Get always fills it; in Set, nil keeps the stored value
+	// (a v0.2 client doesn't send it).
+	TrustPage *bool
 }
 
 // ACMELimits are per hour (PHASE2 step 11).
@@ -98,9 +102,19 @@ func (s *Store) read(ctx context.Context, tenant string) (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	trust := r.TrustPage == 1
 	return &Settings{AllowServerKeygen: r.AllowServerKeygen == 1, Organization: r.SubjectO, OrganizationalUnit: r.SubjectOu,
 		Locality: r.SubjectL, State: r.SubjectSt, Country: r.SubjectC,
-		ACME: &ACMELimits{OrdersPerAccount: int(r.AcmeOrdersPerHour), FailedPerName: int(r.AcmeFailedPerName), AccountsPerIP: int(r.AcmeAccountsPerIp)}}, nil
+		ACME:      &ACMELimits{OrdersPerAccount: int(r.AcmeOrdersPerHour), FailedPerName: int(r.AcmeFailedPerName), AccountsPerIP: int(r.AcmeAccountsPerIp)},
+		TrustPage: &trust}, nil
+}
+
+// TrustPage reports whether the public listener serves the trust page,
+// without a permission check (the public listener asks it per request, so a
+// change applies at once).
+func (s *Store) TrustPage(ctx context.Context, tenant string) (bool, error) {
+	v, err := systemdb.New(s.DB).GetTrustPage(ctx, tenant)
+	return v == 1, err
 }
 
 // Defaults returns the settings without a permission check (for the
@@ -142,6 +156,14 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if v.ACME != nil {
 		limits = *v.ACME
 	}
+	trust := *before.TrustPage
+	if v.TrustPage != nil {
+		trust = *v.TrustPage
+	}
+	trustInt := int64(0)
+	if trust {
+		trustInt = 1
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -154,7 +176,8 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	n, err := systemdb.New(tx).SetTenantSettings(ctx, systemdb.SetTenantSettingsParams{
 		AllowServerKeygen: keygen, SubjectO: v.Organization, SubjectOu: v.OrganizationalUnit, SubjectL: v.Locality,
 		SubjectSt: v.State, SubjectC: v.Country,
-		AcmeOrdersPerHour: int64(limits.OrdersPerAccount), AcmeFailedPerName: int64(limits.FailedPerName), AcmeAccountsPerIp: int64(limits.AccountsPerIP), ID: tenant,
+		AcmeOrdersPerHour: int64(limits.OrdersPerAccount), AcmeFailedPerName: int64(limits.FailedPerName), AcmeAccountsPerIp: int64(limits.AccountsPerIP),
+		TrustPage: trustInt, ID: tenant,
 	})
 	if err != nil {
 		return err
@@ -168,6 +191,7 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 			"allow_server_keygen": v.AllowServerKeygen, "was_allow_server_keygen": before.AllowServerKeygen,
 			"subject": subjectText(v), "was_subject": subjectText(*before),
 			"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
+			"trust_page": trust, "was_trust_page": *before.TrustPage,
 		},
 	}); err != nil {
 		return err

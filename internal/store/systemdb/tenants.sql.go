@@ -59,7 +59,7 @@ func (q *Queries) GetTenant(ctx context.Context, id string) (GetTenantRow, error
 
 const getTenantSettings = `-- name: GetTenantSettings :one
 SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c,
-       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip
+       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page
 FROM tenants
 WHERE id = ?
 `
@@ -75,6 +75,7 @@ type GetTenantSettingsRow struct {
 	AcmeOrdersPerHour int64
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
+	TrustPage         int64
 }
 
 // Settings of a tenant (step 18): server key generation and subject defaults.
@@ -92,8 +93,21 @@ func (q *Queries) GetTenantSettings(ctx context.Context, id string) (GetTenantSe
 		&i.AcmeOrdersPerHour,
 		&i.AcmeFailedPerName,
 		&i.AcmeAccountsPerIp,
+		&i.TrustPage,
 	)
 	return i, err
+}
+
+const getTrustPage = `-- name: GetTrustPage :one
+SELECT trust_page FROM tenants WHERE id = ?
+`
+
+// The public listener asks this for every request to / (v0.2.2).
+func (q *Queries) GetTrustPage(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getTrustPage, id)
+	var trust_page int64
+	err := row.Scan(&trust_page)
+	return trust_page, err
 }
 
 const listTenants = `-- name: ListTenants :many
@@ -140,7 +154,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]ListTenantsRow, error) {
 const setTenantSettings = `-- name: SetTenantSettings :execrows
 UPDATE tenants
 SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?,
-    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?
+    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?
 WHERE id = ?
 `
 
@@ -154,6 +168,7 @@ type SetTenantSettingsParams struct {
 	AcmeOrdersPerHour int64
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
+	TrustPage         int64
 	ID                string
 }
 
@@ -168,6 +183,7 @@ func (q *Queries) SetTenantSettings(ctx context.Context, arg SetTenantSettingsPa
 		arg.AcmeOrdersPerHour,
 		arg.AcmeFailedPerName,
 		arg.AcmeAccountsPerIp,
+		arg.TrustPage,
 		arg.ID,
 	)
 	if err != nil {
