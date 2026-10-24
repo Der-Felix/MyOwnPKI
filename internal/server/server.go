@@ -103,6 +103,7 @@ type Server struct {
 	// Certificates the server issues itself (admin.tls_issuer,
 	// acme.tls_issuer); nil when off.
 	adminTLS, acmeTLS *issuedTLS
+	backups           backupWatch // the daily backup, for the dashboard
 
 	admin, public     *http.Server
 	adminLn, publicLn net.Listener
@@ -126,7 +127,7 @@ func Open(ctx context.Context, opt Options) (_ *Server, err error) {
 	if opt.Hostname == "" {
 		opt.Hostname, _ = os.Hostname()
 	}
-	s := &Server{opt: opt, log: opt.Log, clk: opt.Clock, wake: make(chan struct{}, 1)}
+	s := &Server{opt: opt, log: opt.Log, clk: opt.Clock, wake: make(chan struct{}, 1), backups: newBackupWatch(opt.Clock)}
 	// Named result err: the databases opened so far are closed on every
 	// failure (s itself is returned as nil then).
 	defer func() {
@@ -339,6 +340,11 @@ func (s *Server) renewTLS(ctx context.Context) {
 			m.renew(ctx)
 		}
 	}
+}
+
+// attention is what the dashboard shows about the server itself.
+func (s *Server) attention(sealed bool) []view.Message {
+	return append(s.tlsAttention(sealed), s.backups.attention()...)
 }
 
 // tlsAttention is what the dashboard shows about the issued certificates.
@@ -685,7 +691,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), TLSAttention: s.tlsAttention,
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
 	}})
 	if err != nil {
 		return err

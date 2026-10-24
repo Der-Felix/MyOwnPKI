@@ -198,6 +198,13 @@ subject=$(acme_subject)
 journalctl -u myownpki.service -o cat | grep '"msg":"TLS certificate issued"' | grep -q '"listener":"acme"' ||
 	fail "no issuance in the journal"
 [ "$(stat -c '%a %U' /var/lib/myownpki/tls/acme.key)" = "600 myownpki" ] || fail "ACME key: $(stat -c '%a %U' /var/lib/myownpki/tls/acme.key)"
+# The dashboard reads the backup directory inside the sandbox of the main
+# unit (no new rights): a backup that failed its check is a warning.
+install -d -m 0700 -o myownpki -g myownpki /var/backups/myownpki/20200101T000000Z-unverified
+curl -fsS --noproxy '*' --insecure -b "$tmp/jar" -o "$tmp/dashboard.html" https://127.0.0.1:9443/ || fail "dashboard"
+grep -q 'failed its check and was kept as /var/backups/myownpki/20200101T000000Z-unverified' "$tmp/dashboard.html" ||
+	fail "the dashboard does not show the failed backup check"
+rmdir /var/backups/myownpki/20200101T000000Z-unverified
 healthy || fail "not healthy after the unseal"
 
 step "5. An update that leaves the old binary running is rolled back"

@@ -188,3 +188,50 @@ func (r *PruneResult) String() string {
 	}
 	return b.String()
 }
+
+// TimerStatus is what the dashboard shows about the scheduled backups in a
+// directory (v0.2.2, owner 2026-10-24).
+type TimerStatus struct {
+	// Newest is the time of the newest scheduled backup (from its name);
+	// zero = there is none. A backup that failed its check doesn't count.
+	Newest time.Time
+	// Unverified are the backups that failed their check, oldest first.
+	Unverified []string
+}
+
+// Seen reports whether the timer has ever written a backup here.
+func (s TimerStatus) Seen() bool { return !s.Newest.IsZero() || len(s.Unverified) > 0 }
+
+// ReadTimerStatus lists parent by name only – it opens no backup, so the
+// dashboard can call it on every view. A missing parent is no error: the
+// timer hasn't run yet (or isn't installed).
+func ReadTimerStatus(parent string) (TimerStatus, error) {
+	var st TimerStatus
+	fi, err := os.Stat(parent)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return st, nil
+	case err != nil:
+		return st, err
+	case !fi.IsDir():
+		return st, fmt.Errorf("%s is not a directory", parent)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return st, err
+	}
+	for _, e := range entries { // sorted by name = by age
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if base, ok := strings.CutSuffix(name, UnverifiedSuffix); ok && isScheduled(base) {
+			st.Unverified = append(st.Unverified, name)
+			continue
+		}
+		if isScheduled(name) {
+			st.Newest, _ = time.Parse(scheduledLayout, name) // isScheduled parsed it
+		}
+	}
+	return st, nil
+}

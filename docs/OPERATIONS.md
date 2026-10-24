@@ -380,6 +380,13 @@ runuser -u myownpki -- myownpki backup prune /var/backups/myownpki --keep 14 --d
   install.sh enables the timer only when it installs it the first time; later runs leave it as you
   set it.
 - A failed run shows in `systemctl --failed` and in the journal – watch it like the service.
+- **The dashboard warns** when a `…-unverified` directory lies in `/var/backups/myownpki` (until you
+  delete it), and when the newest timer backup is older than **48 hours** – one daily run missed:
+  the timer is off or the backup fails. It looks only when the timer is installed or has written a
+  backup; with `--no-backup-timer` and no timer backup ever, it stays quiet. When the timer has
+  been on for 48 hours without a single backup, that is a warning too. The server only reads the
+  directory listing (no new rights for its unit: `/var` is read-only for it, not hidden, and the
+  directory belongs to `myownpki`). Install.sh's update backups don't count.
 - `/var/backups/myownpki` is on the same disk as the data directory: copy it elsewhere (rsync, your
   backup software) – a backup on the same disk doesn't survive the disk. Keep the passphrase and
   the recovery key away from that copy.

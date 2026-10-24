@@ -35,6 +35,10 @@ change the API, the configuration and the database schema; the release notes say
   backups (named like `20261025T003512Z`, a valid `manifest.json`, exactly the listed files) –
   never install.sh's update backups, a backup that failed its check (`…-unverified`) or anything
   else.
+- **Backup warnings on the dashboard:** a `…-unverified` backup in `/var/backups/myownpki`, or a
+  newest timer backup older than 48 hours (timer off or failing) – once the timer is installed or
+  has written a backup. The server only reads the directory; its unit needs no new rights.
+  docs/OPERATIONS.md §6.1.
 - **Public trust page** at `/` of the public listener, without sign-in: every active CA (roots
   first) with name, common name, validity and SHA-256 fingerprint, DER and PEM downloads, guides
   for Windows, macOS, iPhone/iPad, Android, Linux and Firefox. No JavaScript, a strict CSP,
