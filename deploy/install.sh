@@ -71,9 +71,10 @@ Usage: install.sh [options]   (as root)
   --public-port-80       public listener on :80 without a reverse proxy (drop-in
                          low-ports.conf with CAP_NET_BIND_SERVICE); default :8080
   --acme URL             ACME with its own TLS, without a reverse proxy, e.g.
-                         https://pki.u.lab/acme: acme.base_url URL, acme.listen
-                         on its port (443 by default; below 1024 with the drop-in
-                         low-ports.conf), acme.tls_issuer from --acme-ca
+                         https://pki.homelab.lan/acme: acme.base_url URL,
+                         acme.listen on its port (443 by default; below 1024
+                         with the drop-in low-ports.conf), acme.tls_issuer
+                         from --acme-ca
   --acme-ca NAME         the CA that issues the ACME listener's certificate
                          (default issuing – the intermediate of init --with-ca)
   --backup-keep N        how many daily backups the timer keeps (default 14; a
@@ -149,7 +150,7 @@ parse_args() {
 		# https://host[:port][/path] – a DNS name or an IPv4 address; the
 		# server checks the rest (config check before the file is used).
 		[[ $opt_acme =~ ^https://[A-Za-z0-9.-]+(:([0-9]{1,5}))?(/[A-Za-z0-9._~/-]*)?$ ]] ||
-			die "--acme: want https://HOST[:PORT]/PATH, e.g. https://pki.u.lab/acme"
+			die "--acme: want https://HOST[:PORT]/PATH, e.g. https://pki.homelab.lan/acme"
 		acme_port=${BASH_REMATCH[2]:-443}
 		[ "$acme_port" -ge 1 ] && [ "$acme_port" -le 65535 ] || die "--acme: port $acme_port is not 1-65535"
 		opt_acme=${opt_acme%/}

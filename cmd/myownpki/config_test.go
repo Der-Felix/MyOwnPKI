@@ -39,11 +39,11 @@ func TestConfigCheck(t *testing.T) {
 		{name: "override is marked", args: []string{"--config", valid}, env: []string{"MYOWNPKI_PUBLIC_LISTEN="}, wantCode: 0,
 			wantStdout: []string{"disabled   (from MYOWNPKI_PUBLIC_LISTEN)", "off (acme.base_url is empty)"}},
 		{name: "issued certificates", args: []string{"--config", valid}, wantCode: 0, env: []string{
-			"MYOWNPKI_ADMIN_TLS_ISSUER=issuing", "MYOWNPKI_ADMIN_TLS_NAMES=pki.u.lab",
-			"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=issuing",
-		}, wantStdout: []string{"issued by CA issuing for pki.u.lab", ":443 – its own TLS, issued by CA issuing",
+			"MYOWNPKI_ADMIN_TLS_ISSUER=issuing", "MYOWNPKI_ADMIN_TLS_NAMES=pki.homelab.lan",
+			"MYOWNPKI_ACME_BASE_URL=https://pki.homelab.lan/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=issuing",
+		}, wantStdout: []string{"issued by CA issuing for pki.homelab.lan", ":443 – its own TLS, issued by CA issuing",
 			"Not checked: whether the CA of tls_issuer is a root – the CA database can't be read", "Configuration is valid."}},
-		{name: "ACME behind the proxy", args: []string{"--config", valid}, wantCode: 0, env: []string{"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme"},
+		{name: "ACME behind the proxy", args: []string{"--config", valid}, wantCode: 0, env: []string{"MYOWNPKI_ACME_BASE_URL=https://pki.homelab.lan/acme"},
 			wantStdout: []string{"127.0.0.1:8081 – plain HTTP for the reverse proxy 127.0.0.1, ::1"}},
 		{name: "invalid file names every problem", args: []string{"--config", invalid}, wantCode: 1,
 			wantStderr: []string{"data_dir: must be an absolute path", "log.level"}},
@@ -97,8 +97,8 @@ func TestConfigCheckRootIssuer(t *testing.T) {
 	} {
 		var stdout, stderr bytes.Buffer
 		code := runConfigCheck([]string{"--config", file}, []string{
-			"MYOWNPKI_ADMIN_TLS_ISSUER=" + tt.admin, "MYOWNPKI_ADMIN_TLS_NAMES=pki.u.lab",
-			"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=" + tt.acme,
+			"MYOWNPKI_ADMIN_TLS_ISSUER=" + tt.admin, "MYOWNPKI_ADMIN_TLS_NAMES=pki.homelab.lan",
+			"MYOWNPKI_ACME_BASE_URL=https://pki.homelab.lan/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=" + tt.acme,
 		}, &stdout, &stderr)
 		if code != 0 || !strings.Contains(stdout.String(), "Configuration is valid.") || strings.Contains(stdout.String(), "Not checked") {
 			t.Errorf("%s/%s: exit %d\n%s%s", tt.admin, tt.acme, code, stdout.String(), stderr.String())
