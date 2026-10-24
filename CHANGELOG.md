@@ -7,9 +7,25 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-Being built as 0.3.0 – the Linux agent (docs/PHASE3.md). Block B: the trusted channel.
+Being built as 0.3.0 – the Linux agent (docs/PHASE3.md). Blocks B–C: the trusted channel,
+ACME issuance and deployment with rollback. Scheduling, reports and packaging follow in D–E.
 
 ### Added
+
+- **ACME in the agent** with lego v4.35.2 as a library: a local account key registered by
+  thumbprint over mTLS, host-generated certificate keys and http-01 in standalone/webroot mode.
+  Its own HTTP client ignores environment proxy and lego trust settings. Linked accounts are
+  restricted to the active agent's allowed names at order creation, finalization and issuance,
+  including after an unseal; ordinary ACME clients keep their normal domain policy. Account key
+  rotation preserves the binding. Existing accounts cannot be captured by a new thumbprint
+  reservation; denials are audited. Re-enrollment with a new agent ID and the old ACME key stops
+  with an operator-action message. pki.db migration 0012 enforces unique reservations and links.
+- **nginx and file deployment profiles**: contained, atomic PEM writes with owner/group/mode,
+  shared test/reload hooks and a local TLS fingerprint check. Failed activations roll back the
+  whole reload group; first-install failures remove the new files. Mixed groups test the restored
+  configuration and reload existing deployments back to their old leaf when safe. A durable journal recovers an
+  interrupted pass before new work, and local status shows deployment results. A failed rollback
+  reports both errors without a retry loop. The Report RPC follows in block D.
 
 - **Agent listener** (`agent.base_url`, `agent.listen` default `:8444`, `agent.tls_issuer`,
   `agent.ca`): Connect-RPC over TLS 1.3. Its certificate comes from `agent.tls_issuer` like the admin

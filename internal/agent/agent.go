@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -39,12 +40,15 @@ var ErrEnrolled = errors.New("this agent is enrolled and its certificate is vali
 
 // Agent is myownpki-agent.
 type Agent struct {
-	cfg      *Config
-	st       state
-	ch       *channel
-	log      *slog.Logger
-	passMu   sync.Mutex // one ACME pass; responders share port 80 and the state directory
-	acmeDial func(context.Context, string, string) (net.Conn, error)
+	cfg            *Config
+	st             state
+	ch             *channel
+	log            *slog.Logger
+	passMu         sync.Mutex // one ACME/deploy/recovery pass; responders share port 80 and the state directory
+	acmeDial       func(context.Context, string, string) (net.Conn, error)
+	obtainForTest  func(context.Context, Deployment) (*Material, error)
+	runHookForTest func(context.Context, string) error
+	deployStarted  bool
 
 	// Version, OS and Arch are reported at enrollment.
 	Version, OS, Arch string
@@ -215,25 +219,35 @@ func (a *Agent) handle(e *enrollmentState, key *ecdsa.PrivateKey, m *agentv1.Enr
 // of the last certificate when that one expired. Later blocks add the
 // heartbeat, the desired state and the deployments.
 func (a *Agent) Run(ctx context.Context) error {
+	if _, err := a.Recover(ctx); err != nil {
+		return fmt.Errorf("recover deployment: %w", err)
+	}
 	backoff := time.Minute
 	for ctx.Err() == nil { // a stop (SIGTERM) ends the loop; it is no failure
-		backoff = a.next(ctx, backoff)
+		var err error
+		backoff, err = a.next(ctx, backoff)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // next runs one step; after a failure it logs, waits the back-off and
 // returns a longer one, after a success the shortest.
-func (a *Agent) next(ctx context.Context, backoff time.Duration) time.Duration {
+func (a *Agent) next(ctx context.Context, backoff time.Duration) (time.Duration, error) {
 	err := a.step(ctx)
+	if errors.Is(err, ErrACMEAccountRegistration) {
+		return 0, err
+	}
 	if err == nil {
-		return time.Minute
+		return time.Minute, nil
 	}
 	if ctx.Err() == nil {
 		a.log.Error("agent", slog.Any("error", err), slog.Duration("retry_in", backoff))
 		_ = a.Sleep(ctx, jitter(backoff))
 	}
-	return min(backoff*2, maxBackoff)
+	return min(backoff*2, maxBackoff), nil
 }
 
 // step does the next thing – wait for an enrollment, enroll again, wait
@@ -255,6 +269,24 @@ func (a *Agent) step(ctx context.Context) error {
 		return nil
 	}
 	if at := RenewAt(id.Leaf, serialFraction(id.Leaf)); now.Before(at) {
+		if !a.deployStarted {
+			a.deployStarted = true
+			known, err := a.deploymentResults()
+			if err != nil {
+				return err
+			}
+			var names []string
+			for _, d := range a.cfg.Deployments {
+				if !slices.ContainsFunc(known, func(r DeploymentResult) bool { return r.Name == d.Name }) {
+					names = append(names, d.Name)
+				}
+			}
+			if len(names) > 0 {
+				if _, err := a.RunPass(ctx, names); err != nil {
+					return err
+				}
+			}
+		}
 		// Wake at least hourly: a new `enroll` or a changed state counts.
 		return a.Sleep(ctx, min(at.Sub(now), time.Hour))
 	}
@@ -347,17 +379,19 @@ func jitter(d time.Duration) time.Duration {
 
 // Status describes the agent for `myownpki-agent status`.
 type Status struct {
-	Hostname   string
-	AgentID    string
-	Enrolled   bool
-	NotAfter   time.Time
-	Serial     string
-	Enrollment string // the open enrollment's last message
+	Hostname    string
+	AgentID     string
+	Enrolled    bool
+	NotAfter    time.Time
+	Serial      string
+	Enrollment  string // the open enrollment's last message
+	Deployments []DeploymentResult
 }
 
 // Status reads the state directory.
 func (a *Agent) Status() Status {
 	s := Status{Hostname: a.cfg.Hostname, AgentID: a.agentID()}
+	s.Deployments, _ = a.deploymentResults()
 	if id, err := a.st.identity(); err == nil {
 		s.Enrolled, s.NotAfter, s.Serial = true, id.Leaf.NotAfter, fmt.Sprintf("%X", id.Leaf.SerialNumber)
 	}

@@ -197,3 +197,18 @@ func (a *Agent) readTarget(path string) ([]byte, os.FileInfo, error) {
 	}
 	return data, info, err
 }
+
+func (a *Agent) removeTarget(path string) error {
+	root, name, err := a.openTarget(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(name); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return syncDirectory(root, filepath.Dir(name))
+}

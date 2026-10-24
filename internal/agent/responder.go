@@ -121,7 +121,9 @@ func (w *webroot) remove(token string) {
 	defer func() { _ = root.Close() }()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_ = root.Remove(filepath.Join(challengeDir, token))
+	if err := root.Remove(filepath.Join(challengeDir, token)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return // keep the record: the next startup retries the cleanup
+	}
 	_ = w.st.dropWritten(writtenEntry{Root: resolved, Token: token})
 }
 
@@ -305,18 +307,22 @@ func (s state) saveWritten(list []writtenEntry) error {
 // .well-known/acme-challenge/<token> below a recorded webroot, through an
 // os.Root opened on it, so nothing outside can be hit.
 func (s state) cleanupWritten() {
+	var remaining []writtenEntry
 	for _, e := range s.written() {
 		if checkToken(e.Token) != nil {
 			continue
 		}
 		root, err := os.OpenRoot(e.Root)
 		if err != nil {
+			remaining = append(remaining, e)
 			continue
 		}
-		_ = root.Remove(filepath.Join(challengeDir, e.Token))
+		if err := root.Remove(filepath.Join(challengeDir, e.Token)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			remaining = append(remaining, e)
+		}
 		_ = root.Close()
 	}
-	_ = s.saveWritten(nil)
+	_ = s.saveWritten(remaining)
 }
 
 func clip(s string) string {

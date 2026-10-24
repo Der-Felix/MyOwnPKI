@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -34,4 +35,8 @@ func testMaterial(t *testing.T, name string, serial int64) *Material {
 	}
 	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	return &Material{Leaf: leaf, Certificate: cert, Fullchain: cert, Key: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})}
+}
+
+func cloneMaterial(m *Material) *Material {
+	return &Material{Leaf: m.Leaf, Certificate: bytes.Clone(m.Certificate), Chain: bytes.Clone(m.Chain), Fullchain: bytes.Clone(m.Fullchain), Key: bytes.Clone(m.Key)}
 }

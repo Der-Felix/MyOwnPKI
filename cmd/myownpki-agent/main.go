@@ -192,6 +192,13 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	if s.Enrollment != "" {
 		_, _ = fmt.Fprintf(stdout, "enrollment   %s\n", s.Enrollment)
 	}
+	for _, deployment := range s.Deployments {
+		_, _ = fmt.Fprintf(stdout, "deployment   %s: %s", deployment.Name, deployment.State)
+		if deployment.LastError != "" {
+			_, _ = fmt.Fprintf(stdout, " (%s)", deployment.LastError)
+		}
+		_, _ = fmt.Fprintln(stdout)
+	}
 	return 0
 }
 

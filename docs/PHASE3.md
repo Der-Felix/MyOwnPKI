@@ -6,7 +6,8 @@
 > in blocks A–E (§3). §5 has the decisions, §7 what is still open.
 >
 > **Progress:** block A done (`9eacb4f`); **block B built** 2026-10-24 – steps 1–3 and the enrollment part
-> of 2a, see "Built in block B" at the end of §6. Blocks C–E follow.
+> of 2a, see "Built in block B" at the end of §6. **Block C reviewed and implemented** –
+> steps 4–6, with the owner's clarifications below. Blocks D–E follow.
 
 Goal of v0.3.0, measured on a real host: on an **nginx reverse proxy** the agent gets its
 certificate by ACME from the own server, puts it in place for nginx, reloads nginx and **rolls back**
@@ -174,17 +175,19 @@ deployments:
 
 The two profiles differ only in where the files go: `nginx` writes `fullchain.pem` and
 `privkey.pem` into `dir`; `file` writes each of `certificate`, `chain`, `fullchain` and `key` to
-the path given (at least `key` and one of the others). Test hook, reload hook, TLS check and
+the path given (at least `key` and `certificate` or `fullchain`). Test hook, reload hook, TLS check and
 rollback (step 6) work the same in both.
 
 Rules the config check enforces:
 
 - Every file, directory and webroot of a deployment lies under one of `paths` (after cleaning the
   path and resolving symlinks); `..` and relative paths are refused.
+- Target files are distinct and cannot overlap the agent's state directory or `ca_bundle`.
 - A hook is referenced by name only and must exist under `hooks`; its first element is an absolute
   path to an executable; arguments are fixed – nothing from the server or from a certificate is
   ever added.
-- `names` are DNS names (no IPs in v0.3.0); `challenge: webroot` needs `webroot`.
+- `names` are exact DNS names (no IPs or wildcard identifiers in v0.3.0: http-01 cannot prove a
+  wildcard); `challenge: webroot` needs `webroot`.
 - `test_hook`, `reload_hook` and `check` are optional in **both** profiles. `check` is
   `host:port`; without it there is no TLS check (and a rollback only follows a failed hook).
 - The join token is **not** in `agent.yaml`: `myownpki-agent enroll --token-file FILE` reads it
@@ -257,11 +260,11 @@ checked in and covered by `task generate:check`. All procedures are unary.
 | 3 | 0.3.0 | **Agent certificate renewal** over the channel (7 days, renewed at 2/3 with jitter, new key), revocation and "disable" take effect at the next call; the previous certificate stays valid until it expires | – | fake-clock test; a revoked agent is cut off on its next call; a renewal survives a server restart in between |
 | 4 | 0.3.0 | **ACME in the agent** with lego as a library (only `lego`, `certificate`, `registration`, `challenge/http01` and `providers/http/webroot`; no DNS providers): its own account key on the host, registered by thumbprint over the channel; the ACME server limits orders of that account to the agent's `agent_names` (at `newOrder` and again at `finalize`), on top of the normal domain policy | Q3 – approved | the agent gets a certificate from the phase 2 server; a name outside its list is refused **by the server** (`rejectedIdentifier`), not just by the agent; a revoked agent's account can't order |
 | 5 | 0.3.0 | **Deploy profiles nginx and file** (Apache and HAProxy in v0.3.x): nginx writes `fullchain.pem` and `privkey.pem` into a directory, file writes each part to the path given – for a host that keeps its existing paths and nginx config; temp file in the target directory, `fsync`, rename, `fsync` of the directory; owner, group and mode from the deployment; PEM; key 0600 by default | – | tests in a temp root for both profiles; a path outside `paths` is refused by the agent; files never half-written |
-| 6 | 0.3.0 | **Reload with rollback, for both profiles**: keep the previous files, write the new ones, test hook (`nginx -t`), reload hook, **local TLS check** (connect to `check`, SNI = first name, compare the served SHA-256 with the new certificate, a few tries over ~10 s); on any failure restore the previous files, reload again, check that the old certificate is served; report the result; one reload for several deployments that share a reload hook in one pass | – | nginx in a container, once with the nginx and once with the file profile: a broken certificate rolls back and the old one is served again; a failing `nginx -t` never reaches the reload |
+| 6 | 0.3.0 | **Reload with rollback, for both profiles**: keep the previous files and a durable journal, replace the files, test, reload once per shared reload hook, then check TLS (SNI = first name, SHA-256 of the expected leaf, bounded retries over ~10 s). On failure restore previous files, remove first-installation files and test the restored group. If it passes and a reload was attempted, attempt one rollback reload/check for existing deployments. An open journal is recovered before another pass (§6.3) | – | both profiles against nginx in the Linux container: a mismatched certificate/key staged after validation fails `nginx -t`, restores the old files and leaves the old certificate served without a reload. A mixed group's TLS failure after reload restores and reloads existing deployments and verifies their old leaf; first installations stay `failed`. Failed restored tests prevent a reload and mark the whole group `failed`, explaining that the service still has the pre-rollback state. A stop between replacement and reload recovers from the journal |
 | 7 | 0.3.0 | **Heartbeat and report** every 5 minutes (±30 s jitter): agent version, OS, every deployment with state, certificate, expiry and last error; `last_seen_at`; the UI shows "silent" after 3 missed beats (the `agent_silent` alert comes with monitoring) | – | fake-clock test; the agent list shows last seen and version |
 | 8 | 0.3.0 | **Renewal scheduling** at 2/3 of the lifetime with jitter (a random point in the last 10 % before 2/3), or earlier when the server's ARI window (PHASE2 step 12) says so | – | fake-clock test; ARI window followed |
 | 8a | 0.3.0 | **"Renew now" without remote commands** (owner 2026-10-24, §6.4): the button sets `renew_requested_at/by` and raises the agent's `desired_version`, with an audit entry; `WatchDesiredState` long-poll (answer at once when newer, else "unchanged" after at most 50 s); the agent renews through its normal ACME path (new key, deploy, rollback) and reports; the server clears the request. operator and admin may, viewer may not; the button is locked while a request is open. UI: agent list, agent detail with deployments | – | the API call reaches the agent within seconds; viewer gets 403; a second request while one is open is refused; a server restart during a long-poll: the agents come back within the backoff, no burst (test with many fake agents) |
-| 9 | 0.3.0 | **Linux packaging**: hardened systemd unit (§6.6), `deploy/install-agent.sh` modelled on `install.sh`, the agent in `.goreleaser.yaml` (released for linux/amd64 and linux/arm64; it must still build for Windows, macOS and FreeBSD in the CI cross-build); CI job **agent end-to-end**; OPERATIONS chapter "Agent"; CHANGELOG 0.3.0 | Q4 – tarball and script | the CI job (§6.7); `systemd-analyze security` measured in CI and documented |
+| 9 | 0.3.0 | **Linux packaging**: hardened systemd unit (§6.6), `deploy/install-agent.sh` modelled on `install.sh`, the agent in `.goreleaser.yaml` (released for linux/amd64 and linux/arm64; it must still build for Windows, macOS and FreeBSD in the CI cross-build); CI job **agent end-to-end**; OPERATIONS chapter "Agent"; CHANGELOG 0.3.0 | Q4 – tarball and script | the CI job (§6.7) must run `TestNginxDeployProfiles` with nginx available in Linux CI from this step onward (no skip); `systemd-analyze security` measured in CI and documented |
 | 10 | later | **Trust store, small form** (PLAN §10.1): root download as PEM, DER, `.mobileconfig`; the agent can add the root to the system trust store (`update-ca-certificates`), off by default | – | Debian and Fedora layouts tested in containers |
 | 11 | 0.3.x | **Expiry dashboard**: certificates by expiry, agent status, sealed warning, CRL freshness | – | handler tests, screenshots light/dark |
 | 12 | 0.3.x | **TLS scan** (integration level 2): scheduled scan of `endpoints` (manual, from agents, from SANs), served certificate vs. the issued one, expiry, chain; SSRF rules as for http-01, ports from the endpoint list only | – | test servers serving the right / an old / a foreign certificate |
@@ -337,7 +340,7 @@ The second round of decisions (2026-10-24, the open points of the first version 
 | 4 | Agent user | Root in the sandbox of §6.6 – `systemctl reload` and the profiles' file owners need root; an own user would need a polkit rule per service |
 | 5 | Agent certificate on the admin and ACME listener | Neither listener asks for client certificates (that would make browsers show a certificate picker); a test pins that an agent certificate gains nothing there; the agent CA never goes into the admin listener's `ClientCAs` when admin mTLS comes (§2) |
 | 6 | Revoking an agent | Its deployed certificates stay valid; the revoke dialog offers to revoke them as a second step (§6.2) |
-| 7 | ACME approval levels | The linked account counts as approved; names an admin put into `agent_names` count as approved names for the `new_name` level – nothing is approved twice (§6.3) |
+| 7 | ACME approval levels | The linked account counts as approved; all `agent_names` sources (`hostname`, `token`, `admin`) count as approved names for `new_name` – nothing is approved twice (§6.3, clarified by the owner for block C) |
 | – | Later releases | Apache and HAProxy profiles and dns-01 in the agent come in v0.3.x |
 
 ---
@@ -410,11 +413,77 @@ certificates and ACME keep working meanwhile.
   (`RegisterACMEAccount`); when that key registers, the account is linked to the agent
   (`acme_accounts.agent_id`) and counts as approved – the agent was admitted at enrollment.
 - Orders of a linked account: every identifier must match the agent's `agent_names`, at `newOrder`
-  and again at `finalize` – `rejectedIdentifier` otherwise. The domain policy applies as for every
-  client (ADR-19).
+  and again at `finalize` and immediately before `Engine.Issue`, including `ProcessPending` after
+  an unseal. The agent must still be active at each point. A refusal has a clear problem
+  (`rejectedIdentifier` for a removed/disallowed name, `unauthorized` for an inactive agent).
+  An existing order becomes invalid on refusal; newOrder rejects before creating one. The storing
+  transaction checks again against concurrent names/status changes.
+  The domain policy applies as for every client (ADR-19).
+- `RegisterACMEAccount` is idempotent for the same agent and thumbprint; a reservation belonging
+  to another agent is `FailedPrecondition`. A new reservation is also refused with
+  `FailedPrecondition` and a `denied` audit entry if any account already uses that thumbprint,
+  even an unlinked account: http-01 responses expose thumbprints, so they are not proof of ownership.
+  Only verified `newAccount` requests bind accounts, both when creating one and when returning
+  an existing one after an interrupted registration; ordinary ACME reads never bind or take a
+  binding write transaction. `keyChange` preserves the account's agent ID and changes the agent's
+  thumbprint atomically. One account per agent; subsequent key rotation uses ACME keyChange.
+  After revocation and enrollment with a new agent ID, the previous account key is refused with a
+  terminal operator-action error, never retried or automatically replaced. OPERATIONS describes
+  removing that directory's `acme-*.key` and matching `acme-*.json` while the agent is stopped.
+- Every source of `agent_names` (`hostname`, `token`, `admin`) counts as approved at `new_name`:
+  enrollment proved the hostname, an admin created the token patterns or added the name.
+  This approval is local to the linked account, never a global approval for other clients.
+- **Accepted boundary (owner 2026-10-24):** `agent_names` restricts the linked account only.
+  A compromised host can create an unlinked account and obtain anything the normal domain policy
+  permits and whose http-01 challenge it can answer. This is normal ACME behavior; domain approval
+  levels control that access. Unlinked clients keep their existing behavior.
+- lego **v4.35.2** (2026-04-24), core packages only. Its configuration is constructed directly,
+  not through `lego.NewConfig`, which reads `LEGO_CA_*` environment variables. A dedicated HTTP
+  client trusts `ca_bundle`, honors only the configured proxy, has bounded HTTPS requests and
+  propagates cancellation. An account key/registration is stored separately per directory URL.
 - The http-01 challenge is answered by the responder of step 2a, the same way as at enrollment.
 - One pass: renew what is due (or requested), deploy each, reload once per reload hook, check,
   roll back what failed, report.
+
+**Deployment and recovery (owner clarifications 2026-10-24):**
+
+- Both profiles use the same pipeline. A shared nonempty `reload_hook` is one group; without one,
+  each deployment is its own group. All members are staged before tests, and duplicate test hooks
+  run once. All targets must be distinct, remain under `paths`, and use a temporary file in the
+  target directory, file fsync, rename and directory fsync. The allowed parent directories must
+  exist; deployment subdirectories are created inside them. New certificates/fullchains never
+  contain the trust anchor; keys default to 0600, certificates to 0644.
+- Before replacing any file, save root-only backup copies and `deployment-journal.json` in the
+  state directory. The journal records the group, targets, previous presence, mode/owner, old
+  certificate metadata and phase. Backups and journal are durable before the first replacement;
+  phases are `prepared`, `replaced`, `reloading`, `checking`, `rollback`.
+- Test-hook failure: restore every file in the group and test the restored configuration, no reload.
+  Reload/TLS-check failure: restore, test the restored files, attempt one reload and verify the old
+  leaf of every existing deployment. A rollback failure reports
+  `failed` with the original and rollback errors. No retry loop. Hook arguments come only from
+  local configuration and output is discarded; each invocation has a 30-second timeout.
+- Without a previous certificate/key, remove newly created files and keep that deployment `failed`.
+  For a mixed group restore existing files, remove first-installation files and always run the
+  test hooks. If they pass and a reload was attempted, reload once and verify the old fingerprint
+  of each existing deployment; those deployments become `rolled_back`. If restored tests fail
+  (for example, a configuration still references a removed file), do not reload: all group members
+  become `failed`, with a message that the service still has the state from before the rollback.
+  Incomplete previous certificate/key pairs are refused before replacing files.
+- At startup, an open journal restores the backups, tests and reloads the group, verifies the old
+  certificate and stores `rolled_back`. Recovery validates the recorded targets/group against the
+  current local configuration; a changed configuration that no longer matches stops recovery.
+  A file-restoration failure keeps the journal for operator-assisted recovery. A completed restore
+  with a failed reload/check stores `failed` and removes the journal, preventing an automatic loop.
+- Local results live in `deployments.json` and appear in `status`; the `Report` RPC and renewal/ARI
+  scheduling are block D. `run` recovers first and makes an initial pass for deployments without
+  a local result. A failed deployment is not retried in the agent-certificate maintenance loop;
+  an account-registration `FailedPrecondition` stops `run` immediately for operator action.
+- Linux provides directory fsync and an advisory state lock to exclude overlapping agent processes.
+  Windows remains a compilation/test target only; it is not a supported deployment platform yet.
+- Tests use the real agent/mTLS/ACME server in both challenge modes, normal-client regression,
+  real local TLS endpoints for success and rollback, and an interrupted pass reopened by a fresh
+  agent. `TestNginxDeployProfiles` runs both profiles against a private nginx process on Linux
+  (inside the pinned nginx container in step 9); it is skipped when nginx is unavailable.
 
 ### 6.4 "Renew now" and the long-poll (step 8a)
 
