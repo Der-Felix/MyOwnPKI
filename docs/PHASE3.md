@@ -4,6 +4,9 @@
 > questions on 2026-10-24 (§5) and split the phase: **v0.3.0 is the Linux agent** (steps 1–9 plus
 > 2a and 8a below); **monitoring (steps 11–13) follows in v0.3.x**. Branch `release/v0.3.0`, built
 > in blocks A–E (§3). §5 has the decisions, §7 what is still open.
+>
+> **Progress:** block A done (`9eacb4f`); **block B built** 2026-10-24 – steps 1–3 and the enrollment part
+> of 2a, see "Built in block B" at the end of §6. Blocks C–E follow.
 
 Goal of v0.3.0, measured on a real host: on an **nginx reverse proxy** the agent gets its
 certificate by ACME from the own server, puts it in place for nginx, reloads nginx and **rolls back**
@@ -93,8 +96,13 @@ the history comes with monitoring.
 **The agent CA** is an intermediate with the **EKU limit `clientAuth` only** (the existing CA
 setting), created like any intermediate – online, or signed by the offline root. `agent.ca` names
 it (§1.4). It signs only agent certificates: ECDSA P-256 key from the host, **7 days**, EKU
-`clientAuth`, subject CN = hostname, SAN URI `urn:myownpki:agent:<agent id>`; extensions from the
+`clientAuth`, subject CN and DNS SAN = hostname (preset *client*); extensions from the
 profile, never from the CSR (pki-rules).
+
+**The agent's identity** (owner 2026-10-24): the agent certificate has **no SAN URI**. The server
+maps a client certificate to its agent by the serial and then compares the **whole certificate**,
+byte for byte, with the agent's current or previous one in `pki.db` – any other certificate,
+even one with a known serial, identifies nobody. At most 6 renewals per agent and hour.
 
 ### 1.2 Monitoring (v0.3.x – `pki.db` and `system.db`, migration numbers when built)
 
@@ -207,7 +215,7 @@ another EKU limit than `clientAuth` only.
 ## 2. Protocol: Connect-RPC over mTLS (ADR-10, Q2)
 
 `proto/myownpki/agent/v1/agent.proto`, package `myownpki.agent.v1`, one service `AgentService`.
-Generated Go code in `internal/gen/agent/v1` (messages and the Connect client and handler),
+Generated Go code in `internal/gen/myownpki/agent/v1` (messages and the Connect client and handler),
 checked in and covered by `task generate:check`. All procedures are unary.
 
 | Procedure | Client certificate | What it does |
@@ -486,6 +494,31 @@ digest) with a webroot, the agent in **webroot mode** for enrollment and ACME:
 | server | host | 80/tcp | http-01 check – enrollment and every ACME order |
 
 Nothing else is opened on the host; in standalone mode port 80 is open only while a check runs.
+
+
+### 6.9 Built in block B (2026-10-24) – what differs from the text above
+
+- **Identity:** the agent certificate has no SAN URI. The server maps a client certificate to its
+  agent by serial **and** by comparing the whole certificate with the stored one; only the current and
+  the previous certificate count. The certificates use the preset *client* (CN and DNS SAN = hostname).
+- **Protocol so far:** `Enroll`, `EnrollStatus`, `RenewCertificate`. `RegisterACMEAccount` (block C),
+  `Report` and `WatchDesiredState` (block D) are added then – adding procedures keeps older agents working.
+- **Enrolling again** uses a CSR with the key of the last certificate (that key is the proof); the
+  next renewal at 2/3 brings a new key again.
+- **`myownpki-agent enroll`** returns when the enrollment waits for approval; `run` (the service) polls
+  every 30 s and installs the certificate once admitted. A pending agent asks the sealed server
+  without causing an audit entry per poll.
+- **Permission `agent.manage`** (admin only, with step-up): join tokens, approvals, names, disable,
+  revoke. Reading agents, the queue and the tokens needs the viewer role.
+- **REST API:** `/agents`, `/agents/{id}` with `disable`, `enable`, `revoke`, `names`;
+  `/agent-enrollments` with `approve` and `deny`; `/agent-join-tokens`; `agent_enrollment` in
+  `/settings`. UI: Agents, Enrollment requests, Join tokens; the mode in Tenant settings.
+- **The enrollment check** uses the ACME validator's http-01 fetch (`acme.HTTP01Checker`) – same
+  rules, also when the ACME server is off.
+- **Webroot writes** go through an `os.Root` opened on the webroot (owner 2026-10-24): the webroot
+  itself is checked against `paths`, and nothing below it – also a directory swapped for a symlink
+  after the check – can lead a write or a delete out of it. The webroot must exist.
+- **Renewals** of the agent certificate: at most 6 per agent and hour (`ResourceExhausted`).
 
 ---
 

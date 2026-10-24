@@ -7,6 +7,35 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+Being built as 0.3.0 – the Linux agent (docs/PHASE3.md). Block B: the trusted channel.
+
+### Added
+
+- **Agent listener** (`agent.base_url`, `agent.listen` default `:8444`, `agent.tls_issuer`,
+  `agent.ca`): Connect-RPC over TLS 1.3. Its certificate comes from `agent.tls_issuer` like the admin
+  and ACME listeners'. Client certificates are accepted from the agent CA only – an intermediate with
+  the EKU limit clientAuth only, checked by `myownpki config check` and at the start. Without a
+  certificate only the enrollment answers; everything else is checked per request (a revoked or
+  disabled agent is cut off at its next call).
+- **Enrollment with proof of control** (ADR-18): the agent makes its key and CSR on the host; the
+  server fetches a check file bound to that key from `http://<host>/.well-known/acme-challenge/`
+  (the agent's own port 80, or the webroot of the web server already there – written only through
+  an `os.Root`, so a symlink can't redirect it) with the rules of the ACME validator. Modes per
+  tenant (`auto`, `verified` – the default –, `manual`; *Tenant settings*, `agent_enrollment` in
+  `PUT /api/v1/settings`, system.db migration 0011). Join tokens: single-use, expiring, for name
+  patterns, stored hashed, shown once. The queue holds at most 100 enrollments without a valid
+  token – one with a token is never refused – and junk expires after 24 hours.
+- **Agent certificates**: 7 days, renewed by the agent at 2/3 with a new key (at most 6 renewals per
+  agent and hour); an agent whose certificate expired enrolls again with the key of its last one.
+  Revoking an agent puts its agent certificates on the CRL. pki.db migration 0011.
+- **`myownpki-agent`** `enroll [--token-file FILE]`, `run`, `status`, `config check` with
+  `/etc/myownpki-agent/agent.yaml`. It ignores `HTTPS_PROXY`/`HTTP_PROXY`; a proxy only when
+  agent.yaml names one.
+- **REST API** `/agents`, `/agent-enrollments`, `/agent-join-tokens` (permission `agent.manage`,
+  admin with step-up), and the pages *Agents*, *Enrollment requests*, *Join tokens*.
+- New modules (owner 2026-10-24): `connectrpc.com/connect` v1.21.0, `google.golang.org/protobuf`
+  v1.36.12; buf v1.73.0 as a pinned development tool (THIRD_PARTY.md).
+
 ## [0.2.2] - 2026-10-24
 
 The server can issue the TLS certificates of its own listeners from one of its intermediates, so
