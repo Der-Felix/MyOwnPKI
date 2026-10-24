@@ -79,6 +79,7 @@ type Tenant struct {
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
 	TrustPage         int64
+	AgentEnrollment   string
 }
 
 type Unseal struct {

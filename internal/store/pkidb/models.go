@@ -20,6 +20,7 @@ type AcmeAccount struct {
 	CreatedAt     string
 	CreatedIp     string
 	UpdatedAt     string
+	AgentID       sql.NullString
 }
 
 type AcmeAuthz struct {
@@ -84,6 +85,81 @@ type AcmeOrder struct {
 type AcmeOrderAuthz struct {
 	OrderID string
 	AuthzID string
+}
+
+type Agent struct {
+	ID                string
+	Hostname          string
+	Status            string
+	EnrollmentMode    string
+	Proof             string
+	CertID            sql.NullString
+	CertSerial        sql.NullString
+	PrevCertID        sql.NullString
+	PrevCertSerial    sql.NullString
+	AcmeKeyThumbprint sql.NullString
+	Os                string
+	Arch              string
+	AgentVersion      string
+	DesiredVersion    int64
+	LastSeenAt        sql.NullString
+	CreatedAt         string
+	ApprovedAt        string
+	ApprovedBy        string
+	UpdatedAt         string
+}
+
+type AgentDeployment struct {
+	AgentID           string
+	Name              string
+	Profile           string
+	Names             string
+	Challenge         string
+	State             string
+	CertificateSerial sql.NullString
+	NotAfter          sql.NullString
+	ServedFingerprint sql.NullString
+	DeployedAt        sql.NullString
+	LastError         sql.NullString
+	LastReportAt      string
+	RenewRequestedAt  sql.NullString
+	RenewRequestedBy  sql.NullString
+}
+
+type AgentEnrollment struct {
+	ID           string
+	AgentID      sql.NullString
+	Hostname     string
+	CsrDer       []byte
+	SpkiSha256   string
+	HandleHash   string
+	CheckToken   string
+	CheckMethod  string
+	CheckState   string
+	CheckError   sql.NullString
+	CheckedAt    sql.NullString
+	TokenID      sql.NullString
+	TokenValid   int64
+	TokenProblem sql.NullString
+	KnownAgent   int64
+	State        string
+	Os           string
+	Arch         string
+	AgentVersion string
+	SourceIp     string
+	CreatedAt    string
+	ExpiresAt    string
+	DecidedAt    sql.NullString
+	DecidedBy    sql.NullString
+	CertID       sql.NullString
+}
+
+type AgentName struct {
+	AgentID string
+	Pattern string
+	Source  string
+	AddedBy string
+	AddedAt string
 }
 
 type BlockedKey struct {
@@ -231,6 +307,18 @@ type ImportJob struct {
 	FinishedAt string
 	StartedBy  string
 	ReportJson string
+}
+
+type JoinToken struct {
+	ID           string
+	TokenHash    string
+	Label        string
+	NamePatterns string
+	ExpiresAt    string
+	UsedAt       sql.NullString
+	UsedBy       sql.NullString
+	CreatedBy    string
+	CreatedAt    string
 }
 
 type Key struct {

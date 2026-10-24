@@ -243,7 +243,7 @@ func (q *Queries) FinishACMEChallenge(ctx context.Context, arg FinishACMEChallen
 }
 
 const getACMEAccount = `-- name: GetACMEAccount :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts WHERE id = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE id = ?
 `
 
 func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, error) {
@@ -261,12 +261,13 @@ func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, e
 		&i.CreatedAt,
 		&i.CreatedIp,
 		&i.UpdatedAt,
+		&i.AgentID,
 	)
 	return i, err
 }
 
 const getACMEAccountByThumbprint = `-- name: GetACMEAccountByThumbprint :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts WHERE key_thumbprint = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE key_thumbprint = ?
 `
 
 func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint string) (AcmeAccount, error) {
@@ -284,6 +285,7 @@ func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint 
 		&i.CreatedAt,
 		&i.CreatedIp,
 		&i.UpdatedAt,
+		&i.AgentID,
 	)
 	return i, err
 }
@@ -623,7 +625,7 @@ func (q *Queries) LinkACMEOrderAuthz(ctx context.Context, arg LinkACMEOrderAuthz
 }
 
 const listACMEAccounts = `-- name: ListACMEAccounts :many
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts ORDER BY created_at DESC LIMIT ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts ORDER BY created_at DESC LIMIT ?
 `
 
 func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAccount, error) {
@@ -647,6 +649,7 @@ func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAcco
 			&i.CreatedAt,
 			&i.CreatedIp,
 			&i.UpdatedAt,
+			&i.AgentID,
 		); err != nil {
 			return nil, err
 		}
