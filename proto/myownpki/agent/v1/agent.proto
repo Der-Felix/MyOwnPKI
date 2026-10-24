@@ -1,0 +1,103 @@
+// The agent protocol (ADR-10, docs/PHASE3.md §2): Connect-RPC over mTLS on
+// the agent listener. Every procedure is unary.
+//
+// Compatibility: fields and procedures are only ever added, never renumbered
+// or removed – `buf breaking` checks it, so an older agent keeps working with
+// a newer server. Everything an agent sends is attacker input on the server.
+syntax = "proto3";
+
+package myownpki.agent.v1;
+
+option go_package = "github.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1;agentv1";
+
+// AgentService is what the server offers to agents. Enroll and EnrollStatus
+// are the only procedures that work without an agent certificate.
+service AgentService {
+  // Enroll starts an enrollment (ADR-18): the hostname, a CSR made on the
+  // host, an optional join token. The answer carries the check token the
+  // agent places for the server's http-01 check.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  // EnrollStatus runs the check once (check_ready) and reports the decision;
+  // an admitted agent receives its certificate here.
+  rpc EnrollStatus(EnrollStatusRequest) returns (EnrollStatusResponse);
+  // RenewCertificate gives an agent a new certificate for a new key, over
+  // its current certificate (renewed at 2/3 of its 7 days).
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+// CheckMethod is how the agent answers the server's http-01 check.
+enum CheckMethod {
+  CHECK_METHOD_UNSPECIFIED = 0;
+  // The agent listens on port 80 itself while the check runs.
+  CHECK_METHOD_STANDALONE = 1;
+  // The agent writes the file into the webroot of the web server on port 80.
+  CHECK_METHOD_WEBROOT = 2;
+}
+
+message EnrollRequest {
+  // The FQDN the agent claims and proves.
+  string hostname = 1;
+  // PKCS#10, DER. Only its public key and signature count; names and
+  // extensions come from the server.
+  bytes csr_der = 2;
+  // Optional; never logged.
+  string join_token = 3;
+  CheckMethod check_method = 4;
+  string agent_version = 5;
+  string os = 6;
+  string arch = 7;
+}
+
+message EnrollResponse {
+  string enrollment_id = 1;
+  // The agent's proof for EnrollStatus; the server keeps only its hash.
+  string handle = 2;
+  // The file name under /.well-known/acme-challenge/. Its content is
+  // "<check_token>.<base64url(SHA-256 of the CSR's public key)>".
+  string check_token = 3;
+}
+
+message EnrollStatusRequest {
+  string enrollment_id = 1;
+  string handle = 2;
+  // true: the file is in place – run the check now (once per enrollment).
+  bool check_ready = 3;
+}
+
+// EnrollState is where an enrollment stands.
+enum EnrollState {
+  ENROLL_STATE_UNSPECIFIED = 0;
+  // Waiting for check_ready.
+  ENROLL_STATE_WAITING_FOR_CHECK = 1;
+  // In the approval queue of the web UI.
+  ENROLL_STATE_PENDING_APPROVAL = 2;
+  // Admitted, but the server is sealed: the certificate follows the unseal.
+  ENROLL_STATE_WAITING_FOR_UNSEAL = 3;
+  // Admitted; the certificate is in the answer.
+  ENROLL_STATE_ADMITTED = 4;
+  ENROLL_STATE_DENIED = 5;
+  ENROLL_STATE_EXPIRED = 6;
+}
+
+message EnrollStatusResponse {
+  EnrollState state = 1;
+  // Why it waits or was refused, for the agent's log.
+  string message = 2;
+  string agent_id = 3;
+  bool token_valid = 4;
+  bool check_passed = 5;
+  // With ENROLL_STATE_ADMITTED: the agent certificate (DER) and its chain,
+  // the issuing CA first.
+  bytes certificate_der = 6;
+  repeated bytes chain_der = 7;
+}
+
+message RenewCertificateRequest {
+  // PKCS#10, DER, for a new key made on the host (ADR-11).
+  bytes csr_der = 1;
+}
+
+message RenewCertificateResponse {
+  bytes certificate_der = 1;
+  repeated bytes chain_der = 2;
+}

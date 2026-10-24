@@ -10,6 +10,16 @@ bring). All Go modules are in `go.mod`; only permissive licenses are accepted (A
 |---|---|---|---|---|
 | `github.com/go-webauthn/webauthn` | v0.18.2 (2026-09-19) | BSD-3-Clause | passkeys (step 17) | `github.com/go-webauthn/x` v0.3.1 (BSD-3), `github.com/fxamacker/cbor/v2` v2.9.4 (MIT), `github.com/x448/float16` v0.8.4 (MIT), `github.com/golang-jwt/jwt/v5` v5.3.1 (MIT, metadata service), `github.com/google/go-tpm` v0.9.8 (Apache-2.0, TPM attestation), `github.com/go-viper/mapstructure/v2` v2.5.0 (MIT), `github.com/tinylib/msgp` v1.6.4 (MIT), `github.com/philhofer/fwd` v1.2.0 (MIT); `github.com/google/uuid` was already in the graph. Test-only modules of webauthn (testify, go.uber.org/mock) are not built in |
 
+## Go modules and tools approved for v0.3.0 – the agent (owner 2026-10-24)
+
+Two-week rule: a version older than 2026-10-10 (docs/PHASE3.md §4).
+
+| Module / tool | Version (release date) | License | For | Brings |
+|---|---|---|---|---|
+| `connectrpc.com/connect` | v1.21.0 (2026-09-08) | Apache-2.0 | the agent protocol (Connect-RPC, ADR-10) in server and agent; its generator `protoc-gen-connect-go` as `go tool` | `github.com/google/go-cmp` v0.7.0 (BSD-3) – only in connect's own tests, not built in. v1.21.1 (2026-10-14) was too new |
+| `google.golang.org/protobuf` | v1.36.12 (2026-08-10) | BSD-3-Clause | protobuf messages of the agent protocol; its generator `protoc-gen-go` as `go tool` | nothing |
+| [buf](https://github.com/bufbuild/buf) CLI | v1.73.0 (2026-09-11) | Apache-2.0 | `task generate`: lint and code generation of `proto/` (local plugins only, no registry) – a development tool, never in `go.mod` or a binary | fetched by `internal/tools/buf` into `.tools/` and checked against the SHA-256 of the release's `sha256.txt` (pins in that file) |
+
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 
 Used only by `.github/workflows/release.yml` (and locally by `task release:check` /

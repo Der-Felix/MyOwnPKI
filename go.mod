@@ -3,17 +3,21 @@ module github.com/Der-Felix/MyOwnPKI
 go 1.27.3
 
 tool (
+	connectrpc.com/connect/cmd/protoc-gen-connect-go
 	github.com/a-h/templ/cmd/templ
 	golang.org/x/vuln/cmd/govulncheck
+	google.golang.org/protobuf/cmd/protoc-gen-go
 )
 
 require (
+	connectrpc.com/connect v1.21.0
 	github.com/a-h/templ v0.3.1070
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.60.1
 )
 

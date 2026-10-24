@@ -1,0 +1,11 @@
+# buf configuration for the agent protocol (docs/PHASE3.md §2, §4).
+# `task generate` runs buf through internal/tools/buf (pinned, checksum-checked).
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - WIRE_JSON

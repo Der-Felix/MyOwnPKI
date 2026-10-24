@@ -219,7 +219,7 @@ tasks:
       - go tool govulncheck ./...
 
   generate:
-    desc: Regenerate generated code (templ, sqlc)
+    desc: Regenerate generated code (templ, sqlc, the agent protocol with buf)
     cmds:
       - go generate ./...
 
