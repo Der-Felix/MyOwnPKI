@@ -107,3 +107,9 @@ func (a *Agent) SetDial(dial func(ctx context.Context, network, addr string) (ne
 	a.ch.transport.DialContext = dial
 	a.ch.transport.CloseIdleConnections()
 }
+
+// SetACMEDial replaces the ACME network edge for tests. TLS still verifies
+// the directory's host against ca_bundle, with the ordinary HTTP client.
+func (a *Agent) SetACMEDial(dial func(context.Context, string, string) (net.Conn, error)) {
+	a.acmeDial = dial
+}

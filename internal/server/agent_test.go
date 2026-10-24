@@ -111,6 +111,14 @@ func newAgentEnv(t *testing.T) *agentEnv {
 			}
 			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 		})
+	srv.acme.SetNetwork(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr != "192.0.2.10:80" {
+			return nil, errors.New("unexpected validation target")
+		}
+		return d.DialContext(ctx, network, host.Listener.Addr().String())
+	}, func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+	})
 	if err := srv.Listen(ctx); err != nil {
 		t.Fatal(err)
 	}

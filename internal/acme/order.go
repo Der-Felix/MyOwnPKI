@@ -67,6 +67,9 @@ func (s *Server) planOrder(ctx context.Context, acct *pkidb.AcmeAccount, in []id
 	if len(in) > maxIdentifiers {
 		return nil, problemErr(http.StatusBadRequest, "rejectedIdentifier", "at most %d identifiers per order", maxIdentifiers)
 	}
+	if err := s.checkAgentOrder(ctx, s.db, acct, in); err != nil {
+		return nil, err
+	}
 	p := &orderPlan{}
 	var subs []map[string]any
 	var firstType, firstDetail string
@@ -107,6 +110,9 @@ func (s *Server) planOrder(ctx context.Context, acct *pkidb.AcmeAccount, in []id
 				waitAccount = true
 			}
 		case ca.ApprovalNewName:
+			if acct.AgentID.Valid {
+				break // every source in agent_names was admitted by enrollment or an admin
+			}
 			ok, nerr := s.nameApproved(ctx, acct.ID, id)
 			if nerr != nil {
 				return nil, nerr

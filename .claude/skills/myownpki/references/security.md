@@ -9,7 +9,7 @@ operator decide, so the product must be safe in the worst case).
 | Listener | Serves | Auth |
 |---|---|---|
 | Public (:80/:443) | ACME, CRL, OCSP, AIA (CA certs) | none by design – read-only or ACME-protocol only |
-| Agent (:8443) | Connect-RPC for agents | mTLS with an `agent-ca` certificate |
+| Agent (:8444) | Connect-RPC for agents | mTLS with an `agent-ca` certificate |
 | Admin (:9443) | Web UI + REST API | session (2FA) or API token; optional mTLS + IP allowlist |
 
 Never mount admin routes on the public listener, not even "just for health checks".
@@ -117,7 +117,28 @@ The http-01 and tls-alpn-01 validators connect to hostnames an ACME client chose
   control of a name, not authorization – that's why `verified` needs token **and** challenge.
 - Join tokens: single-use, short-lived, scoped to tenant + allowed name patterns, stored hashed.
 - An agent may only request certificates for names bound to its identity (policy check server-side).
+- For a linked ACME account, check the agent's active status and every identifier against
+  `agent_names` at newOrder, finalize, and immediately before issuance, including orders waiting
+  for an unseal. Recheck in the storing transaction as well, so a concurrent removal cannot
+  publish a certificate. A refusal invalidates the order with a clear ACME problem.
+- The restriction belongs to the **linked account**, not to the host's network address. On an
+  open domain a compromised host can use an ordinary unlinked account for any name the domain
+  policy permits and whose challenge it can answer. This is the accepted ACME risk model;
+  domain approval levels control access. Never silently apply an agent's names to other clients.
+- Register an account key's thumbprint over the authenticated channel; repeated registration by
+  the same agent is idempotent, another agent's reservation is refused. A new reservation must
+  also refuse every thumbprint already used by an ACME account (including an unlinked one), with
+  a denied audit entry: http-01 exposes thumbprints publicly. Bind only in verified newAccount
+  requests, for newly created accounts or an existing account whose key was reserved beforehand.
+  Ordinary ACME reads never bind an account or acquire a binding write transaction. ACME keyChange keeps
+  the account link and updates the agent's thumbprint in the same transaction. All three name
+  sources (hostname, token, admin) count as approved under the new_name level for that account.
 - **No remote command execution.** The server can only trigger hooks the agent's local config allowlists.
+- Agent deployment hooks use only the locally configured executable and fixed arguments, without
+  a shell; their output is discarded because it may contain secrets. File operations remain
+  inside `paths` through os.Root. Backups and the journal stay in the root-only state directory.
+  A shared reload hook defines one rollback group. Recover an unfinished journal before another
+  pass, using only paths and hooks still authorized by the local configuration.
 - Agent certificates are short-lived and renewed over the existing mTLS channel; revocation takes effect immediately.
 
 ## Audit log

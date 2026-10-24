@@ -28,6 +28,10 @@ SELECT * FROM acme_accounts ORDER BY created_at DESC LIMIT ?;
 -- name: CountACMEAccountsWaiting :one
 SELECT count(*) FROM acme_accounts WHERE approved_at IS NULL AND status = 'valid';
 
+-- name: BindACMEAccount :exec
+UPDATE acme_accounts SET agent_id = ?, approved_at = COALESCE(approved_at, ?),
+    approved_by = COALESCE(approved_by, ?), updated_at = ? WHERE id = ?;
+
 -- EAB keys
 
 -- name: InsertACMEEABKey :exec

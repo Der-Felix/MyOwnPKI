@@ -33,6 +33,7 @@ func (e *agentEnv) newTestAgent(t *testing.T) (*agent.Agent, string) {
 	q := func(p string) string { return `"` + strings.ReplaceAll(p, `\`, `\\`) + `"` }
 	cfg, err := agent.ParseConfig("agent.yaml", []byte("server: https://pki.homelab.lan:8444\nca_bundle: "+q(bundle)+
 		"\nhostname: proxy1.homelab.lan\nstate_dir: "+q(filepath.Join(dir, "state"))+
+		"\nacme_directory: https://pki.homelab.lan/acme/directory"+
 		"\nenrollment:\n  challenge: webroot\n  webroot: "+q(www)+"\npaths: ["+q(www)+"]\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +45,9 @@ func (e *agentEnv) newTestAgent(t *testing.T) (*agent.Agent, string) {
 	var d net.Dialer
 	a.SetDial(func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return d.DialContext(ctx, network, e.srv.AgentAddr())
+	})
+	a.SetACMEDial(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return d.DialContext(ctx, network, e.srv.ACMEAddr())
 	})
 	return a, www
 }

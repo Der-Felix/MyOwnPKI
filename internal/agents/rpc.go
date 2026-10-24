@@ -107,6 +107,17 @@ func (r *rpc) RenewCertificate(ctx context.Context, req *connect.Request[agentv1
 	return connect.NewResponse(&agentv1.RenewCertificateResponse{CertificateDer: der, ChainDer: chain}), nil
 }
 
+func (r *rpc) RegisterACMEAccount(ctx context.Context, req *connect.Request[agentv1.RegisterACMEAccountRequest]) (*connect.Response[agentv1.RegisterACMEAccountResponse], error) {
+	c, err := r.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.s.RegisterACMEAccount(ctx, c, req.Msg.GetKeyThumbprint()); err != nil {
+		return nil, r.s.rpcError("RegisterACMEAccount", err)
+	}
+	return connect.NewResponse(&agentv1.RegisterACMEAccountResponse{}), nil
+}
+
 // caller authenticates a procedure that needs an agent certificate – per
 // request (docs/PHASE3.md §2).
 func (r *rpc) caller(ctx context.Context) (*Caller, error) {

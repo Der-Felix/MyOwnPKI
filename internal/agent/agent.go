@@ -14,8 +14,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -37,10 +39,12 @@ var ErrEnrolled = errors.New("this agent is enrolled and its certificate is vali
 
 // Agent is myownpki-agent.
 type Agent struct {
-	cfg *Config
-	st  state
-	ch  *channel
-	log *slog.Logger
+	cfg      *Config
+	st       state
+	ch       *channel
+	log      *slog.Logger
+	passMu   sync.Mutex // one ACME pass; responders share port 80 and the state directory
+	acmeDial func(context.Context, string, string) (net.Conn, error)
 
 	// Version, OS and Arch are reported at enrollment.
 	Version, OS, Arch string
@@ -66,6 +70,7 @@ func New(cfg *Config, log *slog.Logger, version string) (*Agent, error) {
 	a := &Agent{
 		cfg: cfg, st: state{dir: cfg.StateDir}, ch: ch, log: log, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		StandaloneAddr: ":80", Now: clock.System{}.Now, Sleep: sleep,
+		acmeDial: defaultACMEDial,
 	}
 	if err := a.st.ensure(); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)

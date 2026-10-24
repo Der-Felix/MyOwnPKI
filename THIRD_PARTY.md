@@ -19,6 +19,7 @@ Two-week rule: a version older than 2026-10-10 (docs/PHASE3.md §4).
 | `connectrpc.com/connect` | v1.21.0 (2026-09-08) | Apache-2.0 | the agent protocol (Connect-RPC, ADR-10) in server and agent; its generator `protoc-gen-connect-go` as `go tool` | `github.com/google/go-cmp` v0.7.0 (BSD-3) – only in connect's own tests, not built in. v1.21.1 (2026-10-14) was too new |
 | `google.golang.org/protobuf` | v1.36.12 (2026-08-10) | BSD-3-Clause | protobuf messages of the agent protocol; its generator `protoc-gen-go` as `go tool` | nothing |
 | [buf](https://github.com/bufbuild/buf) CLI | v1.73.0 (2026-09-11) | Apache-2.0 | `task generate`: lint and code generation of `proto/` (local plugins only, no registry) – a development tool, never in `go.mod` or a binary | fetched by `internal/tools/buf` into `.tools/` and checked against the SHA-256 of the release's `sha256.txt` (pins in that file) |
+| `github.com/go-acme/lego/v4` | v4.35.2 (2026-04-24) | MIT | ACME library in the agent (block C); direct imports only `lego`, `certificate`, `registration`; the existing contained responder implements the HTTP provider interface | `github.com/go-jose/go-jose/v4` v4.1.4 (2026-03-31, Apache-2.0), `github.com/miekg/dns` v1.1.72 (2026-01-22, BSD-3), `github.com/cenkalti/backoff/v5` v5.0.3 (2025-07-23, MIT). No DNS provider or provider SDK is built in; existing higher `golang.org/x/*` versions stay unchanged |
 
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 

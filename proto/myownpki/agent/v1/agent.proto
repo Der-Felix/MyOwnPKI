@@ -23,6 +23,9 @@ service AgentService {
   // RenewCertificate gives an agent a new certificate for a new key, over
   // its current certificate (renewed at 2/3 of its 7 days).
   rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+  // RegisterACMEAccount binds this agent to its ACME account key before
+  // newAccount. Repeating the same thumbprint is safe.
+  rpc RegisterACMEAccount(RegisterACMEAccountRequest) returns (RegisterACMEAccountResponse);
 }
 
 // CheckMethod is how the agent answers the server's http-01 check.
@@ -101,3 +104,10 @@ message RenewCertificateResponse {
   bytes certificate_der = 1;
   repeated bytes chain_der = 2;
 }
+
+message RegisterACMEAccountRequest {
+  // RFC 7638: base64url SHA-256 of the canonical public JWK.
+  string key_thumbprint = 1;
+}
+
+message RegisterACMEAccountResponse {}

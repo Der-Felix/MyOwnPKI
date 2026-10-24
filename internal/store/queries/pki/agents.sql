@@ -113,3 +113,9 @@ DELETE FROM agent_names WHERE agent_id = ? AND pattern = ?;
 
 -- name: BumpDesiredVersion :exec
 UPDATE agents SET desired_version = desired_version + 1, updated_at = ? WHERE id = ?;
+
+-- name: GetAgentByACMEThumbprint :one
+SELECT * FROM agents WHERE acme_key_thumbprint = ?;
+
+-- name: SetAgentACMEThumbprint :exec
+UPDATE agents SET acme_key_thumbprint = ?, updated_at = ? WHERE id = ?;

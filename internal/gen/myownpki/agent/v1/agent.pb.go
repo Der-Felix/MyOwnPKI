@@ -558,6 +558,87 @@ func (x *RenewCertificateResponse) GetChainDer() [][]byte {
 	return nil
 }
 
+type RegisterACMEAccountRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// RFC 7638: base64url SHA-256 of the canonical public JWK.
+	KeyThumbprint string `protobuf:"bytes,1,opt,name=key_thumbprint,json=keyThumbprint,proto3" json:"key_thumbprint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterACMEAccountRequest) Reset() {
+	*x = RegisterACMEAccountRequest{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterACMEAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterACMEAccountRequest) ProtoMessage() {}
+
+func (x *RegisterACMEAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterACMEAccountRequest.ProtoReflect.Descriptor instead.
+func (*RegisterACMEAccountRequest) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RegisterACMEAccountRequest) GetKeyThumbprint() string {
+	if x != nil {
+		return x.KeyThumbprint
+	}
+	return ""
+}
+
+type RegisterACMEAccountResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterACMEAccountResponse) Reset() {
+	*x = RegisterACMEAccountResponse{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterACMEAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterACMEAccountResponse) ProtoMessage() {}
+
+func (x *RegisterACMEAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterACMEAccountResponse.ProtoReflect.Descriptor instead.
+func (*RegisterACMEAccountResponse) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
 var File_myownpki_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
@@ -595,7 +676,10 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\acsr_der\x18\x01 \x01(\fR\x06csrDer\"`\n" +
 	"\x18RenewCertificateResponse\x12'\n" +
 	"\x0fcertificate_der\x18\x01 \x01(\fR\x0ecertificateDer\x12\x1b\n" +
-	"\tchain_der\x18\x02 \x03(\fR\bchainDer*b\n" +
+	"\tchain_der\x18\x02 \x03(\fR\bchainDer\"C\n" +
+	"\x1aRegisterACMEAccountRequest\x12%\n" +
+	"\x0ekey_thumbprint\x18\x01 \x01(\tR\rkeyThumbprint\"\x1d\n" +
+	"\x1bRegisterACMEAccountResponse*b\n" +
 	"\vCheckMethod\x12\x1c\n" +
 	"\x18CHECK_METHOD_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17CHECK_METHOD_STANDALONE\x10\x01\x12\x18\n" +
@@ -607,11 +691,12 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\x1fENROLL_STATE_WAITING_FOR_UNSEAL\x10\x03\x12\x19\n" +
 	"\x15ENROLL_STATE_ADMITTED\x10\x04\x12\x17\n" +
 	"\x13ENROLL_STATE_DENIED\x10\x05\x12\x18\n" +
-	"\x14ENROLL_STATE_EXPIRED\x10\x062\xab\x02\n" +
+	"\x14ENROLL_STATE_EXPIRED\x10\x062\xa1\x03\n" +
 	"\fAgentService\x12M\n" +
 	"\x06Enroll\x12 .myownpki.agent.v1.EnrollRequest\x1a!.myownpki.agent.v1.EnrollResponse\x12_\n" +
 	"\fEnrollStatus\x12&.myownpki.agent.v1.EnrollStatusRequest\x1a'.myownpki.agent.v1.EnrollStatusResponse\x12k\n" +
-	"\x10RenewCertificate\x12*.myownpki.agent.v1.RenewCertificateRequest\x1a+.myownpki.agent.v1.RenewCertificateResponseBFZDgithub.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1;agentv1b\x06proto3"
+	"\x10RenewCertificate\x12*.myownpki.agent.v1.RenewCertificateRequest\x1a+.myownpki.agent.v1.RenewCertificateResponse\x12t\n" +
+	"\x13RegisterACMEAccount\x12-.myownpki.agent.v1.RegisterACMEAccountRequest\x1a..myownpki.agent.v1.RegisterACMEAccountResponseBFZDgithub.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_myownpki_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -626,16 +711,18 @@ func file_myownpki_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_myownpki_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_myownpki_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_myownpki_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_myownpki_agent_v1_agent_proto_goTypes = []any{
-	(CheckMethod)(0),                 // 0: myownpki.agent.v1.CheckMethod
-	(EnrollState)(0),                 // 1: myownpki.agent.v1.EnrollState
-	(*EnrollRequest)(nil),            // 2: myownpki.agent.v1.EnrollRequest
-	(*EnrollResponse)(nil),           // 3: myownpki.agent.v1.EnrollResponse
-	(*EnrollStatusRequest)(nil),      // 4: myownpki.agent.v1.EnrollStatusRequest
-	(*EnrollStatusResponse)(nil),     // 5: myownpki.agent.v1.EnrollStatusResponse
-	(*RenewCertificateRequest)(nil),  // 6: myownpki.agent.v1.RenewCertificateRequest
-	(*RenewCertificateResponse)(nil), // 7: myownpki.agent.v1.RenewCertificateResponse
+	(CheckMethod)(0),                    // 0: myownpki.agent.v1.CheckMethod
+	(EnrollState)(0),                    // 1: myownpki.agent.v1.EnrollState
+	(*EnrollRequest)(nil),               // 2: myownpki.agent.v1.EnrollRequest
+	(*EnrollResponse)(nil),              // 3: myownpki.agent.v1.EnrollResponse
+	(*EnrollStatusRequest)(nil),         // 4: myownpki.agent.v1.EnrollStatusRequest
+	(*EnrollStatusResponse)(nil),        // 5: myownpki.agent.v1.EnrollStatusResponse
+	(*RenewCertificateRequest)(nil),     // 6: myownpki.agent.v1.RenewCertificateRequest
+	(*RenewCertificateResponse)(nil),    // 7: myownpki.agent.v1.RenewCertificateResponse
+	(*RegisterACMEAccountRequest)(nil),  // 8: myownpki.agent.v1.RegisterACMEAccountRequest
+	(*RegisterACMEAccountResponse)(nil), // 9: myownpki.agent.v1.RegisterACMEAccountResponse
 }
 var file_myownpki_agent_v1_agent_proto_depIdxs = []int32{
 	0, // 0: myownpki.agent.v1.EnrollRequest.check_method:type_name -> myownpki.agent.v1.CheckMethod
@@ -643,11 +730,13 @@ var file_myownpki_agent_v1_agent_proto_depIdxs = []int32{
 	2, // 2: myownpki.agent.v1.AgentService.Enroll:input_type -> myownpki.agent.v1.EnrollRequest
 	4, // 3: myownpki.agent.v1.AgentService.EnrollStatus:input_type -> myownpki.agent.v1.EnrollStatusRequest
 	6, // 4: myownpki.agent.v1.AgentService.RenewCertificate:input_type -> myownpki.agent.v1.RenewCertificateRequest
-	3, // 5: myownpki.agent.v1.AgentService.Enroll:output_type -> myownpki.agent.v1.EnrollResponse
-	5, // 6: myownpki.agent.v1.AgentService.EnrollStatus:output_type -> myownpki.agent.v1.EnrollStatusResponse
-	7, // 7: myownpki.agent.v1.AgentService.RenewCertificate:output_type -> myownpki.agent.v1.RenewCertificateResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
+	8, // 5: myownpki.agent.v1.AgentService.RegisterACMEAccount:input_type -> myownpki.agent.v1.RegisterACMEAccountRequest
+	3, // 6: myownpki.agent.v1.AgentService.Enroll:output_type -> myownpki.agent.v1.EnrollResponse
+	5, // 7: myownpki.agent.v1.AgentService.EnrollStatus:output_type -> myownpki.agent.v1.EnrollStatusResponse
+	7, // 8: myownpki.agent.v1.AgentService.RenewCertificate:output_type -> myownpki.agent.v1.RenewCertificateResponse
+	9, // 9: myownpki.agent.v1.AgentService.RegisterACMEAccount:output_type -> myownpki.agent.v1.RegisterACMEAccountResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -664,7 +753,7 @@ func file_myownpki_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_myownpki_agent_v1_agent_proto_rawDesc), len(file_myownpki_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

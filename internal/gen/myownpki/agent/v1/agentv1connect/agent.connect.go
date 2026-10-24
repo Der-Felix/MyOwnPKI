@@ -48,6 +48,9 @@ const (
 	// AgentServiceRenewCertificateProcedure is the fully-qualified name of the AgentService's
 	// RenewCertificate RPC.
 	AgentServiceRenewCertificateProcedure = "/myownpki.agent.v1.AgentService/RenewCertificate"
+	// AgentServiceRegisterACMEAccountProcedure is the fully-qualified name of the AgentService's
+	// RegisterACMEAccount RPC.
+	AgentServiceRegisterACMEAccountProcedure = "/myownpki.agent.v1.AgentService/RegisterACMEAccount"
 )
 
 // AgentServiceClient is a client for the myownpki.agent.v1.AgentService service.
@@ -62,6 +65,9 @@ type AgentServiceClient interface {
 	// RenewCertificate gives an agent a new certificate for a new key, over
 	// its current certificate (renewed at 2/3 of its 7 days).
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
+	// RegisterACMEAccount binds this agent to its ACME account key before
+	// newAccount. Repeating the same thumbprint is safe.
+	RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the myownpki.agent.v1.AgentService service. By
@@ -93,14 +99,21 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
 			connect.WithClientOptions(opts...),
 		),
+		registerACMEAccount: connect.NewClient[v1.RegisterACMEAccountRequest, v1.RegisterACMEAccountResponse](
+			httpClient,
+			baseURL+AgentServiceRegisterACMEAccountProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("RegisterACMEAccount")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // agentServiceClient implements AgentServiceClient.
 type agentServiceClient struct {
-	enroll           *connect.Client[v1.EnrollRequest, v1.EnrollResponse]
-	enrollStatus     *connect.Client[v1.EnrollStatusRequest, v1.EnrollStatusResponse]
-	renewCertificate *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
+	enroll              *connect.Client[v1.EnrollRequest, v1.EnrollResponse]
+	enrollStatus        *connect.Client[v1.EnrollStatusRequest, v1.EnrollStatusResponse]
+	renewCertificate    *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
+	registerACMEAccount *connect.Client[v1.RegisterACMEAccountRequest, v1.RegisterACMEAccountResponse]
 }
 
 // Enroll calls myownpki.agent.v1.AgentService.Enroll.
@@ -118,6 +131,11 @@ func (c *agentServiceClient) RenewCertificate(ctx context.Context, req *connect.
 	return c.renewCertificate.CallUnary(ctx, req)
 }
 
+// RegisterACMEAccount calls myownpki.agent.v1.AgentService.RegisterACMEAccount.
+func (c *agentServiceClient) RegisterACMEAccount(ctx context.Context, req *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error) {
+	return c.registerACMEAccount.CallUnary(ctx, req)
+}
+
 // AgentServiceHandler is an implementation of the myownpki.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	// Enroll starts an enrollment (ADR-18): the hostname, a CSR made on the
@@ -130,6 +148,9 @@ type AgentServiceHandler interface {
 	// RenewCertificate gives an agent a new certificate for a new key, over
 	// its current certificate (renewed at 2/3 of its 7 days).
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
+	// RegisterACMEAccount binds this agent to its ACME account key before
+	// newAccount. Repeating the same thumbprint is safe.
+	RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -157,6 +178,12 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServiceRegisterACMEAccountHandler := connect.NewUnaryHandler(
+		AgentServiceRegisterACMEAccountProcedure,
+		svc.RegisterACMEAccount,
+		connect.WithSchema(agentServiceMethods.ByName("RegisterACMEAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/myownpki.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceEnrollProcedure:
@@ -165,6 +192,8 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 			agentServiceEnrollStatusHandler.ServeHTTP(w, r)
 		case AgentServiceRenewCertificateProcedure:
 			agentServiceRenewCertificateHandler.ServeHTTP(w, r)
+		case AgentServiceRegisterACMEAccountProcedure:
+			agentServiceRegisterACMEAccountHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -184,4 +213,8 @@ func (UnimplementedAgentServiceHandler) EnrollStatus(context.Context, *connect.R
 
 func (UnimplementedAgentServiceHandler) RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("myownpki.agent.v1.AgentService.RenewCertificate is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("myownpki.agent.v1.AgentService.RegisterACMEAccount is not implemented"))
 }

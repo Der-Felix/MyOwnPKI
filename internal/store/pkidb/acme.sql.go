@@ -59,6 +59,30 @@ func (q *Queries) ApproveACMENameDirectly(ctx context.Context, arg ApproveACMENa
 	return err
 }
 
+const bindACMEAccount = `-- name: BindACMEAccount :exec
+UPDATE acme_accounts SET agent_id = ?, approved_at = COALESCE(approved_at, ?),
+    approved_by = COALESCE(approved_by, ?), updated_at = ? WHERE id = ?
+`
+
+type BindACMEAccountParams struct {
+	AgentID    sql.NullString
+	ApprovedAt sql.NullString
+	ApprovedBy sql.NullString
+	UpdatedAt  string
+	ID         string
+}
+
+func (q *Queries) BindACMEAccount(ctx context.Context, arg BindACMEAccountParams) error {
+	_, err := q.db.ExecContext(ctx, bindACMEAccount,
+		arg.AgentID,
+		arg.ApprovedAt,
+		arg.ApprovedBy,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const countACMEAccountsWaiting = `-- name: CountACMEAccountsWaiting :one
 SELECT count(*) FROM acme_accounts WHERE approved_at IS NULL AND status = 'valid'
 `

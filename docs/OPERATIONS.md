@@ -841,3 +841,10 @@ cmd /c root-trust-computer.cmd /check
 Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
 normal for scripts from the network. The fingerprint check proves that the file is intact; that it
 is **your** root, only the comparison with a fingerprint from another way proves.
+
+## 12. Agent ACME account state
+
+After revocation and enrollment with a new agent ID, stop the agent and remove the affected
+`acme-<directory-hash>.key` and matching `acme-<directory-hash>.json` from `state_dir` before
+restarting it: the old account belongs to the previous identity, and the terminal error names
+the exact files that need operator action.

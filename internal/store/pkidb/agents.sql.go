@@ -140,6 +140,37 @@ func (q *Queries) GetAgent(ctx context.Context, id string) (Agent, error) {
 	return i, err
 }
 
+const getAgentByACMEThumbprint = `-- name: GetAgentByACMEThumbprint :one
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE acme_key_thumbprint = ?
+`
+
+func (q *Queries) GetAgentByACMEThumbprint(ctx context.Context, acmeKeyThumbprint sql.NullString) (Agent, error) {
+	row := q.db.QueryRowContext(ctx, getAgentByACMEThumbprint, acmeKeyThumbprint)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.Hostname,
+		&i.Status,
+		&i.EnrollmentMode,
+		&i.Proof,
+		&i.CertID,
+		&i.CertSerial,
+		&i.PrevCertID,
+		&i.PrevCertSerial,
+		&i.AcmeKeyThumbprint,
+		&i.Os,
+		&i.Arch,
+		&i.AgentVersion,
+		&i.DesiredVersion,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAgentByCertSerial = `-- name: GetAgentByCertSerial :one
 SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE cert_serial = ?1 OR prev_cert_serial = ?1
 `
@@ -708,6 +739,21 @@ func (q *Queries) ReadmitAgent(ctx context.Context, arg ReadmitAgentParams) erro
 		arg.UpdatedAt,
 		arg.ID,
 	)
+	return err
+}
+
+const setAgentACMEThumbprint = `-- name: SetAgentACMEThumbprint :exec
+UPDATE agents SET acme_key_thumbprint = ?, updated_at = ? WHERE id = ?
+`
+
+type SetAgentACMEThumbprintParams struct {
+	AcmeKeyThumbprint sql.NullString
+	UpdatedAt         string
+	ID                string
+}
+
+func (q *Queries) SetAgentACMEThumbprint(ctx context.Context, arg SetAgentACMEThumbprintParams) error {
+	_, err := q.db.ExecContext(ctx, setAgentACMEThumbprint, arg.AcmeKeyThumbprint, arg.UpdatedAt, arg.ID)
 	return err
 }
 

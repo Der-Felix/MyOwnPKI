@@ -98,6 +98,12 @@ func (s *Server) Close() {
 	s.valid.wg.Wait()
 }
 
+// SetNetwork replaces validation network edges for integration tests.
+// Address, port and redirect policy checks still run unchanged.
+func (s *Server) SetNetwork(dial func(context.Context, string, string) (net.Conn, error), lookupIP func(context.Context, string) ([]netip.Addr, error)) {
+	s.valid.dial, s.valid.lookupIP = dial, lookupIP
+}
+
 func (v *validator) start(j job) {
 	v.wg.Add(1)
 	go func() {

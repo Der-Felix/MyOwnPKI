@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -110,10 +111,17 @@ func readKey(path string) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, _ := pem.Decode(data)
-	if b == nil {
+	defer clear(data)
+	trimmed := bytes.TrimSpace(data)
+	marker := []byte("-----BEGIN PRIVATE KEY-----")
+	if !bytes.HasPrefix(trimmed, marker) || bytes.Count(trimmed, marker) != 1 {
+		return nil, fmt.Errorf("%s: expected one PKCS#8 PEM key", path)
+	}
+	b, rest := pem.Decode(data)
+	if b == nil || b.Type != "PRIVATE KEY" || len(b.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 {
 		return nil, fmt.Errorf("%s: no PEM key", path)
 	}
+	defer clear(b.Bytes)
 	k, err := x509.ParsePKCS8PrivateKey(b.Bytes)
 	if err != nil {
 		return nil, err

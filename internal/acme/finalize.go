@@ -37,6 +37,18 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if o.Status != "valid" {
+		var ids []identifier
+		if jerr := json.Unmarshal([]byte(o.Identifiers), &ids); jerr != nil {
+			s.fail(w, r, jerr)
+			return
+		}
+		if perr := s.checkAgentOrder(ctx, s.db, req.account, ids); perr != nil {
+			s.invalidate(ctx, o, perr)
+			s.fail(w, r, perr)
+			return
+		}
+	}
 	switch o.Status {
 	case "processing", "valid":
 		s.replyOrder(w, ctx, o) // finalize again: the state as it is
@@ -182,11 +194,25 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 		s.invalidate(ctx, &o, jerr)
 		return
 	}
+	account, err := q.GetACMEAccount(ctx, o.AccountID)
+	if err != nil {
+		s.log.Error("acme account for pending order", slog.String("order", o.ID), slog.Any("error", err))
+		return
+	}
+	if perr := s.checkAgentOrder(ctx, s.db, &account, idents); perr != nil {
+		s.invalidate(ctx, &o, perr)
+		return
+	}
 	req := ca.Request{
 		CSR:       pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: o.CsrDer}),
 		RenewalOf: o.Replaces.String, // RFC 9773 replaces; "" when not a renewal
 		Who:       keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: o.AccountID, Name: "acme:" + o.AccountID}, Principal: authz.System("acme")},
 		ACME: &ca.ACMEOrder{OrderID: o.ID, AccountID: o.AccountID, Stored: func(ctx context.Context, tx *sql.Tx, is *ca.Issued) error {
+			// Also serialize the final permission check with names/status
+			// changes in pki.db: a concurrent removal cannot publish a certificate.
+			if perr := s.checkAgentOrder(ctx, tx, &account, idents); perr != nil {
+				return &ca.DeniedError{Reasons: []string{perr.Error()}}
+			}
 			n, uerr := pkidb.New(tx).SetACMEOrderValid(ctx, pkidb.SetACMEOrderValidParams{CertificateID: sql.NullString{String: is.ID, Valid: true}, UpdatedAt: dbTime(s.now()), ID: o.ID})
 			if uerr != nil {
 				return uerr
@@ -203,6 +229,11 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 		} else {
 			req.DNSNames = append(req.DNSNames, id.Value)
 		}
+	}
+	// This path is shared by finalize and ProcessPending after an unseal.
+	if perr := s.checkAgentOrder(ctx, s.db, &account, idents); perr != nil {
+		s.invalidate(ctx, &o, perr)
+		return
 	}
 	_, err = s.engine.Issue(ctx, req)
 	var denied *ca.DeniedError
