@@ -94,6 +94,10 @@ type Request struct {
 	// must lie in a domain, and CA, preset and validity come from the
 	// domains (PHASE2 step 2) – one policy engine for UI, API and ACME.
 	ACME *ACMEOrder
+	// Stored, if set, runs inside the transaction that stores the
+	// certificate – the agent service links an agent to its certificate
+	// this way, so neither exists without the other (ADR-06).
+	Stored func(ctx context.Context, tx *sql.Tx, issued *Issued) error
 	// acmeWildcards: set by acmeRequest when the domains allow wildcards –
 	// the names stay exactly the order's (no base domain is added, unlike
 	// the wildcard preset).
@@ -590,6 +594,11 @@ func (e *Engine) store(ctx context.Context, req Request, now time.Time, is *issu
 	if req.ACME != nil && req.ACME.Stored != nil {
 		if err := req.ACME.Stored(ctx, tx, out); err != nil {
 			return nil, fmt.Errorf("store ACME order: %w", err)
+		}
+	}
+	if req.Stored != nil {
+		if err := req.Stored(ctx, tx, out); err != nil {
+			return nil, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
