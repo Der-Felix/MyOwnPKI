@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) being released 2026-10-24; next: phase 3 · Last updated: 2026-10-24 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) being released 2026-10-24; next: phase 3 – v0.3.0 the Linux agent (docs/PHASE3.md), monitoring in v0.3.x · Last updated: 2026-10-24 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -65,7 +65,7 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
                     ┌──────────────────────────────────────────────────┐
   Browser ─────────▶│ Admin listener  :9443  UI + REST API (2FA, opt. mTLS)
   certbot/Traefik ─▶│ Public listener :80/443 ACME, CRL, OCSP, AIA      │
-  Agents ──────────▶│ Agent listener  :8443  Connect-RPC over mTLS      │
+  Agents ──────────▶│ Agent listener  :8444  Connect-RPC over mTLS      │
                     │                                                  │
                     │  myownpki (single binary)                        │
                     │  ├─ CA engine        signing, CRL, OCSP           │
@@ -434,7 +434,7 @@ release plan below – v1.0 takes parts of phases 2–4 and leaves others for la
 |---|---|---|
 | **v0.1** | Phase 1 complete, as planned in `docs/PHASE1.md` | Bash script replaced in the browser |
 | **v0.2** | ACME server with **http-01 and dns-01** (the server only *reads* the TXT record, through a **configurable DNS resolver** – internal DNS, split DNS); domain model and approval levels | certbot/Traefik/Caddy against the own CA |
-| **v0.3** | **Linux agent** (with the DNS provider integration for dns-01) and **monitoring** (details below) | Certificates deployed and watched |
+| **v0.3** | **v0.3.0: Linux agent** with http-01 (standalone and webroot), nginx and file profiles, "Renew now" (docs/PHASE3.md, owner 2026-10-24); **v0.3.x: monitoring**, dns-01 in the agent (DNS providers), Apache and HAProxy profiles, demo (details below) | Certificates deployed and watched |
 | **Beta** | Feature freeze; release pipeline, demo, guides, upgrade tests; only fixes | Tested by others before 1.0 |
 | **v1.0** | Everything above, stable | – |
 
