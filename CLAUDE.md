@@ -2,7 +2,7 @@
 
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
 templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 released;
-v0.2.0 ACME server released; v0.2.1 = systemd installation being released); phase 3 (agent, monitoring) next.
+v0.2.0 ACME server released; v0.2.1-rc.1 systemd installation in production; v0.2.2 = own TLS, daily backup, trust page – built, not released); phase 3 (agent, monitoring) next.
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,

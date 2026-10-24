@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) being released 2026-10-24; next: phase 3 · Last updated: 2026-10-24 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1-rc.1 (installation as a systemd service) tagged and in production since 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) built in the night run 2026-10-24, not released; next: phase 3 · Last updated: 2026-10-24 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -511,6 +511,14 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [x] Server-side key generation: yes, switchable per tenant, CSR is the default (§5)
 - [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
 - [x] Repository visibility: public (2026-10-13)
+
+### Backlog from the production use of v0.2.1-rc.1 (owner 2026-10-24) – noted, not built
+
+- Issue form: the name fields (DNS names, IPs, e-mails, URIs) also accept commas and spaces as
+  separators, not only one name per line.
+- CA form: hide the *Path length* field when creating a root instead of ignoring it silently.
+- install.sh docs: `sudo` drops `https_proxy` – behind a proxy use
+  `sudo --preserve-env=https_proxy,http_proxy,no_proxy bash install.sh …` or a root shell.
 
 ---
 

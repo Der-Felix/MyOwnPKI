@@ -1,3 +1,141 @@
+# Night log – v0.2.2
+
+> Autonomous run, night of 2026-10-24, branch `night/v0.2.2` (from `origin/main` 123ba9b, no
+> upstream set – a bare `git push` goes nowhere). Three tasks from the production use of
+> v0.2.1-rc.1 (owner decisions 2026-10-24). Rules: own commits per topic, each with `task check`
+> and `task generate:check` green; **not pushed, not merged, no tag, nothing published**. Open
+> questions didn't stop the run: the cautious variant was built and is marked *(night)* below and
+> in PLAN §14 "v0.2.2".
+>
+> Written in English (ADR-17). The owner's report comes first, the decision table after it.
+
+## Report for the owner
+
+**Result: all three tasks are built, tested and committed locally; the backlog items are noted
+in PLAN §12.** Parts that need Linux with systemd, Docker or real ACME clients run only in CI –
+see "Only checkable in CI".
+
+### Commits on `night/v0.2.2` (oldest first, all local)
+
+| Commit | What |
+|---|---|
+| `9a3ef4a` | feat(server): own TLS certificates for the admin and ACME listeners (`tls_issuer`) |
+| `f85db34` | feat(deploy): `low-ports.conf`, `install.sh --acme`, CI against the own TLS listener |
+| `767349f` | feat(backup): daily backup timer, `backup scheduled`, `backup prune` |
+| `6052334` | feat(publish): public trust page with Windows helpers |
+| _this commit_ | docs: backlog, status lines, this night log |
+
+### Done – in short
+
+1. **Own TLS** – `admin.tls_issuer` / `acme.tls_issuer` name a CA; the server issues its listener
+   certificate through `ca.Engine.Issue` (preset *server*, new ECDSA P-256 key, name constraints,
+   audit entry *system / server*), 90 days at most (CA maximum and CA end respected), renewed at
+   2/3, at once after a revocation, a name change or a CA renewal. Key 0600 and fullchain in
+   `<data_dir>/tls/`; issued only while unsealed; an expired one falls back to the bootstrap
+   certificate per handshake (warning in log and on the dashboard), no restart. ACME with
+   `acme.tls_issuer`: its own TLS listener, every peer allowed, client address = peer,
+   `trusted_proxies`/XFF ignored. Proxy mode unchanged and the default (PHASE2 Q1 amended,
+   PLAN §14). `low-ports.conf` replaces `public-port-80.conf` (the old name still works and
+   ships); `install.sh --acme https://NAME/acme [--acme-ca NAME]`.
+2. **Daily backup** – `myownpki-backup.timer` (daily, `RandomizedDelaySec=1h`, `Persistent`) runs
+   `myownpki backup scheduled /var/backups/myownpki --keep 14`: backup, verify, then prune.
+   `backup prune` deletes only complete scheduled backups (name, real directory, readable
+   manifest, exactly the listed files and sizes). install.sh's update backups are **spared**.
+   install.sh installs the units and enables the timer the first time (`--no-backup-timer`,
+   `--backup-keep N`); the update path is unchanged.
+3. **Trust page** at `/` of the public listener: CAs, roots first, with CN, validity, large
+   SHA-256, DER/PEM downloads, guides for Windows, macOS, iPhone/iPad, Android, Linux, Firefox; no
+   JavaScript, CSP `default-src 'none'`, cached; switchable per tenant (system.db 0010, API
+   `trust_page`, default on). Windows helpers per root (LocalMachine with self-elevation,
+   CurrentUser) as Batch/PowerShell polyglot `.cmd`, ASCII + CRLF, SHA-256 check before the
+   import, `/check` without import.
+
+### Checked here (Windows Server 2025)
+
+- `task check` and `task generate:check` green before every commit; `task lint:api` passed;
+  ShellCheck as in CI; `task upgrade:test` (v0.1.0 to this build, incl. migration 0010) and
+  `task acme:lego` green.
+- Mutation checks: issued TLS 5 of 5 caught; prune 5 of 6 – the symlink case runs only on Linux,
+  where a symlink is also caught as "not a directory".
+- A local instance like the CI one: ACME on 127.0.0.1:443 with its bootstrap certificate while
+  sealed; sign-in, TOTP and unseal through the API **with the bash functions of the CI test**;
+  the directory over TLS with the root as the only trust anchor; then a sealed restart that
+  serves the issued certificate; healthcheck ok. `backup scheduled` and `prune --dry-run` against
+  it.
+- The Windows helpers with cmd.exe: `/check` passes, a changed copy stops with 2, an unknown
+  switch with 64 – a Go test, also its own step in the Windows CI job.
+- The trust page in the browser, light and dark.
+
+### Only checkable in CI
+
+- **install job** (systemd): `--acme`; `systemd-analyze security` **with** `low-ports.conf` and for
+  the backup unit (both must stay below 2.0 – estimated about 1.5 for the main unit: the drop-in
+  adds `PrivateUsers=no` and one capability; not measured here); the unseal through the API on
+  the runner; the backup timer, a run, prune with `--backup-keep 2`, `--no-backup-timer`.
+- **conformance job**: `TestConformanceTLS` – lego and certbot directly against the own TLS
+  listener (base URL with the runner's IP; the listener certificate has an IP SAN).
+- **Windows job**: the helper step (green here locally).
+
+### To decide or check
+
+1. **systemd-analyze values** with the drop-in and of the backup unit: the CI summary shows them;
+   please put them into OPERATIONS §2.1 (as for 1.2).
+2. **`PrivateNetwork=yes` in the backup unit** on your unprivileged Debian 13 LXC: if the unit
+   fails with "226/NAMESPACE", `systemctl edit myownpki-backup.service` with `PrivateNetwork=no` –
+   and tell me, then I take it out.
+3. **`--acme-ca` default `issuing`**: your intermediate has another name – set
+   `acme.tls_issuer` (and `admin.tls_issuer`) by hand or through Salt. With the name constraint
+   `u.lab`, `admin.tls_names` may only hold names below `u.lab` (IPs only if the CA has no IP
+   constraints).
+4. **Release**: `DEFAULT_VERSION` in install.sh is still 0.2.1 – release.yml refuses v0.2.2 until
+   it is bumped (on purpose not done tonight). This install.sh needs archives with
+   `low-ports.conf` (v0.2.2 and later); for an older release use that release's install.sh.
+5. **v0.2.1 final** is not tagged (only `v0.2.1-rc.1`); the CHANGELOG `[Unreleased]` link compares
+   against `v0.2.1`.
+
+### Found on the way
+
+- Git Bash rewrites `/check` into `C:/Program Files/Git/check`: the first helper version went on
+  to the import (a Windows dialog would have asked; the process was killed by PID, nothing was
+  imported – checked in `Cert:\CurrentUser\Root`). Fixed in the helper: any unknown argument
+  stops with 64.
+- OpenSSL 3.5 prints `subject=CN=…`, the runner's 3.0 `subject=CN = …`: the CI test uses
+  `-nameopt RFC2253`.
+- A proxy on this machine answered `curl` with Squid's 503; the CI test calls use `--noproxy '*'`.
+- templ reads `for`/`if` after an element or expression as a statement, and joins the lines of
+  plain text inside `<pre>` – commands with several lines are Go strings with `\n` (tested).
+
+## Decision table – v0.2.2
+
+*(night)* = decided alone tonight, the cautious variant; all of them are in PLAN §14 "v0.2.2" too.
+
+| # | Topic | Decision | Why | How to reverse |
+|---|---|---|---|---|
+| 1 | TLS | Keys named `tls_issuer` (your proposal), not `tls_ca` *(night)* | `tls_ca` reads like "the CA to verify clients against" | rename the YAML keys and `MYOWNPKI_*_TLS_ISSUER` |
+| 2 | TLS | The admin certificate has exactly `admin.tls_names` – no host name, `localhost`, loopback *(night)* | name constraints like `u.lab` refuse `localhost`; the health check pins the file | add names in `issuedCertificates` (server.go) |
+| 3 | TLS | A refused issuance is retried after 6 h, other errors after 15 min *(night)* | each refusal is an audit entry | `issuedRetryDenied` |
+| 4 | TLS | Validity 90 days, capped at the CA maximum **and the CA end** (refused only below one day) *(night)* | a CA near its end still gets its listener a certificate | `validityDays` |
+| 5 | TLS | Fullchain = certificate + intermediates, without the root *(night)* | like certbot's fullchain.pem; the root is the client's anchor | `issue()` |
+| 6 | TLS | ACME serves its own self-signed bootstrap certificate until the first issuance *(night)* | same as admin; clients refuse it with a clear error | refuse the handshake in `GetCertificate` |
+| 7 | TLS | Issued again at once after a revocation, a name change, a CA renewal (leaf not signed by the CA's current key) | a revoked or orphaned listener certificate must not stay | `due()` |
+| 8 | deploy | `--acme-ca` defaults to `issuing` (the name of `init --with-ca`) *(night)* | install.sh runs before `init` and can't know your CA names | make it required |
+| 9 | deploy | `low-ports.conf` is new; `public-port-80.conf` stays in the archive (same settings, a test compares them); an installed one is kept, no second drop-in; drop-ins are never removed *(night)* | "old name still supported"; Salt states and guides keep working | drop the old file from `.goreleaser.yaml` |
+| 10 | backup | install.sh's update backups (`<time>-<version>`) are spared and don't count *(night)* | the way back before a migration; daily ones must not push it out | match them in `isScheduled` |
+| 11 | backup | The backup unit may also write `/var/lib/myownpki` – you asked for "only the backup target" *(night, deviation)* | SQLite writes `-shm` even to read a WAL database; every backup is an audit entry | not without dropping the audit entry |
+| 12 | backup | Backup unit: the server's sandbox **plus** `PrivateNetwork=yes`, `IPAddressDeny=any`, `AF_UNIX` only *(night)* | a backup needs no network | `PrivateNetwork=no` in a drop-in ("To decide" 2) |
+| 13 | backup | A backup that fails its check becomes `<time>-unverified`: not pruned, not counted, the run fails *(night)* | a bad backup must not count as one of the 14 | `runBackupScheduled` |
+| 14 | backup | One Go command `backup scheduled` (backup, verify, prune) instead of three `ExecStart=` *(night)* | systemd can't build the time stamp without a shell; one exit code per run | – |
+| 15 | backup | install.sh enables the timer only when it installs it the first time; `--no-backup-timer` disables it; later runs keep your choice *(night)* | Salt runs install.sh again and again | `install_units` |
+| 16 | backup | `BACKUP_KEEP` as `Environment=` plus drop-in `keep.conf` (`--backup-keep`), not a config key *(night)* | install.sh never touches config.yaml; unknown `MYOWNPKI_*` variables are errors | – |
+| 17 | backup | `backup prune` writes no audit entry; the journal names every deleted and skipped directory *(night)* | it needs no config and deletes copies, not PKI state | an audit entry with `--config` |
+| 18 | trust | Off = page and Windows helpers 404; `/ca/…crt`, `/ca/…pem` and the CRLs stay *(night)* | certificates point to them | – |
+| 19 | trust | Every valid, unrevoked generation of an active CA is shown (the older root generation while valid) *(night)* | clients still need the old root for older certificates | `shown()` |
+| 20 | trust | The helper stops on any unknown argument (exit 64) *(night)* | found in testing: a typo must never become an import | – |
+| 21 | trust | No `.mobileconfig` yet *(night)* | not asked for tonight; DER works on iOS and macOS | PLAN §10.1 lists it for v1.0 |
+| 22 | trust | Downloads keep the existing `/ca/<name>/<gen>.crt` (AIA); the buttons save it as `<name>.crt` (HTML `download`), the iOS step links it without `download` *(night)* | nothing changes for what certificates point to; iOS must see the profile type | – |
+
+---
+
 # Night log – v0.2
 
 > Autonomous run, night of 2026-10-22 → 2026-10-23, branch `night/v0.2` (from `fix/release-notes`,
