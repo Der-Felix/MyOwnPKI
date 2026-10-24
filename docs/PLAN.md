@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1-rc.1 (installation as a systemd service) tagged and in production since 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) built in the night run 2026-10-24, not released; next: phase 3 · Last updated: 2026-10-24 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) being released 2026-10-24; next: phase 3 · Last updated: 2026-10-24 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -399,7 +399,7 @@ MyOwnPKI/
 ├─ legacy/                 pki.sh + lib/ (offline root tool)
 ├─ .github/                CI workflow, shared setup action, Dependabot
 ├─ Taskfile.yml            build, test, lint, dev, cross, vuln
-└─ docs/                   PLAN.md, NIGHTLOG.md (phase 0 log), PHASE1.md, screenshots/
+└─ docs/                   PLAN.md, NIGHTLOG.md (logs of the night runs), PHASE1–3.md, OPERATIONS.md, screenshots/
 ```
 
 ---
@@ -512,13 +512,21 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
 - [x] Repository visibility: public (2026-10-13)
 
-### Backlog from the production use of v0.2.1-rc.1 (owner 2026-10-24) – noted, not built
+### Backlog – noted, not built
+
+From the production use of v0.2.1-rc.1 (owner 2026-10-24):
 
 - Issue form: the name fields (DNS names, IPs, e-mails, URIs) also accept commas and spaces as
   separators, not only one name per line.
 - CA form: hide the *Path length* field when creating a root instead of ignoring it silently.
 - install.sh docs: `sudo` drops `https_proxy` – behind a proxy use
   `sudo --preserve-env=https_proxy,http_proxy,no_proxy bash install.sh …` or a root shell.
+
+Left out of v0.2.2 (owner 2026-10-24):
+
+- Trust page: an Apple configuration profile (`.mobileconfig`) per root for iPhone, iPad and macOS
+  – a named profile instead of the bare DER file; on iOS full trust is still switched on by hand
+  (§14 "v0.2.2"; §10.1 "trust store, small form", PHASE3 step 10).
 
 ---
 
@@ -775,8 +783,9 @@ this only changes tokens, component classes and the shell.
 
 ### v0.2.2 – own TLS, daily backup, trust page (owner decisions 2026-10-24)
 From the production use of v0.2.1-rc.1 (Debian 13 LXC, install.sh through Salt). Built in the night
-run of 2026-10-24 (docs/NIGHTLOG.md); rows marked *(night)* were decided alone, as the cautious
-variant, for the owner to confirm.
+run of 2026-10-24 (docs/NIGHTLOG.md, with how to reverse each decision); released as v0.2.2. The
+decisions taken alone that night (the cautious variant each time) were confirmed by the owner on
+2026-10-24, so every row is an owner decision.
 
 | Decision | Why |
 |---|---|
@@ -784,28 +793,28 @@ variant, for the owner to confirm.
 | `admin.tls_issuer` / `acme.tls_issuer` name a CA of the instance; the server issues the listener's certificate through `ca.Engine.Issue` (preset *server*, a new ECDSA P-256 key per certificate, a CSR, `IgnoreCSRNames` with exactly the configured names), audited as *system / server* | One policy engine (ADR-19): name constraints, CA limits and the audit log apply to the server's own certificate too |
 | 90 days at most, capped by the CA's maximum and its end; renewed at 2/3, at once after a revocation, a name change or a CA renewal (the leaf no longer verifies against the CA's current certificate) | Short-lived like ACME certificates; nothing to renew by hand |
 | Key unencrypted in `<data_dir>/tls/<listener>.key` (0600), fullchain without the root in `<listener>.crt`; issuance only while unsealed; an expired certificate falls back to the bootstrap certificate per handshake (`GetCertificate`), with a warning every 15 minutes and on the dashboard | The listeners must work while sealed, like the bootstrap certificate (§5); no restart for a switch |
-| *(night)* Config keys `tls_issuer` (the owner's proposal) – not `tls_ca` | `tls_ca` reads like "the CA to verify clients against" (nginx, Traefik) – a dangerous misreading |
-| *(night)* `admin.tls_issuer` needs `admin.tls_names` and excludes `admin.tls_cert_file`; the issued certificate has exactly `admin.tls_names` – no host name, `localhost` or loopback added | Name constraints of a real intermediate (e.g. `u.lab`) would refuse `localhost`; the health check pins the file, it needs no name |
-| *(night)* A refused issuance is retried after 6 hours (other errors after 15 minutes), not at every check | Each refusal is an audit entry; a configuration error must not fill the log |
+| Config keys `tls_issuer` (the owner's proposal) – not `tls_ca` | `tls_ca` reads like "the CA to verify clients against" (nginx, Traefik) – a dangerous misreading |
+| `admin.tls_issuer` needs `admin.tls_names` and excludes `admin.tls_cert_file`; the issued certificate has exactly `admin.tls_names` – no host name, `localhost` or loopback added | Name constraints of a real intermediate (e.g. `u.lab`) would refuse `localhost`; the health check pins the file, it needs no name |
+| A refused issuance is retried after 6 hours (other errors after 15 minutes), not at every check | Each refusal is an audit entry; a configuration error must not fill the log |
 | `tls_issuer` must name an intermediate: a root is named at the start (log), as an error on the dashboard and as a warning in `config check` (when the CA database is readable) with the fix and the intermediates under that root; nothing is issued or tried, the listener serves the bootstrap certificate – also instead of a still valid certificate from an earlier intermediate | A root usually has no name constraints – a listener certificate straight from it would bypass the intermediate's. The engine refuses it anyway (CA/B BR §6.1.7); this names the fix before the first refusal and keeps refusals out of the audit log |
 | A root in `tls_issuer` is a **warning** in `config check` (stderr, exit 0), not an invalid config | The server starts with it (bootstrap certificate), and install.sh aborts an update on a failed `config check` – a warning must not block an update; install.sh shows stderr |
-| *(night)* With `acme.tls_issuer` the ACME listener serves its own self-signed bootstrap certificate (`acme-bootstrap.crt`) until the first issuance, instead of refusing the handshake | The same behaviour as the admin listener; clients refuse it with a clear "unknown authority" |
+| With `acme.tls_issuer` the ACME listener serves its own self-signed bootstrap certificate (`acme-bootstrap.crt`) until the first issuance, instead of refusing the handshake | The same behaviour as the admin listener; clients refuse it with a clear "unknown authority" |
 | With `acme.tls_issuer`: `acme.listen` is its own listener (never the admin one), every peer may connect, `acme.trusted_proxies` and `X-Forwarded-For` are ignored, the peer is the client address for rate limits and audit | No header is believed when no proxy wrote it |
 | Daily backup: `myownpki-backup.timer` (daily, `RandomizedDelaySec=1h`, `Persistent=true`) starts `myownpki-backup.service` (oneshot), which runs `myownpki backup scheduled /var/backups/myownpki --keep ${BACKUP_KEEP}` – backup, verify, prune in one Go command, prune only after a passed check | One exit code per run for systemd (`systemctl --failed`); no shell in the unit to build the time stamp |
 | `backup prune` deletes only complete scheduled backups: name `YYYYMMDDTHHMMSSZ`, a real directory, a readable manifest, exactly the listed files with the listed sizes; keep ≥ 1 | Never anything an admin put there, never a half-written or tampered directory |
-| *(night)* install.sh's update backups (`<time>-<version>`) are **spared** – they don't count against `--keep` and prune never deletes them | They are the way back before a migration; one per update, few; daily backups must not push them out (nor they the daily ones) |
-| *(night)* A scheduled backup that fails its check is renamed `<time>-unverified`: never pruned, not counted, the run fails | A bad backup must not count as one of the 14 good ones, and must stay for a look |
-| *(night)* The backup unit may also write `/var/lib/myownpki` (not only the backup target, as asked) | SQLite writes its `-shm` lock file even to read a database in WAL mode, and every backup is an entry in the instance audit log – read-only would break both |
-| *(night)* The backup unit adds `PrivateNetwork=yes`, `IPAddressDeny=any`, `RestrictAddressFamilies=AF_UNIX` to the server's sandbox | A backup needs no network; a test checks that it keeps every other setting of the main unit |
-| *(night)* `BACKUP_KEEP` as `Environment=` in the unit, overridden by the drop-in `keep.conf` (`install.sh --backup-keep N`) – not a config key | `config.yaml` is never changed by install.sh, and an unknown `MYOWNPKI_*` variable is an error by design |
-| *(night)* install.sh enables the timer only when it installs it the first time; `--no-backup-timer` disables it; a later run without the option leaves it off | An admin who switched it off keeps it off (Salt runs install.sh again and again) |
+| install.sh's update backups (`<time>-<version>`) are **spared** – they don't count against `--keep` and prune never deletes them | They are the way back before a migration; one per update, few; daily backups must not push them out (nor they the daily ones) |
+| A scheduled backup that fails its check is renamed `<time>-unverified`: never pruned, not counted, the run fails | A bad backup must not count as one of the 14 good ones, and must stay for a look |
+| The backup unit may also write `/var/lib/myownpki` (not only the backup target, as asked) | SQLite writes its `-shm` lock file even to read a database in WAL mode, and every backup is an entry in the instance audit log – read-only would break both |
+| The backup unit adds `PrivateNetwork=yes`, `IPAddressDeny=any`, `RestrictAddressFamilies=AF_UNIX` to the server's sandbox | A backup needs no network; a test checks that it keeps every other setting of the main unit |
+| `BACKUP_KEEP` as `Environment=` in the unit, overridden by the drop-in `keep.conf` (`install.sh --backup-keep N`) – not a config key | `config.yaml` is never changed by install.sh, and an unknown `MYOWNPKI_*` variable is an error by design |
+| install.sh enables the timer only when it installs it the first time; `--no-backup-timer` disables it; a later run without the option leaves it off | An admin who switched it off keeps it off (Salt runs install.sh again and again) |
 | Dashboard warning for the daily backup: a `<time>-unverified` directory (until deleted), or a newest timer backup older than 48 hours; only when the timer's unit is installed or a timer backup exists. The server reads the directory listing (names only) and whether the unit file and its `timers.target.wants` link exist – no status file from the backup service | Reading needs no new rights for the main unit (`ProtectSystem=strict` makes `/var` and `/etc` read-only, not hidden; the directory belongs to `myownpki`); a status file would be a second source of truth that can lie when the service never starts. The install CI job checks it inside the real sandbox |
 | No warning while the timer is installed but off and has never written a backup (`--no-backup-timer`); a warning when it has been on (the link's time) for 48 hours without one | Switching it off before the first run was a choice; a stop after backups existed is not |
-| *(night)* `backup prune` writes no audit entry (it reads only the backup directory, needs no config); the journal names every deleted and every skipped directory | The deletions are of copies, not of PKI state; creation is audited |
+| `backup prune` writes no audit entry (it reads only the backup directory, needs no config); the journal names every deleted and every skipped directory | The deletions are of copies, not of PKI state; creation is audited |
 | Trust page at `/` of the public listener (internal/publish, templ page `internal/web/pages/trust` in the `Plain` layout, the app's stylesheets and logo served there too); CSP `default-src 'none'` plus own styles and images, no script; page 5 minutes, files 15 minutes cache with ETag | The same design language without the admin listener; nothing a stranger could make run |
 | Tenant setting `trust_page` (system.db 0010, default on), asked per request; in `PUT /api/v1/settings` optional (absent keeps it), always in the answer – like `acme_limits` in v0.2 | v0.2 clients keep working; switching off applies at once |
-| *(night)* Off switches only the page and the Windows helpers off; `/ca/…crt`, the new `/ca/…pem` and the CRLs stay | Certificates point to them (AIA, CDP) – they must never disappear |
-| *(night)* Shown: active CAs, every generation that is valid now and not revoked (an older root generation stays while valid), roots first | After a root renewal, clients still need the older root for older certificates |
+| Off switches only the page and the Windows helpers off; `/ca/…crt`, the new `/ca/…pem` and the CRLs stay | Certificates point to them (AIA, CDP) – they must never disappear |
+| Shown: active CAs, every generation that is valid now and not revoked (an older root generation stays while valid), roots first | After a root renewal, clients still need the older root for older certificates |
 | Windows helper: one `.cmd` per root generation and store (LocalMachine with self-elevation, CurrentUser), Batch/PowerShell polyglot (`<# :` … `#>`), the root as PEM inside, its SHA-256 compared before the import, ASCII and CRLF; `/check` without import (the Windows CI job runs it), `/quiet` | The owner's existing approach; a changed file stops before it changes a trust store |
-| *(night)* Any unknown argument stops the helper with exit code 64 before anything is imported | Found while testing: Git Bash turned `/check` into a path, and the helper went on to the import – a typo must never become a trust decision |
-| *(night)* No `.mobileconfig` for Apple yet (PLAN §10.1 "trust store, small form" names it) | Not asked for in this run; the DER file works on iOS and macOS, the guide says how |
+| Any unknown argument stops the helper with exit code 64 before anything is imported | Found while testing: Git Bash turned `/check` into a path, and the helper went on to the import – a typo must never become a trust decision |
+| No `.mobileconfig` for Apple yet (PLAN §10.1 "trust store, small form" names it) | Not asked for in this run; the DER file works on iOS and macOS, the guide says how. In the backlog (§12) |

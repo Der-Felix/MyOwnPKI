@@ -8,6 +8,15 @@
 > in PLAN §14 "v0.2.2".
 >
 > Written in English (ADR-17). The owner's report comes first, the decision table after it.
+>
+> **Closed 2026-10-24 – released as v0.2.2** (CHANGELOG [0.2.2]). After the owner's review two
+> commits were added on `night/v0.2.2` – a root CA as `tls_issuer` is named with the fix, and the
+> dashboard warns about failed or missing daily backups – plus the branch rules in CLAUDE.md; the
+> branch was merged as PR 8 (`c9cfac6`), and `docs: prepare v0.2.2` on `release/v0.2.2` dated
+> the release. The owner confirmed every *(night)* decision on 2026-10-24; they stay in PLAN §14
+"v0.2.2" without the mark, the `.mobileconfig` (21) is in the PLAN §12 backlog. From "To decide or check" below, 4 and 5
+> are done; 1–3 are the owner's checks on the production instance and stay open. The report is
+> kept as written that night.
 
 ## Report for the owner
 
@@ -23,7 +32,10 @@ see "Only checkable in CI".
 | `f85db34` | feat(deploy): `low-ports.conf`, `install.sh --acme`, CI against the own TLS listener |
 | `767349f` | feat(backup): daily backup timer, `backup scheduled`, `backup prune` |
 | `6052334` | feat(publish): public trust page with Windows helpers |
-| _this commit_ | docs: backlog, status lines, this night log |
+| `c350a70` | docs: backlog, status lines, this night log |
+| `4e72e19` | feat(server): refuse a root CA as `tls_issuer` with a clear message *(after the review)* |
+| `a196eaf` | feat(backup): dashboard warning for failed or missing daily backups *(after the review)* |
+| `071520a` | docs(claude): branch and worktree rules *(after the review)* |
 
 ### Done – in short
 
@@ -90,8 +102,10 @@ see "Only checkable in CI".
 4. **Release**: `DEFAULT_VERSION` in install.sh is still 0.2.1 – release.yml refuses v0.2.2 until
    it is bumped (on purpose not done tonight). This install.sh needs archives with
    `low-ports.conf` (v0.2.2 and later); for an older release use that release's install.sh.
+   **Done 2026-10-24** in `docs: prepare v0.2.2` (`DEFAULT_VERSION=0.2.2`; the CHANGELOG says
+   which install.sh installs which release).
 5. **v0.2.1 final** is not tagged (only `v0.2.1-rc.1`); the CHANGELOG `[Unreleased]` link compares
-   against `v0.2.1`.
+   against `v0.2.1`. **Done:** v0.2.1 is tagged on `123ba9b`, the start of this run.
 
 ### Found on the way
 

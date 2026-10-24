@@ -7,6 +7,19 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-24
+
+The server can issue the TLS certificates of its own listeners from one of its intermediates, so
+ACME works without a reverse proxy; a daily backup timer for systemd installations; and a public
+trust page that hands out the root certificates. Without `tls_issuer` the listeners keep their
+bootstrap or configured certificate, and the proxy way for ACME stays the default. **Upgrade from 0.2.1 with install.sh:** run the 0.2.2 `install.sh` as
+before – backup, new binary, migration (system.db 0010), health check; it now also installs the
+daily backup timer and enables it once (`--no-backup-timer` keeps it off). An installed
+`public-port-80.conf` stays. This `install.sh` installs 0.2.2 and later only; for an older release
+use that release's `install.sh`. **Docker installations:** back up, pull the 0.2.2 image, start; the
+backup timer is for systemd installations. The trust page appears at `/` of the public listener in
+both cases – switch it off in *Tenant settings* if you don't want it.
+
 ### Added
 
 - **The server issues its own TLS certificates** from a CA of the instance: `admin.tls_issuer` for
@@ -209,7 +222,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Der-Felix/MyOwnPKI/releases/tag/v0.1.0
