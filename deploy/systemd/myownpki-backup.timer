@@ -1,0 +1,19 @@
+# Starts myownpki-backup.service once a day (v0.2.2). Installed and enabled
+# by deploy/install.sh (off with --no-backup-timer) – docs/OPERATIONS.md §6.1.
+#
+#   systemctl list-timers myownpki-backup.timer   when it runs next
+#   systemctl disable --now myownpki-backup.timer switch it off
+
+[Unit]
+Description=Daily backup of MyOwnPKI
+Documentation=https://github.com/Der-Felix/MyOwnPKI/blob/main/docs/OPERATIONS.md
+
+[Timer]
+OnCalendar=daily
+# Not at midnight sharp on every machine at once.
+RandomizedDelaySec=1h
+# A run missed while the machine was off happens at the next start.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

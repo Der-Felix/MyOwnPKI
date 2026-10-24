@@ -20,6 +20,9 @@
 # - installs /usr/local/bin/myownpki, the unit (and the low-ports drop-in with
 #   --public-port-80 or --acme on a port below 1024) and – only if there is
 #   none yet – /etc/myownpki/config.yaml;
+# - installs the daily backup (myownpki-backup.service and .timer, backups in
+#   /var/backups/myownpki) and enables the timer when it installs it the
+#   first time (--no-backup-timer: off; --backup-keep N: how many to keep);
 # - first installation: enables the service, does NOT start it, and prints
 #   the next commands (init at the terminal, start, fingerprint, unseal);
 # - update (a new binary over an initialized instance): backup and backup
@@ -49,6 +52,9 @@ OLD_LOWPORTS=$DROPINS/public-port-80.conf
 CONF=/etc/myownpki/config.yaml
 DATA=/var/lib/myownpki
 BACKUPS=/var/backups/myownpki
+BACKUP_UNIT=/etc/systemd/system/myownpki-backup.service
+BACKUP_TIMER=/etc/systemd/system/myownpki-backup.timer
+BACKUP_KEEP_DROPIN=/etc/systemd/system/myownpki-backup.service.d/keep.conf
 
 usage() {
 	cat <<EOF
@@ -70,11 +76,16 @@ Usage: install.sh [options]   (as root)
                          low-ports.conf), acme.tls_issuer from --acme-ca
   --acme-ca NAME         the CA that issues the ACME listener's certificate
                          (default issuing – the intermediate of init --with-ca)
+  --backup-keep N        how many daily backups the timer keeps (default 14; a
+                         drop-in myownpki-backup.service.d/keep.conf)
+  --no-backup-timer      switch the daily backup timer off (and leave it off)
   -h, --help             this text
 
 The config options (--tls-names, --admin-listen, --allowed-networks,
 --public-port-80, --acme) only apply when /etc/myownpki/config.yaml is created;
-an existing config is never changed. The drop-in is installed either way.
+an existing config is never changed. The drop-ins are installed either way.
+The backup timer is enabled once, when install.sh installs it; afterwards
+install.sh leaves it as it is, unless --no-backup-timer is given.
 EOF
 }
 
@@ -107,6 +118,8 @@ opt_acme=
 opt_acme_ca=
 acme_port=
 low_ports=false
+opt_backup_keep=
+backup_timer=true
 config_opts=false
 
 parse_args() {
@@ -120,6 +133,8 @@ parse_args() {
 		--public-port-80) port80=true; shift ;;
 		--acme) opt_acme=${2:?--acme needs a URL}; config_opts=true; shift 2 ;;
 		--acme-ca) opt_acme_ca=${2:?--acme-ca needs a CA name}; shift 2 ;;
+		--backup-keep) opt_backup_keep=${2:?--backup-keep needs a number}; shift 2 ;;
+		--no-backup-timer) backup_timer=false; shift ;;
 		-h | --help) usage; exit 0 ;;
 		*) usage >&2; die "unknown option: $1" ;;
 		esac
@@ -145,6 +160,10 @@ parse_args() {
 		die "--acme-ca only goes with --acme"
 	fi
 	if $port80; then low_ports=true; fi
+	if [ -n "$opt_backup_keep" ]; then
+		[[ $opt_backup_keep =~ ^[1-9][0-9]{0,3}$ ]] && [ "$opt_backup_keep" -le 1000 ] ||
+			die "--backup-keep: a number from 1 to 1000, got $opt_backup_keep"
+	fi
 	# main() changes to / before it reads the archive: make a relative path
 	# absolute now, and refuse a missing file with the path as it was given.
 	if [ -n "$archive" ]; then
@@ -335,7 +354,8 @@ unpack() {
 	local f
 	mkdir "$work/x"
 	tar -xzf "$archive_file" -C "$work/x" --no-same-owner
-	for f in myownpki deploy/config.example.yaml deploy/systemd/myownpki.service deploy/systemd/low-ports.conf; do
+	for f in myownpki deploy/config.example.yaml deploy/systemd/myownpki.service deploy/systemd/low-ports.conf \
+		deploy/systemd/myownpki-backup.service deploy/systemd/myownpki-backup.timer; do
 		[ -f "$work/x/$f" ] || die "the archive has no $f – this install.sh needs v0.2.2 or later (or the install.sh of the archive's release)"
 	done
 	# The service user runs the new binary for config check below.
@@ -410,6 +430,13 @@ ensure_dirs() {
 		install -d -m 0755 "$(dirname "$CONF")"
 		changed "$(dirname "$CONF")"
 	fi
+	# The backup target of the timer and of updates: the service user only.
+	if [ ! -d "$BACKUPS" ]; then
+		install -d -m 0700 -o "$SVC" -g "$SVC" "$BACKUPS"
+		changed "$BACKUPS"
+	elif [ "$(stat -c %U "$BACKUPS")" != "$SVC" ]; then
+		die "$BACKUPS exists but is not owned by $SVC – check it by hand"
+	fi
 }
 
 # ensure_config creates the config from the example, or keeps the existing one.
@@ -460,10 +487,45 @@ install_units() {
 		put "$work/x/deploy/systemd/low-ports.conf" "$LOWPORTS" 0644 root root
 		if $put_changed; then unit_changed=true; fi
 	fi
+	# The daily backup. The timer is enabled only when it is installed the
+	# first time: an admin who switched it off later keeps it off.
+	local timer_new=false
+	[ -f "$BACKUP_TIMER" ] || timer_new=true
+	put "$work/x/deploy/systemd/myownpki-backup.service" "$BACKUP_UNIT" 0644 root root
+	if $put_changed; then unit_changed=true; fi
+	put "$work/x/deploy/systemd/myownpki-backup.timer" "$BACKUP_TIMER" 0644 root root
+	if $put_changed; then unit_changed=true; fi
+	if [ -n "$opt_backup_keep" ]; then
+		printf '# Written by install.sh --backup-keep: how many daily backups stay.\n[Service]\nEnvironment=BACKUP_KEEP=%s\n' \
+			"$opt_backup_keep" >"$work/keep.conf"
+		put "$work/keep.conf" "$BACKUP_KEEP_DROPIN" 0644 root root
+		if $put_changed; then unit_changed=true; fi
+	fi
 	if $unit_changed; then systemctl daemon-reload; fi
 	if ! systemctl is-enabled --quiet "$SVC.service" 2>/dev/null; then
 		systemctl enable --quiet "$SVC.service"
 		changed "enabled $SVC.service"
+	fi
+	if ! $backup_timer; then
+		if systemctl is-enabled --quiet "$SVC-backup.timer" 2>/dev/null; then
+			systemctl disable --now --quiet "$SVC-backup.timer"
+			changed "disabled $SVC-backup.timer (--no-backup-timer)"
+		fi
+	elif $timer_new; then
+		systemctl enable --now --quiet "$SVC-backup.timer"
+		changed "enabled $SVC-backup.timer"
+	fi
+}
+
+# backup_text describes the backup timer for the result.
+backup_text() {
+	local keep
+	keep=$(sed -n 's/^Environment=BACKUP_KEEP=//p' "$BACKUP_KEEP_DROPIN" 2>/dev/null || true)
+	keep=${keep:-$(sed -n 's/^Environment=BACKUP_KEEP=//p' "$BACKUP_UNIT")}
+	if systemctl is-enabled --quiet "$SVC-backup.timer" 2>/dev/null; then
+		echo "daily into $BACKUPS, the newest $keep kept (myownpki-backup.timer)"
+	else
+		echo "the daily timer is off – systemctl enable --now myownpki-backup.timer"
 	fi
 }
 
@@ -599,6 +661,7 @@ main() {
 	say "  SHA-256:   ok (checksums.txt)"
 	say "  Signature: $signature"
 	say "  Config:    $config_text"
+	say "  Backups:   $(backup_text)"
 	for t in "$LOWPORTS" "$OLD_LOWPORTS"; do
 		if [ -f "$t" ]; then say "  Low ports: drop-in $t (CAP_NET_BIND_SERVICE)"; fi
 	done

@@ -69,6 +69,9 @@ What it does:
   stops it before anything is installed.
 - It creates the system user `myownpki` and `/var/lib/myownpki` (0700), and installs
   `/usr/local/bin/myownpki` and the unit `/etc/systemd/system/myownpki.service`.
+- It installs the daily backup – `myownpki-backup.service` and `.timer`, backups in
+  `/var/backups/myownpki` (0700) – and enables the timer the first time (§6.1; `--no-backup-timer`,
+  `--backup-keep N`).
 - `/etc/myownpki/config.yaml` (root:myownpki, 0640) is written **only if there is none** – an
   existing config is never changed. It is the example config with four values, each shown in the
   result:
@@ -310,6 +313,68 @@ It runs every check first (hashes, database integrity, audit chains and heads, t
 index) and writes nothing if one fails. Then start the server and unseal it with the passphrase
 **that was valid when the backup was taken**. Certificates issued after the backup are not in it;
 their serial numbers are still in the issued certificates and the audit trail of your clients.
+
+### 6.1 Daily backups with the systemd timer
+
+Since v0.2.2 install.sh (§2.1) installs `myownpki-backup.service` and `myownpki-backup.timer` and
+enables the timer. Once a day (at a random time in the first hour after midnight; a run missed
+while the machine was off follows at the next start) it runs:
+
+```bash
+myownpki backup scheduled /var/backups/myownpki --keep 14 --config /etc/myownpki/config.yaml
+```
+
+1. a backup into `/var/backups/myownpki/<UTC time>`, e.g. `20261025T003512Z` (0700, the service
+   user) – audited as *system / backup-timer*;
+2. every restore check on it (as `backup verify`);
+3. only if the check passed: **prune** – the newest 14 scheduled backups stay, older ones are
+   deleted.
+
+What prune deletes, and what never:
+
+| In `/var/backups/myownpki` | Prune |
+|---|---|
+| `20261025T003512Z` – made by the timer, complete | kept if among the newest 14, else **deleted** |
+| `20261024T101500Z-v0.2.1` – install.sh's backup before an update | **never** – your way back before a migration; delete it yourself when the new version runs well |
+| `20261025T003512Z-unverified` – a timer backup that failed its check | **never**, not counted; the run ended with an error – look at it |
+| a scheduled name that isn't a complete backup (no `manifest.json`, a file more or less than the manifest lists, another size, a symbolic link) | **never**; named as "Left alone" in the journal |
+| anything else (your own backups, notes) | never looked at |
+
+So the update backups don't count against the 14 – an update never pushes a daily backup out, and
+the daily ones never push out the backup taken before a migration.
+
+The timer's unit has the sandbox of the server's unit and **no network**. Writable are only
+`/var/backups/myownpki` and `/var/lib/myownpki` – the data directory because SQLite has to write its
+lock files to read a database that is in use, and every backup is an audit entry.
+
+Everyday commands:
+
+```bash
+systemctl list-timers myownpki-backup.timer
+```
+
+```bash
+systemctl start myownpki-backup.service
+```
+
+```bash
+journalctl -u myownpki-backup.service -o cat
+```
+
+```bash
+runuser -u myownpki -- myownpki backup prune /var/backups/myownpki --keep 14 --dry-run
+```
+
+- **Another number:** `install.sh --backup-keep 30` (writes the drop-in
+  `myownpki-backup.service.d/keep.conf`), or `systemctl edit myownpki-backup.service` with
+  `[Service]` / `Environment=BACKUP_KEEP=30`.
+- **Off:** `install.sh --no-backup-timer`, or `systemctl disable --now myownpki-backup.timer`.
+  install.sh enables the timer only when it installs it the first time; later runs leave it as you
+  set it.
+- A failed run shows in `systemctl --failed` and in the journal – watch it like the service.
+- `/var/backups/myownpki` is on the same disk as the data directory: copy it elsewhere (rsync, your
+  backup software) – a backup on the same disk doesn't survive the disk. Keep the passphrase and
+  the recovery key away from that copy.
 
 ## 7. Passphrase and recovery key
 

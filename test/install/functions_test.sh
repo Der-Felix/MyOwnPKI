@@ -32,7 +32,7 @@ refused() {
 }
 reset_opts() {
 	version=$DEFAULT_VERSION archive='' opt_tls_names='' opt_admin_listen='' opt_allowed='' port80=false config_opts=false
-	opt_acme='' opt_acme_ca='' acme_port='' low_ports=false
+	opt_acme='' opt_acme_ca='' acme_port='' low_ports=false opt_backup_keep='' backup_timer=true
 }
 # rc_of CMD…: run CMD with set -e in effect inside it (not as a condition,
 # where bash switches set -e off) and put its exit code into rc.
@@ -161,6 +161,25 @@ check "--archive ../DIR/FILE, then fetch from /" "$(
 check "--archive missing: the path as given" "$(cd "$tmp/rel/elsewhere" && reset_opts && (parse_args --archive "dl/$a") 2>&1 || true)" \
 	"install.sh: --archive: no such file: dl/$a"
 refused parse_args --archive "$tmp/rel/dl"
+
+
+# The daily backup: options, and the backup unit has every sandbox setting
+# of the main unit (the address families stricter: it has no network) and
+# writes where install.sh makes the directory.
+reset_opts
+parse_args --backup-keep 30 --no-backup-timer
+check "--backup-keep, --no-backup-timer" "$opt_backup_keep $backup_timer" "30 false"
+refused fresh_parse --backup-keep 0
+refused fresh_parse --backup-keep 1001
+refused fresh_parse --backup-keep 1e3
+sandbox() { sed -n '/^NoNewPrivileges=/,/^\[Install\]/p' "$1" | grep -v -e '^#' -e '^$' -e '^\[' -e '^RestrictAddressFamilies='; }
+missing=$(sandbox "$root/deploy/systemd/myownpki.service" | while read -r line; do
+	grep -qxF "$line" "$root/deploy/systemd/myownpki-backup.service" || echo "$line"
+done)
+check "backup unit: the main unit's sandbox" "$missing" ""
+check "backup unit: no network" "$(grep -c -x -e 'PrivateNetwork=yes' -e 'IPAddressDeny=any' -e 'RestrictAddressFamilies=AF_UNIX' "$root/deploy/systemd/myownpki-backup.service")" "3"
+check "backup unit: writes \$BACKUPS" "$(grep -c "^ExecStart=$BIN backup scheduled $BACKUPS --keep \${BACKUP_KEEP} --config $CONF\$" "$root/deploy/systemd/myownpki-backup.service")" "1"
+check "backup unit: ReadWritePaths" "$(sed -n 's/^ReadWritePaths=//p' "$root/deploy/systemd/myownpki-backup.service")" "$DATA $BACKUPS"
 
 # put and swap_binary: a failed copy never passes as done. The tests run as
 # a normal user: install without -o/-g, and directories with mkdir (Git Bash

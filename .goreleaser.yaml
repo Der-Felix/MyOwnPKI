@@ -78,6 +78,11 @@ archives:
         info: *fileinfo
       - src: deploy/systemd/public-port-80.conf
         info: *fileinfo
+      # The daily backup (v0.2.2).
+      - src: deploy/systemd/myownpki-backup.service
+        info: *fileinfo
+      - src: deploy/systemd/myownpki-backup.timer
+        info: *fileinfo
       - src: deploy/install.sh
         info:
           mode: 0o755

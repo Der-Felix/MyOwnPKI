@@ -258,7 +258,8 @@ jobs:
   # the low-ports drop-in), systemd-analyze with the drop-in, second run,
   # init, start, health, CRL, an unseal through the API and ACME over TLS
   # with the root as trust anchor, an update that leaves the old binary
-  # running (rolled back), the update with a second build, one more run. The
+  # running (rolled back), the update with a second build, one more run, the
+  # daily backup (timer, a run, verify, prune with --backup-keep). The
   # archive path stays relative: install.sh changes to / before it reads it.
   install:
     name: systemd installation (install.sh)

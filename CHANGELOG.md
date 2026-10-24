@@ -23,6 +23,15 @@ change the API, the configuration and the database schema; the release notes say
   `acme.trusted_proxies` and `X-Forwarded-For` are ignored. The proxy way stays the default.
   docs/OPERATIONS.md 10.10.
 
+- **Daily backups:** `myownpki-backup.service` and `.timer` (daily, random delay up to an hour,
+  missed runs caught up), installed and enabled by install.sh (`--no-backup-timer`,
+  `--backup-keep N`, default 14). Each run writes `/var/backups/myownpki/<UTC time>`, verifies it
+  and prunes; the unit has the server's sandbox and no network. docs/OPERATIONS.md §6.1.
+- **`myownpki backup scheduled DIR --keep N`** (the timer's run: backup, verify, prune) and
+  **`myownpki backup prune DIR --keep N [--dry-run]`**. Prune deletes only complete scheduled
+  backups (named like `20261025T003512Z`, a valid `manifest.json`, exactly the listed files) –
+  never install.sh's update backups, a backup that failed its check (`…-unverified`) or anything
+  else.
 - **`install.sh --acme https://NAME/acme`** (with `--acme-ca`, default `issuing`) writes the ACME
   keys for its own TLS into a new config and installs the drop-in for port 443.
 

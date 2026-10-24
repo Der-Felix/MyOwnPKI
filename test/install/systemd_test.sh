@@ -3,9 +3,10 @@
 # throwaway Linux machine with systemd (the CI job "install"), as root:
 #
 #  1. install.sh --archive ARCHIVE --acme https://acme.ci.test/acme: enabled,
-#     not started; modes and owners; the ACME keys and the low-ports drop-in
-#  2. systemd-analyze verify, and security below 2.0 – with the drop-in (the
-#     value goes to the step summary)
+#     not started; modes and owners; the ACME keys and the low-ports drop-in;
+#     the backup timer enabled, /var/backups/myownpki 0700
+#  2. systemd-analyze verify, and security below 2.0 – the service with the
+#     drop-in, and the backup service (the values go to the step summary)
 #  3. a second run of the first installation changes nothing
 #  4. init --stdin with throwaway values and the test CA, systemctl start,
 #     healthcheck, /healthz, the fingerprint in the journal, a CRL over the
@@ -20,6 +21,11 @@
 #     healthy again and runs the new version – and, sealed after the
 #     restart, ACME still serves the issued certificate
 #  7. one more run changes nothing
+#  8. the daily backup: the backup service run by hand writes a verified
+#     scheduled backup; with --backup-keep 2 a second run deletes exactly
+#     the older scheduled backups – never the update backups or anything
+#     else; --no-backup-timer switches the timer off, and the next run
+#     without it leaves it off
 #
 # ARCHIVE stays relative in CI on purpose: install.sh changes to / before it
 # reads it.
@@ -102,10 +108,12 @@ acme_directory() {
 # state is a fingerprint of everything install.sh manages.
 state() {
 	{
-		stat -c '%n %a %U:%G %Y %s' "$bin" /etc/systemd/system/myownpki.service /etc/myownpki "$conf" /var/lib/myownpki
-		sha256sum "$bin" /etc/systemd/system/myownpki.service "$conf"
+		stat -c '%n %a %U:%G %Y %s' "$bin" /etc/systemd/system/myownpki.service /etc/myownpki "$conf" /var/lib/myownpki \
+			/etc/systemd/system/myownpki-backup.service /etc/systemd/system/myownpki-backup.timer
+		sha256sum "$bin" /etc/systemd/system/myownpki.service "$conf" /etc/systemd/system/myownpki-backup.service /etc/systemd/system/myownpki-backup.timer
 		getent passwd myownpki
-		systemctl is-enabled myownpki.service
+		systemctl is-enabled myownpki.service myownpki-backup.timer
+		ls -la /etc/systemd/system/myownpki-backup.service.d 2>/dev/null || true
 		ls -la /etc/systemd/system/myownpki.service.d 2>/dev/null || true
 		ls -la /var/backups/myownpki 2>/dev/null || true
 	} | sha256sum
@@ -124,20 +132,26 @@ if systemctl is-active --quiet myownpki.service; then fail "the first installati
 [ "$(stat -c '%a %U' /var/lib/myownpki)" = "700 myownpki" ] || fail "data directory: $(stat -c '%a %U' /var/lib/myownpki)"
 [ "$(stat -c '%a %U:%G' "$conf")" = "640 root:myownpki" ] || fail "config: $(stat -c '%a %U:%G' "$conf")"
 [ "$(stat -c '%a %U' "$bin")" = "755 root" ] || fail "binary: $(stat -c '%a %U' "$bin")"
+[ "$(systemctl is-enabled myownpki-backup.timer)" = enabled ] || fail "the backup timer is not enabled"
+systemctl is-active --quiet myownpki-backup.timer || fail "the backup timer is not active"
+[ "$(stat -c '%a %U' /var/backups/myownpki)" = "700 myownpki" ] || fail "backup directory: $(stat -c '%a %U' /var/backups/myownpki)"
+grep -q 'Backups:   daily into /var/backups/myownpki, the newest 14 kept' "$tmp/run1.log" || fail "the result does not show the backup timer"
 
 step "2. systemd-analyze verify and security"
-systemd-analyze verify /etc/systemd/system/myownpki.service
-systemd-analyze security --no-pager myownpki.service | tee "$tmp/security.txt"
-exposure=$(sed -n 's/.*Overall exposure level for myownpki.service: \([0-9.]*\).*/\1/p' "$tmp/security.txt")
-[ -n "$exposure" ] || fail "no overall exposure in the output of systemd-analyze security"
-{
-	printf '### systemd-analyze security myownpki.service\n\nOverall exposure: **%s** (systemd %s)\n\n' \
-		"$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
-	printf '<details><summary>All checks</summary>\n\n```text\n'
-	cat "$tmp/security.txt"
-	printf '```\n\n</details>\n\n'
-} >>"$summary"
-awk -v e="$exposure" 'BEGIN { exit !(e < 2.0) }' || fail "exposure $exposure – it must stay below 2.0"
+systemd-analyze verify /etc/systemd/system/myownpki.service /etc/systemd/system/myownpki-backup.service /etc/systemd/system/myownpki-backup.timer
+for unit in myownpki.service myownpki-backup.service; do
+	systemd-analyze security --no-pager "$unit" | tee "$tmp/security.txt"
+	exposure=$(sed -n "s/.*Overall exposure level for $unit: \([0-9.]*\).*/\1/p" "$tmp/security.txt")
+	[ -n "$exposure" ] || fail "no overall exposure in the output of systemd-analyze security $unit"
+	{
+		printf '### systemd-analyze security %s\n\nOverall exposure: **%s** (systemd %s)\n\n' \
+			"$unit" "$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
+		printf '<details><summary>All checks</summary>\n\n```text\n'
+		cat "$tmp/security.txt"
+		printf '```\n\n</details>\n\n'
+	} >>"$summary"
+	awk -v e="$exposure" 'BEGIN { exit !(e < 2.0) }' || fail "$unit: exposure $exposure – it must stay below 2.0"
+done
 
 step "3. A second run of the first installation changes nothing"
 before=$(state)
@@ -213,8 +227,10 @@ systemctl daemon-reload
 
 step "6. Update with a second build"
 bash "$install_sh" --archive "$update_archive" | tee "$tmp/run4.log"
-mapfile -t backups < <(find /var/backups/myownpki -mindepth 1 -maxdepth 1 -type d | sort)
-[ ${#backups[@]} -eq 2 ] || fail "want two backups (step 5 and 6), found: ${backups[*]:-none}"
+# install.sh's update backups are <time>-<version> (a timer backup that ran
+# meanwhile has no "-").
+mapfile -t backups < <(find /var/backups/myownpki -mindepth 1 -maxdepth 1 -type d -name '*-*' | sort)
+[ ${#backups[@]} -eq 2 ] || fail "want two update backups (step 5 and 6), found: ${backups[*]:-none}"
 for b in "${backups[@]}"; do svc "$bin" backup verify "$b" || fail "backup verify $b"; done
 systemctl is-active --quiet myownpki.service || fail "not running after the update"
 healthy || fail "not healthy after the update"
@@ -231,5 +247,42 @@ before=$(state)
 bash "$install_sh" --archive "$update_archive" | tee "$tmp/run5.log"
 grep -q 'Changes:   none' "$tmp/run5.log" || fail "the run after the update reported changes"
 [ "$before" = "$(state)" ] || fail "the run after the update changed files"
+
+step "8. The daily backup"
+b=/var/backups/myownpki
+systemctl start myownpki-backup.service || { journalctl -u myownpki-backup.service --no-pager -n 50; fail "the backup service failed"; }
+mapfile -t scheduled < <(find "$b" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z' | sort)
+[ ${#scheduled[@]} -eq 1 ] || fail "want one scheduled backup, found: ${scheduled[*]:-none}"
+first=${scheduled[0]}
+[ "$(stat -c '%a %U' "$first")" = "700 myownpki" ] || fail "scheduled backup: $(stat -c '%a %U' "$first")"
+svc "$bin" backup verify "$first" >/dev/null || fail "backup verify $first"
+journalctl -u myownpki-backup.service -o cat | grep -q "Verified: the backup passed every check" || fail "no verify in the journal"
+# Three older scheduled backups, and what must stay: the two update
+# backups, a directory with a scheduled name but no manifest, notes.
+for n in 20200101T000000Z 20200102T000000Z 20200103T000000Z; do cp -a "$first" "$b/$n"; done
+install -d -o myownpki -g myownpki "$b/20200104T000000Z" "$b/notes"
+mapfile -t keep_these < <(find "$b" -mindepth 1 -maxdepth 1 \( -name '*-*' -o -name notes -o -name 20200104T000000Z \) | sort)
+[ ${#keep_these[@]} -eq 4 ] || fail "test setup: ${keep_these[*]}"
+bash "$install_sh" --archive "$update_archive" --backup-keep 2 | tee "$tmp/run6.log"
+grep -q 'the newest 2 kept' "$tmp/run6.log" || fail "--backup-keep 2 not applied"
+sleep 1 # the next backup gets another second, so another name
+systemctl start myownpki-backup.service || { journalctl -u myownpki-backup.service --no-pager -n 50; fail "the second backup run failed"; }
+mapfile -t left < <(find "$b" -mindepth 1 -maxdepth 1 | sort)
+mapfile -t scheduled < <(find "$b" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z' ! -name '2020*' | sort)
+[ ${#scheduled[@]} -eq 2 ] && [ "${scheduled[0]}" = "$first" ] || fail "want the two runs kept, found: ${scheduled[*]:-none}"
+for n in 20200101T000000Z 20200102T000000Z 20200103T000000Z; do
+	[ ! -e "$b/$n" ] || fail "$b/$n was not deleted"
+	journalctl -u myownpki-backup.service -o cat | grep -q "^Deleted $b/$n\$" || fail "no deletion of $n in the journal"
+done
+for k in "${keep_these[@]}"; do [ -e "$k" ] || fail "prune deleted $k"; done
+[ ${#left[@]} -eq 6 ] || fail "want 2 scheduled + 4 others, found: ${left[*]}"
+journalctl -u myownpki-backup.service -o cat | grep -q "Left alone $b/20200104T000000Z: .*has no manifest.json" || fail "the directory without a manifest was not reported"
+printf 'Daily backup: %s verified; prune kept 2, deleted 3, left alone %d others.\n\n' "$(basename "$first")" ${#keep_these[@]} >>"$summary"
+# --no-backup-timer switches it off; the next run without it leaves it off.
+bash "$install_sh" --archive "$update_archive" --no-backup-timer >"$tmp/run7.log"
+[ "$(systemctl is-enabled myownpki-backup.timer || true)" = disabled ] || fail "--no-backup-timer: still enabled"
+grep -q 'the daily timer is off' "$tmp/run7.log" || fail "the result does not say the timer is off"
+bash "$install_sh" --archive "$update_archive" >"$tmp/run8.log"
+[ "$(systemctl is-enabled myownpki-backup.timer || true)" = disabled ] || fail "install.sh switched the timer on again"
 
 step "All checks passed"

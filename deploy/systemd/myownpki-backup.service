@@ -1,0 +1,72 @@
+# The daily backup of MyOwnPKI (v0.2.2), started by myownpki-backup.timer.
+# Installed by deploy/install.sh to /etc/systemd/system/ – see
+# docs/OPERATIONS.md §6.1.
+#
+# It writes /var/backups/myownpki/<UTC time> (e.g. 20261025T031512Z),
+# checks it like a restore would (backup verify) and keeps the newest
+# BACKUP_KEEP scheduled backups. It deletes nothing else: install.sh's
+# update backups (<time>-<version>) and a backup that failed its check
+# (<time>-unverified) stay until you remove them.
+#
+# Keep another number of backups: install.sh --backup-keep N, or
+#   systemctl edit myownpki-backup.service
+#   [Service]
+#   Environment=BACKUP_KEEP=30
+# Run it now: systemctl start myownpki-backup.service
+# Check the sandbox: systemd-analyze security myownpki-backup.service
+
+[Unit]
+Description=MyOwnPKI daily backup
+Documentation=https://github.com/Der-Felix/MyOwnPKI/blob/main/docs/OPERATIONS.md
+# Nothing to back up before `myownpki init`.
+ConditionPathExists=/var/lib/myownpki/system.db
+After=myownpki.service
+
+[Service]
+Type=oneshot
+User=myownpki
+Group=myownpki
+Environment=BACKUP_KEEP=14
+ExecStart=/usr/local/bin/myownpki backup scheduled /var/backups/myownpki --keep ${BACKUP_KEEP} --config /etc/myownpki/config.yaml
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+
+# Writable: the backup target – and the data directory, because SQLite
+# needs to write its lock files (-shm) even to read a database in WAL mode,
+# and every backup is an entry in the instance audit log (who copied the
+# keys, and when). Everything else is read-only.
+ReadWritePaths=/var/lib/myownpki /var/backups/myownpki
+
+# The sandbox of myownpki.service, plus: no network at all.
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+PrivateUsers=yes
+PrivateMounts=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
