@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.2.1
+v=0.2.2
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"

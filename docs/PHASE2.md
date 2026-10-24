@@ -3,6 +3,10 @@
 > Written at the end of the night run 2026-10-21, after phase 1 (v0.1). The owner answered the open
 > questions on 2026-10-22 (§4); the plan below follows those answers. Built from the night run of
 > 2026-10-22 on (branch `night/v0.2`, docs/NIGHTLOG.md "Night log – v0.2").
+>
+> **Status: complete.** Released as v0.2.0 on 2026-10-23; v0.2.1 (installation as a systemd
+> service, 2026-10-24) and v0.2.2 (own TLS, daily backup, trust page – amends Q1, 2026-10-24)
+> followed. Phase 3: docs/PHASE3.md.
 
 Goal (PLAN §10.1, v0.2): an **ACME server (RFC 8555) for the internal CAs with http-01 and
 dns-01**, a **domain model** and **approval levels**, so that certbot, acme.sh, Traefik and Caddy
