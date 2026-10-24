@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -38,6 +40,7 @@ type env struct {
 	passphrase  string
 	demoPass    string // password of the init user "demo"
 	caIDs       map[string]string
+	agents      *agents.Service
 	logs        bytes.Buffer
 }
 
@@ -49,10 +52,16 @@ func newEnv(t *testing.T) *env {
 		sys: in.SystemDB, ia: in.InstanceAudit, ta: in.TenantAudit,
 		passphrase: in.Passphrase, demoPass: in.DemoPassword, caIDs: in.CAIDs,
 	}
+	v.agents = &agents.Service{
+		PKI: in.PKIDB.Write, Tenant: store.DefaultTenant, Engine: in.Engine, CA: "agent-ca", Checker: passChecker{}, Clock: in.Clock,
+		Log: slog.New(slog.DiscardHandler), Mode: func(ctx context.Context) (string, error) {
+			return (&tenant.Store{DB: in.SystemDB.Read, Clock: in.Clock}).AgentEnrollment(ctx, store.DefaultTenant)
+		},
+	}
 	v.api = New(Deps{
 		Auth: in.Auth, Engine: in.Engine, Keys: in.Ring, Presets: in.Presets, Clock: in.Clock,
 		Log: slog.New(slog.NewJSONHandler(&v.logs, nil)), Version: "test", Demo: true,
-		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read,
+		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents,
 	})
 	return v
 }
@@ -181,3 +190,9 @@ func (c *client) stepUp(t *testing.T, name string) {
 		t.Fatalf("step-up %s: %d %s", name, r.Code, r.Body.String())
 	}
 }
+
+// passChecker lets every enrollment check pass (the real fetch is tested in
+// internal/server).
+type passChecker struct{}
+
+func (passChecker) Check(context.Context, string, string, string, string) error { return nil }

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -56,6 +57,8 @@ type Deps struct {
 	Tenant   string
 	// TenantAudit and InstanceAudit are the audit logs for reading (step 18).
 	TenantAudit, InstanceAudit *sql.DB
+	// Agents is the agent service (v0.3); nil while agent.base_url is empty.
+	Agents *agents.Service
 }
 
 // access says who may call a route.

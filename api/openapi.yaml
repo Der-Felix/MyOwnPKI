@@ -74,6 +74,8 @@ tags:
     description: Import of a legacy pki.sh directory and of external certificates
   - name: audit
     description: Tamper-evident audit log
+  - name: agents
+    description: myownpki-agent – enrollments, join tokens, agents and their names (v0.3)
 
 paths:
   # ---------------------------------------------------------------- system
@@ -896,6 +898,260 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- agents (v0.3)
+  /agents:
+    get:
+      tags: [agents]
+      operationId: listAgents
+      summary: List the admitted agents
+      description: By hostname. Pending enrollments are under `/agent-enrollments`.
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /agents/{agentId}:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    get:
+      tags: [agents]
+      operationId: getAgent
+      summary: Get an agent with its names
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /agents/{agentId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agents]
+      operationId: disableAgent
+      summary: Disable an agent
+      description: |
+        Cut off at its next call; its certificates stay valid, `enable` lets it back in.
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Disabled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agents/{agentId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agents]
+      operationId: enableAgent
+      summary: Enable a disabled agent
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Enabled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agents/{agentId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agents]
+      operationId: revokeAgent
+      summary: Revoke an agent for good
+      description: |
+        The agent is cut off at its next call, and its agent certificates go on the CRL of the
+        agent CA. The certificates it deployed stay valid – revoke them separately if needed.
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agents/{agentId}/names:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agents]
+      operationId: changeAgentNames
+      summary: Add or remove names an agent may order
+      description: |
+        Exact names or `*.suffix` patterns (every name below the suffix). The ACME server refuses
+        an agent's order for any other name.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "Names to add and to remove"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentNamesChange" }
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /agent-enrollments:
+    get:
+      tags: [agents]
+      operationId: listAgentEnrollments
+      summary: List enrollments – the approval queue
+      description: |
+        `state=open` (default): the enrollments that wait – for the check file or for an admin.
+        `state=all`: the last 200 of any state.
+      x-required-role: viewer
+      parameters:
+        - name: state
+          in: query
+          description: "open or all"
+          schema: { type: string, enum: [open, all] }
+      responses:
+        "200":
+          description: Enrollments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AgentEnrollment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /agent-enrollments/{enrollmentId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/EnrollmentId"
+    post:
+      tags: [agents]
+      operationId: approveAgentEnrollment
+      summary: Admit an enrollment from the queue
+      description: The agent receives its certificate at its next poll (every 30 seconds).
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "204": { description: Admitted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agent-enrollments/{enrollmentId}/deny:
+    parameters:
+      - $ref: "#/components/parameters/EnrollmentId"
+    post:
+      tags: [agents]
+      operationId: denyAgentEnrollment
+      summary: Refuse an enrollment
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "204": { description: Refused }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agent-join-tokens:
+    get:
+      tags: [agents]
+      operationId: listAgentJoinTokens
+      summary: List join tokens (without their secrets)
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Join tokens, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/JoinToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [agents]
+      operationId: createAgentJoinToken
+      summary: Create a join token
+      description: |
+        Single-use, for hosts whose name matches one of `names`, valid for `valid_hours` (1 to 720,
+        default 24). The secret is in this answer only; the server keeps its SHA-256.
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: "Label, names and validity"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JoinTokenCreate" }
+      responses:
+        "201":
+          description: Created – the only time the secret is shown
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JoinTokenCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /agent-join-tokens/{joinTokenId}:
+    parameters:
+      - $ref: "#/components/parameters/JoinTokenId"
+    delete:
+      tags: [agents]
+      operationId: deleteAgentJoinToken
+      summary: Withdraw an unused join token
+      description: A used token stays as a record (409).
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "204": { description: Withdrawn }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /presets:
     get:
@@ -1797,6 +2053,27 @@ components:
       required: true
       schema: { $ref: "#/components/schemas/ID" }
 
+    AgentId:
+      description: "ID of the agent"
+      name: agentId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
+    EnrollmentId:
+      description: "ID of the enrollment"
+      name: enrollmentId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
+    JoinTokenId:
+      description: "ID of the join token"
+      name: joinTokenId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
     CertificateId:
       description: "ID of the certificate"
       name: certificateId
@@ -2210,6 +2487,125 @@ components:
         last_used_at: { type: [string, "null"], format: date-time }
         secret: { type: string, pattern: "^mop_[a-z2-7]+$" }
 
+    Agent:
+      description: "An admitted agent (v0.3)"
+      type: object
+      required: [id, hostname, status, enrollment_mode, os, arch, version, created_at, approved_at, approved_by, last_seen_at, certificate_id, names]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        hostname: { type: string, description: "The FQDN proven at enrollment" }
+        status: { type: string, enum: [active, disabled, revoked] }
+        enrollment_mode: { type: string, enum: [auto, verified, manual], description: "The mode that admitted it" }
+        os: { type: string }
+        arch: { type: string }
+        version: { type: string, description: "As the agent reported it" }
+        created_at: { type: string, format: date-time }
+        approved_at: { type: string, format: date-time }
+        approved_by: { type: string, description: "An admin, or the mode" }
+        last_seen_at: { type: [string, "null"], format: date-time }
+        certificate_id: { type: [string, "null"], description: "Its current agent certificate" }
+        names:
+          description: "What it may order: exact names and *.suffix patterns"
+          type: array
+          items: { $ref: "#/components/schemas/AgentName" }
+
+    AgentName:
+      description: "One name or pattern an agent may order"
+      type: object
+      required: [name, source, added_by, added_at]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        source: { type: string, enum: [hostname, token, admin] }
+        added_by: { type: string }
+        added_at: { type: string, format: date-time }
+
+    AgentNamesChange:
+      description: "Names to add to and remove from an agent"
+      type: object
+      additionalProperties: false
+      properties:
+        add:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 255 }
+        remove:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 255 }
+
+    AgentEnrollment:
+      description: "An enrollment (ADR-18): what the agent claimed and what was proven"
+      type: object
+      required: [id, hostname, state, check_method, check_state, check_error, token_valid, token_problem, known_agent, agent_id, os, arch, version, source_ip, created_at, expires_at, decided_at, decided_by]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        hostname: { type: string }
+        state: { type: string, enum: [waiting_for_check, pending_approval, admitted, denied, expired] }
+        check_method: { type: string, enum: [standalone, webroot] }
+        check_state: { type: string, enum: [waiting, passed, failed] }
+        check_error: { type: string, description: "Why the http-01 check failed; empty when it didn't" }
+        token_valid: { type: boolean }
+        token_problem: { type: string, description: "Why a given join token didn't count; empty otherwise" }
+        known_agent: { type: boolean, description: "The key of an active agent's last certificate: it enrolls again" }
+        agent_id: { type: [string, "null"] }
+        os: { type: string }
+        arch: { type: string }
+        version: { type: string }
+        source_ip: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        decided_at: { type: [string, "null"], format: date-time }
+        decided_by: { type: string }
+
+    JoinToken:
+      description: "A join token without its secret"
+      type: object
+      required: [id, label, names, expires_at, used_at, used_by, created_by, created_at]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        label: { type: string }
+        names: { type: array, items: { type: string } }
+        expires_at: { type: string, format: date-time }
+        used_at: { type: [string, "null"], format: date-time }
+        used_by: { type: string, description: "The enrollment that used it" }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+
+    JoinTokenCreate:
+      description: "A new join token"
+      type: object
+      required: [names]
+      additionalProperties: false
+      properties:
+        label: { type: string, maxLength: 64 }
+        names:
+          description: "The hostname must match one: an exact name or *.suffix"
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string, maxLength: 255 }
+        valid_hours: { type: integer, minimum: 1, maximum: 720, description: "Default 24" }
+
+    JoinTokenCreated:
+      description: "A new join token with its secret, shown once"
+      type: object
+      required: [id, label, names, expires_at, used_at, used_by, created_by, created_at, secret]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        label: { type: string }
+        names: { type: array, items: { type: string } }
+        expires_at: { type: string, format: date-time }
+        used_at: { type: [string, "null"], format: date-time }
+        used_by: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent enroll --token-file" }
+
     TenantSettings:
       description: "Settings of the tenant"
       type: object
@@ -2247,6 +2643,13 @@ components:
             Off, the public listener serves only what certificates point to (CA certificates,
             CRLs) and the PEM copies.
           type: boolean
+        agent_enrollment:
+          description: |
+            How agents are admitted (since 0.3, ADR-18): `auto` – a valid join token or a passed
+            http-01 check; `verified` (default) – both, one alone waits for an admin; `manual` – an
+            admin decides every enrollment. Always in the answer; optional in a change.
+          type: string
+          enum: [auto, verified, manual]
 
     PasswordChange:
       description: "Password change of the logged-in user"
