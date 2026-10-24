@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -55,6 +56,8 @@ type AppDeps struct {
 	// (tenant settings, audit log); nil hides those pages.
 	Settings                   *tenant.Store
 	TenantAudit, InstanceAudit *sql.DB
+	// Agents is the agent service (v0.3); nil while agent.base_url is empty.
+	Agents *agents.Service
 	// ACME is the ACME server (PHASE2); nil while ACME is off.
 	ACME ACMEAdmin
 	// ACMEDirectory is the directory URL clients use (shown with EAB keys).
@@ -145,6 +148,16 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /domains/{id}", a.signedIn(a.domainDetail))
 	mux.HandleFunc("POST /domains/{id}", a.signedIn(a.domainUpdate))
 	mux.HandleFunc("POST /domains/{id}/delete", a.signedIn(a.domainDelete))
+	mux.HandleFunc("GET /agents", a.signedIn(a.agentList))
+	mux.HandleFunc("GET /agents/enrollments", a.signedIn(a.enrollmentList))
+	mux.HandleFunc("POST /agents/enrollments/approve", a.signedIn(a.enrollmentDecide))
+	mux.HandleFunc("POST /agents/enrollments/deny", a.signedIn(a.enrollmentDecide))
+	mux.HandleFunc("GET /agents/tokens", a.signedIn(a.joinTokens))
+	mux.HandleFunc("POST /agents/tokens", a.signedIn(a.joinTokenCreate))
+	mux.HandleFunc("POST /agents/tokens/delete", a.signedIn(a.joinTokenDelete))
+	mux.HandleFunc("GET /agents/{id}", a.signedIn(a.agentDetail))
+	mux.HandleFunc("POST /agents/{id}/names", a.signedIn(a.agentNames))
+	mux.HandleFunc("POST /agents/{id}/{action}", a.signedIn(a.agentAction))
 	mux.HandleFunc("GET /acme/accounts", a.signedIn(a.acmeAccounts))
 	mux.HandleFunc("GET /acme/accounts/{id}", a.signedIn(a.acmeAccount))
 	mux.HandleFunc("POST /acme/accounts/approve", a.signedIn(a.acmeApprove))

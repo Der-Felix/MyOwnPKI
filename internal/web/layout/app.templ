@@ -40,8 +40,9 @@ var nav = []navGroup{
 		{Key: "acme-orders", Label: "Orders", Href: "/acme/orders", Real: true},
 	}},
 	{"Agents", []navItem{
-		{Key: "agents", Label: "Agents", Note: "phase 3"},
-		{Key: "enrollment", Label: "Enrollment requests", Note: "phase 3"},
+		{Key: "agents", Label: "Agents", Href: "/agents", Real: true},
+		{Key: "enrollment", Label: "Enrollment requests", Href: "/agents/enrollments", Real: true},
+		{Key: "join-tokens", Label: "Join tokens", Href: "/agents/tokens", Real: true},
 	}},
 	{"Administration", []navItem{
 		{Key: "users", Label: "Users and roles", Href: "/admin/users", Real: true},

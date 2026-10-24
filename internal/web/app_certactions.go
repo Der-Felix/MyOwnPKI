@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -60,7 +61,7 @@ func (c *rc) refused(err error, back string) {
 		add("Wrong password.")
 	case errors.Is(err, auth.ErrInvalidCode):
 		add("Wrong or already used code.")
-	case errors.Is(err, tenant.ErrInvalid), errors.Is(err, ca.ErrKeyDeleted), errors.Is(err, ca.ErrNoStoredKey),
+	case errors.Is(err, tenant.ErrInvalid), errors.Is(err, agents.ErrInvalid), errors.Is(err, agents.ErrConflict), errors.Is(err, ca.ErrKeyDeleted), errors.Is(err, ca.ErrNoStoredKey),
 		errors.Is(err, auth.ErrNoTOTPChange), errors.Is(err, auth.ErrPasskeysOff), errors.Is(err, auth.ErrNoToken), errors.Is(err, auth.ErrNoPasskey):
 		add(err.Error())
 	default:
