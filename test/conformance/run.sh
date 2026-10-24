@@ -6,6 +6,11 @@
 # job (task acme:conformance). Nothing of this reaches the release binary:
 # the tools are built into .tools/, the images run only here.
 #
+# Two packages, one after the other (-p 1: both need port 80): internal/acme
+# (the clients through a TLS stand-in for the reverse proxy) and
+# internal/server (lego and certbot directly against the own TLS listener,
+# acme.tls_issuer, v0.2.2).
+#
 # Pinning: lego and Pebble by version (Taskfile.yml), the images by digest.
 # Each was at least two weeks old when pinned (tag dates on Docker Hub).
 set -euo pipefail
@@ -73,4 +78,4 @@ CONF_WORK="$work" CONF_HOST_IP="$host_ip" CONF_DNS="127.0.0.1:$DNS_PORT" \
   CONF_TSIG_NAME=acme-conformance CONF_TSIG_SECRET="$tsig_secret" \
   CONF_CERTBOT_IMAGE="$CERTBOT_IMAGE" CONF_ACMESH_IMAGE="$ACMESH_IMAGE" \
   LEGO_BIN="$root/.tools/lego" PEBBLE_BIN="$root/.tools/pebble" PEBBLE_DIR="$pebble_dir" \
-  CGO_ENABLED=0 go test -tags conformance -run '^TestConformance$' -count=1 -v -timeout 25m ./internal/acme/
+  CGO_ENABLED=0 go test -p 1 -tags conformance -run '^TestConformance' -count=1 -v -timeout 25m ./internal/acme/ ./internal/server/

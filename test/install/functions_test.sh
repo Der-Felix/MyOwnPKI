@@ -32,6 +32,7 @@ refused() {
 }
 reset_opts() {
 	version=$DEFAULT_VERSION archive='' opt_tls_names='' opt_admin_listen='' opt_allowed='' port80=false config_opts=false
+	opt_acme='' opt_acme_ca='' acme_port='' low_ports=false
 }
 # rc_of CMD…: run CMD with set -e in effect inside it (not as a condition,
 # where bash switches set -e off) and put its exit code into rc.
@@ -90,6 +91,44 @@ else
 fi
 sed 's/^  allowed_networks:.*/  allowed: ""/' "$root/deploy/config.example.yaml" >"$tmp/drift.yaml"
 refused render_config "$tmp/drift.yaml"
+check "--public-port-80: low ports" "$low_ports" "true"
+
+# --acme: ACME with its own TLS – three more keys, the port of the URL, the
+# low-ports drop-in only below 1024.
+reset_opts
+parse_args --acme https://pki.u.lab/acme/
+defaults
+check "--acme: base URL without the trailing slash" "$opt_acme" "https://pki.u.lab/acme"
+check "--acme: port 443, low ports, CA issuing" "$acme_port $low_ports $opt_acme_ca" "443 true issuing"
+render_config "$root/deploy/config.example.yaml" >"$tmp/acme.yaml"
+check "--acme: changed lines (3 header + 6 keys; public.listen stays :8080)" "$(diff "$root/deploy/config.example.yaml" "$tmp/acme.yaml" | grep -c '^>')" "9"
+check "--acme: acme.base_url" "$(config_value "$tmp/acme.yaml" acme base_url)" "https://pki.u.lab/acme"
+check "--acme: acme.listen" "$(config_value "$tmp/acme.yaml" acme listen)" ":443"
+check "--acme: acme.tls_issuer" "$(config_value "$tmp/acme.yaml" acme tls_issuer)" "issuing"
+check "--acme: admin.listen still set" "$(config_value "$tmp/acme.yaml" admin listen)" "0.0.0.0:9443"
+sed "s|^data_dir: .*|data_dir: $data|" "$tmp/acme.yaml" >"$tmp/acme-check.yaml"
+if "$bin" config check --config "$tmp/acme-check.yaml" >"$tmp/check.out" 2>&1; then
+	echo "ok   config check of the --acme config"
+else
+	echo "FAIL config check of the --acme config:"
+	cat "$tmp/check.out"
+	fail=1
+fi
+reset_opts
+parse_args --acme https://172.20.23.20:8443 --acme-ca lab-issuing
+check "--acme on 8443: no low ports, own CA" "$acme_port $low_ports $opt_acme_ca" "8443 false lab-issuing"
+# shellcheck disable=SC2329 # called through refused
+fresh_parse() { reset_opts && parse_args "$@"; }
+refused fresh_parse --acme http://pki.u.lab/acme
+refused fresh_parse --acme 'https://pki.u.lab/acme"x'
+refused fresh_parse --acme https://pki.u.lab:99999/acme
+refused fresh_parse --acme https://pki.u.lab/acme --acme-ca 'Issuing CA'
+refused fresh_parse --acme-ca issuing
+
+# low-ports.conf and its old name public-port-80.conf grant the same.
+settings() { grep -v -e '^#' -e '^$' "$1"; }
+check "low-ports.conf = public-port-80.conf (without comments)" \
+	"$(settings "$root/deploy/systemd/low-ports.conf" | tr '\n' ' ')" "$(settings "$root/deploy/systemd/public-port-80.conf" | tr '\n' ' ')"
 
 # Checksums.
 f=$tmp/myownpki_9.9.9_linux_amd64.tar.gz

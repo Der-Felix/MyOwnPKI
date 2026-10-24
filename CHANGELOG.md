@@ -23,10 +23,20 @@ change the API, the configuration and the database schema; the release notes say
   `acme.trusted_proxies` and `X-Forwarded-For` are ignored. The proxy way stays the default.
   docs/OPERATIONS.md 10.10.
 
+- **`install.sh --acme https://NAME/acme`** (with `--acme-ca`, default `issuing`) writes the ACME
+  keys for its own TLS into a new config and installs the drop-in for port 443.
+
 ### Changed
 
 - `myownpki healthcheck` accepts the bootstrap and the issued admin certificate (with
-  `admin.tls_issuer`).
+  `admin.tls_issuer`); `myownpki config check` shows `tls_issuer` and the ACME mode.
+- The drop-in `public-port-80.conf` is now `low-ports.conf` – for every listener on a port below
+  1024 (`--public-port-80`, `--acme`). An installed `public-port-80.conf` keeps working and stays;
+  the archives still carry it.
+- CI: the install job installs with `--acme`, unseals through the API and reads the ACME directory
+  over TLS with the root as trust anchor; `systemd-analyze security` is measured with the drop-in
+  and must stay below 2.0. The conformance job runs lego and certbot directly against the own TLS
+  listener.
 
 ## [0.2.1] - 2026-10-24
 

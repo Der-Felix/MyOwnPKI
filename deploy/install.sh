@@ -17,8 +17,9 @@
 #   Sigstore signature of checksums.txt when cosign is installed – a
 #   mismatch stops it before anything is installed;
 # - creates the system user myownpki and /var/lib/myownpki (0700);
-# - installs /usr/local/bin/myownpki, the unit (and the port-80 drop-in with
-#   --public-port-80) and – only if there is none yet – /etc/myownpki/config.yaml;
+# - installs /usr/local/bin/myownpki, the unit (and the low-ports drop-in with
+#   --public-port-80 or --acme on a port below 1024) and – only if there is
+#   none yet – /etc/myownpki/config.yaml;
 # - first installation: enables the service, does NOT start it, and prints
 #   the next commands (init at the terminal, start, fingerprint, unseal);
 # - update (a new binary over an initialized instance): backup and backup
@@ -41,7 +42,10 @@ ISSUER=https://token.actions.githubusercontent.com
 SVC=myownpki
 BIN=/usr/local/bin/myownpki
 UNIT=/etc/systemd/system/myownpki.service
-DROPIN=/etc/systemd/system/myownpki.service.d/public-port-80.conf
+DROPINS=/etc/systemd/system/myownpki.service.d
+LOWPORTS=$DROPINS/low-ports.conf
+# The old name of low-ports.conf (v0.2.1): an installed one is kept.
+OLD_LOWPORTS=$DROPINS/public-port-80.conf
 CONF=/etc/myownpki/config.yaml
 DATA=/var/lib/myownpki
 BACKUPS=/var/backups/myownpki
@@ -59,11 +63,18 @@ Usage: install.sh [options]   (as root)
   --allowed-networks L   who may reach the admin listener (default: 127.0.0.1 and
                          the /24 of each own IPv4 address)
   --public-port-80       public listener on :80 without a reverse proxy (drop-in
-                         with CAP_NET_BIND_SERVICE); default :8080
+                         low-ports.conf with CAP_NET_BIND_SERVICE); default :8080
+  --acme URL             ACME with its own TLS, without a reverse proxy, e.g.
+                         https://pki.u.lab/acme: acme.base_url URL, acme.listen
+                         on its port (443 by default; below 1024 with the drop-in
+                         low-ports.conf), acme.tls_issuer from --acme-ca
+  --acme-ca NAME         the CA that issues the ACME listener's certificate
+                         (default issuing – the intermediate of init --with-ca)
   -h, --help             this text
 
-The four config options only apply when /etc/myownpki/config.yaml is created;
-an existing config is never changed.
+The config options (--tls-names, --admin-listen, --allowed-networks,
+--public-port-80, --acme) only apply when /etc/myownpki/config.yaml is created;
+an existing config is never changed. The drop-in is installed either way.
 EOF
 }
 
@@ -92,6 +103,10 @@ opt_tls_names=
 opt_admin_listen=
 opt_allowed=
 port80=false
+opt_acme=
+opt_acme_ca=
+acme_port=
+low_ports=false
 config_opts=false
 
 parse_args() {
@@ -103,6 +118,8 @@ parse_args() {
 		--admin-listen) opt_admin_listen=${2:?--admin-listen needs a value}; config_opts=true; shift 2 ;;
 		--allowed-networks) opt_allowed=${2:?--allowed-networks needs a value}; config_opts=true; shift 2 ;;
 		--public-port-80) port80=true; shift ;;
+		--acme) opt_acme=${2:?--acme needs a URL}; config_opts=true; shift 2 ;;
+		--acme-ca) opt_acme_ca=${2:?--acme-ca needs a CA name}; shift 2 ;;
 		-h | --help) usage; exit 0 ;;
 		*) usage >&2; die "unknown option: $1" ;;
 		esac
@@ -113,6 +130,21 @@ parse_args() {
 	[[ -z $opt_tls_names || $opt_tls_names =~ ^[A-Za-z0-9.:,\ *_-]+$ ]] || die "--tls-names: only names, addresses, commas and spaces"
 	[[ -z $opt_admin_listen || $opt_admin_listen =~ ^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]*):[0-9]{1,5}$ ]] || die "--admin-listen: HOST:PORT, e.g. 0.0.0.0:9443"
 	[[ -z $opt_allowed || $opt_allowed =~ ^[0-9A-Fa-f.:/,\ ]+$ ]] || die "--allowed-networks: only addresses and CIDRs, separated by commas"
+	if [ -n "$opt_acme" ]; then
+		# https://host[:port][/path] – a DNS name or an IPv4 address; the
+		# server checks the rest (config check before the file is used).
+		[[ $opt_acme =~ ^https://[A-Za-z0-9.-]+(:([0-9]{1,5}))?(/[A-Za-z0-9._~/-]*)?$ ]] ||
+			die "--acme: want https://HOST[:PORT]/PATH, e.g. https://pki.u.lab/acme"
+		acme_port=${BASH_REMATCH[2]:-443}
+		[ "$acme_port" -ge 1 ] && [ "$acme_port" -le 65535 ] || die "--acme: port $acme_port is not 1-65535"
+		opt_acme=${opt_acme%/}
+		opt_acme_ca=${opt_acme_ca:-issuing}
+		[[ $opt_acme_ca =~ ^[a-z0-9][a-z0-9._-]{0,62}$ ]] || die "--acme-ca: not a CA name (the name in myownpki ca list): $opt_acme_ca"
+		if [ "$acme_port" -lt 1024 ]; then low_ports=true; fi
+	elif [ -n "$opt_acme_ca" ]; then
+		die "--acme-ca only goes with --acme"
+	fi
+	if $port80; then low_ports=true; fi
 	# main() changes to / before it reads the archive: make a relative path
 	# absolute now, and refuse a missing file with the path as it was given.
 	if [ -n "$archive" ]; then
@@ -190,12 +222,15 @@ defaults() {
 	if $port80; then public_listen=":80"; else public_listen=":8080"; fi
 }
 
-# render_config writes the example config with the four values set to stdout.
-# It fails if the example no longer has exactly these keys.
+# render_config writes the example config with the four values (seven with
+# --acme) set to stdout. It fails if the example no longer has exactly
+# these keys.
 render_config() {
-	local example=$1
+	local example=$1 want=4
+	[ -z "$opt_acme" ] || want=7
 	awk -v admin_listen="$admin_listen" -v tls_names="$tls_names" -v allowed="$allowed" \
-		-v public_listen="$public_listen" -v stamp="$(date -u +%Y-%m-%d)" '
+		-v public_listen="$public_listen" -v acme_base="$opt_acme" -v acme_listen=":${acme_port:-443}" \
+		-v acme_ca="$opt_acme_ca" -v want="$want" -v stamp="$(date -u +%Y-%m-%d)" '
 		NR == 1 { print "# Written by install.sh on " stamp " from deploy/config.example.yaml; edit freely –"
 			print "# install.sh never changes it again. Check: myownpki config check --config /etc/myownpki/config.yaml"
 			print "#" }
@@ -204,8 +239,11 @@ render_config() {
 		section == "admin:" && /^  tls_names:/ { print "  tls_names: \"" tls_names "\""; n++; next }
 		section == "admin:" && /^  allowed_networks:/ { print "  allowed_networks: \"" allowed "\""; n++; next }
 		section == "public:" && /^  listen:/ { print "  listen: \"" public_listen "\""; n++; next }
+		acme_base != "" && section == "acme:" && /^  base_url:/ { print "  base_url: \"" acme_base "\""; n++; next }
+		acme_base != "" && section == "acme:" && /^  listen:/ { print "  listen: \"" acme_listen "\""; n++; next }
+		acme_base != "" && section == "acme:" && /^  tls_issuer:/ { print "  tls_issuer: \"" acme_ca "\""; n++; next }
 		{ print }
-		END { if (n != 4) { print "install.sh: the example config changed – " n " of 4 keys found" > "/dev/stderr"; exit 1 } }
+		END { if (n != want) { print "install.sh: the example config changed – " n " of " want " keys found" > "/dev/stderr"; exit 1 } }
 	' "$example"
 }
 
@@ -297,8 +335,8 @@ unpack() {
 	local f
 	mkdir "$work/x"
 	tar -xzf "$archive_file" -C "$work/x" --no-same-owner
-	for f in myownpki deploy/config.example.yaml deploy/systemd/myownpki.service deploy/systemd/public-port-80.conf; do
-		[ -f "$work/x/$f" ] || die "the archive has no $f – install.sh needs v0.2.1 or later"
+	for f in myownpki deploy/config.example.yaml deploy/systemd/myownpki.service deploy/systemd/low-ports.conf; do
+		[ -f "$work/x/$f" ] || die "the archive has no $f – this install.sh needs v0.2.2 or later (or the install.sh of the archive's release)"
 	done
 	# The service user runs the new binary for config check below.
 	chmod 0755 "$work" "$work/x" "$work/x/myownpki"
@@ -379,10 +417,13 @@ ensure_config() {
 	local data_dir pub
 	if [ -f "$CONF" ]; then
 		config_text="kept $CONF (install.sh never changes an existing config)"
-		$config_opts && warn "$CONF exists – --tls-names, --admin-listen and --allowed-networks were not applied; edit it by hand"
+		$config_opts && warn "$CONF exists – --tls-names, --admin-listen, --allowed-networks and --acme were not applied; edit it by hand"
 		pub=$(config_value "$CONF" public listen)
 		if $port80 && [ "$pub" != ":80" ] && [ "${pub##*:}" != 80 ]; then
 			warn "--public-port-80: set public.listen to \":80\" in $CONF yourself"
+		fi
+		if [ -n "$opt_acme" ] && [ "$(config_value "$CONF" acme base_url)" != "$opt_acme" ]; then
+			warn "--acme: set acme.base_url: \"$opt_acme\", acme.listen: \":$acme_port\" and acme.tls_issuer: \"$opt_acme_ca\" in $CONF yourself"
 		fi
 	else
 		defaults
@@ -397,6 +438,12 @@ ensure_config() {
     admin.tls_names:        \"$tls_names\"
     admin.allowed_networks: \"$allowed\"
     public.listen:          \"$public_listen\""
+		if [ -n "$opt_acme" ]; then
+			config_text+="
+    acme.base_url:          \"$opt_acme\"
+    acme.listen:            \":$acme_port\"
+    acme.tls_issuer:        \"$opt_acme_ca\""
+		fi
 	fi
 	data_dir=$(config_value "$CONF" "" data_dir)
 	[ "$data_dir" = "$DATA" ] ||
@@ -407,8 +454,10 @@ install_units() {
 	unit_changed=false
 	put "$work/x/deploy/systemd/myownpki.service" "$UNIT" 0644 root root
 	if $put_changed; then unit_changed=true; fi
-	if $port80; then
-		put "$work/x/deploy/systemd/public-port-80.conf" "$DROPIN" 0644 root root
+	# Ports below 1024: low-ports.conf – unless the old public-port-80.conf
+	# (v0.2.1, the same content) is installed; that one stays.
+	if $low_ports && [ ! -f "$OLD_LOWPORTS" ]; then
+		put "$work/x/deploy/systemd/low-ports.conf" "$LOWPORTS" 0644 root root
 		if $put_changed; then unit_changed=true; fi
 	fi
 	if $unit_changed; then systemctl daemon-reload; fi
@@ -502,6 +551,14 @@ Next steps – the service is enabled but not started:
 
 4. Open https://${host:-<this host>}:${port:-9443}/ , sign in, and unseal (banner → Unseal).
 EOF
+	if [ -n "$(config_value "$CONF" acme tls_issuer)" ]; then
+		cat <<EOF
+
+5. ACME with its own TLS: at the unseal the server issues the certificate of
+   $(config_value "$CONF" acme base_url) from CA $(config_value "$CONF" acme tls_issuer). Add a domain under
+   ACME → Domains; clients need your root as trust anchor (docs/OPERATIONS.md 10.10).
+EOF
+	fi
 }
 
 main() {
@@ -542,7 +599,9 @@ main() {
 	say "  SHA-256:   ok (checksums.txt)"
 	say "  Signature: $signature"
 	say "  Config:    $config_text"
-	if [ -f "$DROPIN" ]; then say "  Port 80:   drop-in $DROPIN (CAP_NET_BIND_SERVICE)"; fi
+	for t in "$LOWPORTS" "$OLD_LOWPORTS"; do
+		if [ -f "$t" ]; then say "  Low ports: drop-in $t (CAP_NET_BIND_SERVICE)"; fi
+	done
 	if [ ${#changes[@]} -eq 0 ]; then
 		say "  Changes:   none – everything was already in place"
 	else

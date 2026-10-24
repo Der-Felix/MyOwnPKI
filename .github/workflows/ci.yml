@@ -231,6 +231,8 @@ jobs:
   # its own job because it runs containers (BIND, certbot, acme.sh) and binds
   # port 80. The images are pinned by digest in test/conformance/run.sh; lego
   # and Pebble by version in Taskfile.yml. Nothing of it reaches a release.
+  # Since v0.2.2 also lego and certbot directly against the server's own TLS
+  # listener (acme.tls_issuer), with the root as the only trust anchor.
   conformance:
     name: ACME conformance (lego, certbot, acme.sh; Pebble as control)
     if: github.event_name != 'schedule'
@@ -252,10 +254,12 @@ jobs:
 
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the
-  # runner – first installation, systemd-analyze, second run, init, start,
-  # health, CRL, an update that leaves the old binary running (rolled back),
-  # the update with a second build, one more run. The archive path stays
-  # relative: install.sh changes to / before it reads it.
+  # runner – first installation with --acme (ACME with its own TLS on :443,
+  # the low-ports drop-in), systemd-analyze with the drop-in, second run,
+  # init, start, health, CRL, an unseal through the API and ACME over TLS
+  # with the root as trust anchor, an update that leaves the old binary
+  # running (rolled back), the update with a second build, one more run. The
+  # archive path stays relative: install.sh changes to / before it reads it.
   install:
     name: systemd installation (install.sh)
     if: github.event_name != 'schedule'

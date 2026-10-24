@@ -79,8 +79,10 @@ What it does:
   | `admin.tls_names` | `hostname -f` and the machine's addresses | `--tls-names` |
   | `admin.allowed_networks` | `127.0.0.1` and the /24 of each own IPv4 address | `--allowed-networks` (the address the health check uses is always added) |
   | `public.listen` | `:8080` | `--public-port-80` sets `:80` |
+  | `acme.base_url`, `acme.listen`, `acme.tls_issuer` | ACME off | `--acme https://pki.u.lab/acme` sets the URL, `acme.listen` to its port (`:443` without one) and `acme.tls_issuer` to `--acme-ca` (default `issuing`, the intermediate of `init --with-ca` – give the name of your own intermediate) – ACME with its own TLS, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) |
 
-  The new file must pass `myownpki config check` before it is put in place.
+  The new file must pass `myownpki config check` before it is put in place. With an existing
+  config, install.sh says which values to set by hand.
 - The first installation **enables the service but doesn't start it**, and ends with the next
   commands: `init` at the terminal as the service user (§3), `systemctl start myownpki`, the admin
   certificate's fingerprint from the journal, and the address to unseal in the browser:
@@ -104,10 +106,17 @@ The unit runs the server in a strict sandbox: no capabilities, a read-only syste
 namespaces, no writable-and-executable memory, the system calls of a normal service.
 `systemd-analyze security myownpki.service` rates it **1.2** ("OK"; measured 2026-10-23 on the
 GitHub runner ubuntu-24.04). The CI job fails above 2.0 and shows the value in its summary;
-other systemd versions may rate a little differently. Without a reverse proxy in front of the public listener,
-`--public-port-80` adds the drop-in `myownpki.service.d/public-port-80.conf`: binding port 80 is
-then the only capability the service has. With a `data_dir` other than `/var/lib/myownpki`,
-change `StateDirectory=` and `ReadWritePaths=` with `systemctl edit myownpki`.
+other systemd versions may rate a little differently.
+
+Ports below 1024 without a reverse proxy – the public listener on `:80` (`--public-port-80`), ACME
+with its own TLS on `:443` (`--acme`) – need the drop-in `myownpki.service.d/low-ports.conf`:
+binding such a port is then the only capability the service has (it also drops `PrivateUsers=`,
+because a capability inside a private user namespace doesn't count for the host's network). Since
+v0.2.2 the CI job measures the unit **with** this drop-in and still requires less than 2.0. Its
+old name `public-port-80.conf` (v0.2.1) does the same; an installed one stays in place and
+install.sh adds no second one. The drop-in is installed even when the config exists already, and
+never removed. With a `data_dir` other than `/var/lib/myownpki`, change `StateDirectory=` and
+`ReadWritePaths=` with `systemctl edit myownpki`.
 
 ### 2.2 With Docker, or by hand
 
@@ -676,6 +685,10 @@ acme:
   tls_issuer: issuing                # the CA's name (myownpki ca list)
   resolver: 172.20.23.1
 ```
+
+With install.sh (§2.1) on a new machine: `--acme https://pki.u.lab/acme --acme-ca <your intermediate>`
+writes these keys and installs the drop-in `low-ports.conf` for port 443. On an existing
+installation, set the keys by hand; `install.sh --acme …` then only adds the drop-in.
 
 What changes against the proxy way:
 
