@@ -57,7 +57,7 @@ With [cosign](https://github.com/sigstore/cosign/releases) installed, check the 
 downloads. Then, as root:
 
 ```bash
-sudo bash install.sh --tls-names "pki.homelab.lan, 192.168.10.5"
+sudo bash install.sh --tls-names "pki.homelab.lan, 192.0.2.5"
 ```
 
 What it does:
@@ -82,7 +82,7 @@ What it does:
   | `admin.tls_names` | `hostname -f` and the machine's addresses | `--tls-names` |
   | `admin.allowed_networks` | `127.0.0.1` and the /24 of each own IPv4 address | `--allowed-networks` (the address the health check uses is always added) |
   | `public.listen` | `:8080` | `--public-port-80` sets `:80` |
-  | `acme.base_url`, `acme.listen`, `acme.tls_issuer` | ACME off | `--acme https://pki.u.lab/acme` sets the URL, `acme.listen` to its port (`:443` without one) and `acme.tls_issuer` to `--acme-ca` (default `issuing`, the intermediate of `init --with-ca` – give the name of your own intermediate) – ACME with its own TLS, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) |
+  | `acme.base_url`, `acme.listen`, `acme.tls_issuer` | ACME off | `--acme https://pki.homelab.lan/acme` sets the URL, `acme.listen` to its port (`:443` without one) and `acme.tls_issuer` to `--acme-ca` (default `issuing`, the intermediate of `init --with-ca` – give the name of your own intermediate) – ACME with its own TLS, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) |
 
   The new file must pass `myownpki config check` before it is put in place. With an existing
   config, install.sh says which values to set by hand.
@@ -141,10 +141,10 @@ For a config written by hand (install.sh sets these from its defaults or options
 
 1. Who may reach the admin listener. Loopback is the default of the example config. For remote
    administration set `admin.listen: 0.0.0.0:9443` **and** `admin.allowed_networks` (for example
-   `127.0.0.1, 192.168.10.0/24`). Keep `127.0.0.1` in the list: `myownpki healthcheck` connects
+   `127.0.0.1, 192.0.2.0/24`). Keep `127.0.0.1` in the list: `myownpki healthcheck` connects
    through loopback. Never expose the admin listener to the internet.
 2. Add the names you type into the browser to `admin.tls_names` (for example
-   `pki.homelab.lan, 192.168.10.5`), or give your own certificate with `admin.tls_cert_file` /
+   `pki.homelab.lan, 192.0.2.5`), or give your own certificate with `admin.tls_cert_file` /
    `admin.tls_key_file` – or let the server issue its own from your CA with `admin.tls_issuer`
    (§2.4).
 3. The public listener must be reachable under the base URL that is baked into every certificate
@@ -158,8 +158,8 @@ compares fingerprints any more:
 
 ```yaml
 admin:
-  tls_names: "pki.u.lab, 172.20.23.20"   # exactly the names of the certificate
-  tls_issuer: issuing                    # the name of the CA (as in `myownpki ca list`), not its CN
+  tls_names: "pki.homelab.lan, 192.0.2.20" # exactly the names of the certificate
+  tls_issuer: issuing                      # the name of the CA (as in `myownpki ca list`), not its CN
 ```
 
 How it behaves:
@@ -202,7 +202,7 @@ How it behaves:
 Check what the listener serves, and that it verifies against your root:
 
 ```bash
-openssl s_client -connect pki.u.lab:9443 -servername pki.u.lab -CAfile root.pem -verify_return_error </dev/null | grep -E "Verify return code|subject=|issuer="
+openssl s_client -connect pki.homelab.lan:9443 -servername pki.homelab.lan -CAfile root.pem -verify_return_error </dev/null | grep -E "Verify return code|subject=|issuer="
 ```
 
 ```bash
@@ -488,7 +488,7 @@ acme:
   base_url: https://pki.homelab.lan/acme   # empty = ACME off
   listen: 127.0.0.1:8081                    # for the proxy only, plain HTTP
   trusted_proxies: "127.0.0.1, ::1"         # the proxy's address(es)
-  resolver: 192.168.10.53                   # DNS server that knows your internal names (split DNS)
+  resolver: 192.0.2.53                      # DNS server that knows your internal names (split DNS)
 ```
 
 Check it, then restart the server:
@@ -762,13 +762,13 @@ at 2/3, issued only while unsealed, the CA's name constraints apply, audited as 
 
 ```yaml
 acme:
-  base_url: https://pki.u.lab/acme   # the host is the name in the certificate
-  listen: ":443"                     # the port of base_url; reachable by the clients
-  tls_issuer: issuing                # the CA's name (myownpki ca list)
-  resolver: 172.20.23.1
+  base_url: https://pki.homelab.lan/acme # the host is the name in the certificate
+  listen: ":443"                         # the port of base_url; reachable by the clients
+  tls_issuer: issuing                    # the CA's name (myownpki ca list)
+  resolver: 192.0.2.1
 ```
 
-With install.sh (§2.1) on a new machine: `--acme https://pki.u.lab/acme --acme-ca <your intermediate>`
+With install.sh (§2.1) on a new machine: `--acme https://pki.homelab.lan/acme --acme-ca <your intermediate>`
 writes these keys and installs the drop-in `low-ports.conf` for port 443. On an existing
 installation, set the keys by hand; `install.sh --acme …` then only adds the drop-in.
 
@@ -789,12 +789,12 @@ What changes against the proxy way:
 Check it from a client:
 
 ```bash
-curl --cacert root.pem https://pki.u.lab/acme/directory
+curl --cacert root.pem https://pki.homelab.lan/acme/directory
 ```
 
 ## 11. The public trust page
 
-Since v0.2.2 the public listener serves a page at `/` – `http://pki.u.lab/` behind port 80 –
+Since v0.2.2 the public listener serves a page at `/` – `http://pki.homelab.lan/` behind port 80 –
 that everybody may open without signing in. Send people there instead of mailing root files:
 
 - every active CA, **roots first**: name, common name, validity and the **SHA-256 fingerprint**
