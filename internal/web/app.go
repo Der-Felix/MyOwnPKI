@@ -59,6 +59,11 @@ type AppDeps struct {
 	ACME ACMEAdmin
 	// ACMEDirectory is the directory URL clients use (shown with EAB keys).
 	ACMEDirectory string
+	// ServerAttention reports the state of the server itself for the
+	// dashboard: the certificates it issues for its listeners
+	// (admin.tls_issuer, acme.tls_issuer) and the scheduled backups; nil =
+	// nothing to report.
+	ServerAttention func(sealed bool) []view.Message
 }
 
 // ACMEAdmin is what the UI uses of the ACME server.

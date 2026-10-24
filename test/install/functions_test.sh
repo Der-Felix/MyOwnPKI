@@ -32,6 +32,7 @@ refused() {
 }
 reset_opts() {
 	version=$DEFAULT_VERSION archive='' opt_tls_names='' opt_admin_listen='' opt_allowed='' port80=false config_opts=false
+	opt_acme='' opt_acme_ca='' acme_port='' low_ports=false opt_backup_keep='' backup_timer=true
 }
 # rc_of CMD…: run CMD with set -e in effect inside it (not as a condition,
 # where bash switches set -e off) and put its exit code into rc.
@@ -90,6 +91,44 @@ else
 fi
 sed 's/^  allowed_networks:.*/  allowed: ""/' "$root/deploy/config.example.yaml" >"$tmp/drift.yaml"
 refused render_config "$tmp/drift.yaml"
+check "--public-port-80: low ports" "$low_ports" "true"
+
+# --acme: ACME with its own TLS – three more keys, the port of the URL, the
+# low-ports drop-in only below 1024.
+reset_opts
+parse_args --acme https://pki.u.lab/acme/
+defaults
+check "--acme: base URL without the trailing slash" "$opt_acme" "https://pki.u.lab/acme"
+check "--acme: port 443, low ports, CA issuing" "$acme_port $low_ports $opt_acme_ca" "443 true issuing"
+render_config "$root/deploy/config.example.yaml" >"$tmp/acme.yaml"
+check "--acme: changed lines (3 header + 6 keys; public.listen stays :8080)" "$(diff "$root/deploy/config.example.yaml" "$tmp/acme.yaml" | grep -c '^>')" "9"
+check "--acme: acme.base_url" "$(config_value "$tmp/acme.yaml" acme base_url)" "https://pki.u.lab/acme"
+check "--acme: acme.listen" "$(config_value "$tmp/acme.yaml" acme listen)" ":443"
+check "--acme: acme.tls_issuer" "$(config_value "$tmp/acme.yaml" acme tls_issuer)" "issuing"
+check "--acme: admin.listen still set" "$(config_value "$tmp/acme.yaml" admin listen)" "0.0.0.0:9443"
+sed "s|^data_dir: .*|data_dir: $data|" "$tmp/acme.yaml" >"$tmp/acme-check.yaml"
+if "$bin" config check --config "$tmp/acme-check.yaml" >"$tmp/check.out" 2>&1; then
+	echo "ok   config check of the --acme config"
+else
+	echo "FAIL config check of the --acme config:"
+	cat "$tmp/check.out"
+	fail=1
+fi
+reset_opts
+parse_args --acme https://172.20.23.20:8443 --acme-ca lab-issuing
+check "--acme on 8443: no low ports, own CA" "$acme_port $low_ports $opt_acme_ca" "8443 false lab-issuing"
+# shellcheck disable=SC2329 # called through refused
+fresh_parse() { reset_opts && parse_args "$@"; }
+refused fresh_parse --acme http://pki.u.lab/acme
+refused fresh_parse --acme 'https://pki.u.lab/acme"x'
+refused fresh_parse --acme https://pki.u.lab:99999/acme
+refused fresh_parse --acme https://pki.u.lab/acme --acme-ca 'Issuing CA'
+refused fresh_parse --acme-ca issuing
+
+# low-ports.conf and its old name public-port-80.conf grant the same.
+settings() { grep -v -e '^#' -e '^$' "$1"; }
+check "low-ports.conf = public-port-80.conf (without comments)" \
+	"$(settings "$root/deploy/systemd/low-ports.conf" | tr '\n' ' ')" "$(settings "$root/deploy/systemd/public-port-80.conf" | tr '\n' ' ')"
 
 # Checksums.
 f=$tmp/myownpki_9.9.9_linux_amd64.tar.gz
@@ -122,6 +161,25 @@ check "--archive ../DIR/FILE, then fetch from /" "$(
 check "--archive missing: the path as given" "$(cd "$tmp/rel/elsewhere" && reset_opts && (parse_args --archive "dl/$a") 2>&1 || true)" \
 	"install.sh: --archive: no such file: dl/$a"
 refused parse_args --archive "$tmp/rel/dl"
+
+
+# The daily backup: options, and the backup unit has every sandbox setting
+# of the main unit (the address families stricter: it has no network) and
+# writes where install.sh makes the directory.
+reset_opts
+parse_args --backup-keep 30 --no-backup-timer
+check "--backup-keep, --no-backup-timer" "$opt_backup_keep $backup_timer" "30 false"
+refused fresh_parse --backup-keep 0
+refused fresh_parse --backup-keep 1001
+refused fresh_parse --backup-keep 1e3
+sandbox() { sed -n '/^NoNewPrivileges=/,/^\[Install\]/p' "$1" | grep -v -e '^#' -e '^$' -e '^\[' -e '^RestrictAddressFamilies='; }
+missing=$(sandbox "$root/deploy/systemd/myownpki.service" | while read -r line; do
+	grep -qxF "$line" "$root/deploy/systemd/myownpki-backup.service" || echo "$line"
+done)
+check "backup unit: the main unit's sandbox" "$missing" ""
+check "backup unit: no network" "$(grep -c -x -e 'PrivateNetwork=yes' -e 'IPAddressDeny=any' -e 'RestrictAddressFamilies=AF_UNIX' "$root/deploy/systemd/myownpki-backup.service")" "3"
+check "backup unit: writes \$BACKUPS" "$(grep -c "^ExecStart=$BIN backup scheduled $BACKUPS --keep \${BACKUP_KEEP} --config $CONF\$" "$root/deploy/systemd/myownpki-backup.service")" "1"
+check "backup unit: ReadWritePaths" "$(sed -n 's/^ReadWritePaths=//p' "$root/deploy/systemd/myownpki-backup.service")" "$DATA $BACKUPS"
 
 # put and swap_binary: a failed copy never passes as done. The tests run as
 # a normal user: install without -o/-g, and directories with mkdir (Git Bash

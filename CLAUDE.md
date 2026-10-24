@@ -2,7 +2,7 @@
 
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
 templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 released;
-v0.2.0 ACME server released; v0.2.1 = systemd installation being released); phase 3 (agent, monitoring) next.
+v0.2.0 ACME server released; v0.2.1-rc.1 systemd installation in production; v0.2.2 = own TLS, daily backup, trust page – built, not released); phase 3 (agent, monitoring) next.
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
@@ -16,6 +16,23 @@ v0.2.0 ACME server released; v0.2.1 = systemd installation being released); phas
   (pushes, releases, container images).
 - Conventional Commits; small commits that each build and pass `task check`.
 - Don't commit or push on your own unless the maintainer asked for it.
+
+## Branches and worktrees
+
+- The **main checkout** (the clone itself) always stays on `main`. Never `git checkout` or
+  `git switch` another branch there. Work happens in a worktree next to it
+  (forward slashes work in PowerShell and Git Bash):
+  `git worktree add ../MyOwnPKI-wt/<branch> -b <branch> origin/main`
+- One branch per release or topic, named only like this:
+  - `release/vX.Y.Z` – preparing a release and the features of that release
+  - `fix/<short>` – a single fix
+  - `deps/<short>` – dependencies
+
+  No more `night/` branches: a night run works on the `release/` branch of the planned release.
+- If an open branch or PR already exists for the goal, keep working there – don't start a second one.
+- After the merge GitHub deletes the branch; remove the worktree with `git worktree remove` and the
+  local branch with `git branch -d`.
+- The session never pushes, merges, tags or deletes remote branches – the maintainer does.
 
 ## Build and environment
 

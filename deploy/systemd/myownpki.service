@@ -7,8 +7,9 @@
 # ReadWritePaths= in a drop-in (systemctl edit myownpki).
 #
 # Check the sandbox: systemd-analyze security myownpki.service
-# Port 80 for the public listener without a reverse proxy: the drop-in
-# public-port-80.conf (install.sh --public-port-80).
+# Ports below 1024 (public listener on :80, ACME with its own TLS on :443)
+# without a reverse proxy: the drop-in low-ports.conf (install.sh
+# --public-port-80 or --acme; its old name public-port-80.conf still works).
 
 [Unit]
 Description=MyOwnPKI certificate authority

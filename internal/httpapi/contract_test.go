@@ -685,6 +685,8 @@ func TestContract(t *testing.T) {
 		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 100, 3, 20), want: 200, note: "acme-limits"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
+		{op: "updateSettings", as: admin, body: withTrustPage(settings, false), want: 200, note: "trust-page"},
+		{op: "updateSettings", as: admin, body: withTrustPage(settings, true), want: 200, note: "trust-page"},
 	} {
 		run(cc)
 	}
@@ -981,5 +983,13 @@ func withLimits(settings map[string]any, orders, failed, accounts int) map[strin
 	out := map[string]any{}
 	maps.Copy(out, settings)
 	out["acme_limits"] = map[string]int{"orders_per_account": orders, "failed_per_name": failed, "accounts_per_ip": accounts}
+	return out
+}
+
+// withTrustPage adds trust_page to a settings body (v0.2.2).
+func withTrustPage(settings map[string]any, on bool) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["trust_page"] = on
 	return out
 }

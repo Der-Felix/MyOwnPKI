@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,8 +63,13 @@ type Admin struct {
 	TLSKeyFile  string `yaml:"tls_key_file"`
 	// TLSNames are further DNS names or IPs (comma-separated) for the
 	// bootstrap certificate, besides the host name, the listen IP and
-	// loopback – the names admins type into the browser.
+	// loopback – the names admins type into the browser. With TLSIssuer they
+	// are exactly the names of the issued certificate.
 	TLSNames string `yaml:"tls_names"`
+	// TLSIssuer names a CA of this instance (v0.2.2): the server issues the
+	// listener's certificate from it itself, while unsealed, and renews it.
+	// Empty: the operator certificate or the bootstrap certificate.
+	TLSIssuer string `yaml:"tls_issuer"`
 	// AllowedNetworks limits who may connect (IPs or CIDRs, comma-separated);
 	// empty: everybody. Checked against the direct peer before TLS (ADR-08).
 	AllowedNetworks string `yaml:"allowed_networks"`
@@ -92,23 +98,34 @@ type Auth struct {
 	PasskeyOrigin string `yaml:"passkey_origin"`
 }
 
-// ACME is the ACME server (PHASE2, owner Q1 2026-10-22): plain HTTP on its own
-// listener, only behind a reverse proxy that terminates TLS.
+// ACME is the ACME server (PHASE2): by default plain HTTP on its own listener,
+// only behind a reverse proxy that terminates TLS (owner Q1 2026-10-22); with
+// TLSIssuer it speaks TLS itself (v0.2.2, owner 2026-10-24).
 type ACME struct {
-	// Listen is IP:port of the ACME listener – for the reverse proxy only, not
-	// the public CRL port, so nobody talks ACME in clear text past the proxy.
+	// Listen is IP:port of the ACME listener – never the public CRL port, so
+	// nobody talks ACME in clear text. Without TLSIssuer it is for the reverse
+	// proxy only; with it, for the clients (e.g. :443).
 	Listen string `yaml:"listen"`
 	// BaseURL is what clients use (the proxy's https URL, e.g.
 	// https://pki.homelab.lan/acme); every URL the server hands out is built
 	// from it. Empty: ACME is off.
 	BaseURL string `yaml:"base_url"`
 	// TrustedProxies may connect to Listen (others get 403), and only their
-	// X-Forwarded-For is believed (IPs or CIDRs, comma-separated).
+	// X-Forwarded-For is believed (IPs or CIDRs, comma-separated). Ignored
+	// with TLSIssuer: then every client connects directly and the peer is
+	// the client address.
 	TrustedProxies string `yaml:"trusted_proxies"`
 	// Resolver is the DNS server (IP or IP:port) for dns-01 and for resolving
 	// http-01 names. Empty: the system resolver.
 	Resolver string `yaml:"resolver"`
+	// TLSIssuer names a CA of this instance: ACME runs with TLS on Listen,
+	// with a certificate for the host of BaseURL that the server issues from
+	// this CA itself. Empty: plain HTTP behind a reverse proxy.
+	TLSIssuer string `yaml:"tls_issuer"`
 }
+
+// DirectTLS reports whether the ACME listener speaks TLS itself.
+func (a ACME) DirectTLS() bool { return a.TLSIssuer != "" }
 
 // Allowed values.
 var (
@@ -192,6 +209,17 @@ func (c Config) Validate() error {
 	}
 	if (c.Admin.TLSCertFile == "") != (c.Admin.TLSKeyFile == "") {
 		add("admin.tls_cert_file and admin.tls_key_file: set both or neither")
+	}
+	if c.Admin.TLSIssuer != "" {
+		if err := checkCAName(c.Admin.TLSIssuer); err != nil {
+			add("admin.tls_issuer: %w", err)
+		}
+		if c.Admin.TLSCertFile != "" {
+			add("admin.tls_issuer and admin.tls_cert_file: set one of them – a certificate the server issues itself, or your own file")
+		}
+		if names, ips, err := ParseTLSNames(c.Admin.TLSNames); err == nil && len(names)+len(ips) == 0 {
+			add("admin.tls_issuer needs admin.tls_names: the names of the issued certificate (the names admins type into the browser)")
+		}
 	}
 	for key, file := range map[string]string{"admin.tls_cert_file": c.Admin.TLSCertFile, "admin.tls_key_file": c.Admin.TLSKeyFile} {
 		if file != "" && !filepath.IsAbs(file) {
@@ -440,6 +468,14 @@ func (c Config) validateACME(admin listenAddr, add func(string, ...any)) {
 			add("acme.base_url: %w", err)
 		}
 	}
+	if c.ACME.TLSIssuer != "" {
+		if err := checkCAName(c.ACME.TLSIssuer); err != nil {
+			add("acme.tls_issuer: %w", err)
+		}
+		if c.ACME.BaseURL == "" {
+			add("acme.tls_issuer needs acme.base_url: its host is the name in the certificate")
+		}
+	}
 	acme, err := parseListen(c.ACME.Listen)
 	switch {
 	case err != nil:
@@ -468,11 +504,32 @@ func ACMEBaseURL(s string) (string, error) {
 	case err != nil:
 		return "", fmt.Errorf("%q is not a URL", s)
 	case u.Scheme != "https":
-		return "", fmt.Errorf("%q: must be https:// – ACME runs behind a reverse proxy that terminates TLS (RFC 8555 §6.1)", s)
+		return "", fmt.Errorf("%q: must be https:// – clients talk ACME only over TLS (RFC 8555 §6.1): through the reverse proxy, or directly with acme.tls_issuer", s)
 	case u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "":
 		return "", fmt.Errorf("%q: want https://host[:port][/path], e.g. https://pki.homelab.lan/acme", s)
 	}
 	return strings.TrimRight(s, "/"), nil
+}
+
+// caNamePattern is the rule for CA names (internal/ca, profile.go): the
+// name a CA was created with, not its common name.
+var caNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
+
+func checkCAName(s string) error {
+	if !caNamePattern.MatchString(s) {
+		return fmt.Errorf("%q is not a CA name (the name the CA was created with: lower case letters, digits, '.', '_', '-')", s)
+	}
+	return nil
+}
+
+// ACMEHost is the host of acme.base_url in lower case: the name (or IP) in
+// the certificate of the ACME listener with acme.tls_issuer.
+func ACMEHost(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // ACMEResolver checks acme.resolver: empty, an IP (port 53) or IP:port.

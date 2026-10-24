@@ -9,7 +9,7 @@
 
 > **Status: v0.2 – phases 1 and 2 complete.** A working CA with web UI, REST API, legacy import and
 > backup – it replaces the `pki.sh` Bash suite – and, new in v0.2, an **ACME server** for your own CA
-> (only behind a reverse proxy that ends TLS). The agent and monitoring come with v0.3. See
+> (behind a reverse proxy, or with its own TLS since v0.2.2). The agent and monitoring come with v0.3. See
 > [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
 
 MyOwnPKI is a self-hosted certificate authority platform. v0.1 brought the CA, the web UI and the
@@ -18,7 +18,7 @@ follows up to v1.0:
 
 - **Secure web UI** with dashboards, upload/download and role-based access
 - **ACME server** for your internal CA *(v0.2)* – use certbot, acme.sh, lego, Traefik, Caddy or
-  win-acme; it runs only behind a reverse proxy that ends TLS (docs/OPERATIONS.md chapter 10)
+  win-acme; behind a reverse proxy, or since v0.2.2 with its own TLS (docs/OPERATIONS.md chapter 10)
 - **ACME client** for public certificates from Let's Encrypt / ZeroSSL (http-01, dns-01)
 - **Optional agent** that deploys certificates to Linux, Windows and FreeBSD hosts, reloads
   services safely and monitors what is actually being served
@@ -145,7 +145,7 @@ are reproducible: the same tag built again gives byte-identical archives.
 | Path | Content |
 |---|---|
 | `docs/PLAN.md` | Project plan, architecture decisions (ADRs), roadmap |
-| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies, the ACME server behind a reverse proxy |
+| `docs/OPERATIONS.md` | Operations guide: install, init, backup and restore, emergencies, the ACME server (behind a reverse proxy or with its own TLS) |
 | `docs/RELEASING.md` | How a release is made (owner checklist) |
 | `deploy/` | Example configuration, `install.sh` and the systemd unit, Dockerfile and Docker Compose file |
 | `CHANGELOG.md` | Changes per release |

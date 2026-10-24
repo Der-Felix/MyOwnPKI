@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/server"
 )
 
 // runConfig handles `myownpki config <subcommand>`.
@@ -49,7 +52,27 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printConfig(stdout, cfg, src)
+	checkTLSIssuers(cfg, stdout, stderr)
+	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0
+}
+
+// checkTLSIssuers names a root CA in admin.tls_issuer or acme.tls_issuer, read
+// from the CA database when it is readable. It is a warning on stderr, not
+// an invalid config (exit 0): the server starts with it and serves the
+// bootstrap certificate (owner 2026-10-24) – and install.sh, which hides
+// stdout, still shows it.
+func checkTLSIssuers(cfg config.Config, stdout, stderr io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	problems, err := server.TLSIssuerProblems(ctx, cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stdout, "\nNot checked: whether the CA of tls_issuer is a root – the CA database can't be read (%v).\n", err)
+		return
+	}
+	for _, p := range problems {
+		_, _ = fmt.Fprintf(stderr, "\nWarning: %s. Until then the listener serves the bootstrap certificate.\n", p)
+	}
 }
 
 // configFlag registers --config on a subcommand's flag set.
@@ -90,8 +113,11 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 		return ""
 	}
 	tls := "self-signed bootstrap certificate"
-	if cfg.Admin.TLSCertFile != "" {
+	switch {
+	case cfg.Admin.TLSCertFile != "":
 		tls = cfg.Admin.TLSCertFile + " + " + cfg.Admin.TLSKeyFile
+	case cfg.Admin.TLSIssuer != "":
+		tls = "issued by CA " + cfg.Admin.TLSIssuer + " for " + cfg.Admin.TLSNames + " (bootstrap certificate until the unseal)"
 	}
 	public := cfg.Public.Listen
 	if public == "" {
@@ -102,12 +128,21 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 		{"log.level", cfg.Log.Level + from("MYOWNPKI_LOG_LEVEL")},
 		{"log.format", cfg.Log.Format + from("MYOWNPKI_LOG_FORMAT")},
 		{"admin.listen", cfg.Admin.Listen + from("MYOWNPKI_ADMIN_LISTEN")},
-		{"admin.tls", tls + from("MYOWNPKI_ADMIN_TLS_CERT_FILE") + from("MYOWNPKI_ADMIN_TLS_KEY_FILE")},
+		{"admin.tls", tls + from("MYOWNPKI_ADMIN_TLS_CERT_FILE") + from("MYOWNPKI_ADMIN_TLS_KEY_FILE") + from("MYOWNPKI_ADMIN_TLS_ISSUER")},
 		{"public.listen", public + from("MYOWNPKI_PUBLIC_LISTEN")},
+	}
+	switch {
+	case cfg.ACME.BaseURL == "":
+		rows = append(rows, [2]string{"acme", "off (acme.base_url is empty)"})
+	case cfg.ACME.DirectTLS():
+		rows = append(rows, [2]string{"acme", cfg.ACME.BaseURL + from("MYOWNPKI_ACME_BASE_URL")},
+			[2]string{"acme.listen", cfg.ACME.Listen + " – its own TLS, issued by CA " + cfg.ACME.TLSIssuer + from("MYOWNPKI_ACME_TLS_ISSUER")})
+	default:
+		rows = append(rows, [2]string{"acme", cfg.ACME.BaseURL + from("MYOWNPKI_ACME_BASE_URL")},
+			[2]string{"acme.listen", cfg.ACME.Listen + " – plain HTTP for the reverse proxy " + cfg.ACME.TrustedProxies + from("MYOWNPKI_ACME_LISTEN")})
 	}
 	_, _ = fmt.Fprintf(w, "Config file: %s\n\n", src.File)
 	for _, r := range rows {
 		_, _ = fmt.Fprintf(w, "  %-14s %s\n", r[0], r[1])
 	}
-	_, _ = fmt.Fprintln(w, "\nConfiguration is valid.")
 }

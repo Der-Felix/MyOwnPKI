@@ -44,6 +44,37 @@ func TestDirectoryNonceAndProxy(t *testing.T) {
 	if got := v.s.clientIP(req, netipMust("127.0.0.1")); got != "203.0.113.9" {
 		t.Errorf("client IP %q", got)
 	}
+	if got, ok := v.s.client(req); !ok || got != "203.0.113.9" {
+		t.Errorf("client behind the proxy: %q %v", got, ok)
+	}
+}
+
+// TestDirectMode (acme.tls_issuer, v0.2.2): on the own TLS listener every
+// peer may connect, and the peer is the client – an X-Forwarded-For header
+// can't pick another address for the rate limits.
+func TestDirectMode(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	s, err := New(Options{Engine: v.s.engine, BaseURL: testBase, Direct: true, Clock: v.s.clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/acme/directory", nil)
+	req.RemoteAddr = "203.0.113.7:4242"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1")
+	if got, ok := s.client(req); !ok || got != "203.0.113.7" {
+		t.Errorf("client: %q %v, want the peer", got, ok)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Header().Get("Replay-Nonce") == "" {
+		t.Errorf("directory from any peer: %d %s", rec.Code, rec.Body)
+	}
+	req.RemoteAddr = "[::ffff:192.0.2.9]:4242"
+	if got, _ := s.client(req); got != "192.0.2.9" {
+		t.Errorf("IPv4-mapped peer: %q", got)
+	}
 }
 
 func TestHTTP01ToCertificate(t *testing.T) {

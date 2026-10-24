@@ -21,9 +21,9 @@ full design is in [PLAN.md](PLAN.md).
 | Part | What it is | Default |
 |---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` |
-| Public listener | CRLs and CA certificates over plain HTTP, no login | `:8080` |
-| ACME listener | ACME for the reverse proxy only, plain HTTP; off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
-| Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificate), `auth.key` | `/var/lib/myownpki` |
+| Public listener | CRLs and CA certificates over plain HTTP, no login; the trust page at `/` ([chapter 11](#11-the-public-trust-page)) | `:8080` |
+| ACME listener | ACME for the reverse proxy only, plain HTTP – or, with `acme.tls_issuer`, with its own TLS for the clients ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)); off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
+| Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificates and the ones the server issues itself, §2.4), `auth.key` | `/var/lib/myownpki` |
 | Config file | YAML, every key also as `MYOWNPKI_*` variable | `/etc/myownpki/config.yaml` (Windows: `%ProgramData%\MyOwnPKI\config.yaml`) |
 
 The secrets you get at `init`, and what each one protects:
@@ -69,6 +69,9 @@ What it does:
   stops it before anything is installed.
 - It creates the system user `myownpki` and `/var/lib/myownpki` (0700), and installs
   `/usr/local/bin/myownpki` and the unit `/etc/systemd/system/myownpki.service`.
+- It installs the daily backup – `myownpki-backup.service` and `.timer`, backups in
+  `/var/backups/myownpki` (0700) – and enables the timer the first time (§6.1; `--no-backup-timer`,
+  `--backup-keep N`).
 - `/etc/myownpki/config.yaml` (root:myownpki, 0640) is written **only if there is none** – an
   existing config is never changed. It is the example config with four values, each shown in the
   result:
@@ -79,8 +82,10 @@ What it does:
   | `admin.tls_names` | `hostname -f` and the machine's addresses | `--tls-names` |
   | `admin.allowed_networks` | `127.0.0.1` and the /24 of each own IPv4 address | `--allowed-networks` (the address the health check uses is always added) |
   | `public.listen` | `:8080` | `--public-port-80` sets `:80` |
+  | `acme.base_url`, `acme.listen`, `acme.tls_issuer` | ACME off | `--acme https://pki.u.lab/acme` sets the URL, `acme.listen` to its port (`:443` without one) and `acme.tls_issuer` to `--acme-ca` (default `issuing`, the intermediate of `init --with-ca` – give the name of your own intermediate) – ACME with its own TLS, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) |
 
-  The new file must pass `myownpki config check` before it is put in place.
+  The new file must pass `myownpki config check` before it is put in place. With an existing
+  config, install.sh says which values to set by hand.
 - The first installation **enables the service but doesn't start it**, and ends with the next
   commands: `init` at the terminal as the service user (§3), `systemctl start myownpki`, the admin
   certificate's fingerprint from the journal, and the address to unseal in the browser:
@@ -104,10 +109,17 @@ The unit runs the server in a strict sandbox: no capabilities, a read-only syste
 namespaces, no writable-and-executable memory, the system calls of a normal service.
 `systemd-analyze security myownpki.service` rates it **1.2** ("OK"; measured 2026-10-23 on the
 GitHub runner ubuntu-24.04). The CI job fails above 2.0 and shows the value in its summary;
-other systemd versions may rate a little differently. Without a reverse proxy in front of the public listener,
-`--public-port-80` adds the drop-in `myownpki.service.d/public-port-80.conf`: binding port 80 is
-then the only capability the service has. With a `data_dir` other than `/var/lib/myownpki`,
-change `StateDirectory=` and `ReadWritePaths=` with `systemctl edit myownpki`.
+other systemd versions may rate a little differently.
+
+Ports below 1024 without a reverse proxy – the public listener on `:80` (`--public-port-80`), ACME
+with its own TLS on `:443` (`--acme`) – need the drop-in `myownpki.service.d/low-ports.conf`:
+binding such a port is then the only capability the service has (it also drops `PrivateUsers=`,
+because a capability inside a private user namespace doesn't count for the host's network). Since
+v0.2.2 the CI job measures the unit **with** this drop-in and still requires less than 2.0. Its
+old name `public-port-80.conf` (v0.2.1) does the same; an installed one stays in place and
+install.sh adds no second one. The drop-in is installed even when the config exists already, and
+never removed. With a `data_dir` other than `/var/lib/myownpki`, change `StateDirectory=` and
+`ReadWritePaths=` with `systemctl edit myownpki`.
 
 ### 2.2 With Docker, or by hand
 
@@ -133,9 +145,69 @@ For a config written by hand (install.sh sets these from its defaults or options
    through loopback. Never expose the admin listener to the internet.
 2. Add the names you type into the browser to `admin.tls_names` (for example
    `pki.homelab.lan, 192.168.10.5`), or give your own certificate with `admin.tls_cert_file` /
-   `admin.tls_key_file`.
+   `admin.tls_key_file` – or let the server issue its own from your CA with `admin.tls_issuer`
+   (§2.4).
 3. The public listener must be reachable under the base URL that is baked into every certificate
    (AIA and CRL distribution point) – usually a reverse proxy on port 80 in front of `:8080`.
+
+### 2.4 Certificates the server issues itself (`tls_issuer`)
+
+Since v0.2.2 the server can give the admin listener – and the ACME listener, [10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls) –
+a certificate from **your own CA**, so browsers that trust your root show no warning and nobody
+compares fingerprints any more:
+
+```yaml
+admin:
+  tls_names: "pki.u.lab, 172.20.23.20"   # exactly the names of the certificate
+  tls_issuer: issuing                    # the name of the CA (as in `myownpki ca list`), not its CN
+```
+
+How it behaves:
+
+- **Issued while unsealed, through the normal policy.** At the unseal (and every 15 minutes after)
+  the server makes a new ECDSA P-256 key, sends a CSR through the same CA engine as the UI – preset
+  *server*, the CA's name constraints and limits apply – and gets a certificate for exactly the
+  names in `admin.tls_names`. The tenant audit log shows it as `certificate.issue` by the actor
+  *system / server*; the certificate is in *Certificates* like any other.
+- **Short-lived:** 90 days, less when the CA allows less (*max validity*) or ends earlier. Renewed
+  at 2/3 of the lifetime (after 60 days), and at once when the names change, the certificate was
+  revoked, or the CA got a new certificate (renewal with a new key).
+- **Works while sealed.** Signing needs the unsealed key ring, the listener doesn't: key and
+  certificate lie in `<data_dir>/tls/admin.key` (0600, unencrypted – like the bootstrap key) and
+  `admin.crt` (the certificate and the issuing CA, *fullchain* without the root). So a restart
+  serves the issued certificate at once, even before the unseal.
+- **Falls back to the bootstrap certificate** while there is no valid issued one: before the first
+  unseal, and when it expires while the server stays sealed (a warning in the log every 15 minutes
+  and on the dashboard). The unseal issues a new one. The switch happens per connection – **no
+  restart**, and `myownpki healthcheck` accepts both.
+- **A refused issuance** – a name outside the CA's name constraints, an unknown or offline CA – is
+  logged with the engine's reason and shown on the dashboard as an error; the server keeps the
+  bootstrap (or the still valid issued) certificate and tries again after 6 hours (other errors:
+  after 15 minutes), or at the first unseal after a restart.
+- **Name an intermediate, never a root.** A root usually has no name constraints, so a listener
+  certificate straight from it would bypass the ones of your intermediate (and the engine signs no
+  end-entity certificate with a root anyway). With a root in `admin.tls_issuer` or
+  `acme.tls_issuer` the server says so at the start – `CA root is a root – name the issuing
+  intermediate in admin.tls_issuer (intermediates of root: issuing)` – in the log and as an error
+  on the dashboard, issues nothing and serves the **bootstrap certificate**, even when an older
+  issued one is still valid. `myownpki config check` prints the same warning on stderr when it can
+  read the CA database (the config stays valid, exit code 0, like the server, which starts).
+- `admin.tls_issuer` and `admin.tls_cert_file` exclude each other; `config check` says so.
+
+> **PKI background – why the key may lie unencrypted.** The CA keys are what must never leak: they
+> sign. The listener's key only proves "this is the server" for 90 days at most, for exactly the
+> names in its certificate – and the CA's name constraints limit even that. If it leaks, revoke the
+> certificate in the UI: the server issues a new one at once (with a new key).
+
+Check what the listener serves, and that it verifies against your root:
+
+```bash
+openssl s_client -connect pki.u.lab:9443 -servername pki.u.lab -CAfile root.pem -verify_return_error </dev/null | grep -E "Verify return code|subject=|issuer="
+```
+
+```bash
+journalctl -u myownpki -o cat | grep -E '"TLS certificate (issued|can.t be issued)"|tls_issuer'
+```
 
 ## 3. First start: `init`
 
@@ -250,6 +322,75 @@ index) and writes nothing if one fails. Then start the server and unseal it with
 **that was valid when the backup was taken**. Certificates issued after the backup are not in it;
 their serial numbers are still in the issued certificates and the audit trail of your clients.
 
+### 6.1 Daily backups with the systemd timer
+
+Since v0.2.2 install.sh (§2.1) installs `myownpki-backup.service` and `myownpki-backup.timer` and
+enables the timer. Once a day (at a random time in the first hour after midnight; a run missed
+while the machine was off follows at the next start) it runs:
+
+```bash
+myownpki backup scheduled /var/backups/myownpki --keep 14 --config /etc/myownpki/config.yaml
+```
+
+1. a backup into `/var/backups/myownpki/<UTC time>`, e.g. `20261025T003512Z` (0700, the service
+   user) – audited as *system / backup-timer*;
+2. every restore check on it (as `backup verify`);
+3. only if the check passed: **prune** – the newest 14 scheduled backups stay, older ones are
+   deleted.
+
+What prune deletes, and what never:
+
+| In `/var/backups/myownpki` | Prune |
+|---|---|
+| `20261025T003512Z` – made by the timer, complete | kept if among the newest 14, else **deleted** |
+| `20261024T101500Z-v0.2.1` – install.sh's backup before an update | **never** – your way back before a migration; delete it yourself when the new version runs well |
+| `20261025T003512Z-unverified` – a timer backup that failed its check | **never**, not counted; the run ended with an error – look at it |
+| a scheduled name that isn't a complete backup (no `manifest.json`, a file more or less than the manifest lists, another size, a symbolic link) | **never**; named as "Left alone" in the journal |
+| anything else (your own backups, notes) | never looked at |
+
+So the update backups don't count against the 14 – an update never pushes a daily backup out, and
+the daily ones never push out the backup taken before a migration.
+
+The timer's unit has the sandbox of the server's unit and **no network**. Writable are only
+`/var/backups/myownpki` and `/var/lib/myownpki` – the data directory because SQLite has to write its
+lock files to read a database that is in use, and every backup is an audit entry.
+
+Everyday commands:
+
+```bash
+systemctl list-timers myownpki-backup.timer
+```
+
+```bash
+systemctl start myownpki-backup.service
+```
+
+```bash
+journalctl -u myownpki-backup.service -o cat
+```
+
+```bash
+runuser -u myownpki -- myownpki backup prune /var/backups/myownpki --keep 14 --dry-run
+```
+
+- **Another number:** `install.sh --backup-keep 30` (writes the drop-in
+  `myownpki-backup.service.d/keep.conf`), or `systemctl edit myownpki-backup.service` with
+  `[Service]` / `Environment=BACKUP_KEEP=30`.
+- **Off:** `install.sh --no-backup-timer`, or `systemctl disable --now myownpki-backup.timer`.
+  install.sh enables the timer only when it installs it the first time; later runs leave it as you
+  set it.
+- A failed run shows in `systemctl --failed` and in the journal – watch it like the service.
+- **The dashboard warns** when a `…-unverified` directory lies in `/var/backups/myownpki` (until you
+  delete it), and when the newest timer backup is older than **48 hours** – one daily run missed:
+  the timer is off or the backup fails. It looks only when the timer is installed or has written a
+  backup; with `--no-backup-timer` and no timer backup ever, it stays quiet. When the timer has
+  been on for 48 hours without a single backup, that is a warning too. The server only reads the
+  directory listing (no new rights for its unit: `/var` is read-only for it, not hidden, and the
+  directory belongs to `myownpki`). Install.sh's update backups don't count.
+- `/var/backups/myownpki` is on the same disk as the data directory: copy it elsewhere (rsync, your
+  backup software) – a backup on the same disk doesn't survive the disk. Keep the passphrase and
+  the recovery key away from that copy.
+
 ## 7. Passphrase and recovery key
 
 ```bash
@@ -327,8 +468,11 @@ client (certbot, Traefik, …) ──https──▶ reverse proxy ──http─�
          └───────── http-01: port 80 / dns-01: TXT record ◀── validator ─┘
 ```
 
-- ACME runs **only behind a reverse proxy** that ends TLS. MyOwnPKI has no TLS listener for ACME
-  of its own; `acme.listen` speaks plain HTTP and is meant for the proxy only.
+- By default ACME runs **behind a reverse proxy** that ends TLS; `acme.listen` speaks plain HTTP
+  and is meant for the proxy only. Since v0.2.2 there is a second way without a proxy:
+  `acme.tls_issuer` gives `acme.listen` its own TLS with a certificate the server issues itself
+  ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)). The proxy way stays supported
+  and is what you get when `acme.tls_issuer` is empty.
 - `acme.base_url` is the https URL clients use, including a path, e.g.
   `https://pki.homelab.lan/acme`. Every URL the server hands out is built from it – it never
   trusts `X-Forwarded-Host` or `X-Forwarded-Proto`.
@@ -468,7 +612,9 @@ the proxy's address is not in `acme.trusted_proxies`.
 
 ### 10.4 Trusting your root on the clients
 
-Clients check the proxy's certificate like any website, so they must trust your root CA. The root
+Clients check the proxy's certificate like any website, so they must trust your root CA. Since
+v0.2.2 the trust page at `/` of the public listener walks every platform through it ([chapter
+11](#11-the-public-trust-page)). By hand: the root
 is on the public listener as `/ca/<root name>/<generation>.crt` (DER):
 
 ```bash
@@ -605,3 +751,93 @@ The **validator** – the part of MyOwnPKI that checks a challenge – connects 
 | `rateLimited` | A limit of 10.8 | Wait for `Retry-After`, or raise the limit |
 | TLS error, unknown authority | The root is not trusted on the client | 10.4 |
 | `unauthorized: the ACME server is reachable only through its reverse proxy` | The proxy (or the client, past the proxy) is not in `acme.trusted_proxies` | 10.1 |
+| TLS error, unknown authority, or a certificate for "MyOwnPKI ACME (bootstrap)" | With `acme.tls_issuer`: no issued certificate yet (the server was not unsealed since the start) or it expired while sealed | 10.10, the dashboard |
+
+### 10.10 Without a reverse proxy: ACME with its own TLS
+
+Since v0.2.2 `acme.tls_issuer` names a CA of your instance, and the ACME listener speaks TLS
+itself with a certificate the server issues from it for the host of `acme.base_url` – the same
+mechanism as for the admin listener (§2.4: preset *server*, ECDSA P-256, 90 days at most, renewed
+at 2/3, issued only while unsealed, the CA's name constraints apply, audited as *system*):
+
+```yaml
+acme:
+  base_url: https://pki.u.lab/acme   # the host is the name in the certificate
+  listen: ":443"                     # the port of base_url; reachable by the clients
+  tls_issuer: issuing                # the CA's name (myownpki ca list)
+  resolver: 172.20.23.1
+```
+
+With install.sh (§2.1) on a new machine: `--acme https://pki.u.lab/acme --acme-ca <your intermediate>`
+writes these keys and installs the drop-in `low-ports.conf` for port 443. On an existing
+installation, set the keys by hand; `install.sh --acme …` then only adds the drop-in.
+
+What changes against the proxy way:
+
+- `acme.listen` is **its own listener** with TLS – never the admin listener (that one is limited
+  by `admin.allowed_networks`) and never the public CRL port.
+- Every client may connect: `acme.trusted_proxies` and `X-Forwarded-For` are **ignored**. The
+  client address in the rate limits and the audit log is the direct peer – a client can't pick
+  another one with a header. The server logs this at start.
+- Until the first unseal after a start without an issued certificate (and when it expired while
+  sealed), the listener serves a self-signed *MyOwnPKI ACME (bootstrap)* certificate. Clients
+  refuse it – on purpose: an ACME client must never talk to a server it can't verify. The
+  dashboard and the log say so; the unseal fixes it.
+- Clients need your root as trust anchor (10.4) – for certbot `REQUESTS_CA_BUNDLE`, for lego
+  `LEGO_CA_CERTIFICATES`, for acme.sh `--ca-bundle`.
+
+Check it from a client:
+
+```bash
+curl --cacert root.pem https://pki.u.lab/acme/directory
+```
+
+## 11. The public trust page
+
+Since v0.2.2 the public listener serves a page at `/` – `http://pki.u.lab/` behind port 80 –
+that everybody may open without signing in. Send people there instead of mailing root files:
+
+- every active CA, **roots first**: name, common name, validity and the **SHA-256 fingerprint**
+  in large type; after a root renewal also the older generation while it is valid;
+- downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
+  and PEM (`/ca/<name>/<generation>.pem`, new);
+- per root two **Windows helpers** (`.cmd`): *this computer* (LocalMachine, asks for administrator
+  rights itself) and *my user only* (CurrentUser, no administrator rights);
+- guides for Windows, macOS, iPhone/iPad (including *Certificate Trust Settings* – without that
+  step iOS installs a root but doesn't trust it for websites), Android, Linux and Firefox.
+
+Only public data, no JavaScript, a strict Content Security Policy (`default-src 'none'`, the own
+stylesheets and logo only), cached for 5 minutes (the files for 15) with ETags.
+
+**Switch it off** in *Administration → Tenant settings* (*Public trust page*), or through the API
+(`PUT /api/v1/settings` with `"trust_page": false`). Off, `/` and the Windows helpers answer 404;
+the CA certificates, their PEM copies and the CRLs stay – certificates point to them.
+
+> **PKI background – why compare the fingerprint.** A root is the anchor every check ends at:
+> whoever slips you a false root can impersonate every website for you. The page comes over plain
+> HTTP (it must work before anything trusts your PKI), so someone in the network path could change
+> it. The fingerprint is the check: compare it with one you got another way – the admin UI
+> (*Certificate authorities*), a printout, your administrator.
+
+### 11.1 The Windows helpers
+
+Each `.cmd` is one file that is both a batch file and a PowerShell script. Double-clicked, it:
+
+1. shows the SHA-256 fingerprint of the root it carries, computed from the embedded certificate;
+2. compares it with the fingerprint written into the file and **stops** (exit code 2, nothing
+   imported) if they differ – a file changed on the way;
+3. *this computer*: asks for administrator rights (UAC) and runs again elevated;
+4. imports the root into *Trusted Root Certification Authorities* of the computer or the user
+   (Windows asks once to confirm the user variant) and waits for Enter.
+
+Switches: `/check` only checks (exit 0 when the fingerprint fits), `/quiet` doesn't wait for
+Enter. Any other argument stops it with exit code 64 – a typo never becomes an import. The file is
+ASCII with CRLF line ends. Check a downloaded helper without importing:
+
+```bat
+cmd /c root-trust-computer.cmd /check
+```
+
+Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
+normal for scripts from the network. The fingerprint check proves that the file is intact; that it
+is **your** root, only the comparison with a fingerprint from another way proves.

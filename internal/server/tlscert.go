@@ -35,6 +35,9 @@ const (
 	bootstrapRenew = 30 * 24 * time.Hour
 	bootstrapCert  = "admin-bootstrap.crt"
 	bootstrapKey   = "admin-bootstrap.key"
+
+	acmeBootstrapCert = "acme-bootstrap.crt"
+	acmeBootstrapKey  = "acme-bootstrap.key"
 )
 
 // CertInfo describes the admin certificate for the log.
@@ -68,8 +71,35 @@ func adminCertificate(cfg config.Config, hostname string, now time.Time, rnd io.
 	if err != nil {
 		return nil, CertInfo{}, err
 	}
-	dir := filepath.Join(cfg.DataDir, "tls")
-	certPath, keyPath := filepath.Join(dir, bootstrapCert), filepath.Join(dir, bootstrapKey)
+	return bootstrap(filepath.Join(cfg.DataDir, "tls"), bootstrapCert, bootstrapKey, "MyOwnPKI admin (bootstrap)",
+		"the names changed (host name, admin.listen or admin.tls_names)", names, ips, now, rnd)
+}
+
+// acmeBootstrap is the self-signed certificate of the ACME listener with
+// acme.tls_issuer: what it serves until the server has issued its own (the
+// first unseal), or after that one expired while sealed. ACME clients refuse
+// it – that is the point: they never talk to a listener they can't verify.
+func acmeBootstrap(cfg config.Config, now time.Time, rnd io.Reader) (*tls.Certificate, CertInfo, error) {
+	names, ips := hostNames(config.ACMEHost(cfg.ACME.BaseURL))
+	return bootstrap(filepath.Join(cfg.DataDir, "tls"), acmeBootstrapCert, acmeBootstrapKey, "MyOwnPKI ACME (bootstrap)",
+		"the host of acme.base_url changed", names, ips, now, rnd)
+}
+
+// hostNames puts a host – a DNS name or an IP – into the right SAN list.
+func hostNames(host string) ([]string, []netip.Addr) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return nil, []netip.Addr{ip.Unmap()}
+	}
+	if host == "" {
+		return nil, nil
+	}
+	return []string{host}, nil
+}
+
+// bootstrap loads the self-signed certificate in dir/certFile, or makes a
+// new one when it is missing, expires within 30 days or lacks a name.
+func bootstrap(dir, certFile, keyFile, cn, namesChanged string, names []string, ips []netip.Addr, now time.Time, rnd io.Reader) (*tls.Certificate, CertInfo, error) {
+	certPath, keyPath := filepath.Join(dir, certFile), filepath.Join(dir, keyFile)
 	reason := "first start"
 	if c, lerr := tls.LoadX509KeyPair(certPath, keyPath); lerr == nil {
 		leaf, perr := x509.ParseCertificate(c.Certificate[0])
@@ -79,13 +109,13 @@ func adminCertificate(cfg config.Config, hostname string, now time.Time, rnd io.
 		case now.Add(bootstrapRenew).After(leaf.NotAfter):
 			reason = "it expires within 30 days"
 		case !covers(leaf, names, ips):
-			reason = "the names changed (host name, admin.listen or admin.tls_names)"
+			reason = namesChanged
 		default:
 			c.Leaf = leaf
 			return &c, info("bootstrap", leaf), nil
 		}
 	}
-	c, err := createBootstrap(dir, certPath, keyPath, names, ips, now, rnd)
+	c, err := createBootstrap(dir, certPath, keyPath, cn, names, ips, now, rnd)
 	if err != nil {
 		return nil, CertInfo{}, err
 	}
@@ -146,7 +176,7 @@ func covers(leaf *x509.Certificate, names []string, ips []netip.Addr) bool {
 	return true
 }
 
-func createBootstrap(dir, certPath, keyPath string, names []string, ips []netip.Addr, now time.Time, rnd io.Reader) (*tls.Certificate, error) {
+func createBootstrap(dir, certPath, keyPath, cn string, names []string, ips []netip.Addr, now time.Time, rnd io.Reader) (*tls.Certificate, error) {
 	if rnd == nil {
 		rnd = rand.Reader
 	}
@@ -163,7 +193,7 @@ func createBootstrap(dir, certPath, keyPath string, names []string, ips []netip.
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial.Add(serial, big.NewInt(1)),
-		Subject:               pkix.Name{CommonName: "MyOwnPKI admin (bootstrap)"},
+		Subject:               pkix.Name{CommonName: cn},
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              now.Add(bootstrapDays * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
@@ -237,12 +267,18 @@ func Fingerprint(der []byte) string {
 	return strings.Join(parts, ":")
 }
 
-// AdminCertFile is the file of the certificate the admin listener serves:
-// the operator's file or the bootstrap certificate. `myownpki healthcheck`
-// pins it.
-func AdminCertFile(cfg config.Config) string {
+// AdminCertFiles are the files of the certificates the admin listener may
+// serve: the operator's file, or the bootstrap certificate – and with
+// admin.tls_issuer the issued one, which replaces the bootstrap certificate
+// without a restart. `myownpki healthcheck` pins the served certificate to
+// one of them.
+func AdminCertFiles(cfg config.Config) []string {
 	if cfg.Admin.TLSCertFile != "" {
-		return cfg.Admin.TLSCertFile
+		return []string{cfg.Admin.TLSCertFile}
 	}
-	return filepath.Join(cfg.DataDir, "tls", bootstrapCert)
+	files := []string{filepath.Join(cfg.DataDir, "tls", bootstrapCert)}
+	if cfg.Admin.TLSIssuer != "" {
+		files = append(files, filepath.Join(cfg.DataDir, "tls", issuedCertFile("admin")))
+	}
+	return files
 }

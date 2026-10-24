@@ -32,8 +32,15 @@ admin:
   tls_key_file: ""
   # Further names in the bootstrap certificate (comma-separated DNS names or
   # IPs) – the names you type into the browser. Host name, the listen IP and
-  # loopback are always in it.
+  # loopback are always in it. With tls_issuer: exactly the names of the
+  # issued certificate.
   tls_names: ""
+  # An intermediate CA of this instance (its name, e.g. issuing; not a root)
+  # that issues the admin certificate: the server issues it itself while
+  # unsealed (90 days at most, renewed at 2/3) and falls back to the bootstrap
+  # certificate if it expires while sealed. Empty: tls_cert_file, or the
+  # bootstrap certificate.
+  tls_issuer: ""
   # Who may connect at all (IPs or CIDRs, comma-separated), checked before
   # TLS. Empty: everybody. Strongly recommended when listen is not loopback –
   # better still, never expose the admin listener to the internet.
@@ -61,20 +68,31 @@ auth:
   # only there. Empty: no passkeys, sign-in with an authenticator app (TOTP).
   passkey_origin: ""
 
-# ACME server (certbot, acme.sh, Traefik, Caddy, lego). It runs only behind a
-# reverse proxy that terminates TLS – see docs/OPERATIONS.md "ACME".
+# ACME server (certbot, acme.sh, Traefik, Caddy, lego). By default it runs
+# behind a reverse proxy that terminates TLS; with tls_issuer it speaks TLS
+# itself – see docs/OPERATIONS.md "ACME".
 acme:
-  # The address clients use: the proxy's https URL plus a path, e.g.
-  # https://pki.homelab.lan/acme. Every URL the server hands out is built from
-  # it (X-Forwarded-Host/-Proto are never trusted). Empty: ACME is off.
+  # The address clients use, e.g. https://pki.homelab.lan/acme: the proxy's
+  # https URL, or with tls_issuer this listener's. Every URL the server hands
+  # out is built from it (X-Forwarded-Host/-Proto are never trusted). Empty:
+  # ACME is off.
   base_url: ""
-  # Plain-HTTP listener for the proxy only – not the public CRL port, so nobody
-  # can talk ACME in clear text past the proxy.
+  # The ACME listener – never the public CRL port. Without tls_issuer plain
+  # HTTP for the proxy only; with tls_issuer TLS for the clients, e.g. ":443"
+  # (a port below 1024 needs the drop-in low-ports.conf).
   listen: 127.0.0.1:8081
   # Who may connect to acme.listen (IPs or CIDRs, comma-separated); others get
-  # 403. Only their X-Forwarded-For is used as the client address.
+  # 403. Only their X-Forwarded-For is used as the client address. Ignored
+  # with tls_issuer: every client connects directly.
   trusted_proxies: "127.0.0.1, ::1"
   # DNS server for dns-01 and for resolving http-01 names: the server that
   # knows your internal names (split DNS), e.g. 192.168.10.53. Empty: the
   # system resolver.
   resolver: ""
+  # An intermediate CA of this instance (its name, e.g. issuing; not a root):
+  # ACME speaks TLS itself on listen, with a certificate for the host of
+  # base_url that the server issues from this CA while unsealed (90 days at
+  # most, renewed at 2/3). Clients
+  # connect directly; the client address is the peer. Empty: plain HTTP behind
+  # a reverse proxy.
+  tls_issuer: ""

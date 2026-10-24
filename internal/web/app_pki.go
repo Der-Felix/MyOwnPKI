@@ -157,6 +157,9 @@ func (a *app) dashboard(c *rc) {
 		Attention: []view.Message{},
 	}
 	sealed := a.d.Keys.Status().Sealed
+	if a.d.ServerAttention != nil {
+		d.Attention = append(d.Attention, a.d.ServerAttention(sealed)...)
+	}
 	if a.d.ACME != nil {
 		if waiting, werr := a.d.ACME.Waiting(ctx); werr == nil && waiting > 0 {
 			if sealed {

@@ -281,6 +281,7 @@ func (a *app) settingsPage(c *rc) {
 			{ID: "acme_orders", Label: "ACME: new orders per account and hour", Type: "number", Value: strconv.Itoa(s.ACME.OrdersPerAccount), Hint: "1 to 10000"},
 			{ID: "acme_failed", Label: "ACME: failed validations per name and hour", Type: "number", Value: strconv.Itoa(s.ACME.FailedPerName), Hint: "1 to 100 – stops a client that retries a broken setup"},
 			{ID: "acme_accounts", Label: "ACME: new accounts per client address and hour", Type: "number", Value: strconv.Itoa(s.ACME.AccountsPerIP), Hint: "1 to 1000; IPv6 counts per /64"},
+			{ID: "trust_page", Label: "Public trust page at / of the public listener (CA certificates, fingerprints, install guides)", Type: "checkbox", Checked: s.TrustPage != nil && *s.TrustPage},
 		},
 	})
 	if !c.may(authz.ManageTenant, "") {
@@ -297,9 +298,11 @@ func (a *app) saveSettings(c *rc) {
 	f := c.r.PostFormValue
 	// A number that doesn't parse becomes 0, which the settings refuse.
 	num := func(id string) int { n, _ := strconv.Atoi(strings.TrimSpace(f(id))); return n }
+	trust := yes(f("trust_page"))
 	err := a.d.Settings.Set(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
 		OrganizationalUnit: strings.TrimSpace(f("ou")), Locality: strings.TrimSpace(f("l")), State: strings.TrimSpace(f("st")), Country: strings.TrimSpace(f("c")),
-		ACME: &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")}}, c.who())
+		ACME:      &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")},
+		TrustPage: &trust}, c.who())
 	if err != nil {
 		c.refused(err, "/admin/settings")
 		return

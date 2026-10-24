@@ -46,6 +46,29 @@ func TestHealthcheck(t *testing.T) {
 	if err := healthcheck(t.Context(), cfg, time.Second); err != nil {
 		t.Errorf("healthy: %v", err)
 	}
+	// admin.tls_issuer: the server serves the bootstrap or the issued
+	// certificate (admin.crt, missing until the first unseal) – either passes.
+	issued := cfg
+	issued.Admin.TLSIssuer, issued.Admin.TLSNames = "issuing", "pki.homelab.lan"
+	if err := healthcheck(t.Context(), issued, time.Second); err != nil {
+		t.Errorf("issued certificate not there yet, bootstrap served: %v", err)
+	}
+	other := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not the served one")})
+	if err := os.WriteFile(certFile, other, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "tls", "admin.crt"), served, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := healthcheck(t.Context(), issued, time.Second); err != nil {
+		t.Errorf("issued certificate served: %v", err)
+	}
+	if err := healthcheck(t.Context(), cfg, time.Second); err == nil || !strings.Contains(err.Error(), "serves another certificate") {
+		t.Errorf("without admin.tls_issuer the issued file doesn't count: %v", err)
+	}
+	if err := os.WriteFile(certFile, served, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	body = "sealed\n"
 	if err := healthcheck(t.Context(), cfg, time.Second); err == nil || !strings.Contains(err.Error(), `"sealed\n"`) {
 		t.Errorf("wrong answer: %v", err)

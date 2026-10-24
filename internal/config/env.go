@@ -23,6 +23,7 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "ADMIN_TLS_CERT_FILE":    &c.Admin.TLSCertFile,
 		EnvPrefix + "ADMIN_TLS_KEY_FILE":     &c.Admin.TLSKeyFile,
 		EnvPrefix + "ADMIN_TLS_NAMES":        &c.Admin.TLSNames,
+		EnvPrefix + "ADMIN_TLS_ISSUER":       &c.Admin.TLSIssuer,
 		EnvPrefix + "ADMIN_ALLOWED_NETWORKS": &c.Admin.AllowedNetworks,
 		EnvPrefix + "PUBLIC_LISTEN":          &c.Public.Listen,
 		EnvPrefix + "AUTH_KEY_FILE":          &c.Auth.KeyFile,
@@ -32,6 +33,7 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "ACME_BASE_URL":          &c.ACME.BaseURL,
 		EnvPrefix + "ACME_TRUSTED_PROXIES":   &c.ACME.TrustedProxies,
 		EnvPrefix + "ACME_RESOLVER":          &c.ACME.Resolver,
+		EnvPrefix + "ACME_TLS_ISSUER":        &c.ACME.TLSIssuer,
 	}
 }
 

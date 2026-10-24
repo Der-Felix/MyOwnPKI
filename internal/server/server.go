@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
 // ShutdownBudget: everything – requests, the last checkpoint, the seal – is
@@ -98,6 +100,10 @@ type Server struct {
 	cert     *tls.Certificate
 	CertInfo CertInfo
 	refused  *refusalLog
+	// Certificates the server issues itself (admin.tls_issuer,
+	// acme.tls_issuer); nil when off.
+	adminTLS, acmeTLS *issuedTLS
+	backups           backupWatch // the daily backup, for the dashboard
 
 	admin, public     *http.Server
 	adminLn, publicLn net.Listener
@@ -121,7 +127,7 @@ func Open(ctx context.Context, opt Options) (_ *Server, err error) {
 	if opt.Hostname == "" {
 		opt.Hostname, _ = os.Hostname()
 	}
-	s := &Server{opt: opt, log: opt.Log, clk: opt.Clock, wake: make(chan struct{}, 1)}
+	s := &Server{opt: opt, log: opt.Log, clk: opt.Clock, wake: make(chan struct{}, 1), backups: newBackupWatch(opt.Clock)}
 	// Named result err: the databases opened so far are closed on every
 	// failure (s itself is returned as nil then).
 	defer func() {
@@ -162,6 +168,9 @@ func Open(ctx context.Context, opt Options) (_ *Server, err error) {
 	}
 	if s.cert, s.CertInfo, err = adminCertificate(opt.Config, opt.Hostname, s.clk.Now(), nil); err != nil {
 		return nil, err
+	}
+	if terr := s.issuedCertificates(ctx); terr != nil {
+		return nil, terr
 	}
 	s.logStart(ctx, inst)
 	return s, nil
@@ -240,6 +249,7 @@ func (s *Server) build(key *auth.Key) error {
 				s.log.Warn("ACME orders at unseal", slog.Any("error", err))
 			}
 		}
+		s.renewTLS(ctx)
 	}
 	s.ring.BeforeSeal = func(ctx context.Context) {
 		s.deliver(ctx)
@@ -276,13 +286,76 @@ func (s *Server) build(key *auth.Key) error {
 			l, lerr := settings.ACMELimits(ctx, store.DefaultTenant)
 			return acme.Limits{OrdersPerAccount: l.OrdersPerAccount, FailedPerName: l.FailedPerName, AccountsPerIP: l.AccountsPerIP}, lerr
 		}
-		if s.acme, aerr = acme.New(acme.Options{Engine: s.engine, BaseURL: base, TrustedProxies: acfg.TrustedProxies, Resolver: acfg.Resolver, Clock: s.clk, Log: s.log, Limits: limits}); aerr != nil {
+		if s.acme, aerr = acme.New(acme.Options{Engine: s.engine, BaseURL: base, TrustedProxies: acfg.TrustedProxies, Resolver: acfg.Resolver,
+			Direct: acfg.DirectTLS(), Clock: s.clk, Log: s.log, Limits: limits}); aerr != nil {
 			return aerr
 		}
 		s.jobs.add(jobACMEIssue, time.Minute, time.Minute, s.acme.ProcessPending)
 		s.jobs.add(jobACMEExpire, 5*time.Minute, 5*time.Minute, s.acme.ExpireStale)
 	}
+	if s.opt.Config.Admin.TLSIssuer != "" || s.opt.Config.ACME.DirectTLS() {
+		s.jobs.add(jobTLS, tlsEvery, 0, func(ctx context.Context) error { s.renewTLS(ctx); return nil })
+	}
 	return nil
+}
+
+// issuedCertificates prepares the certificates the server issues itself;
+// each one falls back to a bootstrap certificate (admin: the one already
+// loaded; ACME: its own, for the host of acme.base_url).
+func (s *Server) issuedCertificates(ctx context.Context) error {
+	cfg := s.opt.Config
+	dir := filepath.Join(cfg.DataDir, "tls")
+	if cfg.Admin.TLSIssuer != "" {
+		names, ips, err := config.ParseTLSNames(cfg.Admin.TLSNames)
+		if err != nil {
+			return err
+		}
+		names, ips = uniqueNames(names, ips)
+		s.adminTLS = newIssuedTLS("admin", "admin.tls_names", "admin.tls_issuer", cfg.Admin.TLSIssuer, names, ips, dir, s.cert, s.engine, s.clk, s.log)
+	}
+	if cfg.ACME.DirectTLS() {
+		boot, in, err := acmeBootstrap(cfg, s.clk.Now(), nil)
+		if err != nil {
+			return fmt.Errorf("ACME bootstrap certificate: %w", err)
+		}
+		if in.Created {
+			s.log.Info("new ACME bootstrap certificate – served until the server issues the ACME certificate", slog.String("reason", in.Reason))
+		}
+		names, ips := hostNames(config.ACMEHost(cfg.ACME.BaseURL))
+		s.acmeTLS = newIssuedTLS("acme", "the host of acme.base_url", "acme.tls_issuer", cfg.ACME.TLSIssuer, names, ips, dir, boot, s.engine, s.clk, s.log)
+	}
+	// A root as issuer is named right at the start, not only at the unseal.
+	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+		if m != nil {
+			m.checkIssuer(ctx)
+		}
+	}
+	return nil
+}
+
+// renewTLS renews the issued certificates that are due (unsealed only).
+func (s *Server) renewTLS(ctx context.Context) {
+	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+		if m != nil {
+			m.renew(ctx)
+		}
+	}
+}
+
+// attention is what the dashboard shows about the server itself.
+func (s *Server) attention(sealed bool) []view.Message {
+	return append(s.tlsAttention(sealed), s.backups.attention()...)
+}
+
+// tlsAttention is what the dashboard shows about the issued certificates.
+func (s *Server) tlsAttention(sealed bool) []view.Message {
+	var out []view.Message
+	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+		if m != nil {
+			out = append(out, m.attention(sealed)...)
+		}
+	}
+	return out
 }
 
 // warnSealedCRLs: while sealed nothing can be signed – CRLs that need
@@ -348,6 +421,12 @@ func (s *Server) logStart(ctx context.Context, inst setup.Instance) {
 	if ci.Source == "operator" && s.clk.Now().Add(bootstrapRenew).After(ci.NotAfter) {
 		s.log.Warn("the admin TLS certificate expires within 30 days – replace admin.tls_cert_file", slog.Time("not_after", ci.NotAfter))
 	}
+	if s.adminTLS != nil {
+		s.log.Info("admin TLS certificate from admin.tls_issuer", s.adminTLS.startInfo()...)
+	}
+	if s.acmeTLS != nil {
+		s.log.Info("ACME TLS certificate from acme.tls_issuer", s.acmeTLS.startInfo()...)
+	}
 	s.logHeads(ctx)
 }
 
@@ -382,9 +461,13 @@ func (s *Server) Listen(ctx context.Context) error {
 		return fmt.Errorf("admin listener %s: %w", cfg.Admin.Listen, err)
 	}
 	tlsCfg := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{*s.cert},
-		NextProtos:   []string{"h2", "http/1.1"},
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+	if s.adminTLS != nil {
+		tlsCfg.GetCertificate = s.adminTLS.GetCertificate // switches without a restart
+	} else {
+		tlsCfg.Certificates = []tls.Certificate{*s.cert}
 	}
 	s.adminLn = tls.NewListener(&allowListener{Listener: raw, allowed: allowed, refused: s.refused}, tlsCfg)
 	s.admin = &http.Server{
@@ -398,7 +481,7 @@ func (s *Server) Listen(ctx context.Context) error {
 			return fmt.Errorf("public listener %s: %w", cfg.Public.Listen, err)
 		}
 		s.public = &http.Server{
-			Handler:           publish.New(s.pki.Read, s.log),
+			Handler:           s.publicHandler(),
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 			MaxHeaderBytes: 8 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
 		}
@@ -411,14 +494,26 @@ func (s *Server) Listen(ctx context.Context) error {
 			}
 			return fmt.Errorf("acme listener %s: %w", cfg.ACME.Listen, err)
 		}
-		// Plain HTTP for the reverse proxy only; the handler refuses every
-		// peer outside acme.trusted_proxies.
+		// Without acme.tls_issuer: plain HTTP for the reverse proxy only; the
+		// handler refuses every peer outside acme.trusted_proxies. With it:
+		// TLS for every client, with the certificate the server issued.
+		scheme := "http://"
+		if s.acmeTLS != nil {
+			s.acmeLn = tls.NewListener(s.acmeLn, &tls.Config{
+				MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}, GetCertificate: s.acmeTLS.GetCertificate,
+			})
+			scheme = "https://"
+			s.log.Info("ACME speaks TLS itself (acme.tls_issuer): every client may connect, acme.trusted_proxies and X-Forwarded-For are not used")
+			if loopbackOnly(cfg.ACME.Listen) {
+				s.log.Warn("acme.listen is a loopback address – with acme.tls_issuer, clients on other machines can't reach it (e.g. \":443\")")
+			}
+		}
 		s.acmeHS = &http.Server{
 			Handler:           s.acme,
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 			MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
 		}
-		s.log.Info("ACME listening", slog.String("listen", "http://"+s.acmeLn.Addr().String()), slog.String("directory", s.acme.BaseURL()+"/directory"))
+		s.log.Info("ACME listening", slog.String("listen", scheme+s.acmeLn.Addr().String()), slog.String("directory", s.acme.BaseURL()+"/directory"))
 	}
 	s.log.Info("listening", slog.String("admin", "https://"+s.adminLn.Addr().String()), slog.String("public", s.PublicAddr()))
 	return nil
@@ -426,6 +521,17 @@ func (s *Server) Listen(ctx context.Context) error {
 
 // AdminAddr and PublicAddr are the bound addresses (tests use port 0).
 func (s *Server) AdminAddr() string { return s.adminLn.Addr().String() }
+
+// ServedAdminCertificate describes the certificate the admin listener
+// serves now: with admin.tls_issuer the issued one while it is valid.
+func (s *Server) ServedAdminCertificate() CertInfo {
+	if s.adminTLS != nil {
+		if c, issued := s.adminTLS.serving(s.clk.Now()); issued {
+			return info("issued by CA "+s.adminTLS.issuer, c.Leaf)
+		}
+	}
+	return s.CertInfo
+}
 
 // ACMEAddr is "" when ACME is off; else the listener's address (tests use port 0).
 func (s *Server) ACMEAddr() string {
@@ -585,7 +691,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(),
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
 	}})
 	if err != nil {
 		return err
@@ -609,4 +715,14 @@ func (s *Server) acmeDirectory() string {
 		return ""
 	}
 	return s.acme.BaseURL() + "/directory"
+}
+
+// publicHandler: CA certificates and CRLs, and the trust page at / unless
+// the tenant switched it off (asked per request).
+func (s *Server) publicHandler() http.Handler {
+	settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
+	return publish.New(s.pki.Read, s.log).WithTrustPage(publish.TrustPage{
+		Enabled: func(ctx context.Context) (bool, error) { return settings.TrustPage(ctx, store.DefaultTenant) },
+		Clock:   s.clk,
+	})
 }

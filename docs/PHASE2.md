@@ -115,7 +115,8 @@ clients time out after finalize, PLAN §6.3 note).
 
 ACME is served **only behind a reverse proxy** that terminates TLS (owner Q1, 2026-10-22): the
 server has no TLS listener of its own for ACME, but a separate plain-HTTP listener that is not
-the public CRL port – so nobody can talk ACME in clear text past the proxy.
+the public CRL port – so nobody can talk ACME in clear text past the proxy. (Amended in v0.2.2:
+with `acme.tls_issuer` the ACME listener may speak TLS itself – PLAN §14 "v0.2.2", OPERATIONS 10.10.)
 
 ```yaml
 acme:
@@ -197,7 +198,7 @@ weeks old, never in `go.mod`:
 
 | # | Question | Decision |
 |---|---|---|
-| Q1 | HTTPS for ACME | **Only behind a reverse proxy**, no TLS listener of our own. A separate plain-HTTP `acme.listen` (default 127.0.0.1:8081), not the public CRL port. `acme.base_url` must be `https://` (`config check` refuses http). `acme.trusted_proxies`: only there X-Forwarded-For counts (rate limits, audit), other addresses get 403 on `acme.listen`. X-Forwarded-Host/-Proto are never trusted – every URL comes from `base_url`. OPERATIONS.md: Caddy, nginx, Traefik, and how the proxy gets its own certificate once from the own CA |
+| Q1 | HTTPS for ACME | **Only behind a reverse proxy**, no TLS listener of our own. A separate plain-HTTP `acme.listen` (default 127.0.0.1:8081), not the public CRL port. `acme.base_url` must be `https://` (`config check` refuses http). `acme.trusted_proxies`: only there X-Forwarded-For counts (rate limits, audit), other addresses get 403 on `acme.listen`. X-Forwarded-Host/-Proto are never trusted – every URL comes from `base_url`. OPERATIONS.md: Caddy, nginx, Traefik, and how the proxy gets its own certificate once from the own CA. **Amended 2026-10-24 (v0.2.2):** `acme.tls_issuer` adds a TLS listener of our own as an alternative; the proxy way stays the default – PLAN §14 "v0.2.2" |
 | Q2 | Default approval level | **`account`**; EAB keys from the UI, shown once |
 | Q3 | JOSE library or own code | **Own code**: parsing and rules ourselves, cryptography only from the standard library. Allowlist ES256 (P-256), ES384 (P-384), RS256 (≥ 2048), EdDSA (Ed25519); the algorithm follows from the key, the header must match; `none`, HS*, unknown `crit`, `b64: false` refused; ES signatures only as R‖S of the right length; flattened JSON with exactly one signature; `url`, `nonce` and exactly one of `jwk`/`kid`; duplicate header names refused. RFC 7515 appendix A and RFC 7638 vectors, a negative test per rule, a fuzz test, lego as the end-to-end check |
 | Q4 | DNS library | **`net.Resolver` with its own `Dial`** to `acme.resolver` |

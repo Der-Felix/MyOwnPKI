@@ -7,6 +7,63 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Added
+
+- **The server issues its own TLS certificates** from a CA of the instance: `admin.tls_issuer` for
+  the admin listener (the names of `admin.tls_names`), `acme.tls_issuer` for the ACME listener (the
+  host of `acme.base_url`). Through the normal CA engine – preset *server*, ECDSA P-256, the CA's
+  name constraints, an audit entry by *system* – for 90 days at most (never beyond the CA's maximum
+  or end), renewed at 2/3 and at once after a revocation, a name change or a CA renewal. Issued
+  only while unsealed; key and fullchain lie in `<data_dir>/tls/` (key 0600), so a sealed restart
+  serves them. When one expires while sealed, the listener falls back to its bootstrap
+  certificate with a warning in the log and on the dashboard; the switch needs no restart.
+  A **root CA** as `tls_issuer` is refused with the fix ("CA root is a root – name the issuing
+  intermediate …") at the start, on the dashboard and in `myownpki config check` (a warning when
+  the CA database is readable); the listener then serves its bootstrap certificate.
+  docs/OPERATIONS.md §2.4.
+- **ACME without a reverse proxy:** with `acme.tls_issuer`, `acme.listen` speaks TLS itself (e.g.
+  `":443"`); every client may connect, the peer is the client address for rate limits and audit,
+  `acme.trusted_proxies` and `X-Forwarded-For` are ignored. The proxy way stays the default.
+  docs/OPERATIONS.md 10.10.
+
+- **Daily backups:** `myownpki-backup.service` and `.timer` (daily, random delay up to an hour,
+  missed runs caught up), installed and enabled by install.sh (`--no-backup-timer`,
+  `--backup-keep N`, default 14). Each run writes `/var/backups/myownpki/<UTC time>`, verifies it
+  and prunes; the unit has the server's sandbox and no network. docs/OPERATIONS.md §6.1.
+- **`myownpki backup scheduled DIR --keep N`** (the timer's run: backup, verify, prune) and
+  **`myownpki backup prune DIR --keep N [--dry-run]`**. Prune deletes only complete scheduled
+  backups (named like `20261025T003512Z`, a valid `manifest.json`, exactly the listed files) –
+  never install.sh's update backups, a backup that failed its check (`…-unverified`) or anything
+  else.
+- **Backup warnings on the dashboard:** a `…-unverified` backup in `/var/backups/myownpki`, or a
+  newest timer backup older than 48 hours (timer off or failing) – once the timer is installed or
+  has written a backup. The server only reads the directory; its unit needs no new rights.
+  docs/OPERATIONS.md §6.1.
+- **Public trust page** at `/` of the public listener, without sign-in: every active CA (roots
+  first) with name, common name, validity and SHA-256 fingerprint, DER and PEM downloads, guides
+  for Windows, macOS, iPhone/iPad, Android, Linux and Firefox. No JavaScript, a strict CSP,
+  cached. On by default; *Tenant settings* or `trust_page` in `PUT /api/v1/settings` switch it off
+  (system.db migration 0010). docs/OPERATIONS.md chapter 11.
+- **Windows helpers** per root on the trust page: a `.cmd` (Batch/PowerShell in one file, ASCII,
+  CRLF) for *this computer* (asks for administrator rights) or *my user only*; it checks the
+  SHA-256 of the embedded root before the import and stops if the file was changed; `/check`
+  only checks, an unknown switch never imports.
+- `/ca/<name>/<generation>.pem`: the CA certificate as PEM.
+- **`install.sh --acme https://NAME/acme`** (with `--acme-ca`, default `issuing`) writes the ACME
+  keys for its own TLS into a new config and installs the drop-in for port 443.
+
+### Changed
+
+- `myownpki healthcheck` accepts the bootstrap and the issued admin certificate (with
+  `admin.tls_issuer`); `myownpki config check` shows `tls_issuer` and the ACME mode.
+- The drop-in `public-port-80.conf` is now `low-ports.conf` – for every listener on a port below
+  1024 (`--public-port-80`, `--acme`). An installed `public-port-80.conf` keeps working and stays;
+  the archives still carry it.
+- CI: the install job installs with `--acme`, unseals through the API and reads the ACME directory
+  over TLS with the root as trust anchor; `systemd-analyze security` is measured with the drop-in
+  and must stay below 2.0. The conformance job runs lego and certbot directly against the own TLS
+  listener.
+
 ## [0.2.1] - 2026-10-24
 
 Install and update MyOwnPKI as a hardened systemd service with one command: `install.sh`

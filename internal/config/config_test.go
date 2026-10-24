@@ -186,8 +186,8 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 	if _, err := cfg.ApplyEnv(env); err != nil {
 		t.Fatal(err)
 	}
-	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
-		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker"}}
+	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
+		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -390,5 +390,42 @@ func TestACMEConfig(t *testing.T) {
 	}
 	if r, _ := ACMEResolver(good.ACME.Resolver); r != "192.0.2.53:53" {
 		t.Errorf("resolver %q", r)
+	}
+}
+
+// TestTLSIssuer (v0.2.2): an issued certificate for the admin or the ACME
+// listener needs a CA name and the names for the certificate; it excludes
+// the operator's own certificate files.
+func TestTLSIssuer(t *testing.T) {
+	t.Parallel()
+	base := Default()
+	base.DataDir = absDir(t)
+	for name, tc := range map[string]struct {
+		mod  func(*Config)
+		want string
+	}{
+		"admin: no names":    {func(c *Config) { c.Admin.TLSIssuer = "issuing" }, "admin.tls_issuer needs admin.tls_names"},
+		"admin: bad CA name": {func(c *Config) { c.Admin.TLSIssuer, c.Admin.TLSNames = "Issuing CA", "pki.u.lab" }, "is not a CA name"},
+		"admin: and own files": {func(c *Config) {
+			c.Admin.TLSIssuer, c.Admin.TLSNames, c.Admin.TLSCertFile, c.Admin.TLSKeyFile = "issuing", "pki.u.lab", "/c", "/k"
+		}, "set one of them"},
+		"acme: no base URL":   {func(c *Config) { c.ACME.TLSIssuer = "issuing" }, "acme.tls_issuer needs acme.base_url"},
+		"acme: http base URL": {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "issuing", "http://pki.u.lab/acme" }, "must be https://"},
+		"acme: bad CA name":   {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "../x", "https://pki.u.lab/acme" }, "is not a CA name"},
+	} {
+		c := base
+		tc.mod(&c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+	good := base
+	good.Admin.TLSIssuer, good.Admin.TLSNames = "issuing", "pki.u.lab, 172.20.23.20"
+	good.ACME.TLSIssuer, good.ACME.BaseURL, good.ACME.Listen = "issuing", "https://PKI.u.lab/acme", ":443"
+	if err := good.Validate(); err != nil {
+		t.Error(err)
+	}
+	if !good.ACME.DirectTLS() || base.ACME.DirectTLS() || ACMEHost(good.ACME.BaseURL) != "pki.u.lab" {
+		t.Errorf("direct TLS %v/%v, host %q", good.ACME.DirectTLS(), base.ACME.DirectTLS(), ACMEHost(good.ACME.BaseURL))
 	}
 }
