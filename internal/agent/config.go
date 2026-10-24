@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -185,10 +186,17 @@ func (c *Config) Validate() error {
 	}
 	c.Paths = paths
 	under := func(field, p string) {
-		if !filepath.IsAbs(p) {
+		switch {
+		case !filepath.IsAbs(p):
 			add("%s: %q: an absolute path", field, p)
-		} else if !Under(c.Paths, p) {
+		case slices.Contains(strings.Split(filepath.ToSlash(p), "/"), ".."):
+			add("%s: %q: no .. path segments", field, p)
+		case !Under(c.Paths, p):
 			add("%s: %q: not under one of paths – the agent writes only there", field, p)
+		default:
+			if _, rerr := resolveUnder(c.Paths, p); rerr != nil {
+				add("%s: %v", field, rerr)
+			}
 		}
 	}
 	for name, cmd := range c.Hooks {
@@ -212,6 +220,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	seen := map[string]bool{}
+	seenFiles := map[string]string{}
 	for i, d := range c.Deployments {
 		where := fmt.Sprintf("deployments[%d]", i)
 		if !nameRE.MatchString(d.Name) {
@@ -225,7 +234,7 @@ func (c *Config) Validate() error {
 			add("%s: names: 1 to 100 DNS names", where)
 		}
 		for _, n := range d.Names {
-			if err := checkHost(strings.TrimPrefix(n, "*.")); err != nil {
+			if err := checkHost(n); err != nil {
 				add("%s: names: %q: %v", where, n, err)
 			}
 		}
@@ -257,9 +266,28 @@ func (c *Config) Validate() error {
 			}
 		}
 		if d.Check != "" {
-			if _, port, err := net.SplitHostPort(d.Check); err != nil || port == "" {
+			host, port, err := net.SplitHostPort(d.Check)
+			n, numErr := strconv.ParseUint(port, 10, 16)
+			if err != nil || numErr != nil || n == 0 || host == "" {
 				add("%s: check: host:port of the service, e.g. 127.0.0.1:443", where)
 			}
+		}
+		f := deploymentPaths(d)
+		for _, target := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
+			if target == "" {
+				continue
+			}
+			key := filepath.Clean(target)
+			if Under([]string{c.StateDir}, key) || key == filepath.Clean(c.CABundle) {
+				add("%s: target overlaps state_dir or ca_bundle", where)
+			}
+			if runtime.GOOS == "windows" {
+				key = strings.ToLower(key)
+			}
+			if old, exists := seenFiles[key]; exists {
+				add("%s: target file is also used by %s", where, old)
+			}
+			seenFiles[key] = d.Name
 		}
 		if d.KeyMode != "" {
 			if m, err := strconv.ParseUint(d.KeyMode, 8, 32); err != nil || m&0o007 != 0 || m > 0o777 {
@@ -289,6 +317,9 @@ func Under(dirs []string, p string) bool {
 
 // checkHost: a fully qualified DNS name, lower case.
 func checkHost(h string) error {
+	if net.ParseIP(h) != nil {
+		return errors.New("IP identifiers are not supported by this agent release")
+	}
 	if len(h) == 0 || len(h) > 253 {
 		return errors.New("1 to 253 characters")
 	}
