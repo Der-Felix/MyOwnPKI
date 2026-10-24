@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/server"
 )
 
 // runConfig handles `myownpki config <subcommand>`.
@@ -49,7 +52,27 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printConfig(stdout, cfg, src)
+	checkTLSIssuers(cfg, stdout, stderr)
+	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0
+}
+
+// checkTLSIssuers names a root CA in admin.tls_issuer or acme.tls_issuer, read
+// from the CA database when it is readable. It is a warning on stderr, not
+// an invalid config (exit 0): the server starts with it and serves the
+// bootstrap certificate (owner 2026-10-24) – and install.sh, which hides
+// stdout, still shows it.
+func checkTLSIssuers(cfg config.Config, stdout, stderr io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	problems, err := server.TLSIssuerProblems(ctx, cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stdout, "\nNot checked: whether the CA of tls_issuer is a root – the CA database can't be read (%v).\n", err)
+		return
+	}
+	for _, p := range problems {
+		_, _ = fmt.Fprintf(stderr, "\nWarning: %s. Until then the listener serves the bootstrap certificate.\n", p)
+	}
 }
 
 // configFlag registers --config on a subcommand's flag set.
@@ -122,5 +145,4 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 	for _, r := range rows {
 		_, _ = fmt.Fprintf(w, "  %-14s %s\n", r[0], r[1])
 	}
-	_, _ = fmt.Fprintln(w, "\nConfiguration is valid.")
 }

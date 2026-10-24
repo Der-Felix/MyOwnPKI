@@ -30,7 +30,9 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
+	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -66,7 +68,8 @@ func issuedKeyFile(listener string) string  { return listener + ".key" }
 // issuedTLS serves the certificate of one listener ("admin" or "acme").
 type issuedTLS struct {
 	listener  string // "admin", "acme": file names and messages
-	setting   string // the config key, for messages
+	setting   string // the config key of the names, for messages
+	issuerKey string // the config key of the CA: admin.tls_issuer, acme.tls_issuer
 	issuer    string // CA name
 	names     []string
 	ips       []netip.Addr
@@ -77,7 +80,8 @@ type issuedTLS struct {
 	log       *slog.Logger
 	rnd       io.Reader // nil = crypto/rand
 
-	cur atomic.Pointer[tls.Certificate] // the issued certificate; nil = none yet
+	cur     atomic.Pointer[tls.Certificate] // the issued certificate; nil = none yet
+	blocked atomic.Pointer[string]          // why the CA may not issue it (a root); nil = it may
 
 	mu       sync.Mutex // one renewal at a time
 	nextTry  time.Time  // after a failure
@@ -85,9 +89,9 @@ type issuedTLS struct {
 	lastWarn time.Time  // the fallback warning, at most once per tlsEvery
 }
 
-func newIssuedTLS(listener, setting, issuer string, names []string, ips []netip.Addr, dir string, bootstrap *tls.Certificate,
+func newIssuedTLS(listener, setting, issuerKey, issuer string, names []string, ips []netip.Addr, dir string, bootstrap *tls.Certificate,
 	engine *ca.Engine, clk clock.Clock, log *slog.Logger) *issuedTLS {
-	m := &issuedTLS{listener: listener, setting: setting, issuer: issuer, names: names, ips: ips, dir: dir, bootstrap: bootstrap,
+	m := &issuedTLS{listener: listener, setting: setting, issuerKey: issuerKey, issuer: issuer, names: names, ips: ips, dir: dir, bootstrap: bootstrap,
 		engine: engine, clk: clk, log: log}
 	m.load()
 	return m
@@ -120,7 +124,13 @@ func (m *issuedTLS) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, erro
 }
 
 // serving returns what a handshake gets now, and whether it is the issued one.
+// While the setting names a root CA it is the bootstrap certificate, even
+// when an older issued one is still valid: the config says it must not be
+// used, and the admin sees why on the dashboard.
 func (m *issuedTLS) serving(now time.Time) (*tls.Certificate, bool) {
+	if m.blocked.Load() != nil {
+		return m.bootstrap, false
+	}
 	if c := m.cur.Load(); c != nil && !now.Before(c.Leaf.NotBefore) && !now.After(c.Leaf.NotAfter) {
 		return c, true
 	}
@@ -138,6 +148,9 @@ func renewAt(leaf *x509.Certificate) time.Time {
 func (m *issuedTLS) renew(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.checkIssuer(ctx) {
+		return // nothing to issue from a root – and no refusal per run in the audit log
+	}
 	now := m.clk.Now()
 	c := m.cur.Load()
 	if m.engine.Keys.Status().Sealed {
@@ -173,6 +186,104 @@ func (m *issuedTLS) renew(ctx context.Context) {
 	m.log.Info("TLS certificate issued", slog.String("listener", m.listener), slog.String("ca", m.issuer), slog.String("reason", why),
 		slog.String("fingerprint_sha256", Fingerprint(issued.Leaf.Raw)), slog.String("serial", issued.Leaf.SerialNumber.Text(16)),
 		slog.Time("not_after", issued.Leaf.NotAfter), slog.Time("renew_at", renewAt(issued.Leaf)))
+}
+
+// checkIssuer looks up whether the configured CA is a root and remembers it;
+// true = blocked. It logs when the state changes (at the start, or when a
+// CA of that name appears later), not every run. A database error keeps
+// the last state.
+func (m *issuedTLS) checkIssuer(ctx context.Context) bool {
+	problem, err := IssuerProblem(ctx, m.engine.PKI, m.issuer, m.issuerKey)
+	if err != nil {
+		m.log.Error("TLS certificate: can't read the CA from the database", slog.String("listener", m.listener), slog.String("ca", m.issuer), slog.Any("error", err))
+		return m.blocked.Load() != nil
+	}
+	old := m.blocked.Load()
+	switch {
+	case problem != "" && (old == nil || *old != problem):
+		m.blocked.Store(&problem)
+		m.log.Error("TLS certificate can't come from a root CA – the listener serves the bootstrap certificate", slog.String("listener", m.listener),
+			slog.String("ca", m.issuer), slog.String("problem", problem), slog.String("bootstrap_sha256", Fingerprint(m.bootstrap.Leaf.Raw)))
+	case problem == "" && old != nil:
+		m.blocked.Store(nil)
+		m.log.Info("TLS certificate: the CA is no longer a root – issued at the next renewal check", slog.String("listener", m.listener), slog.String("ca", m.issuer))
+	}
+	return problem != ""
+}
+
+// IssuerProblem says why the CA named in admin.tls_issuer or acme.tls_issuer
+// (setting) must not issue a listener certificate; "" = it may, or there is
+// no CA of that name (the engine names that problem when it refuses).
+//
+// A root CA is refused (owner 2026-10-24): a root usually carries no name
+// constraints, so a listener certificate straight from it would bypass the
+// ones of the intermediate. The engine signs no end-entity certificate with
+// a root anyway (CA/B BR §6.1.7); this check names the fix before the
+// first refusal, at the start and in `config check`.
+func IssuerProblem(ctx context.Context, db pkidb.DBTX, issuer, setting string) (string, error) {
+	q := pkidb.New(db)
+	row, err := q.GetCAByName(ctx, issuer)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", err
+	case row.Kind != ca.KindRoot:
+		return "", nil
+	}
+	cas, err := q.ListCAs(ctx)
+	if err != nil {
+		return "", err
+	}
+	var subs []string
+	for _, c := range cas {
+		if c.ParentID.Valid && c.ParentID.String == row.ID && c.Status == ca.StatusActive {
+			subs = append(subs, c.Name)
+		}
+	}
+	hint := "create an intermediate under it first"
+	if len(subs) > 0 {
+		hint = "intermediates of " + issuer + ": " + strings.Join(subs, ", ")
+	}
+	return fmt.Sprintf("CA %s is a root – name the issuing intermediate in %s (%s)", issuer, setting, hint), nil
+}
+
+// TLSIssuerProblems is IssuerProblem for both settings of cfg, read from the
+// CA database without changing it (`config check`). An error means the
+// database couldn't be read (not there yet, no permission, an older
+// schema) – the check is then skipped, not failed.
+func TLSIssuerProblems(ctx context.Context, cfg config.Config) ([]string, error) {
+	type setting struct{ key, issuer string }
+	var check []setting
+	if cfg.Admin.TLSIssuer != "" {
+		check = append(check, setting{"admin.tls_issuer", cfg.Admin.TLSIssuer})
+	}
+	if cfg.ACME.DirectTLS() {
+		check = append(check, setting{"acme.tls_issuer", cfg.ACME.TLSIssuer})
+	}
+	if len(check) == 0 {
+		return nil, nil
+	}
+	file, err := store.Layout{DataDir: cfg.DataDir}.TenantDB(store.DefaultTenant, store.KindPKI)
+	if err != nil {
+		return nil, err
+	}
+	db, err := store.OpenReadOnly(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	var out []string
+	for _, s := range check {
+		p, perr := IssuerProblem(ctx, db.Read, s.issuer, s.key)
+		if perr != nil {
+			return nil, perr
+		}
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // due says why a new certificate is needed now; "" = it isn't.
@@ -359,6 +470,9 @@ func (m *issuedTLS) attention(sealed bool) []view.Message {
 	m.mu.Unlock()
 	now := m.clk.Now()
 	label := m.label()
+	if b := m.blocked.Load(); b != nil {
+		return []view.Message{{Kind: view.MessageError, Text: label + ": " + *b + ". Until then the listener serves the bootstrap certificate."}}
+	}
 	c := m.cur.Load()
 	var out []view.Message
 	if problem != "" {
@@ -393,6 +507,9 @@ func (m *issuedTLS) startInfo() []any {
 	attrs := []any{slog.String("ca", m.issuer), slog.String("fingerprint_sha256", Fingerprint(c.Leaf.Raw)), slog.Time("not_after", c.Leaf.NotAfter)}
 	if issued {
 		return append(attrs, slog.String("source", "issued"), slog.Time("renew_at", renewAt(c.Leaf)))
+	}
+	if b := m.blocked.Load(); b != nil {
+		return append(attrs, slog.String("source", "bootstrap"), slog.String("note", *b))
 	}
 	return append(attrs, slog.String("source", "bootstrap"), slog.String("note", "issued from the CA at the unseal"))
 }

@@ -184,6 +184,14 @@ How it behaves:
   logged with the engine's reason and shown on the dashboard as an error; the server keeps the
   bootstrap (or the still valid issued) certificate and tries again after 6 hours (other errors:
   after 15 minutes), or at the first unseal after a restart.
+- **Name an intermediate, never a root.** A root usually has no name constraints, so a listener
+  certificate straight from it would bypass the ones of your intermediate (and the engine signs no
+  end-entity certificate with a root anyway). With a root in `admin.tls_issuer` or
+  `acme.tls_issuer` the server says so at the start – `CA root is a root – name the issuing
+  intermediate in admin.tls_issuer (intermediates of root: issuing)` – in the log and as an error
+  on the dashboard, issues nothing and serves the **bootstrap certificate**, even when an older
+  issued one is still valid. `myownpki config check` prints the same warning on stderr when it can
+  read the CA database (the config stays valid, exit code 0, like the server, which starts).
 - `admin.tls_issuer` and `admin.tls_cert_file` exclude each other; `config check` says so.
 
 > **PKI background – why the key may lie unencrypted.** The CA keys are what must never leak: they

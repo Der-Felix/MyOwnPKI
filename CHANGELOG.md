@@ -17,6 +17,9 @@ change the API, the configuration and the database schema; the release notes say
   only while unsealed; key and fullchain lie in `<data_dir>/tls/` (key 0600), so a sealed restart
   serves them. When one expires while sealed, the listener falls back to its bootstrap
   certificate with a warning in the log and on the dashboard; the switch needs no restart.
+  A **root CA** as `tls_issuer` is refused with the fix ("CA root is a root – name the issuing
+  intermediate …") at the start, on the dashboard and in `myownpki config check` (a warning when
+  the CA database is readable); the listener then serves its bootstrap certificate.
   docs/OPERATIONS.md §2.4.
 - **ACME without a reverse proxy:** with `acme.tls_issuer`, `acme.listen` speaks TLS itself (e.g.
   `":443"`); every client may connect, the peer is the client address for rate limits and audit,

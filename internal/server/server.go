@@ -168,7 +168,7 @@ func Open(ctx context.Context, opt Options) (_ *Server, err error) {
 	if s.cert, s.CertInfo, err = adminCertificate(opt.Config, opt.Hostname, s.clk.Now(), nil); err != nil {
 		return nil, err
 	}
-	if terr := s.issuedCertificates(); terr != nil {
+	if terr := s.issuedCertificates(ctx); terr != nil {
 		return nil, terr
 	}
 	s.logStart(ctx, inst)
@@ -301,7 +301,7 @@ func (s *Server) build(key *auth.Key) error {
 // issuedCertificates prepares the certificates the server issues itself;
 // each one falls back to a bootstrap certificate (admin: the one already
 // loaded; ACME: its own, for the host of acme.base_url).
-func (s *Server) issuedCertificates() error {
+func (s *Server) issuedCertificates(ctx context.Context) error {
 	cfg := s.opt.Config
 	dir := filepath.Join(cfg.DataDir, "tls")
 	if cfg.Admin.TLSIssuer != "" {
@@ -310,7 +310,7 @@ func (s *Server) issuedCertificates() error {
 			return err
 		}
 		names, ips = uniqueNames(names, ips)
-		s.adminTLS = newIssuedTLS("admin", "admin.tls_names", cfg.Admin.TLSIssuer, names, ips, dir, s.cert, s.engine, s.clk, s.log)
+		s.adminTLS = newIssuedTLS("admin", "admin.tls_names", "admin.tls_issuer", cfg.Admin.TLSIssuer, names, ips, dir, s.cert, s.engine, s.clk, s.log)
 	}
 	if cfg.ACME.DirectTLS() {
 		boot, in, err := acmeBootstrap(cfg, s.clk.Now(), nil)
@@ -321,7 +321,13 @@ func (s *Server) issuedCertificates() error {
 			s.log.Info("new ACME bootstrap certificate – served until the server issues the ACME certificate", slog.String("reason", in.Reason))
 		}
 		names, ips := hostNames(config.ACMEHost(cfg.ACME.BaseURL))
-		s.acmeTLS = newIssuedTLS("acme", "the host of acme.base_url", cfg.ACME.TLSIssuer, names, ips, dir, boot, s.engine, s.clk, s.log)
+		s.acmeTLS = newIssuedTLS("acme", "the host of acme.base_url", "acme.tls_issuer", cfg.ACME.TLSIssuer, names, ips, dir, boot, s.engine, s.clk, s.log)
+	}
+	// A root as issuer is named right at the start, not only at the unseal.
+	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+		if m != nil {
+			m.checkIssuer(ctx)
+		}
 	}
 	return nil
 }

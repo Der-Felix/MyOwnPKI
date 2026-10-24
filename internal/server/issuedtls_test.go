@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -48,7 +50,7 @@ func (e *issuedEnv) manager(issuer string, names []string, ips ...string) *issue
 	for _, ip := range ips {
 		addrs = append(addrs, netip.MustParseAddr(ip))
 	}
-	return newIssuedTLS("admin", "admin.tls_names", issuer, names, addrs, e.dir, e.boot, e.inst.Engine, e.inst.Clock,
+	return newIssuedTLS("admin", "admin.tls_names", "admin.tls_issuer", issuer, names, addrs, e.dir, e.boot, e.inst.Engine, e.inst.Clock,
 		slog.New(slog.NewJSONHandler(e.logs, nil)))
 }
 
@@ -294,6 +296,93 @@ func TestIssuedTLSDenied(t *testing.T) {
 	m.renew(ctx)
 	if got := kinds(m.attention(false)); !strings.Contains(got, `there is no CA named "nope"`) {
 		t.Errorf("unknown CA: %q", got)
+	}
+}
+
+// TestIssuedTLSRootIssuer: a root CA as issuer is named with the fix (the
+// intermediates under it), nothing is issued or tried – no refusals in the
+// audit log – and the listener serves the bootstrap certificate, even when
+// an older certificate from an intermediate is still valid.
+func TestIssuedTLSRootIssuer(t *testing.T) {
+	t.Parallel()
+	e := newIssuedEnv(t)
+	ctx := t.Context()
+	e.inst.Unseal(t)
+	ok := e.manager("issuing", []string{"pki.homelab.lan"})
+	ok.renew(ctx)
+	if served(t, ok) == e.boot {
+		t.Fatalf("not issued from issuing:\n%s", e.logs)
+	}
+	crt := filepath.Join(e.dir, issuedCertFile("admin"))
+	before, err := os.ReadFile(crt) // #nosec G304 -- test file
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := e.manager("root", []string{"pki.homelab.lan"}) // loads the certificate from issuing
+	for range 3 {
+		m.renew(ctx)
+		e.inst.Clock.Advance(7 * time.Hour) // past the retry wait of a refusal
+	}
+	if served(t, m) != e.boot {
+		t.Error("root as issuer: not the bootstrap certificate")
+	}
+	if _, issued := m.serving(e.inst.Clock.Now()); issued {
+		t.Error("serving reports an issued certificate")
+	}
+	want := "CA root is a root – name the issuing intermediate in admin.tls_issuer (intermediates of root: issuing)"
+	if got := kinds(m.attention(false)); got != "crit: The admin TLS certificate: "+want+". Until then the listener serves the bootstrap certificate." {
+		t.Errorf("attention: %q", got)
+	}
+	if n := strings.Count(e.logs.String(), "can't come from a root CA"); n != 1 || !strings.Contains(e.logs.String(), want) {
+		t.Errorf("logged %d times, want once with the fix:\n%s", n, e.logs)
+	}
+	if n := strings.Count(strings.Join(testinstance.Audit(t, e.inst.TenantAudit), " "), ca.ActionIssue+"/denied"); n != 0 {
+		t.Errorf("issuance tried with the root: %d refusals in the audit log", n)
+	}
+	if after, rerr := os.ReadFile(crt); rerr != nil || !bytes.Equal(after, before) { // #nosec G304 -- test file
+		t.Errorf("the stored certificate changed: %v", rerr)
+	}
+	if start := fmt.Sprint(m.startInfo()...); !strings.Contains(start, "source=bootstrap") || !strings.Contains(start, want) {
+		t.Errorf("start log: %s", start)
+	}
+
+	// Intermediates and unknown names are not this check's business.
+	for _, name := range []string{"issuing", "nope"} {
+		if p, err := IssuerProblem(ctx, e.inst.Engine.PKI, name, "admin.tls_issuer"); p != "" || err != nil {
+			t.Errorf("%s: %q, %v", name, p, err)
+		}
+	}
+}
+
+// TestIssuedTLSRootAtStart: the server names a root as issuer at the start –
+// sealed, before any renewal – in the log and on the dashboard, and
+// `config check` names it while the database is readable.
+func TestIssuedTLSRootAtStart(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	cfg.Admin.TLSIssuer, cfg.Admin.TLSNames = "root", "pki.homelab.lan"
+	cfg.ACME.BaseURL, cfg.ACME.Listen, cfg.ACME.TLSIssuer = "https://acme.homelab.lan/acme", "127.0.0.1:0", "issuing"
+	initialized(t, cfg)
+	var logs logBuf
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.NewJSONHandler(&logs, nil)), Hostname: "pki01", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.closeDBs()
+	if !strings.Contains(logs.String(), "can't come from a root CA") || !strings.Contains(logs.String(), "CA root is a root – name the issuing intermediate in admin.tls_issuer") {
+		t.Errorf("start log:\n%s", logs.String())
+	}
+	got := kinds(srv.tlsAttention(true))
+	if !strings.Contains(got, "crit: The admin TLS certificate: CA root is a root") || strings.Contains(got, "ACME listener: CA") {
+		t.Errorf("dashboard: %q", got)
+	}
+	if in := srv.ServedAdminCertificate(); in.Fingerprint != srv.CertInfo.Fingerprint {
+		t.Errorf("served %+v, want the bootstrap certificate", in)
+	}
+	problems, err := TLSIssuerProblems(t.Context(), cfg)
+	if err != nil || len(problems) != 1 || !strings.HasPrefix(problems[0], "CA root is a root") {
+		t.Errorf("config check: %q, %v", problems, err)
 	}
 }
 

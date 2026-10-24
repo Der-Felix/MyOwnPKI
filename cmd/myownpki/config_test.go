@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
 func TestConfigCheck(t *testing.T) {
@@ -39,7 +41,8 @@ func TestConfigCheck(t *testing.T) {
 		{name: "issued certificates", args: []string{"--config", valid}, wantCode: 0, env: []string{
 			"MYOWNPKI_ADMIN_TLS_ISSUER=issuing", "MYOWNPKI_ADMIN_TLS_NAMES=pki.u.lab",
 			"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=issuing",
-		}, wantStdout: []string{"issued by CA issuing for pki.u.lab", ":443 – its own TLS, issued by CA issuing"}},
+		}, wantStdout: []string{"issued by CA issuing for pki.u.lab", ":443 – its own TLS, issued by CA issuing",
+			"Not checked: whether the CA of tls_issuer is a root – the CA database can't be read", "Configuration is valid."}},
 		{name: "ACME behind the proxy", args: []string{"--config", valid}, wantCode: 0, env: []string{"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme"},
 			wantStdout: []string{"127.0.0.1:8081 – plain HTTP for the reverse proxy 127.0.0.1, ::1"}},
 		{name: "invalid file names every problem", args: []string{"--config", invalid}, wantCode: 1,
@@ -70,6 +73,44 @@ func TestConfigCheck(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestConfigCheckRootIssuer: with a readable CA database, a root in
+// admin.tls_issuer or acme.tls_issuer is a warning with the fix – on stderr,
+// which install.sh shows – and the config stays valid (exit 0), like the
+// server, which starts with it.
+func TestConfigCheckRootIssuer(t *testing.T) {
+	t.Parallel()
+	inst := testinstance.New(t, testinstance.Options{})
+	file := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(file, []byte("data_dir: \""+strings.ReplaceAll(inst.Config.DataDir, `\`, `\\`)+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		admin, acme string
+		want        []string
+	}{
+		{admin: "root", acme: "issuing", want: []string{"Warning: CA root is a root – name the issuing intermediate in admin.tls_issuer (intermediates of root: issuing). Until then"}},
+		{admin: "issuing", acme: "root", want: []string{"in acme.tls_issuer"}},
+		{admin: "issuing", acme: "issuing"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := runConfigCheck([]string{"--config", file}, []string{
+			"MYOWNPKI_ADMIN_TLS_ISSUER=" + tt.admin, "MYOWNPKI_ADMIN_TLS_NAMES=pki.u.lab",
+			"MYOWNPKI_ACME_BASE_URL=https://pki.u.lab/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=" + tt.acme,
+		}, &stdout, &stderr)
+		if code != 0 || !strings.Contains(stdout.String(), "Configuration is valid.") || strings.Contains(stdout.String(), "Not checked") {
+			t.Errorf("%s/%s: exit %d\n%s%s", tt.admin, tt.acme, code, stdout.String(), stderr.String())
+		}
+		for _, w := range tt.want {
+			if !strings.Contains(stderr.String(), w) {
+				t.Errorf("%s/%s: stderr lacks %q:\n%s", tt.admin, tt.acme, w, stderr.String())
+			}
+		}
+		if len(tt.want) == 0 && stderr.Len() != 0 {
+			t.Errorf("intermediates only: %s", stderr.String())
+		}
 	}
 }
 

@@ -35,10 +35,11 @@ admin:
   # loopback are always in it. With tls_issuer: exactly the names of the
   # issued certificate.
   tls_names: ""
-  # A CA of this instance (its name, e.g. issuing) that issues the admin
-  # certificate: the server issues it itself while unsealed (90 days at most,
-  # renewed at 2/3) and falls back to the bootstrap certificate if it expires
-  # while sealed. Empty: tls_cert_file, or the bootstrap certificate.
+  # An intermediate CA of this instance (its name, e.g. issuing; not a root)
+  # that issues the admin certificate: the server issues it itself while
+  # unsealed (90 days at most, renewed at 2/3) and falls back to the bootstrap
+  # certificate if it expires while sealed. Empty: tls_cert_file, or the
+  # bootstrap certificate.
   tls_issuer: ""
   # Who may connect at all (IPs or CIDRs, comma-separated), checked before
   # TLS. Empty: everybody. Strongly recommended when listen is not loopback –
@@ -88,9 +89,10 @@ acme:
   # knows your internal names (split DNS), e.g. 192.168.10.53. Empty: the
   # system resolver.
   resolver: ""
-  # A CA of this instance (its name, e.g. issuing): ACME speaks TLS itself on
-  # listen, with a certificate for the host of base_url that the server issues
-  # from this CA while unsealed (90 days at most, renewed at 2/3). Clients
+  # An intermediate CA of this instance (its name, e.g. issuing; not a root):
+  # ACME speaks TLS itself on listen, with a certificate for the host of
+  # base_url that the server issues from this CA while unsealed (90 days at
+  # most, renewed at 2/3). Clients
   # connect directly; the client address is the peer. Empty: plain HTTP behind
   # a reverse proxy.
   tls_issuer: ""
