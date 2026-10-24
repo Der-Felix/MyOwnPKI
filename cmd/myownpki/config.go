@@ -73,6 +73,14 @@ func checkTLSIssuers(cfg config.Config, stdout, stderr io.Writer) {
 	for _, p := range problems {
 		_, _ = fmt.Fprintf(stderr, "\nWarning: %s. Until then the listener serves the bootstrap certificate.\n", p)
 	}
+	agentCA, err := server.AgentCAProblems(ctx, cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stdout, "\nNot checked: the agent CA – the CA database can't be read (%v).\n", err)
+		return
+	}
+	for _, p := range agentCA {
+		_, _ = fmt.Fprintf(stderr, "\nWarning: %s. Until then agents can't enroll.\n", p)
+	}
 }
 
 // configFlag registers --config on a subcommand's flag set.
@@ -140,6 +148,13 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 	default:
 		rows = append(rows, [2]string{"acme", cfg.ACME.BaseURL + from("MYOWNPKI_ACME_BASE_URL")},
 			[2]string{"acme.listen", cfg.ACME.Listen + " – plain HTTP for the reverse proxy " + cfg.ACME.TrustedProxies + from("MYOWNPKI_ACME_LISTEN")})
+	}
+	if cfg.Agent.Enabled() {
+		rows = append(rows, [2]string{"agent", cfg.Agent.BaseURL + from("MYOWNPKI_AGENT_BASE_URL")},
+			[2]string{"agent.listen", cfg.Agent.Listen + " – mTLS, issued by CA " + cfg.Agent.TLSIssuer + ", agents from CA " + cfg.Agent.CA +
+				from("MYOWNPKI_AGENT_LISTEN") + from("MYOWNPKI_AGENT_TLS_ISSUER") + from("MYOWNPKI_AGENT_CA")})
+	} else {
+		rows = append(rows, [2]string{"agent", "off (agent.base_url is empty)"})
 	}
 	_, _ = fmt.Fprintf(w, "Config file: %s\n\n", src.File)
 	for _, r := range rows {

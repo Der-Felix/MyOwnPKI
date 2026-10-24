@@ -261,6 +261,9 @@ func TLSIssuerProblems(ctx context.Context, cfg config.Config) ([]string, error)
 	if cfg.ACME.DirectTLS() {
 		check = append(check, setting{"acme.tls_issuer", cfg.ACME.TLSIssuer})
 	}
+	if cfg.Agent.Enabled() {
+		check = append(check, setting{"agent.tls_issuer", cfg.Agent.TLSIssuer})
+	}
 	if len(check) == 0 {
 		return nil, nil
 	}

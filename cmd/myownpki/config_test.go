@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -123,6 +124,45 @@ func TestConfigCommandUsage(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), "config check") {
 			t.Errorf("%v: usage missing: %s", args, stderr.String())
+		}
+	}
+}
+
+// TestConfigCheckAgentCA (docs/PHASE3.md §1.4): agent.ca must be an active
+// intermediate with the EKU limit clientAuth only; anything else is a
+// warning on stderr (exit 0), like a root in tls_issuer.
+func TestConfigCheckAgentCA(t *testing.T) {
+	t.Parallel()
+	inst := testinstance.New(t, testinstance.Options{})
+	inst.Unseal(t)
+	for name, eku := range map[string][]string{"agent-ca": {"clientAuth"}, "wide-ca": nil, "both-ca": {"clientAuth", "serverAuth"}} {
+		if _, err := inst.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
+			CASettings: ca.CASettings{Name: name, BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+			Subject: ca.Subject{CommonName: name}, EKULimit: eku, Who: testinstance.Console,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(file, []byte("data_dir: \""+strings.ReplaceAll(inst.Config.DataDir, `\`, `\\`)+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ ca, want string }{
+		{"agent-ca", ""},
+		{"root", "Warning: CA root is a root – agent.ca names an intermediate"},
+		{"nope", `there is no CA named "nope" (agent.ca)`},
+		{"wide-ca", "CA wide-ca may sign more than client certificates"},
+		{"both-ca", "CA both-ca may sign more than client certificates"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := runConfigCheck([]string{"--config", file}, []string{
+			"MYOWNPKI_AGENT_BASE_URL=https://pki.homelab.lan:8444", "MYOWNPKI_AGENT_TLS_ISSUER=issuing", "MYOWNPKI_AGENT_CA=" + tt.ca,
+		}, &stdout, &stderr)
+		if code != 0 || !strings.Contains(stdout.String(), "agent.listen   :8444 – mTLS, issued by CA issuing, agents from CA "+tt.ca) {
+			t.Errorf("%s: exit %d\n%s%s", tt.ca, code, stdout.String(), stderr.String())
+		}
+		if tt.want == "" && stderr.Len() != 0 || !strings.Contains(stderr.String(), tt.want) {
+			t.Errorf("%s: stderr %q, want %q", tt.ca, stderr.String(), tt.want)
 		}
 	}
 }

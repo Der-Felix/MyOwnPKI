@@ -96,3 +96,19 @@ acme:
   # connect directly; the client address is the peer. Empty: plain HTTP behind
   # a reverse proxy.
   tls_issuer: ""
+
+# The agent listener (v0.3, docs/OPERATIONS.md "Agent"): myownpki-agent on the
+# hosts connects here – Connect-RPC over mTLS, outbound from the host.
+agent:
+  # The address agents use, e.g. https://pki.homelab.lan:8444. Its host is
+  # the name in the listener's certificate. Empty: no agent listener.
+  base_url: ""
+  # The agent listener – a port of its own (open it for the hosts).
+  listen: ":8444"
+  # An intermediate CA of this instance that issues the listener's
+  # certificate while unsealed (like admin.tls_issuer). Required with base_url.
+  tls_issuer: ""
+  # The agent CA: an intermediate with the EKU limit clientAuth only. It
+  # signs the agents' 7-day certificates; only those pass the listener's
+  # client authentication. Required with base_url.
+  ca: ""
