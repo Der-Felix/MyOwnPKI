@@ -32,6 +32,19 @@ func TestSanitizeHookOutputIsBoundedUTF8AndPlainText(t *testing.T) {
 	}
 }
 
+func TestSanitizeHookOutputRemovesUnicodeFormatCharacters(t *testing.T) {
+	t.Parallel()
+	output := sanitizeHookOutput([]byte("visible\u202eabc\u200bdef\n"))
+	if output != "visibleabcdef" {
+		t.Fatalf("format characters remain: %q", output)
+	}
+	for _, r := range output {
+		if unicode.Is(unicode.Cf, r) {
+			t.Fatalf("unicode format character remains: %U", r)
+		}
+	}
+}
+
 func TestDeployErrorClippingKeepsUTF8AtRuneBoundary(t *testing.T) {
 	t.Parallel()
 	boundary := strings.Repeat("a", 999) + "é" + "tail"

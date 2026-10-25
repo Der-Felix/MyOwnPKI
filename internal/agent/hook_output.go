@@ -87,7 +87,7 @@ func sanitizeHookOutput(data []byte) string {
 	text := strings.ToValidUTF8(string(data), "�")
 	var out strings.Builder
 	for _, r := range text {
-		if r == '\n' || !unicode.IsControl(r) {
+		if r == '\n' || !unicode.IsControl(r) && !unicode.Is(unicode.Cf, r) {
 			out.WriteRune(r)
 		}
 	}
