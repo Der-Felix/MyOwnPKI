@@ -20,6 +20,7 @@ Two-week rule: a version older than 2026-10-10 (docs/PHASE3.md §4).
 | `google.golang.org/protobuf` | v1.36.12 (2026-08-10) | BSD-3-Clause | protobuf messages of the agent protocol; its generator `protoc-gen-go` as `go tool` | nothing |
 | [buf](https://github.com/bufbuild/buf) CLI | v1.73.0 (2026-09-11) | Apache-2.0 | `task generate`: lint and code generation of `proto/` (local plugins only, no registry) – a development tool, never in `go.mod` or a binary | fetched by `internal/tools/buf` into `.tools/` and checked against the SHA-256 of the release's `sha256.txt` (pins in that file) |
 | `github.com/go-acme/lego/v4` | v4.35.2 (2026-04-24) | MIT | ACME library in the agent (block C); direct imports only `lego`, `certificate`, `registration`; the existing contained responder implements the HTTP provider interface | `github.com/go-jose/go-jose/v4` v4.1.4 (2026-03-31, Apache-2.0), `github.com/miekg/dns` v1.1.72 (2026-01-22, BSD-3), `github.com/cenkalti/backoff/v5` v5.0.3 (2025-07-23, MIT). No DNS provider or provider SDK is built in; existing higher `golang.org/x/*` versions stay unchanged |
+| `nginx:1.29.2-trixie` | 2025-10-07 | BSD-2-Clause | nginx in the Linux `agent end-to-end` CI job only; not shipped | multi-architecture index `sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903` |
 
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 

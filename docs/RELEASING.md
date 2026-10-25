@@ -76,12 +76,12 @@ $env:NO_PROXY = "github.com,api.github.com"
    awk -v head="## [${VERSION}]" 'index($0, head) == 1 { p = 1; next } p && /^## \[/ { exit } p && /^\[[^]]*\]: / { next } p' CHANGELOG.md
    ```
 
-3. `deploy/install.sh`: `DEFAULT_VERSION=<version>` – the version `install.sh` installs without
-   `--version`. The workflow stops if it differs from the tag (for a candidate: from its base
-   version). Check it (Git Bash, or `Select-String` in PowerShell):
+3. `deploy/install.sh` and `deploy/install-agent.sh`: `DEFAULT_VERSION=<version>` – the version each
+   script installs without `--version`. The workflow stops if either differs from the tag (for a
+   candidate: from its base version). Check them (Git Bash, or `Select-String` in PowerShell):
 
    ```bash
-   grep "^DEFAULT_VERSION=" deploy/install.sh
+   grep "^DEFAULT_VERSION=" deploy/install.sh deploy/install-agent.sh
    ```
 
 4. Merge into main – through the pull request once its CI is green – and bring the local main up
@@ -157,10 +157,10 @@ gh release view "v${RELEASE}" --json name,isDraft,isPrerelease,assets --jq "{nam
 ```
 
 - `isDraft` true; `isPrerelease` true for a candidate, false for the real release.
-- 13 assets: 5 archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
-  `…_darwin_arm64.tar.gz`, `…_freebsd_amd64.tar.gz`, `…_windows_amd64.zip`), 5 SBOMs
-  (`*.sbom.json`), `install.sh`, `checksums.txt` and `checksums.txt.sigstore.json`. The archives
-  also hold `deploy/install.sh` and the systemd unit with its drop-in.
+- 18 assets: 5 server archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
+  `…_darwin_arm64.tar.gz`, `…_freebsd_amd64.tar.gz`, `…_windows_amd64.zip`), 2 agent archives for
+  Linux amd64/arm64, 7 SBOMs (`*.sbom.json`), `install.sh`, `install-agent.sh`, `checksums.txt` and
+  `checksums.txt.sigstore.json`. The archives also hold their install scripts and systemd units.
 
 The release notes – **the text must not be empty**: the length is more than 0, and the text starts
 with the first lines of the version's CHANGELOG section, without a list of commits:

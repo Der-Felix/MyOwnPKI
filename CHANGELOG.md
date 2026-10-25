@@ -7,8 +7,11 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-Being built as 0.3.0 – the Linux agent (docs/PHASE3.md). Blocks B–C: the trusted channel,
-ACME issuance and deployment with rollback. Scheduling, reports and packaging follow in D–E.
+## [0.3.0] - 2026-10-25
+
+The Linux agent: trusted enrollment, ACME issuance, atomic deployment with rollback, scheduled
+renewals and operator-requested renewal through the web UI and REST API. Linux packages and a
+hardened systemd installation complete the release.
 
 ### Added
 
@@ -25,7 +28,7 @@ ACME issuance and deployment with rollback. Scheduling, reports and packaging fo
   whole reload group; first-install failures remove the new files. Mixed groups test the restored
   configuration and reload existing deployments back to their old leaf when safe. A durable journal recovers an
   interrupted pass before new work, and local status shows deployment results. A failed rollback
-  reports both errors without a retry loop. The Report RPC follows in block D.
+  reports both errors without a retry loop.
 
 - **Agent listener** (`agent.base_url`, `agent.listen` default `:8444`, `agent.tls_issuer`,
   `agent.ca`): Connect-RPC over TLS 1.3. Its certificate comes from `agent.tls_issuer` like the admin
@@ -49,8 +52,30 @@ ACME issuance and deployment with rollback. Scheduling, reports and packaging fo
   agent.yaml names one.
 - **REST API** `/agents`, `/agent-enrollments`, `/agent-join-tokens` (permission `agent.manage`,
   admin with step-up), and the pages *Agents*, *Enrollment requests*, *Join tokens*.
+- **Reports and renewal scheduling:** a heartbeat every five minutes with jitter and one combined
+  report after each deployment pass; 2/3-lifetime scheduling with ARI support, persistent failure
+  backoff and a silent-agent indicator after three missed reports.
+- **Renew now and Withdraw:** operator/admin actions in the UI and REST API wake the agent through
+  a bounded long-poll. Versioned acknowledgements prevent stale reports from clearing newer requests;
+  CSRF, role checks and audit entries cover both actions. Agent pages show deployments, disallowed
+  names and removed configurations. The certificate filter hides agent identity certificates by
+  default, while deployment certificates stay visible.
+- **Linux packaging:** `install-agent.sh`, a hardened root systemd unit with explicit writable-path
+  drop-ins, and reproducible Linux amd64/arm64 agent archives. The script verifies the downloaded
+  archive against the signed checksum file, never overwrites agent.yaml and updates without
+  self-update magic. The `agent end-to-end` CI job runs real ACME/agent flows and nginx rollback,
+  measures `systemd-analyze security`, and checks protobuf compatibility with `buf breaking`.
 - New modules (owner 2026-10-24): `connectrpc.com/connect` v1.21.0, `google.golang.org/protobuf`
   v1.36.12; buf v1.73.0 as a pinned development tool (THIRD_PARTY.md).
+
+### Changed
+
+- Reports and desired-state watches have per-agent rate limits (60 and 120 per 10 minutes) to
+  protect the SQLite writer and audit log from a compromised agent. The dashboard excludes agent
+  identity certificates from ordinary 30-day expiry views and warns per active agent when its
+  current certificate has less than 48 hours left.
+- pki.db migration 0013 stores reported deployments and renewal requests. The release now has 18
+  assets, including the two agent archives and `install-agent.sh`.
 
 ## [0.2.2] - 2026-10-24
 
@@ -267,7 +292,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.1.0...v0.2.0

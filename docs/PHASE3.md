@@ -526,7 +526,11 @@ before.
   `ReadWritePaths=` the `paths` of `agent.yaml` (webroots are inside them), `StateDirectory=
   myownpki-agent`, `NoNewPrivileges=yes`, `ProtectHome=yes`, `PrivateTmp=yes`, only IPv4, IPv6 and
   Unix sockets, `@system-service` system calls. Hooks run inside this sandbox too – an allowlisted
-  command can't write outside the allowed paths either.
+  command can't write outside the allowed paths either. This contains filesystem mistakes in the
+  agent. It is **not a security boundary against code running as root in the agent process**:
+  `systemctl reload` needs access to systemd over D-Bus, and the same access permits `systemd-run`.
+  The actual protection is that the server sends no commands and hooks come only from root-owned
+  `agent.yaml`.
 - `CAP_NET_BIND_SERVICE` only through a drop-in when a deployment or the enrollment uses
   standalone (like `low-ports.conf` on the server).
 - `nginx -t` opens nginx's log files: the install script adds nginx's log directory to
