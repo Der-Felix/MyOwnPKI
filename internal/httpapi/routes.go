@@ -78,6 +78,8 @@ func (a *API) table() []Route {
 
 		{OperationID: "listAgents", Method: http.MethodGet, Path: "/agents", access: signedIn, handle: a.listAgents},
 		{OperationID: "getAgent", Method: http.MethodGet, Path: "/agents/{agentId}", access: signedIn, handle: a.getAgent},
+		{OperationID: "renewAgentDeployment", Method: http.MethodPost, Path: "/agents/{agentId}/deployments/{deploymentName}/renew", access: signedIn, handle: a.renewAgentDeployment},
+		{OperationID: "withdrawAgentDeployment", Method: http.MethodDelete, Path: "/agents/{agentId}/deployments/{deploymentName}/renew", access: signedIn, handle: a.withdrawAgentDeployment},
 		{OperationID: "disableAgent", Method: http.MethodPost, Path: "/agents/{agentId}/disable", access: signedIn, handle: a.disableAgent},
 		{OperationID: "enableAgent", Method: http.MethodPost, Path: "/agents/{agentId}/enable", access: signedIn, handle: a.enableAgent},
 		{OperationID: "revokeAgent", Method: http.MethodPost, Path: "/agents/{agentId}/revoke", access: signedIn, handle: a.revokeAgent},

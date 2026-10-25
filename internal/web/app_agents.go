@@ -17,10 +17,6 @@ import (
 // join tokens. The agent service decides; these pages show and ask. What
 // agents reported is shown as text (templ escapes it), never as markup.
 
-// silentAfter: three missed heartbeats (every 5 minutes) – the list says
-// "silent" then (the alert comes with monitoring, v0.3.x).
-const silentAfter = 15 * time.Minute
-
 // agentsOff explains why the agent pages are empty.
 func (a *app) agentsOff(c *rc, title, key string) bool {
 	if a.d.Agents != nil {
@@ -45,7 +41,7 @@ func (a *app) agentStatus(ag agents.Agent) admin.Cell {
 		return admin.Cell{Text: "revoked", Status: view.StatusCrit}
 	case ag.Status == agents.StatusDisabled:
 		return admin.Cell{Text: "disabled", Status: view.StatusNeutral}
-	case !ag.LastSeenAt.IsZero() && a.now().Sub(ag.LastSeenAt) > silentAfter:
+	case ag.Silent(a.now()):
 		return admin.Cell{Text: "silent", Status: view.StatusWarn}
 	}
 	return admin.Cell{Text: "active", Status: view.StatusOK}
@@ -93,6 +89,9 @@ func (a *app) agentDetail(c *rc) {
 		{Key: "Admitted", Value: dateTime(ag.ApprovedAt) + " by " + ag.ApprovedBy + " (mode " + ag.EnrollmentMode + ")"},
 		{Key: "Agent certificate (serial)", Value: cert},
 	}}}
+	deployments := a.agentDeploymentTable(c, ag)
+	deployments.RefreshURL = "/agents/" + ag.ID + "/deployments"
+	sections = append(sections, admin.Section{Table: &deployments})
 	if ag.CertificateID != "" {
 		sections[0].Text = []string{"The agent certificate (7 days, renewed by the agent at 2/3) is under Certificates: /certificates/" + ag.CertificateID}
 	}
@@ -129,8 +128,95 @@ func (a *app) agentDetail(c *rc) {
 	}
 	crumbs := []view.Crumb{{Label: "Agents", Href: "/agents"}}
 	p := c.page(ag.Hostname, "agents", crumbs...)
-	p.Description = "Changes need a fresh second factor."
+	p.Description = "Renew now asks this host to renew a deployment. Administrative changes need a fresh second factor."
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(p, admin.DetailData{Messages: c.messages(), Sections: sections}))
+}
+
+func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
+	t := admin.TableData{Title: "Deployments", Empty: "This agent has not reported any deployments yet.", Columns: []admin.Column{
+		{Label: "Deployment"}, {Label: "State"}, {Label: "Serial"}, {Label: "Expires"}, {Label: "Last error"}, {Label: "Renewal"},
+	}}
+	for _, d := range ag.Deployments {
+		status := view.StatusNeutral
+		switch d.State {
+		case "deployed":
+			status = view.StatusOK
+		case "failed":
+			status = view.StatusCrit
+		case "rolled_back":
+			status = view.StatusWarn
+		}
+		serial := admin.Cell{Text: orDash(d.Serial), Mono: true}
+		if d.CertificateID != "" {
+			serial.Href = "/certificates/" + d.CertificateID
+		}
+		details := d.Profile
+		if len(d.Names) > 0 {
+			if details != "" {
+				details += " · "
+			}
+			details += strings.Join(d.Names, ", ")
+		}
+		if d.Removed {
+			if details != "" {
+				details += " · "
+			}
+			details += "not in the agent configuration"
+		}
+		pending := !d.RenewRequestedAt.IsZero()
+		renew := admin.PostCommand{Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/renew", CSRF: c.sess.CSRFToken,
+			Label: "Renew now", Disabled: pending || d.Removed || ag.Status != agents.StatusActive || !c.may(authz.RenewAgent, "")}
+		renewal := admin.Cell{Posts: []admin.PostCommand{renew}}
+		if pending {
+			renew.Label = "Requested"
+			renewal.Rel = dateTime(d.RenewRequestedAt) + " by " + d.RenewRequestedBy
+			renewal.Posts = []admin.PostCommand{renew, {Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/withdraw",
+				CSRF: c.sess.CSRFToken, Label: "Withdraw", Disabled: !c.may(authz.RenewAgent, "")}}
+		}
+		t.Rows = append(t.Rows, []admin.Cell{{Text: d.Name, Rel: details},
+			{Text: strings.ReplaceAll(d.State, "_", " "), Status: status}, serial, {Text: dateTime(d.NotAfter), NoWrap: true},
+			{Text: d.LastError, Break: true}, renewal})
+	}
+	return t
+}
+
+func (a *app) agentDeployments(c *rc) {
+	if a.d.Agents == nil {
+		http.NotFound(c.w, c.r)
+		return
+	}
+	ag, err := a.d.Agents.GetAgent(c.r.Context(), c.who(), c.r.PathValue("id"))
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	render(c.w, c.r, a.log, http.StatusOK, admin.Table(a.agentDeploymentTable(c, ag)))
+}
+
+func (a *app) agentRenew(c *rc) {
+	if a.d.Agents == nil {
+		http.NotFound(c.w, c.r)
+		return
+	}
+	id := c.r.PathValue("id")
+	if err := a.d.Agents.RequestRenewal(c.r.Context(), c.who(), id, c.r.PathValue("name")); err != nil {
+		c.refused(err, "/agents/"+id)
+		return
+	}
+	c.done("/agents/"+id, "Renewal requested.")
+}
+
+func (a *app) agentWithdraw(c *rc) {
+	if a.d.Agents == nil {
+		http.NotFound(c.w, c.r)
+		return
+	}
+	id := c.r.PathValue("id")
+	if err := a.d.Agents.WithdrawRenewal(c.r.Context(), c.who(), id, c.r.PathValue("name")); err != nil {
+		c.refused(err, "/agents/"+id)
+		return
+	}
+	c.done("/agents/"+id, "Renewal request withdrawn.")
 }
 
 func (a *app) agentNames(c *rc) {

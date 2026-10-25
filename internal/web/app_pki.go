@@ -226,6 +226,7 @@ func (a *app) certificateList(c *rc) {
 		return
 	}
 	f := ca.CertificateFilter{CAID: caID, Preset: presetName, Status: status, Search: query, Cursor: cursor}
+	f.HideAgentCertificates = q.Get("agent_filter") != "1" || q.Get("hide_agents") == "yes"
 	if status == "expiring" {
 		f.Status, f.ExpiresBefore = ca.CertValid, a.now().Add(ca.ExpiringWindow)
 	}
@@ -244,7 +245,7 @@ func (a *app) certificateList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := certificates.ListData{Real: true, Query: query, Total: int(total.Total()), Messages: c.messages()}
+	d := certificates.ListData{Real: true, Query: query, Total: int(total.Total()), Messages: c.messages(), HideAgents: f.HideAgentCertificates}
 	for i := range page.Items {
 		d.Rows = append(d.Rows, a.certRow(&page.Items[i]))
 	}

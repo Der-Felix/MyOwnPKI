@@ -19,25 +19,52 @@ type agentNameJSON struct {
 }
 
 type agentJSON struct {
-	ID             string          `json:"id"`
-	Hostname       string          `json:"hostname"`
-	Status         string          `json:"status"`
-	EnrollmentMode string          `json:"enrollment_mode"`
-	OS             string          `json:"os"`
-	Arch           string          `json:"arch"`
-	Version        string          `json:"version"`
-	CreatedAt      time.Time       `json:"created_at"`
-	ApprovedAt     time.Time       `json:"approved_at"`
-	ApprovedBy     string          `json:"approved_by"`
-	LastSeenAt     *time.Time      `json:"last_seen_at"`
-	CertificateID  *string         `json:"certificate_id"`
-	Names          []agentNameJSON `json:"names"`
+	ID             string                `json:"id"`
+	Hostname       string                `json:"hostname"`
+	Status         string                `json:"status"`
+	EnrollmentMode string                `json:"enrollment_mode"`
+	OS             string                `json:"os"`
+	Arch           string                `json:"arch"`
+	Version        string                `json:"version"`
+	CreatedAt      time.Time             `json:"created_at"`
+	ApprovedAt     time.Time             `json:"approved_at"`
+	ApprovedBy     string                `json:"approved_by"`
+	LastSeenAt     *time.Time            `json:"last_seen_at"`
+	CertificateID  *string               `json:"certificate_id"`
+	Names          []agentNameJSON       `json:"names"`
+	Silent         bool                  `json:"silent"`
+	Deployments    []agentDeploymentJSON `json:"deployments"`
+}
+
+type agentDeploymentJSON struct {
+	Name             string     `json:"name"`
+	Profile          string     `json:"profile"`
+	Names            []string   `json:"names"`
+	Challenge        string     `json:"challenge"`
+	State            string     `json:"state"`
+	Serial           string     `json:"serial"`
+	CertificateID    *string    `json:"certificate_id"`
+	NotAfter         *time.Time `json:"not_after"`
+	DeployedAt       *time.Time `json:"deployed_at"`
+	Fingerprint      string     `json:"fingerprint"`
+	LastError        string     `json:"last_error"`
+	LastReportAt     time.Time  `json:"last_report_at"`
+	RenewRequestedAt *time.Time `json:"renew_requested_at"`
+	RenewRequestedBy string     `json:"renew_requested_by"`
+	Removed          bool       `json:"removed"`
+}
+
+func timeOrNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func toAgentJSON(a *agents.Agent) agentJSON {
 	out := agentJSON{
 		ID: a.ID, Hostname: a.Hostname, Status: a.Status, EnrollmentMode: a.EnrollmentMode, OS: a.OS, Arch: a.Arch,
-		Version: a.Version, CreatedAt: a.CreatedAt, ApprovedAt: a.ApprovedAt, ApprovedBy: a.ApprovedBy, Names: []agentNameJSON{},
+		Version: a.Version, CreatedAt: a.CreatedAt, ApprovedAt: a.ApprovedAt, ApprovedBy: a.ApprovedBy, Names: []agentNameJSON{}, Deployments: []agentDeploymentJSON{},
 	}
 	if !a.LastSeenAt.IsZero() {
 		out.LastSeenAt = &a.LastSeenAt
@@ -47,6 +74,16 @@ func toAgentJSON(a *agents.Agent) agentJSON {
 	}
 	for _, n := range a.Names {
 		out.Names = append(out.Names, agentNameJSON{Name: n.Pattern, Source: n.Source, AddedBy: n.AddedBy, AddedAt: n.AddedAt})
+	}
+	for _, d := range a.Deployments {
+		row := agentDeploymentJSON{Name: d.Name, Profile: d.Profile, Names: nonNil(d.Names), Challenge: d.Challenge, State: d.State,
+			Serial: d.Serial, NotAfter: timeOrNil(d.NotAfter), DeployedAt: timeOrNil(d.DeployedAt), Fingerprint: d.Fingerprint,
+			LastError: d.LastError, LastReportAt: d.LastReportAt, RenewRequestedAt: timeOrNil(d.RenewRequestedAt),
+			RenewRequestedBy: d.RenewRequestedBy, Removed: d.Removed}
+		if d.CertificateID != "" {
+			row.CertificateID = &d.CertificateID
+		}
+		out.Deployments = append(out.Deployments, row)
 	}
 	return out
 }
@@ -129,7 +166,9 @@ func (a *API) listAgents(c *call) error {
 		if gerr != nil {
 			return gerr
 		}
-		out = append(out, toAgentJSON(full))
+		row := toAgentJSON(full)
+		row.Silent = full.Silent(a.d.Clock.Now())
+		out = append(out, row)
 	}
 	return c.reply(http.StatusOK, out)
 }
@@ -147,7 +186,45 @@ func (a *API) replyAgent(c *call, s *agents.Service, id string) error {
 	if err != nil {
 		return err
 	}
-	return c.reply(http.StatusOK, toAgentJSON(ag))
+	out := toAgentJSON(ag)
+	out.Silent = ag.Silent(a.d.Clock.Now())
+	return c.reply(http.StatusOK, out)
+}
+
+func (a *API) renewAgentDeployment(c *call) error {
+	s, err := a.agentsOn(c)
+	if err != nil {
+		return err
+	}
+	id := pathID(c, "agentId")
+	if id == "" {
+		return agents.ErrNotFound
+	}
+	if rerr := s.RequestRenewal(c.ctx(), c.who(), id, c.r.PathValue("deploymentName")); rerr != nil {
+		return rerr
+	}
+	ag, err := s.GetAgent(c.ctx(), c.who(), id)
+	if err != nil {
+		return err
+	}
+	out := toAgentJSON(ag)
+	out.Silent = ag.Silent(a.d.Clock.Now())
+	return c.reply(http.StatusAccepted, out)
+}
+
+func (a *API) withdrawAgentDeployment(c *call) error {
+	s, err := a.agentsOn(c)
+	if err != nil {
+		return err
+	}
+	id := pathID(c, "agentId")
+	if id == "" {
+		return agents.ErrNotFound
+	}
+	if werr := s.WithdrawRenewal(c.ctx(), c.who(), id, c.r.PathValue("deploymentName")); werr != nil {
+		return werr
+	}
+	return a.replyAgent(c, s, id)
 }
 
 func (a *API) getAgent(c *call) error {

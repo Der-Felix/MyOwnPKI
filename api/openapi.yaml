@@ -936,6 +936,53 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /agents/{agentId}/deployments/{deploymentName}/renew:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+      - name: deploymentName
+        in: path
+        required: true
+        description: Name from the agent's reported local configuration
+        schema: { type: string, pattern: "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$" }
+    post:
+      tags: [agents]
+      operationId: renewAgentDeployment
+      summary: Request renewal of an agent deployment
+      description: |
+        Records a desired-state request and audits the caller and deployment. A new report
+        acknowledging this exact request clears it, including a failed deployment result.
+        A pending request is refused with 409. No command, path or hook is sent to the host.
+      x-required-role: operator
+      responses:
+        "202":
+          description: Renewal requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [agents]
+      operationId: withdrawAgentDeployment
+      summary: Withdraw an open renewal request
+      description: |
+        Clears an open desired-state request, audits the caller and wakes the agent.
+        Without an open request the operation is refused with 409. A result already
+        in flight is harmless and cannot clear a later request.
+      x-required-role: operator
+      responses:
+        "200":
+          description: Renewal request withdrawn
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /agents/{agentId}/disable:
     parameters:
       - $ref: "#/components/parameters/AgentId"
@@ -1574,6 +1621,10 @@ paths:
       description: Only certificates of CAs the caller may read; newest first.
       x-required-role: viewer
       parameters:
+        - name: hide_agent_certificates
+          in: query
+          description: Hide all agent identity certificates, including previous renewals; deployment certificates stay visible
+          schema: { type: boolean, default: true }
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
         - name: ca_id
@@ -2490,7 +2541,7 @@ components:
     Agent:
       description: "An admitted agent (v0.3)"
       type: object
-      required: [id, hostname, status, enrollment_mode, os, arch, version, created_at, approved_at, approved_by, last_seen_at, certificate_id, names]
+      required: [id, hostname, status, enrollment_mode, os, arch, version, created_at, approved_at, approved_by, last_seen_at, certificate_id, names, silent, deployments]
       additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
@@ -2505,10 +2556,35 @@ components:
         approved_by: { type: string, description: "An admin, or the mode" }
         last_seen_at: { type: [string, "null"], format: date-time }
         certificate_id: { type: [string, "null"], description: "Its current agent certificate" }
+        silent: { type: boolean, description: "Three missed five-minute reports" }
+        deployments:
+          type: array
+          items: { $ref: "#/components/schemas/AgentDeployment" }
         names:
           description: "What it may order: exact names and *.suffix patterns"
           type: array
           items: { $ref: "#/components/schemas/AgentName" }
+
+    AgentDeployment:
+      type: object
+      additionalProperties: false
+      required: [name, profile, names, challenge, state, serial, certificate_id, not_after, deployed_at, fingerprint, last_error, last_report_at, renew_requested_at, renew_requested_by, removed]
+      properties:
+        name: { type: string, maxLength: 64 }
+        profile: { type: string, maxLength: 32 }
+        names: { type: array, maxItems: 100, items: { type: string, maxLength: 253 } }
+        challenge: { type: string, maxLength: 32 }
+        state: { type: string, enum: [pending, deployed, failed, rolled_back] }
+        serial: { type: string, maxLength: 64 }
+        certificate_id: { type: [string, "null"], description: "Only when the certificate belongs to this agent's ACME account" }
+        not_after: { type: [string, "null"], format: date-time }
+        deployed_at: { type: [string, "null"], format: date-time }
+        fingerprint: { type: string, maxLength: 64 }
+        last_error: { type: string, maxLength: 1024 }
+        last_report_at: { type: string, format: date-time }
+        renew_requested_at: { type: [string, "null"], format: date-time }
+        renew_requested_by: { type: string }
+        removed: { type: boolean, description: "Absent from the latest accepted report; retained only while a renewal request is open" }
 
     AgentName:
       description: "One name or pattern an agent may order"

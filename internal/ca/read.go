@@ -157,8 +157,9 @@ type CertificateInfo struct {
 
 // CertificateFilter selects certificates; every field is optional.
 type CertificateFilter struct {
-	CAID, Preset, Status string
-	ExpiresBefore        time.Time
+	CAID, Preset, Status  string
+	HideAgentCertificates bool
+	ExpiresBefore         time.Time
 	// Search is a substring of CN, serial or a SAN – no wildcards.
 	Search string
 	Cursor string // the last ID of the previous page
@@ -202,7 +203,8 @@ func (e *Engine) Certificates(ctx context.Context, who keys.Who, f CertificateFi
 	limit = min(limit, MaxPageSize)
 	allowedJSON, _ := json.Marshal(allowed)
 	p := pkidb.ListCertificatesParams{
-		AllCas: boolInt(tenantWide), AllowedCas: string(allowedJSON), CaID: f.CAID, Preset: f.Preset, Status: f.Status,
+		HideAgents: boolInt(f.HideAgentCertificates),
+		AllCas:     boolInt(tenantWide), AllowedCas: string(allowedJSON), CaID: f.CAID, Preset: f.Preset, Status: f.Status,
 		Now: now.Format(dbTime), Search: strings.ToLower(f.Search), Cursor: f.Cursor, PageSize: int64(limit) + 1,
 	}
 	if !f.ExpiresBefore.IsZero() {

@@ -20,6 +20,7 @@ type ListData struct {
 
 	// Real UI (step 14): no bulk commands yet, paging by cursor.
 	Real      bool
+	HideAgents bool
 	CanIssue  bool
 	NextHref  string // next page; "" = last page
 	FirstHref string // first page; "" = this is the first
@@ -30,6 +31,7 @@ templ List(p view.Page, d ListData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
 		<form class="filters" action="/certificates" method="get" role="search">
+			<input type="hidden" name="agent_filter" value="1"/>
 			<label class="filter">
 				Name or serial
 				<input type="search" name="q" value={ d.Query }/>
@@ -47,6 +49,10 @@ templ List(p view.Page, d ListData) {
 				@selectBox("preset", d.Presets)
 			</label>
 			<button type="submit" class="btn">Apply</button>
+			<label class="choice">
+				<input type="checkbox" name="hide_agents" value="yes" checked?={ d.HideAgents }/>
+				Hide agent certificates
+			</label>
 			<a class="btn" href="/certificates">Reset</a>
 		</form>
 		if d.Real {
@@ -81,7 +87,11 @@ templ List(p view.Page, d ListData) {
 			@components.CertificateTable(d.Rows, !d.Real, "selection")
 		}
 		<div class="table-foot">
-			{ strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } certificates
+			if d.HideAgents {
+				{ strconv.Itoa(len(d.Rows)) } certificates on this page
+			} else {
+				{ strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } certificates
+			}
 			if d.FirstHref != "" {
 				{ " · " }
 				<a href={ templ.SafeURL(d.FirstHref) }>First page</a>

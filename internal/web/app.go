@@ -156,6 +156,9 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("POST /agents/tokens", a.signedIn(a.joinTokenCreate))
 	mux.HandleFunc("POST /agents/tokens/delete", a.signedIn(a.joinTokenDelete))
 	mux.HandleFunc("GET /agents/{id}", a.signedIn(a.agentDetail))
+	mux.HandleFunc("GET /agents/{id}/deployments", a.session(a.agentDeployments, true))
+	mux.HandleFunc("POST /agents/{id}/deployments/{name}/renew", a.signedIn(a.agentRenew))
+	mux.HandleFunc("POST /agents/{id}/deployments/{name}/withdraw", a.signedIn(a.agentWithdraw))
 	mux.HandleFunc("POST /agents/{id}/names", a.signedIn(a.agentNames))
 	mux.HandleFunc("POST /agents/{id}/{action}", a.signedIn(a.agentAction))
 	mux.HandleFunc("GET /acme/accounts", a.signedIn(a.acmeAccounts))
@@ -258,10 +261,22 @@ func (a *app) anon(h func(*rc)) http.HandlerFunc {
 // the sign-in page and comes back afterwards; a POST additionally needs the
 // session's CSRF token.
 func (a *app) signedIn(h func(*rc)) http.HandlerFunc {
+	return a.session(h, false)
+}
+
+func (a *app) session(h func(*rc), passive bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c := a.newRC(w, r)
-		sess, err := a.d.Auth.Authenticate(r.Context(), c.token)
+		authenticate := a.d.Auth.Authenticate
+		if passive {
+			authenticate = a.d.Auth.AuthenticatePassive
+		}
+		sess, err := authenticate(r.Context(), c.token)
 		if err != nil {
+			if passive {
+				http.Error(w, "session ended", http.StatusUnauthorized)
+				return
+			}
 			if !errors.Is(err, auth.ErrNoSession) {
 				a.log.ErrorContext(r.Context(), "authenticate", slog.Any("error", err))
 			}

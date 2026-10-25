@@ -35,6 +35,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -858,7 +859,20 @@ func TestContract(t *testing.T) {
 		}
 	}
 	agentPath := "/agents/" + agentID
+	if err := v.agents.Report(t.Context(), &agents.Caller{Agent: pkidb.Agent{ID: agentID}, Who: console}, agents.ReportInput{Deployments: []agents.DeploymentReport{{Name: "proxy", State: "deployed"}}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, cc := range []contractCase{
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 202},
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
+		{op: "renewAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
+		{op: "renewAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
+		{op: "renewAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
+		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 200},
+		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
+		{op: "withdrawAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
+		{op: "withdrawAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
+		{op: "withdrawAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
 		{op: "listAgents", as: viewer, want: 200},
 		{op: "listAgents", as: anon, want: 401, note: "no-session"},
 		{op: "getAgent", as: viewer, path: agentPath, want: 200},

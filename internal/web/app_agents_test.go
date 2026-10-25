@@ -12,11 +12,15 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
+	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
@@ -133,16 +137,70 @@ func TestAgentPages(t *testing.T) {
 			id = a.ID
 		}
 	}
+	caller := &agents.Caller{Agent: pkidb.Agent{ID: id}, Who: testinstance.Console}
+	reports := []agents.DeploymentReport{
+		{Name: "proxy", Profile: "nginx", State: "deployed", Serial: "AA", NotAfter: v.Clock.Now().Add(24 * time.Hour).Format(time.RFC3339)},
+		{Name: "broken", Profile: "file", State: "failed", LastError: "<img src=x onerror=alert(1)>"},
+		{Name: "removed", Profile: "file", State: "rolled_back"},
+	}
+	report := agents.ReportInput{Version: "<script>x</script>", OS: "linux", Arch: "amd64", Deployments: reports}
+	if err := svc.Report(t.Context(), caller, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestRenewal(t.Context(), testinstance.Console, id, "removed"); err != nil {
+		t.Fatal(err)
+	}
+	report.Deployments = reports[:2]
+	if err := svc.Report(t.Context(), caller, report); err != nil {
+		t.Fatal(err)
+	}
 	detail := b.get(t, "/agents/"+id).html()
-	for _, want := range []string{"*.apps.homelab.lan", "token", "Add name", "Disable agent", "Revoke agent", "&lt;script&gt;"} {
+	for _, want := range []string{"*.apps.homelab.lan", "token", "Add name", "Disable agent", "Revoke agent", "&lt;script&gt;",
+		"deployed", "failed", "rolled back", "AA", "Renew now", "Requested", "Withdraw", "not in the agent configuration", "&lt;img src=x onerror=alert(1)&gt;"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("agent page lacks %q", want)
 		}
+	}
+	if !strings.Contains(detail, `action="/agents/`+id+`/deployments/removed/withdraw"`) || !strings.Contains(detail, `name="csrf_token" value="`+token+`"`) {
+		t.Error("withdraw has no form with the session's CSRF token")
+	}
+	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
+		t.Fatalf("renew: %d", r.Code)
+	}
+	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Requested") || !strings.Contains(page, "Withdraw") {
+		t.Error("open request does not show requested and withdraw")
+	}
+	if r := b.post(t, "/agents/"+id+"/deployments/proxy/withdraw", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
+		t.Fatalf("withdraw: %d", r.Code)
+	}
+	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Renew now") {
+		t.Error("withdraw did not re-enable renew")
 	}
 	b.post(t, "/agents/"+id+"/names", url.Values{"csrf_token": {token}, "action": {"add"}, "name": {"wiki.homelab.lan"}})
 	if msg := flashOf(t, b, "/agents/"+id); !strings.Contains(msg, "Names changed") {
 		t.Errorf("add name: %q", msg)
 	}
+
+	v.User(t, "operator", false, authz.Binding{Role: authz.Operator})
+	ob := v.browser("192.0.2.3")
+	ob.signIn(t, "operator", testinstance.Password)
+	operatorPage := ob.get(t, "/agents/"+id).html()
+	if strings.Contains(operatorPage, "disabled>Renew now") || strings.Contains(operatorPage, "disabled>Withdraw") {
+		t.Error("operator does not get enabled renew/withdraw actions")
+	}
+	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
+	vb := v.browser("192.0.2.2")
+	vb.signIn(t, "viewer", testinstance.Password)
+	viewerPage := vb.get(t, "/agents/"+id).html()
+	if !strings.Contains(viewerPage, "disabled>Renew now") || !strings.Contains(viewerPage, "disabled>Withdraw") {
+		t.Error("viewer actions are not disabled")
+	}
+	viewerToken := vb.csrf(t)
+	vb.post(t, "/agents/"+id+"/deployments/removed/withdraw", url.Values{"csrf_token": {viewerToken}})
+	if msg := flashOf(t, vb, "/agents/"+id); !strings.Contains(msg, "role doesn") {
+		t.Errorf("viewer withdrew a request: %q", msg)
+	}
+
 	b.post(t, "/agents/"+id+"/disable", url.Values{"csrf_token": {token}})
 	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "disabled") || !strings.Contains(page, "Enable agent") {
 		t.Error("not disabled")
@@ -161,15 +219,46 @@ func TestAgentPages(t *testing.T) {
 		t.Errorf("mode %q", mode)
 	}
 
-	// A viewer: the pages, no forms.
-	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
-	vb := v.browser("192.0.2.2")
-	vb.signIn(t, "viewer", testinstance.Password)
+	// A viewer: the pages, without management forms.
 	for _, p := range []string{"/agents", "/agents/" + id, "/agents/enrollments", "/agents/tokens"} {
 		page := vb.get(t, p)
 		if page.Code != http.StatusOK || strings.Contains(page.html(), "Create token") || strings.Contains(page.html(), "Revoke agent") {
 			t.Errorf("viewer %s: %d", p, page.Code)
 		}
+	}
+}
+
+func TestAgentCertificateFilter(t *testing.T) {
+	t.Parallel()
+	v, svc := newAgentsUIEnv(t)
+	secret, _, err := svc.CreateJoinToken(t.Context(), testinstance.Console, "filter", []string{"proxy1.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll(t, svc, "proxy1.homelab.lan", secret, "0.3.0")
+	list, err := svc.ListAgents(t.Context(), testinstance.Console)
+	if err != nil || len(list) != 1 || list[0].CertSerial == "" {
+		t.Fatalf("agent identity certificate missing: %v", err)
+	}
+	who := keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: "acct_agent", Name: "acme:acct_agent"}, Principal: authz.System("acme")}
+	deployment, err := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"app.homelab.lan"}, Who: who})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	agentSerial := list[0].CertSerial
+	defaultPage := b.get(t, "/certificates").html()
+	if strings.Contains(defaultPage, agentSerial) || !strings.Contains(defaultPage, deployment.SerialHex) {
+		t.Error("default filter does not hide only the agent identity certificate")
+	}
+	all := b.get(t, "/certificates?agent_filter=1").html()
+	if !strings.Contains(all, agentSerial) || !strings.Contains(all, deployment.SerialHex) {
+		t.Error("disabled filter does not show both certificate kinds")
+	}
+	hidden := b.get(t, "/certificates?agent_filter=1&hide_agents=yes").html()
+	if strings.Contains(hidden, agentSerial) || !strings.Contains(hidden, deployment.SerialHex) {
+		t.Error("explicitly enabled filter shows the wrong certificates")
 	}
 }
 
