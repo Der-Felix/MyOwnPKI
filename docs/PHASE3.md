@@ -532,7 +532,7 @@ before.
   The actual protection is that the server sends no commands and hooks come only from root-owned
   `agent.yaml`.
 - `CAP_NET_BIND_SERVICE` only through a drop-in when a deployment or the enrollment uses
-  standalone (like `low-ports.conf` on the server).
+  standalone, or a hook binds a port below 1024 (for example `nginx -t`, also in webroot mode).
 - `nginx -t` opens nginx's log files: the install script adds nginx's log directory to
   `ReadWritePaths` when a hook runs nginx – the CI job proves it.
 - **Known limitation in v0.3.0** (owner 2026-10-24): with `NoNewPrivileges=yes` hooks that use

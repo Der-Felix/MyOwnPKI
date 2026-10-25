@@ -986,9 +986,22 @@ code running as root in the agent process**: `systemctl reload` needs access to 
 and the same access would also allow `systemd-run`. The actual protection is that the agent accepts
 no commands from the server and runs hooks only from the root-owned `agent.yaml`.
 
-Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`;
-webroot mode does not. Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user
-switch do not work with `NoNewPrivileges=yes`.
+Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`.
+The nginx test and reload hooks need it too, **also in webroot mode**: `nginx -t` opens the
+configured listen sockets, so a listener on port 443 otherwise fails with `bind() ... Permission
+denied`. Install it from the release archive and restart the agent:
+
+```bash
+sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
+sudo install -m 0644 deploy/systemd/agent-low-ports.conf \
+  /etc/systemd/system/myownpki-agent.service.d/20-low-ports.conf
+sudo systemctl daemon-reload
+sudo systemctl restart myownpki-agent
+```
+
+For a new installation, `install-agent.sh --low-ports` installs the same drop-in explicitly.
+Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
+with `NoNewPrivileges=yes`.
 
 CI runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full
 report and measured overall exposure are documented in the **agent end-to-end** job summary for
