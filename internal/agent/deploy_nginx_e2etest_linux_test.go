@@ -102,8 +102,8 @@ func TestNginxPort443InSystemdSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(prefix, "nginx.conf")
-	configuration := fmt.Sprintf("pid %s;\nerror_log /var/log/nginx/myownpki-agent-e2e-error.log;\nevents {}\nhttp { access_log off; server { listen 0.0.0.0:443; server_name _; return 200; } }\n",
-		strconv.Quote(filepath.Join(prefix, "nginx.pid")))
+	configuration := fmt.Sprintf("pid %s;\nerror_log %s;\nevents {}\nhttp { access_log off; server { listen 0.0.0.0:443; server_name _; return 200; } }\n",
+		strconv.Quote(filepath.Join(prefix, "nginx.pid")), strconv.Quote(filepath.Join(prefix, "error.log")))
 	if err := os.WriteFile(configPath, []byte(configuration), 0o600); err != nil {
 		t.Fatal(err)
 	}

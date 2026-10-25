@@ -318,7 +318,11 @@ jobs:
           sudo install -D -m 0755 "$RUNNER_TEMP/myownpki-agent-e2e.test" "$rootfs/usr/local/libexec/myownpki-agent-e2e.test"
           sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
           sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
-          printf '[Service]\nReadWritePaths=/var/lib/myownpki-agent /var/log/nginx\n' |
+          # systemd.exec(5): ReadWritePaths= is relative to the runner's root
+          # unless prefixed with '+'. It does not name a directory in this
+          # CI-only RootDirectory. Keep nginx's files in StateDirectory instead.
+          # A real host has no RootDirectory and uses 10-paths.conf normally.
+          printf '[Service]\nReadWritePaths=/var/lib/myownpki-agent\n' |
             sudo tee /etc/systemd/system/myownpki-agent.service.d/10-paths.conf >/dev/null
           {
             printf '[Service]\n'
@@ -329,7 +333,6 @@ jobs:
             printf 'Environment=MYOWNPKI_SYSTEMD_E2E=1\n'
           } | sudo tee /etc/systemd/system/myownpki-agent.service.d/99-ci.conf >/dev/null
           sudo install -d -m 0700 "$rootfs/var/lib/myownpki-agent"
-          sudo install -d -m 0755 "$rootfs/var/log/nginx"
           nginx_uid=$(awk -F: '$1 == "nginx" { print $3 }' "$rootfs/etc/passwd")
           nginx_gid=$(awk -F: '$1 == "nginx" { print $4 }' "$rootfs/etc/passwd")
           [ -n "$nginx_uid" ] && [ -n "$nginx_gid" ] || { echo '::error::nginx user missing in the pinned image'; exit 1; }
