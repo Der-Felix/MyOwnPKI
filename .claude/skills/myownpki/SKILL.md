@@ -61,6 +61,8 @@ language, level of explanation, local environment) are in `CLAUDE.local.md` if p
 ## Definition of done (every change)
 
 - `task check` green (formatting, `golangci-lint` incl. vet, tests, build); `task vuln` clean
+- New or changed CI steps always go through `scripts/ci` and the central `task ci:local`
+  registry. Run `task ci:local` before every report and include every SKIP line in that report.
 - Tests for the change: unit tests, plus an integration test when certificates are produced
   (parse the output with `crypto/x509` **and**, when available, cross-check with `openssl verify`)
 - Generated code is regenerated and committed (`task generate`: templ, later sqlc). API handlers are hand-written – contract tests keep them in line with `api/openapi.yaml`

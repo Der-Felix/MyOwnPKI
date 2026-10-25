@@ -62,24 +62,13 @@ jobs:
       # The output also goes to a file: on a failure the next step turns the
       # failed tests into annotations, readable without signing in.
       - name: task check
-        run: |
-          set -o pipefail
-          task check 2>&1 | tee "$RUNNER_TEMP/test.log"
+        run: bash scripts/ci/check-check.sh
       - name: Failed tests as annotations
         if: failure()
-        run: |
-          if [ ! -s "$RUNNER_TEMP/test.log" ]; then exit 0; fi
-          printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
-      - run: task generate:check
+        run: bash scripts/ci/check-failed-tests.sh
+      - run: bash scripts/ci/check-generate.sh
       - name: Agent protocol stays compatible with main
-        run: |
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          if git cat-file -e origin/main:buf.yaml 2>/dev/null; then
-            go run ./internal/tools/buf breaking --against '.git#branch=origin/main'
-          else
-            echo 'main has no agent protocol yet; the introduction in v0.3.0 is the compatibility baseline'
-          fi
+        run: bash scripts/ci/check-agent-protocol.sh
       - name: Fuzz the ACME JWS parser (short run)
         run: task fuzz
       # The previous release (Taskfile UPGRADE_FROM) makes an instance and a
@@ -109,36 +98,12 @@ jobs:
       # packages, ok lines, everything of a failed package). Memory is logged
       # every 15 s: -race needs several times the memory of a plain run.
       - name: task test:race
-        run: |
-          set -o pipefail
-          while sleep 15; do
-            free -m | awk -v t="$(date -u +%T)" '/^Mem:/ { printf "memory %s UTC: %d of %d MiB used, %d available\n", t, $3, $2, $7 }' |
-              tee -a "$RUNNER_TEMP/memory.log"
-          done &
-          sampler=$!
-          trap 'kill "$sampler" 2>/dev/null || true' EXIT
-          task --silent test:race -- -json | tee "$RUNNER_TEMP/test.json" | bash .github/scripts/failed-tests.sh --text
+        run: bash scripts/ci/race-test.sh
       # Also after the timeout above: then the run was cancelled, and the
       # report names the tests that had started and not ended.
       - name: Failed tests as annotations
         if: failure() || cancelled()
-        run: |
-          printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s "$RUNNER_TEMP/test.json" ]; then
-            bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.json" "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -s "$RUNNER_TEMP/memory.log" ]; then
-            {
-              printf '\n#### Memory, the last two minutes\n\n```text\n'
-              tail -n 8 "$RUNNER_TEMP/memory.log"
-              printf '```\n'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          # The kernel's OOM killer, if it ended a test binary.
-          oom=$(sudo dmesg 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -n 5 || true)
-          if [ -n "$oom" ]; then
-            printf '::error title=out of memory::%s\n' "${oom//$'\n'/%0A}"
-          fi
+        run: bash scripts/ci/race-failed-tests.sh
 
   test-os:
     name: tests on ${{ matrix.os }}
@@ -161,22 +126,20 @@ jobs:
       - name: OpenSSL 3 from Homebrew (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: |
-          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+        run: bash scripts/ci/test-os-openssl.sh
       # The tests cross-check certificates with `openssl verify` (required
       # in CI); the log shows which OpenSSL that is.
       - name: OpenSSL used by the tests
         shell: bash
-        run: command -v openssl && openssl version
-      - run: go test ./...
+        run: bash scripts/ci/test-os-openssl-version.sh
+      - run: bash scripts/ci/test-os-test.sh
       # The Windows helpers of the trust page (v0.2.2) for real: cmd.exe runs
       # each with /check (no import) – the fingerprint passes, a changed copy
       # and an unknown switch stop before anything is imported. Part of the
       # run above too; its own step so the log shows it.
       - name: Windows helper of the trust page (cmd.exe, /check)
         if: runner.os == 'Windows'
-        run: go test -count=1 -run '^TestWindowsHelper' -v ./internal/publish/
+        run: bash scripts/ci/test-os-windows-helper.sh
 
   cross:
     name: cross-compile (linux, darwin, windows, freebsd)
@@ -213,7 +176,8 @@ jobs:
           shellcheck: "true"
           actionlint: "true"
           vacuum: "true"
-      - run: task lint:ci
+      - run: bash scripts/ci/lint-meta-actionlint.sh
+      - run: bash scripts/ci/lint-meta-registry.sh --self-test
       - run: task lint:api
 
   shellcheck:
@@ -232,15 +196,9 @@ jobs:
       # unused (SC2034), so the modules skip that check; the standalone
       # script contains all modules in one file and runs it for real.
       - name: ShellCheck sources and compiled standalone script
-        run: |
-          bash legacy/build.sh
-          shellcheck --severity=warning --external-sources \
-            legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
-            legacy/dist/pki-standalone.sh .github/scripts/*.sh test/conformance/run.sh \
-            deploy/install.sh deploy/install-agent.sh test/install/*.sh
-          shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
+        run: bash scripts/ci/shellcheck-sources.sh
       - name: Smoke test (modular and standalone script, completion)
-        run: bash legacy/tests/smoke.sh
+        run: bash scripts/ci/shellcheck-smoke.sh
 
   # Real ACME clients against the ACME server (PHASE2 step 14, owner Q5):
   # its own job because it runs containers (BIND, certbot, acme.sh) and binds
@@ -278,133 +236,22 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Download pinned Go modules
-        run: go mod download
+        run: bash scripts/ci/agent-e2e-download.sh
       - name: install-agent.sh functions (no root)
-        run: bash test/install/agent_functions_test.sh
+        run: bash scripts/ci/agent-e2e-functions.sh
       # The official image carries nginx, not Go. Mount the already installed
       # toolchain and module cache read-only; the test cache is disposable.
       - name: Real server, agent, ACME, Renew now and nginx rollback
-        run: |
-          goroot=$(go env GOROOT)
-          modcache=$(go env GOMODCACHE)
-          mkdir -p "$RUNNER_TEMP/agent-go-cache" "$RUNNER_TEMP/agent-tmp"
-          docker run --rm --network host \
-            --env PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            --env HOME=/tmp --env GOPATH=/tmp/gopath --env GOMODCACHE=/go/pkg/mod \
-            --env GOCACHE=/tmp/go-cache --env GOFLAGS=-mod=readonly --env GOTOOLCHAIN=local \
-            --env CGO_ENABLED=0 --env MYOWNPKI_REQUIRE_NGINX=1 \
-            --volume "$PWD:/src:ro" --volume "$goroot:/usr/local/go:ro" \
-            --volume "$modcache:/go/pkg/mod:ro" \
-            --volume "$RUNNER_TEMP/agent-go-cache:/tmp/go-cache" \
-            --volume "$RUNNER_TEMP/agent-tmp:/tmp" \
-            --workdir /src \
-            nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903 \
-            bash -c 'nginx -v && go test -count=1 -v ./internal/server -run "^(TestAgentEndToEnd|TestRenewNowOverRESTServesNewCertificate)$" && go test -count=5 -v -tags e2etest ./internal/agent -run "^(TestNginxDeployProfiles|TestNginxStagedFaultRollsBack)$"'
+        run: bash scripts/ci/agent-e2e-nginx.sh
       # Measure the production unit before any CI-only drop-ins are installed.
       - name: systemd-analyze verify and security
-        run: |
-          go build -trimpath -o "$RUNNER_TEMP/myownpki-agent" ./cmd/myownpki-agent
-          sudo install -m 0755 "$RUNNER_TEMP/myownpki-agent" /usr/local/bin/myownpki-agent
-          sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
-          sudo systemctl daemon-reload
-          systemd-analyze verify /etc/systemd/system/myownpki-agent.service
-          systemd-analyze security --no-pager myownpki-agent.service | tee "$RUNNER_TEMP/agent-security.txt"
-          exposure=$(sed -n 's/.*Overall exposure level for .*: \([0-9.]*\).*/\1/p' "$RUNNER_TEMP/agent-security.txt")
-          [ -n "$exposure" ] || { echo '::error::no overall exposure in systemd-analyze output'; exit 1; }
-          {
-            printf '### systemd-analyze security myownpki-agent.service\n\nOverall exposure: **%s** (systemd %s)\n\n' \
-              "$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
-            printf '<details><summary>All checks</summary>\n\n```text\n'
-            cat "$RUNNER_TEMP/agent-security.txt"
-            printf '```\n\n</details>\n'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/ci/agent-e2e-systemd.sh
 
       # Run nginx itself, not a look-alike, under the real unit. Exporting the
       # pinned image supplies its matching loader and libraries; no apt package
       # or second image is needed. Only ExecStart is replaced for this test.
       - name: nginx -t on port 443 under the real systemd unit
-        run: |
-          image=nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903
-          rootfs=/var/lib/myownpki-agent-e2e/rootfs
-          container=$(docker create "$image")
-          cleanup_agent_e2e() {
-            if [ -n "${container:-}" ]; then
-              docker rm -f "$container" 2>/dev/null || true
-            fi
-            sudo systemctl stop myownpki-agent.service >/dev/null 2>&1 || true
-            sudo rm -rf /etc/systemd/system/myownpki-agent.service.d \
-              /etc/systemd/system/myownpki-agent.service /var/lib/myownpki-agent-e2e \
-              /usr/local/bin/myownpki-agent
-            sudo systemctl reset-failed myownpki-agent.service >/dev/null 2>&1 || true
-            sudo systemctl daemon-reload
-          }
-          trap cleanup_agent_e2e EXIT
-          sudo rm -rf /var/lib/myownpki-agent-e2e
-          sudo install -d -m 0755 "$rootfs"
-          docker export "$container" | sudo tar -x -C "$rootfs"
-          docker rm "$container"
-          container=
-          go test -c -tags e2etest -o "$RUNNER_TEMP/myownpki-agent-e2e.test" ./internal/agent
-          sudo install -D -m 0755 "$RUNNER_TEMP/myownpki-agent-e2e.test" "$rootfs/usr/local/libexec/myownpki-agent-e2e.test"
-          sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
-          sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
-          # systemd.exec(5): ReadWritePaths= is relative to the runner's root
-          # unless prefixed with '+'. It does not name a directory in this
-          # CI-only RootDirectory. Keep nginx's files in StateDirectory instead.
-          # A real host has no RootDirectory and uses 10-paths.conf normally.
-          printf '[Service]\nReadWritePaths=/var/lib/myownpki-agent\n' |
-            sudo tee /etc/systemd/system/myownpki-agent.service.d/10-paths.conf >/dev/null
-          {
-            printf '[Service]\n'
-            printf 'Restart=no\n'
-            printf 'RootDirectory=%s\n' "$rootfs"
-            printf 'ExecStart=\n'
-            printf 'ExecStart=/usr/local/libexec/myownpki-agent-e2e.test -test.run=^TestNginxPort443InSystemdSandbox$ -test.v\n'
-            printf 'Environment=MYOWNPKI_SYSTEMD_E2E=1\n'
-          } | sudo tee /etc/systemd/system/myownpki-agent.service.d/99-ci.conf >/dev/null
-          sudo install -d -m 0700 "$rootfs/var/lib/myownpki-agent"
-          nginx_uid=$(awk -F: '$1 == "nginx" { print $3 }' "$rootfs/etc/passwd")
-          nginx_gid=$(awk -F: '$1 == "nginx" { print $4 }' "$rootfs/etc/passwd")
-          [ -n "$nginx_uid" ] && [ -n "$nginx_gid" ] || { echo '::error::nginx user missing in the pinned image'; exit 1; }
-          for directory in body fastcgi proxy scgi uwsgi; do
-            sudo install -d -m 0755 -o "$nginx_uid" -g "$nginx_gid" "$rootfs/var/lib/nginx/$directory"
-          done
-          for directory in client_temp fastcgi_temp proxy_temp scgi_temp uwsgi_temp; do
-            sudo install -d -m 0755 -o "$nginx_uid" -g "$nginx_gid" "$rootfs/var/cache/nginx/$directory"
-          done
-          sudo systemctl daemon-reload
-          # Negative control: without CAP_NET_BIND_SERVICE the same nginx test
-          # must fail and its sanitized stderr must explain the missing right.
-          sudo systemctl start myownpki-agent.service || true
-          for _ in $(seq 1 30); do
-            sudo systemctl is-active --quiet myownpki-agent.service || break
-            sleep 1
-          done
-          result=$(systemctl show --property Result --value myownpki-agent.service)
-          sudo journalctl -u myownpki-agent.service --no-pager -n 100 | tee "$RUNNER_TEMP/agent-no-low-ports.log" >/dev/null
-          if [ "$result" = success ] || ! grep -Fq 'bind() to 0.0.0.0:443 failed (13: Permission denied)' "$RUNNER_TEMP/agent-no-low-ports.log"; then
-            echo '::error::the sandbox test did not detect the missing low-port capability'
-            cat "$RUNNER_TEMP/agent-no-low-ports.log"
-            exit 1
-          fi
-          # Positive control: the packaged drop-in fixes exactly this failure.
-          sudo install -m 0644 deploy/systemd/agent-low-ports.conf /etc/systemd/system/myownpki-agent.service.d/20-low-ports.conf
-          sudo systemctl daemon-reload
-          sudo systemctl reset-failed myownpki-agent.service
-          if ! sudo systemctl start myownpki-agent.service; then
-            sudo journalctl -u myownpki-agent.service --no-pager -n 100
-            exit 1
-          fi
-          for _ in $(seq 1 30); do
-            sudo systemctl is-active --quiet myownpki-agent.service || break
-            sleep 1
-          done
-          result=$(systemctl show --property Result --value myownpki-agent.service)
-          if [ "$result" != success ]; then
-            sudo journalctl -u myownpki-agent.service --no-pager -n 100
-            exit 1
-          fi
-          systemctl show --property Result --property ExecMainStatus myownpki-agent.service
+        run: bash scripts/ci/agent-e2e-nginx-systemd.sh
 
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the
@@ -430,19 +277,14 @@ jobs:
         with:
           goreleaser: "true"
       - name: Snapshot build (no SBOMs, no signatures, no image)
-        run: goreleaser release --snapshot --clean --skip=sign,docker,sbom
+        run: bash scripts/ci/install-snapshot.sh
       - name: install.sh functions (no root)
-        run: bash test/install/functions_test.sh dist/myownpki_linux_amd64_v1/myownpki
+        run: bash scripts/ci/install-functions.sh
       # A second binary with another version for the update path.
       - name: Second build for the update
-        run: |
-          go build -trimpath -o "$RUNNER_TEMP/update/myownpki" \
-            -ldflags "-X github.com/Der-Felix/MyOwnPKI/internal/version.version=v0.2.1-ci.update" ./cmd/myownpki
+        run: bash scripts/ci/install-second-build.sh
       - name: Install, start, update (as root)
-        run: |
-          archive=$(find dist -maxdepth 1 -name 'myownpki_*_linux_amd64.tar.gz')
-          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_STEP_SUMMARY \
-            bash test/install/systemd_test.sh "$archive" "$RUNNER_TEMP/update/myownpki"
+        run: bash scripts/ci/install-systemd.sh
       - name: Service log
         if: failure()
-        run: sudo journalctl -u myownpki.service --no-pager -n 200
+        run: bash scripts/ci/install-service-log.sh
