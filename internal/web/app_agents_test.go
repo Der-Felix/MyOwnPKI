@@ -156,11 +156,17 @@ func TestAgentPages(t *testing.T) {
 	}
 	detail := b.get(t, "/agents/"+id).html()
 	for _, want := range []string{"*.apps.homelab.lan", "token", "Add name", "Disable agent", "Revoke agent", "&lt;script&gt;",
-		"deployed", "failed", "rolled back", "AA", "Renew now", "Requested", "Withdraw", "not in the agent configuration", "&lt;img src=x onerror=alert(1)&gt;",
-		"table-adaptive", "not covered by Names it may order: other.homelab.lan; the ACME server will refuse them", "View agent certificate"} {
+		"deployed", "failed", "rolled back", "AA", "Renew now", "Renewal requested ·", "Withdraw", "not in the agent configuration", "&lt;img src=x onerror=alert(1)&gt;",
+		"table-adaptive", "not covered by Names it may order: other.homelab.lan; the ACME server will refuse them", "View agent certificate", "st-info", "cmd cmd-danger"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("agent page lacks %q", want)
 		}
+	}
+	if strings.Contains(detail, ">Requested</button>") {
+		t.Error("renewal status is still rendered as a button")
+	}
+	if strings.Count(detail, ">Remove</button>") != 1 || strings.Contains(detail, "Remove a name") {
+		t.Error("name removal is not a per-row action only for removable sources")
 	}
 	if strings.Contains(detail, "mode verified (mode verified)") || strings.Contains(detail, "Certificates: /certificates/") {
 		t.Error("agent page repeats the enrollment mode or shows a naked certificate path")
@@ -171,7 +177,7 @@ func TestAgentPages(t *testing.T) {
 	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
 		t.Fatalf("renew: %d", r.Code)
 	}
-	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Requested") || !strings.Contains(page, "Withdraw") {
+	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Renewal requested") || !strings.Contains(page, "Withdraw") {
 		t.Error("open request does not show requested and withdraw")
 	}
 	if r := b.post(t, "/agents/"+id+"/deployments/proxy/withdraw", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
@@ -183,6 +189,14 @@ func TestAgentPages(t *testing.T) {
 	b.post(t, "/agents/"+id+"/names", url.Values{"csrf_token": {token}, "action": {"add"}, "name": {"wiki.homelab.lan"}})
 	if msg := flashOf(t, b, "/agents/"+id); !strings.Contains(msg, "Names changed") {
 		t.Errorf("add name: %q", msg)
+	}
+	withAdded := b.get(t, "/agents/"+id).html()
+	if strings.Count(withAdded, ">Remove</button>") != 2 || !strings.Contains(withAdded, `name="name" value="wiki.homelab.lan"`) {
+		t.Error("an admin-added name has no row-level remove action")
+	}
+	b.post(t, "/agents/"+id+"/names", url.Values{"csrf_token": {token}, "action": {"remove"}, "name": {"wiki.homelab.lan"}})
+	if msg := flashOf(t, b, "/agents/"+id); !strings.Contains(msg, "Names changed") || strings.Contains(b.get(t, "/agents/"+id).html(), `name="name" value="wiki.homelab.lan"`) {
+		t.Error("row-level name removal failed")
 	}
 
 	v.User(t, "operator", false, authz.Binding{Role: authz.Operator})

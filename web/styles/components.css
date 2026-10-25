@@ -279,6 +279,10 @@
   vertical-align: top;
 }
 
+.table-adaptive .table .st {
+  white-space: normal;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
