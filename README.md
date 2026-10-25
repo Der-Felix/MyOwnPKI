@@ -7,21 +7,23 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: v0.2 – phases 1 and 2 complete.** A working CA with web UI, REST API, legacy import and
-> backup – it replaces the `pki.sh` Bash suite – and, new in v0.2, an **ACME server** for your own CA
-> (behind a reverse proxy, or with its own TLS since v0.2.2). The agent and monitoring come with v0.3. See
+> **Status: v0.3.** A working CA with web UI, REST API, legacy import and backup – it replaces the
+> `pki.sh` Bash suite – an **ACME server** for your own CA (behind a reverse proxy, or with its own
+> TLS since v0.2.2) and, new in v0.3.0, the **Linux agent** that gets and deploys certificates by
+> ACME, with "Renew now" in the web UI. Monitoring comes with v0.3.x. See
 > [docs/PLAN.md](docs/PLAN.md) for the architecture, decisions and roadmap.
 
 MyOwnPKI is a self-hosted certificate authority platform. v0.1 brought the CA, the web UI and the
-REST API, the import of a `pki.sh` PKI and backups; v0.2 adds the ACME server; the rest of this list
-follows up to v1.0:
+REST API, the import of a `pki.sh` PKI and backups; v0.2 adds the ACME server; v0.3.0 the Linux
+agent; the rest of this list follows up to v1.0:
 
 - **Secure web UI** with dashboards, upload/download and role-based access
 - **ACME server** for your internal CA *(v0.2)* – use certbot, acme.sh, lego, Traefik, Caddy or
   win-acme; behind a reverse proxy, or since v0.2.2 with its own TLS (docs/OPERATIONS.md chapter 10)
 - **ACME client** for public certificates from Let's Encrypt / ZeroSSL (http-01, dns-01)
 - **Optional agent** that deploys certificates to Linux, Windows and FreeBSD hosts, reloads
-  services safely and monitors what is actually being served
+  services safely and monitors what is actually being served *(v0.3.0: Linux, nginx and files,
+  with rollback)*
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 
@@ -70,7 +72,7 @@ distributions; amd64 or arm64). Download the script with the checksum file, chec
 never pipe it into a shell:
 
 ```sh
-v=0.2.2
+v=0.3.0
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -91,7 +93,7 @@ single `myownpki` binary, the operations guide, an example configuration, the sy
 `install.sh`.
 
 ```sh
-v=0.2.2
+v=0.3.0
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -132,8 +134,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.2.2 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.2.2" \
+cosign verify ghcr.io/der-felix/myownpki:0.3.0 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.0" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
