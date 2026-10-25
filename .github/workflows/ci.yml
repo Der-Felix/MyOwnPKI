@@ -72,6 +72,14 @@ jobs:
           printf '### Failed tests – %s\n\n' "$GITHUB_JOB" >> "$GITHUB_STEP_SUMMARY"
           bash .github/scripts/failed-tests.sh "$RUNNER_TEMP/test.log" "$GITHUB_STEP_SUMMARY"
       - run: task generate:check
+      - name: Agent protocol stays compatible with main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if git cat-file -e origin/main:buf.yaml 2>/dev/null; then
+            go run ./internal/tools/buf breaking --against '.git#branch=origin/main'
+          else
+            echo 'main has no agent protocol yet; the introduction in v0.3.0 is the compatibility baseline'
+          fi
       - name: Fuzz the ACME JWS parser (short run)
         run: task fuzz
       # The previous release (Taskfile UPGRADE_FROM) makes an instance and a
@@ -229,7 +237,7 @@ jobs:
           shellcheck --severity=warning --external-sources \
             legacy/*.sh legacy/tests/*.sh legacy/completions/*.bash \
             legacy/dist/pki-standalone.sh .github/scripts/*.sh test/conformance/run.sh \
-            deploy/install.sh test/install/*.sh
+            deploy/install.sh deploy/install-agent.sh test/install/*.sh
           shellcheck --severity=warning --exclude=SC2034 legacy/lib/*.sh
       - name: Smoke test (modular and standalone script, completion)
         run: bash legacy/tests/smoke.sh
@@ -258,6 +266,57 @@ jobs:
         env:
           CONF_WORK: ${{ runner.temp }}/conformance
         run: task acme:conformance
+
+  agent-e2e:
+    name: agent end-to-end
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Download pinned Go modules
+        run: go mod download
+      - name: install-agent.sh functions (no root)
+        run: bash test/install/agent_functions_test.sh
+      # The official image carries nginx, not Go. Mount the already installed
+      # toolchain and module cache read-only; the test cache is disposable.
+      - name: Real server, agent, ACME, Renew now and nginx rollback
+        run: |
+          goroot=$(go env GOROOT)
+          modcache=$(go env GOMODCACHE)
+          mkdir -p "$RUNNER_TEMP/agent-go-cache" "$RUNNER_TEMP/agent-tmp"
+          docker run --rm --network host \
+            --env PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --env HOME=/tmp --env GOPATH=/tmp/gopath --env GOMODCACHE=/go/pkg/mod \
+            --env GOCACHE=/tmp/go-cache --env GOFLAGS=-mod=readonly --env GOTOOLCHAIN=local \
+            --env CGO_ENABLED=0 --env MYOWNPKI_REQUIRE_NGINX=1 \
+            --volume "$PWD:/src:ro" --volume "$goroot:/usr/local/go:ro" \
+            --volume "$modcache:/go/pkg/mod:ro" \
+            --volume "$RUNNER_TEMP/agent-go-cache:/tmp/go-cache" \
+            --volume "$RUNNER_TEMP/agent-tmp:/tmp" \
+            --workdir /src \
+            nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903 \
+            bash -c 'nginx -v && go test -count=1 -v ./internal/server -run "^(TestAgentEndToEnd|TestRenewNowOverRESTServesNewCertificate)$" && go test -count=1 -v -tags e2etest ./internal/agent -run "^(TestNginxDeployProfiles|TestNginxStagedFaultRollsBack)$"'
+      - name: systemd-analyze verify and security
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/myownpki-agent" ./cmd/myownpki-agent
+          sudo install -m 0755 "$RUNNER_TEMP/myownpki-agent" /usr/local/bin/myownpki-agent
+          sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
+          sudo systemctl daemon-reload
+          systemd-analyze verify /etc/systemd/system/myownpki-agent.service
+          systemd-analyze security --no-pager myownpki-agent.service | tee "$RUNNER_TEMP/agent-security.txt"
+          exposure=$(sed -n 's/.*Overall exposure level for .*: \([0-9.]*\).*/\1/p' "$RUNNER_TEMP/agent-security.txt")
+          [ -n "$exposure" ] || { echo '::error::no overall exposure in systemd-analyze output'; exit 1; }
+          {
+            printf '### systemd-analyze security myownpki-agent.service\n\nOverall exposure: **%s** (systemd %s)\n\n' \
+              "$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
+            printf '<details><summary>All checks</summary>\n\n```text\n'
+            cat "$RUNNER_TEMP/agent-security.txt"
+            printf '```\n\n</details>\n'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the

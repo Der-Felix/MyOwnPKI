@@ -1,0 +1,55 @@
+# MyOwnPKI agent on Linux. Installed by deploy/install-agent.sh.
+# The 10-paths.conf drop-in repeats the writable paths of agent.yaml.
+# Standalone http-01 also needs 20-low-ports.conf.
+
+[Unit]
+Description=MyOwnPKI certificate deployment agent
+Documentation=https://github.com/Der-Felix/MyOwnPKI/blob/main/docs/OPERATIONS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/myownpki-agent run --config /etc/myownpki-agent/agent.yaml
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StateDirectory=myownpki-agent
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/myownpki-agent
+ConfigurationDirectory=myownpki-agent
+ConfigurationDirectoryMode=0755
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+PrivateMounts=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

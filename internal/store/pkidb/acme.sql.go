@@ -59,6 +59,30 @@ func (q *Queries) ApproveACMENameDirectly(ctx context.Context, arg ApproveACMENa
 	return err
 }
 
+const bindACMEAccount = `-- name: BindACMEAccount :exec
+UPDATE acme_accounts SET agent_id = ?, approved_at = COALESCE(approved_at, ?),
+    approved_by = COALESCE(approved_by, ?), updated_at = ? WHERE id = ?
+`
+
+type BindACMEAccountParams struct {
+	AgentID    sql.NullString
+	ApprovedAt sql.NullString
+	ApprovedBy sql.NullString
+	UpdatedAt  string
+	ID         string
+}
+
+func (q *Queries) BindACMEAccount(ctx context.Context, arg BindACMEAccountParams) error {
+	_, err := q.db.ExecContext(ctx, bindACMEAccount,
+		arg.AgentID,
+		arg.ApprovedAt,
+		arg.ApprovedBy,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const countACMEAccountsWaiting = `-- name: CountACMEAccountsWaiting :one
 SELECT count(*) FROM acme_accounts WHERE approved_at IS NULL AND status = 'valid'
 `
@@ -243,7 +267,7 @@ func (q *Queries) FinishACMEChallenge(ctx context.Context, arg FinishACMEChallen
 }
 
 const getACMEAccount = `-- name: GetACMEAccount :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts WHERE id = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE id = ?
 `
 
 func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, error) {
@@ -261,12 +285,13 @@ func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, e
 		&i.CreatedAt,
 		&i.CreatedIp,
 		&i.UpdatedAt,
+		&i.AgentID,
 	)
 	return i, err
 }
 
 const getACMEAccountByThumbprint = `-- name: GetACMEAccountByThumbprint :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts WHERE key_thumbprint = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE key_thumbprint = ?
 `
 
 func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint string) (AcmeAccount, error) {
@@ -284,6 +309,7 @@ func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint 
 		&i.CreatedAt,
 		&i.CreatedIp,
 		&i.UpdatedAt,
+		&i.AgentID,
 	)
 	return i, err
 }
@@ -623,7 +649,7 @@ func (q *Queries) LinkACMEOrderAuthz(ctx context.Context, arg LinkACMEOrderAuthz
 }
 
 const listACMEAccounts = `-- name: ListACMEAccounts :many
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at FROM acme_accounts ORDER BY created_at DESC LIMIT ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts ORDER BY created_at DESC LIMIT ?
 `
 
 func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAccount, error) {
@@ -647,6 +673,7 @@ func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAcco
 			&i.CreatedAt,
 			&i.CreatedIp,
 			&i.UpdatedAt,
+			&i.AgentID,
 		); err != nil {
 			return nil, err
 		}

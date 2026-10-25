@@ -47,6 +47,8 @@ const (
 	ManageCA     Permission = "ca.manage"          // create, import, renew, retire, update, revoke, install; step-up
 	UploadCRL    Permission = "crl.upload"         // the offline root's CRL; step-up
 	ManageTenant Permission = "tenant.manage"      // tenant settings
+	ManageAgents Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
+	RenewAgent   Permission = "agent.renew"        // request renewal of a locally configured deployment
 )
 
 // Instance permissions: instance admins only.
@@ -57,14 +59,14 @@ const (
 
 var rolePermissions = map[Role][]Permission{
 	Viewer:   {ReadPKI},
-	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey},
-	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant},
+	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent},
+	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent},
 }
 
 var instancePermissions = []Permission{Unseal, ManageUsers}
 
 // stepUp: permissions that need a fresh second factor (security.md).
-var stepUp = []Permission{RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageUsers}
+var stepUp = []Permission{RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageUsers, ManageAgents}
 
 // StepUpWindow is how long a fresh second factor counts.
 const StepUpWindow = 5 * time.Minute
@@ -218,11 +220,13 @@ func (p *Principal) CanIssueSomewhere() bool {
 
 // stepUpActions names the step-up permissions for a token's refusal.
 var stepUpActions = map[Permission]string{
-	RevokeCert:  "revoke certificates",
-	DownloadKey: "download private keys",
-	ManageCA:    "manage CAs",
-	UploadCRL:   "upload CRLs",
-	ManageUsers: "manage users",
+	RevokeCert:   "revoke certificates",
+	DownloadKey:  "download private keys",
+	ManageCA:     "manage CAs",
+	UploadCRL:    "upload CRLs",
+	ManageAgents: "manage agents",
+	RenewAgent:   "renew agent deployments",
+	ManageUsers:  "manage users",
 }
 
 // TokenStepUpError refuses an action that needs step-up to an API token. It

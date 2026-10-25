@@ -157,8 +157,9 @@ type CertificateInfo struct {
 
 // CertificateFilter selects certificates; every field is optional.
 type CertificateFilter struct {
-	CAID, Preset, Status string
-	ExpiresBefore        time.Time
+	CAID, Preset, Status  string
+	HideAgentCertificates bool
+	ExpiresBefore         time.Time
 	// Search is a substring of CN, serial or a SAN – no wildcards.
 	Search string
 	Cursor string // the last ID of the previous page
@@ -202,7 +203,8 @@ func (e *Engine) Certificates(ctx context.Context, who keys.Who, f CertificateFi
 	limit = min(limit, MaxPageSize)
 	allowedJSON, _ := json.Marshal(allowed)
 	p := pkidb.ListCertificatesParams{
-		AllCas: boolInt(tenantWide), AllowedCas: string(allowedJSON), CaID: f.CAID, Preset: f.Preset, Status: f.Status,
+		HideAgents: boolInt(f.HideAgentCertificates),
+		AllCas:     boolInt(tenantWide), AllowedCas: string(allowedJSON), CaID: f.CAID, Preset: f.Preset, Status: f.Status,
 		Now: now.Format(dbTime), Search: strings.ToLower(f.Search), Cursor: f.Cursor, PageSize: int64(limit) + 1,
 	}
 	if !f.ExpiresBefore.IsZero() {
@@ -362,9 +364,10 @@ type Counts struct {
 func (c Counts) Total() int64 { return c.Valid + c.Expired + c.Revoked }
 
 // CertificateCounts counts the certificates who may read, in total and per
-// issuing CA ID.
-func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, map[string]Counts, error) {
+// issuing CA ID. An optional filter excludes agent identity certificates.
+func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who, filters ...CertificateFilter) (Counts, map[string]Counts, error) {
 	now := e.now()
+	hideAgents := len(filters) > 0 && filters[0].HideAgentCertificates
 	q := pkidb.New(e.PKI)
 	cas, err := q.ListCAs(ctx)
 	if err != nil {
@@ -374,7 +377,7 @@ func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, m
 	for _, c := range cas {
 		names[c.ID] = c.Name
 	}
-	rows, err := q.CountCertificates(ctx, pkidb.CountCertificatesParams{Now: now.Format(dbTime), Soon: now.Add(ExpiringWindow).Format(dbTime)})
+	rows, err := q.CountCertificates(ctx, pkidb.CountCertificatesParams{HideAgents: boolInt(hideAgents), Now: now.Format(dbTime), Soon: now.Add(ExpiringWindow).Format(dbTime)})
 	if err != nil {
 		return Counts{}, nil, err
 	}

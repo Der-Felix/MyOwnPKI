@@ -22,16 +22,20 @@ ORDER BY id;
 -- Settings of a tenant (step 18): server key generation and subject defaults.
 -- name: GetTenantSettings :one
 SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c,
-       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page
+       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment
 FROM tenants
 WHERE id = ?;
 
 -- name: SetTenantSettings :execrows
 UPDATE tenants
 SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?,
-    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?
+    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?
 WHERE id = ?;
 
 -- The public listener asks this for every request to / (v0.2.2).
 -- name: GetTrustPage :one
 SELECT trust_page FROM tenants WHERE id = ?;
+
+-- The agent listener asks this for every enrollment (v0.3.0).
+-- name: GetAgentEnrollment :one
+SELECT agent_enrollment FROM tenants WHERE id = ?;

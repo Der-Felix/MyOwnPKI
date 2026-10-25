@@ -113,6 +113,9 @@ type Server struct {
 	acmeHS *http.Server
 	acmeLn net.Listener
 
+	// The agent listener (v0.3.0): nil while agent.base_url is empty.
+	agent *agentSide
+
 	closeOnce sync.Once
 }
 
@@ -293,7 +296,10 @@ func (s *Server) build(key *auth.Key) error {
 		s.jobs.add(jobACMEIssue, time.Minute, time.Minute, s.acme.ProcessPending)
 		s.jobs.add(jobACMEExpire, 5*time.Minute, 5*time.Minute, s.acme.ExpireStale)
 	}
-	if s.opt.Config.Admin.TLSIssuer != "" || s.opt.Config.ACME.DirectTLS() {
+	if err := s.buildAgents(); err != nil {
+		return err
+	}
+	if s.opt.Config.Admin.TLSIssuer != "" || s.opt.Config.ACME.DirectTLS() || s.opt.Config.Agent.Enabled() {
 		s.jobs.add(jobTLS, tlsEvery, 0, func(ctx context.Context) error { s.renewTLS(ctx); return nil })
 	}
 	return nil
@@ -324,8 +330,19 @@ func (s *Server) issuedCertificates(ctx context.Context) error {
 		names, ips := hostNames(config.ACMEHost(cfg.ACME.BaseURL))
 		s.acmeTLS = newIssuedTLS("acme", "the host of acme.base_url", "acme.tls_issuer", cfg.ACME.TLSIssuer, names, ips, dir, boot, s.engine, s.clk, s.log)
 	}
+	if s.agent != nil {
+		boot, in, err := agentBootstrap(cfg, s.clk.Now(), nil)
+		if err != nil {
+			return fmt.Errorf("agent bootstrap certificate: %w", err)
+		}
+		if in.Created {
+			s.log.Info("new agent bootstrap certificate – served until the server issues the agent listener certificate", slog.String("reason", in.Reason))
+		}
+		names, ips := hostNames(config.AgentHost(cfg.Agent.BaseURL))
+		s.agent.tls = newIssuedTLS("agent", "the host of agent.base_url", "agent.tls_issuer", cfg.Agent.TLSIssuer, names, ips, dir, boot, s.engine, s.clk, s.log)
+	}
 	// A root as issuer is named right at the start, not only at the unseal.
-	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+	for _, m := range s.issuedManagers() {
 		if m != nil {
 			m.checkIssuer(ctx)
 		}
@@ -335,7 +352,7 @@ func (s *Server) issuedCertificates(ctx context.Context) error {
 
 // renewTLS renews the issued certificates that are due (unsealed only).
 func (s *Server) renewTLS(ctx context.Context) {
-	for _, m := range []*issuedTLS{s.adminTLS, s.acmeTLS} {
+	for _, m := range s.issuedManagers() {
 		if m != nil {
 			m.renew(ctx)
 		}
@@ -344,7 +361,8 @@ func (s *Server) renewTLS(ctx context.Context) {
 
 // attention is what the dashboard shows about the server itself.
 func (s *Server) attention(sealed bool) []view.Message {
-	return append(s.tlsAttention(sealed), s.backups.attention()...)
+	out := append(s.tlsAttention(sealed), s.agentAttention(sealed)...)
+	return append(out, s.backups.attention()...)
 }
 
 // tlsAttention is what the dashboard shows about the issued certificates.
@@ -426,6 +444,9 @@ func (s *Server) logStart(ctx context.Context, inst setup.Instance) {
 	}
 	if s.acmeTLS != nil {
 		s.log.Info("ACME TLS certificate from acme.tls_issuer", s.acmeTLS.startInfo()...)
+	}
+	if s.agent != nil {
+		s.log.Info("agent TLS certificate from agent.tls_issuer", s.agent.tls.startInfo()...)
 	}
 	s.logHeads(ctx)
 }
@@ -514,6 +535,16 @@ func (s *Server) Listen(ctx context.Context) error {
 			MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
 		}
 		s.log.Info("ACME listening", slog.String("listen", scheme+s.acmeLn.Addr().String()), slog.String("directory", s.acme.BaseURL()+"/directory"))
+	}
+	if s.agent != nil {
+		if aerr := s.listenAgents(ctx, lc); aerr != nil {
+			for _, ln := range []net.Listener{s.adminLn, s.publicLn, s.acmeLn} {
+				if ln != nil {
+					_ = ln.Close()
+				}
+			}
+			return aerr
+		}
 	}
 	s.log.Info("listening", slog.String("admin", "https://"+s.adminLn.Addr().String()), slog.String("public", s.PublicAddr()))
 	return nil
@@ -604,13 +635,16 @@ func (s *Server) Sealed() bool { return s.ring.Status().Sealed }
 // ShutdownBudget: no new connections, in-flight requests get a few seconds,
 // then the seal with its last checkpoint, then the databases close.
 func (s *Server) Serve(ctx context.Context) error {
-	errc := make(chan error, 3)
+	errc := make(chan error, 4)
 	go func() { errc <- serveErr("admin", s.admin.Serve(s.adminLn)) }()
 	if s.public != nil {
 		go func() { errc <- serveErr("public", s.public.Serve(s.publicLn)) }()
 	}
 	if s.acmeHS != nil {
 		go func() { errc <- serveErr("acme", s.acmeHS.Serve(s.acmeLn)) }()
+	}
+	if s.agent != nil && s.agent.hs != nil {
+		go func() { errc <- serveErr("agent", s.agent.hs.Serve(s.agent.ln)) }()
 	}
 	jobCtx, stopJobs := context.WithCancel(ctx)
 	jobsDone := make(chan struct{})
@@ -641,9 +675,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		sctx, cancel := context.WithTimeout(ctx, ShutdownBudget)
 		defer cancel()
 		s.log.Info("shutting down")
+		if s.agent != nil {
+			s.agent.svc.CloseWatches()
+		}
 		// Requests get at most half of the budget; the seal must fit after.
 		reqCtx, reqCancel := context.WithTimeout(sctx, ShutdownBudget/2)
-		for _, srv := range []*http.Server{s.admin, s.public, s.acmeHS} {
+		servers := []*http.Server{s.admin, s.public, s.acmeHS}
+		if s.agent != nil {
+			servers = append(servers, s.agent.hs)
+		}
+		for _, srv := range servers {
 			if srv == nil {
 				continue
 			}
@@ -685,13 +726,14 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk, Log: s.log,
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, Tenant: store.DefaultTenant,
-		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
+		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(),
 	})
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
 		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
+		Agents: s.Agents(),
 	}})
 	if err != nil {
 		return err
@@ -725,4 +767,14 @@ func (s *Server) publicHandler() http.Handler {
 		Enabled: func(ctx context.Context) (bool, error) { return settings.TrustPage(ctx, store.DefaultTenant) },
 		Clock:   s.clk,
 	})
+}
+
+// issuedManagers are the certificates the server issues itself; nil
+// entries are off.
+func (s *Server) issuedManagers() []*issuedTLS {
+	out := []*issuedTLS{s.adminTLS, s.acmeTLS}
+	if s.agent != nil {
+		out = append(out, s.agent.tls)
+	}
+	return out
 }

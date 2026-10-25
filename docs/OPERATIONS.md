@@ -1,4 +1,4 @@
-# Operations guide – MyOwnPKI v0.2
+# Operations guide – MyOwnPKI v0.3
 
 For the administrator who runs MyOwnPKI: installing it, the first start, daily work, backup and
 restore, moving from `pki.sh`, and what to do when something is lost. Installing with `install.sh`
@@ -841,3 +841,217 @@ cmd /c root-trust-computer.cmd /check
 Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
 normal for scripts from the network. The fingerprint check proves that the file is intact; that it
 is **your** root, only the comparison with a fingerprint from another way proves.
+
+## 12. Agent
+
+`myownpki-agent` enrolls a Linux host, obtains certificates through ACME with http-01 and installs
+them with the `nginx` or `file` profile. It writes only below local `paths`, runs only hooks from
+local `agent.yaml`, and receives desired state rather than commands from the server. Linux is the
+supported deployment platform in v0.3.0; Windows, macOS and FreeBSD are build/test targets only.
+
+### 12.1 Agent CA and server
+
+Create an intermediate **directly below the root**, not below an intermediate with `pathlen: 0`.
+In *Certificate authorities → New intermediate*, choose the root as parent and set the EKU limit to
+**clientAuth only**. Name it `agent-ca`. It signs only the agents' 7-day client certificates; it is
+not the CA that issues the agent listener's server certificate.
+
+Enable the listener in `/etc/myownpki/config.yaml`:
+
+```yaml
+agent:
+  base_url: https://pki.homelab.lan:8444
+  listen: ":8444"
+  tls_issuer: issuing   # issues the listener's server certificate
+  ca: agent-ca          # signs and authenticates agent client certificates
+```
+
+Unseal the server so it can issue both certificates. `myownpki config check` and startup check the
+agent CA and its EKU limit. Also configure ACME (chapter 10) and a domain covering every name the
+agent may order. Agents use the same root as trust anchor for the agent and ACME listeners.
+
+### 12.2 Join token and verified installation
+
+In *Agents → Join tokens → Create token*, enter the host's exact name and, if needed, patterns such
+as `*.apps.homelab.lan`. Store the one-time token in a root-only file on the host, for example
+`/root/myownpki-join-token` with mode 0600. Do not put it in `agent.yaml` or on a command line.
+
+Download the installer and checksum file, verify, and only then execute. Never pipe a download
+into a shell:
+
+```bash
+v=0.3.0
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install-agent.sh"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
+curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
+sha256sum --check --ignore-missing checksums.txt
+```
+
+Verify `checksums.txt` with cosign as described in the README when available. The installer checks
+the archive against `checksums.txt` again after downloading it; with cosign installed it also checks
+the release-workflow signature. For an offline host, put the agent archive and checksum files in one
+directory and use `--archive` instead.
+
+Webroot enrollment (recommended when nginx already answers port 80):
+
+```bash
+sudo bash install-agent.sh \
+  --server https://pki.homelab.lan:8444 \
+  --ca-bundle root.pem \
+  --token-file /root/myownpki-join-token \
+  --webroot /var/www/html
+```
+
+Without `--webroot`, enrollment uses standalone http-01 on port 80 and the installer adds the
+`20-low-ports.conf` capability drop-in. The token file is deleted only after successful admission;
+a pending or failed enrollment keeps it. The initial `agent.yaml` has no deployments. It is never
+overwritten on later runs. Re-run the script with a newer release to update the binary and restart
+the service; there is no agent self-update.
+
+### 12.3 agent.yaml and deployment profiles
+
+The file is `/etc/myownpki-agent/agent.yaml`, state is `/var/lib/myownpki-agent` (0700, files 0600).
+After editing, run `myownpki-agent config check` and `systemctl restart myownpki-agent`.
+
+An nginx profile with webroot enrollment and ACME:
+
+```yaml
+server: "https://pki.homelab.lan:8444"
+ca_bundle: "/etc/myownpki-agent/root.pem"
+hostname: "proxy1.homelab.lan"
+state_dir: "/var/lib/myownpki-agent"
+log_level: "info"
+acme_directory: "https://pki.homelab.lan/acme/directory"
+enrollment:
+  challenge: webroot
+  webroot: "/var/www/html"
+hooks:
+  nginx-test: ["/usr/sbin/nginx", "-t"]
+  nginx-reload: ["/usr/bin/systemctl", "reload", "nginx"]
+paths: ["/var/www/html", "/etc/nginx/myownpki"]
+deployments:
+  - name: proxy
+    profile: nginx
+    names: ["proxy1.homelab.lan"]
+    challenge: webroot
+    webroot: "/var/www/html"
+    dir: "/etc/nginx/myownpki/proxy"
+    test_hook: nginx-test
+    reload_hook: nginx-reload
+    check: "127.0.0.1:443"
+```
+
+The agent writes `fullchain.pem` and `privkey.pem` in `dir`. Reference those paths from the nginx
+server block. `check` is the local TLS endpoint whose SNI certificate must match the deployed leaf.
+
+The `file` profile fits existing paths and nginx configuration. Replace the deployment above with:
+
+```yaml
+  - name: proxy
+    profile: file
+    names: ["proxy1.homelab.lan"]
+    challenge: webroot
+    webroot: "/var/www/html"
+    files:
+      fullchain: "/etc/nginx/myownpki/proxy.fullchain.pem"
+      key: "/etc/nginx/myownpki/proxy.key"
+    key_mode: "0600"
+    test_hook: nginx-test
+    reload_hook: nginx-reload
+    check: "127.0.0.1:443"
+```
+
+`files.certificate` and `files.chain` are available when separate files are needed. Optional
+`owner`, `group` and `key_mode` apply locally. Deployments sharing a nonempty reload hook are staged,
+tested, reloaded and, on failure, rolled back as one group. Automatic renewal runs at 2/3 of the
+lifetime or earlier when ARI requests it. *Renew now* uses the same path; failures back off rather
+than retrying continuously.
+
+The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
+`ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
+`@system-service` system calls. Its base writable path is only the state directory. The installer
+adds the enrollment webroot to `10-paths.conf`. Whenever you add or change `paths`, update that
+drop-in to contain **exactly the state, webroot and deployment parent directories**, then run
+`systemctl daemon-reload` and restart. When a hook runs nginx, also add `/var/log/nginx`, because
+`nginx -t` opens its log files:
+
+```ini
+[Service]
+ReadWritePaths=/var/lib/myownpki-agent /var/www/html /etc/nginx/myownpki /var/log/nginx
+```
+
+Do not make `/etc`, `/var` or `/` writable. The sandbox prevents writes outside the allowed paths
+and thereby contains filesystem mistakes in the agent. It is **not a security boundary against
+code running as root in the agent process**: `systemctl reload` needs access to systemd over D-Bus,
+and the same access would also allow `systemd-run`. The actual protection is that the agent accepts
+no commands from the server and runs hooks only from the root-owned `agent.yaml`.
+
+Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`;
+webroot mode does not. Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user
+switch do not work with `NoNewPrivileges=yes`.
+
+CI runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full
+report and measured overall exposure are documented in the **agent end-to-end** job summary for
+each run; values can differ between systemd releases. No unmeasured local value is claimed here.
+
+### 12.4 Firewall
+
+| From | To | Port | Purpose |
+|---|---|---|---|
+| Agent host | Server | 8444/tcp | agent channel with mTLS |
+| Agent host | Server | ACME HTTPS port (443 or the reverse proxy) | certificate orders |
+| Server | Agent host | 80/tcp | http-01 for enrollment and orders |
+
+Nothing else needs to be opened on the host. Standalone port 80 is listened on only while a check
+runs; the web server must answer it in webroot mode. The agent makes outbound connections; the
+server never connects to an administrative agent port.
+
+### 12.5 Status and troubleshooting
+
+```bash
+myownpki-agent config check
+myownpki-agent status
+systemctl status myownpki-agent
+journalctl -u myownpki-agent -n 100 --no-pager
+```
+
+Check the agent page in the UI for last seen, version, deployment state, serial, expiry and last
+error. Reports arrive every five minutes with jitter and immediately after a pass; *silent* means
+three missed reports. An open renewal on a silent agent stays pending and can be withdrawn.
+
+- **TLS trust or hostname errors:** compare `ca_bundle` with the root and `server` with the listener
+  certificate's DNS name. A bootstrap certificate is not accepted.
+- **Enrollment waits for approval:** approve it under *Enrollment requests*; `run` finishes it.
+- **http-01 fails:** check DNS, the server-to-host port 80 route, webroot contents and the domain
+  policy. In webroot mode the directory must exist and be below `paths`.
+- **Name refused:** the ACME server checks every name against *Names it may order* at order and
+  issuance. Add the exact name or a suitable `*.suffix` pattern; the UI marks uncovered names.
+- **Permission or sandbox errors:** compare `ReadWritePaths` with every target and webroot. Include
+  `/var/log/nginx` for nginx hooks. Hooks with `sudo` are unsupported.
+- **Deployment rolled back:** inspect the original and rollback errors. The old files and leaf are
+  restored when possible; fix configuration/material before the next attempt.
+- **Rate limited:** reports and watches are limited per agent to 60 and 120 calls per 10 minutes;
+  ordinary scheduling stays well below this. Look for a second process or a broken client loop.
+
+### 12.6 Revoke and enroll again
+
+*Revoke agent* is permanent for that agent ID, puts its agent certificates on the agent CA's CRL
+and cuts it off at its next call. **Certificates already deployed stay valid**; revoke those
+separately only when intended. *Disable* is the reversible alternative.
+
+To enroll the host as a new agent, create a new join token, stop the service and remove the old
+identity and account binding:
+
+```bash
+sudo systemctl stop myownpki-agent
+cd /var/lib/myownpki-agent
+sudo rm -f agent.json agent.key agent.crt pending.key enrollment.json
+sudo rm -f acme-*.key acme-*.json
+sudo myownpki-agent enroll --token-file /root/myownpki-join-token
+sudo systemctl start myownpki-agent
+```
+
+The `acme-<directory-hash>` files must be removed together because the old ACME account belongs to
+the revoked agent ID. Keep `deployments.json`, `deployment-journal.json`, `deploy-backup-*` and
+`webroot-files.json`: they carry deployment history, rollback data and crash cleanup state. Delete
+those only as part of a separate, manually verified reset of deployment state.

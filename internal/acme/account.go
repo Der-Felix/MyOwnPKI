@@ -104,6 +104,10 @@ func (s *Server) newAccount(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		// The key has an account: answer with it (RFC 8555 §7.3.1).
+		if berr := s.bindVerifiedAccount(ctx, &existing); berr != nil {
+			s.fail(w, r, berr)
+			return
+		}
 		w.Header().Set("Location", s.url("/account/"+existing.ID))
 		s.reply(w, http.StatusOK, s.accountJSON(&existing))
 		return
@@ -158,8 +162,15 @@ func (s *Server) newAccount(w http.ResponseWriter, r *http.Request) {
 		if ierr := q.InsertACMEAccount(ctx, acct); ierr != nil {
 			return ierr
 		}
+		created, gerr := q.GetACMEAccount(ctx, id)
+		if gerr != nil {
+			return gerr
+		}
+		if berr := s.bindAccount(ctx, q, tx, &created); berr != nil {
+			return berr
+		}
 		return enqueue(ctx, tx, now, id, req.ip, ActionAccountCreate, audit.Target{Type: "acme_account", ID: id}, audit.ResultSuccess,
-			map[string]any{"key_thumbprint": acct.KeyThumbprint, "key_algorithm": req.key.Algorithm(), "eab": eabID, "approved": eabID != "", "contacts": len(contact)})
+			map[string]any{"key_thumbprint": acct.KeyThumbprint, "key_algorithm": req.key.Algorithm(), "eab": eabID, "approved": created.ApprovedAt.Valid, "contacts": len(contact)})
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -360,8 +371,22 @@ func (s *Server) keyChange(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
 	id := req.account.ID
 	err = s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		reserved, rerr := q.GetAgentByACMEThumbprint(ctx, sql.NullString{String: inner.JWK.Thumbprint(), Valid: true})
+		if rerr != nil && !errors.Is(rerr, sql.ErrNoRows) {
+			return rerr
+		}
+		if rerr == nil && (!req.account.AgentID.Valid || reserved.ID != req.account.AgentID.String) {
+			return problemErr(http.StatusForbidden, "unauthorized", "the new account key belongs to another agent")
+		}
 		if uerr := q.UpdateACMEAccountKey(ctx, pkidb.UpdateACMEAccountKeyParams{KeyThumbprint: inner.JWK.Thumbprint(), Jwk: string(inner.JWK.Canonical()), UpdatedAt: dbTime(now), ID: id}); uerr != nil {
 			return uerr
+		}
+		if req.account.AgentID.Valid {
+			if uerr := q.SetAgentACMEThumbprint(ctx, pkidb.SetAgentACMEThumbprintParams{
+				AcmeKeyThumbprint: sql.NullString{String: inner.JWK.Thumbprint(), Valid: true}, UpdatedAt: dbTime(now), ID: req.account.AgentID.String,
+			}); uerr != nil {
+				return uerr
+			}
 		}
 		return enqueue(ctx, tx, now, id, req.ip, ActionAccountKeyChange, audit.Target{Type: "acme_account", ID: id}, audit.ResultSuccess,
 			map[string]any{"old_thumbprint": req.key.Thumbprint(), "new_thumbprint": inner.JWK.Thumbprint(), "key_algorithm": inner.JWK.Algorithm()})

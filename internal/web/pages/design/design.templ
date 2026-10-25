@@ -188,7 +188,8 @@ templ brandSection() {
 		<p class="muted">Logo files live in assets/brand (source of truth: the SVGs). Below 64 px use the small variants.</p>
 		@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "Gold is for the logo only. It is close to the fixed warning color, so it is never an accent, link or status color in the interface."})
 		@components.KVList(brandColors)
-		<div class="table-wrap">
+		<p class="muted">Adaptive tables use table-adaptive to wrap every column instead of scrolling at narrow widths.</p>
+		<div class="table-wrap table-adaptive">
 			<table class="table">
 				<thead>
 					<tr><th scope="col">Preview</th><th scope="col">File</th><th scope="col">Use</th></tr>

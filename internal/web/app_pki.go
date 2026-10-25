@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
@@ -27,6 +28,9 @@ import (
 
 // caWarnBefore: a CA certificate that ends within it needs attention.
 const caWarnBefore = 90 * 24 * time.Hour
+
+// agentCertificateWarnBefore means the renewal at 2/3 did not happen.
+const agentCertificateWarnBefore = 48 * time.Hour
 
 // ---------------------------------------------------------------- helpers
 
@@ -137,6 +141,11 @@ func (a *app) dashboard(c *rc) {
 		c.fail(err)
 		return
 	}
+	endEntity, _, err := a.d.Engine.CertificateCounts(ctx, c.who(), ca.CertificateFilter{HideAgentCertificates: true})
+	if err != nil {
+		c.fail(err)
+		return
+	}
 	cas, err := a.d.Engine.CAs(ctx, c.who())
 	if err != nil {
 		c.fail(err)
@@ -149,7 +158,7 @@ func (a *app) dashboard(c *rc) {
 		Numbers: []components.Number{
 			{Label: "Certificates", Value: n(total.Total()), Href: "/certificates"},
 			{Label: "Valid", Value: n(total.Valid), Href: "/certificates?status=valid"},
-			{Label: "Expire in 30 days", Value: n(total.Expiring), Href: "/certificates?status=expiring", Status: alarm(total.Expiring, view.StatusWarn)},
+			{Label: "Expire in 30 days", Value: n(endEntity.Expiring), Href: "/certificates?status=expiring", Status: alarm(endEntity.Expiring, view.StatusWarn)},
 			{Label: "Expired", Value: n(total.Expired), Href: "/certificates?status=expired", Status: alarm(total.Expired, view.StatusCrit)},
 			{Label: "Revoked", Value: n(total.Revoked), Href: "/certificates?status=revoked"},
 			{Label: "Certificate authorities", Value: strconv.Itoa(len(cas)), Href: "/authorities"},
@@ -196,7 +205,29 @@ func (a *app) dashboard(c *rc) {
 			d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning, Text: "The certificate of " + info.Name + ": " + strings.ToLower(text) + " (" + view.Date(genTime(g.NotAfter)) + ").", Href: href, LinkText: "Open"})
 		}
 	}
-	page, err := a.d.Engine.Certificates(ctx, c.who(), ca.CertificateFilter{Status: ca.CertValid, ExpiresBefore: a.now().Add(ca.ExpiringWindow), Limit: 10})
+	if a.d.Agents != nil {
+		agentList, listErr := a.d.Agents.ListAgents(ctx, c.who())
+		if listErr != nil {
+			c.fail(listErr)
+			return
+		}
+		for _, agent := range agentList {
+			if agent.Status != agents.StatusActive || agent.CertificateID == "" {
+				continue
+			}
+			certificate, certErr := a.d.Engine.Certificate(ctx, c.who(), agent.CertificateID)
+			if certErr != nil {
+				c.fail(certErr)
+				return
+			}
+			if certificate.NotAfter.Sub(a.now()) < agentCertificateWarnBefore {
+				d.Attention = append(d.Attention, view.Message{Kind: view.MessageWarning,
+					Text: "The agent certificate of " + agent.Hostname + " expires " + view.Relative(a.now(), certificate.NotAfter) + "; its renewal at 2/3 of the lifetime did not happen.",
+					Href: "/agents/" + agent.ID, LinkText: "Open"})
+			}
+		}
+	}
+	page, err := a.d.Engine.Certificates(ctx, c.who(), ca.CertificateFilter{Status: ca.CertValid, ExpiresBefore: a.now().Add(ca.ExpiringWindow), Limit: 10, HideAgentCertificates: true})
 	if err != nil {
 		c.fail(err)
 		return
@@ -226,6 +257,7 @@ func (a *app) certificateList(c *rc) {
 		return
 	}
 	f := ca.CertificateFilter{CAID: caID, Preset: presetName, Status: status, Search: query, Cursor: cursor}
+	f.HideAgentCertificates = q.Get("agent_filter") != "1" || q.Get("hide_agents") == "yes"
 	if status == "expiring" {
 		f.Status, f.ExpiresBefore = ca.CertValid, a.now().Add(ca.ExpiringWindow)
 	}
@@ -244,7 +276,7 @@ func (a *app) certificateList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := certificates.ListData{Real: true, Query: query, Total: int(total.Total()), Messages: c.messages()}
+	d := certificates.ListData{Real: true, Query: query, Total: int(total.Total()), Messages: c.messages(), HideAgents: f.HideAgentCertificates}
 	for i := range page.Items {
 		d.Rows = append(d.Rows, a.certRow(&page.Items[i]))
 	}

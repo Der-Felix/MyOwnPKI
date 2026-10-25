@@ -45,6 +45,7 @@ type Config struct {
 	Public  Public `yaml:"public"`
 	Auth    Auth   `yaml:"auth"`
 	ACME    ACME   `yaml:"acme"`
+	Agent   Agent  `yaml:"agent"`
 }
 
 // Log configures the process log (not the audit log).
@@ -127,6 +128,27 @@ type ACME struct {
 // DirectTLS reports whether the ACME listener speaks TLS itself.
 func (a ACME) DirectTLS() bool { return a.TLSIssuer != "" }
 
+// Agent is the agent listener (ADR-08, docs/PHASE3.md §1.4): Connect-RPC
+// over mTLS for myownpki-agent. Off while BaseURL is empty.
+type Agent struct {
+	// BaseURL is what agents connect to, e.g. https://pki.homelab.lan:8444;
+	// its host is the name in the listener certificate. Empty: no agents.
+	BaseURL string `yaml:"base_url"`
+	// Listen is IP:port of the agent listener – its own port, never the
+	// admin, ACME or public one.
+	Listen string `yaml:"listen"`
+	// TLSIssuer names the CA that issues the listener certificate, as for
+	// admin.tls_issuer: an intermediate, issued while unsealed.
+	TLSIssuer string `yaml:"tls_issuer"`
+	// CA names the agent CA: an intermediate with the EKU limit clientAuth
+	// only. It signs the agents' 7-day certificates, and only certificates
+	// from it pass the listener's client authentication.
+	CA string `yaml:"ca"`
+}
+
+// Enabled reports whether the agent listener runs.
+func (a Agent) Enabled() bool { return a.BaseURL != "" }
+
 // Allowed values.
 var (
 	LogLevels  = []string{"debug", "info", "warn", "error"}
@@ -142,6 +164,7 @@ func Default() Config {
 		Admin:  Admin{Listen: "127.0.0.1:9443"},
 		Public: Public{Listen: ":8080"},
 		ACME:   ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
+		Agent:  Agent{Listen: ":8444"},
 	}
 }
 
@@ -253,6 +276,7 @@ func (c Config) Validate() error {
 		add("auth.passkey_origin: %w", err)
 	}
 	c.validateACME(admin, add)
+	c.validateAgent(add)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("%w:\n  %w", ErrInvalid, joinIndented(errs))
@@ -494,6 +518,64 @@ func (c Config) validateACME(admin listenAddr, add func(string, ...any)) {
 		add("acme.resolver: %w", err)
 	}
 }
+
+// validateAgent checks the agent section: with base_url, tls_issuer and ca
+// are required and the listener needs a port of its own.
+func (c Config) validateAgent(add func(string, ...any)) {
+	a := c.Agent
+	if !a.Enabled() {
+		for _, kv := range [][2]string{{"agent.tls_issuer", a.TLSIssuer}, {"agent.ca", a.CA}} {
+			if kv[1] != "" {
+				add("%s needs agent.base_url: without it the agent listener is off", kv[0])
+			}
+		}
+		return
+	}
+	if _, err := AgentBaseURL(a.BaseURL); err != nil {
+		add("agent.base_url: %w", err)
+	}
+	for _, kv := range [][2]string{{"agent.tls_issuer", a.TLSIssuer}, {"agent.ca", a.CA}} {
+		if kv[1] == "" {
+			add("%s: required with agent.base_url", kv[0])
+		} else if err := checkCAName(kv[1]); err != nil {
+			add("%s: %w", kv[0], err)
+		}
+	}
+	if a.CA != "" && a.CA == a.TLSIssuer {
+		add("agent.ca and agent.tls_issuer: the agent CA signs only agents' client certificates – name another CA as tls_issuer")
+	}
+	l, err := parseListen(a.Listen)
+	if err != nil {
+		add("agent.listen: %w", err)
+		return
+	}
+	for _, kv := range [][2]string{{"admin.listen", c.Admin.Listen}, {"public.listen", c.Public.Listen}, {"acme.listen", c.ACME.Listen}} {
+		if kv[0] == "acme.listen" && c.ACME.BaseURL == "" {
+			continue
+		}
+		if o, perr := parseListen(kv[1]); kv[1] != "" && perr == nil && overlaps(l, o) {
+			add("agent.listen: %q collides with %s %q – the agent listener needs a port of its own", a.Listen, kv[0], kv[1])
+		}
+	}
+}
+
+// AgentBaseURL checks agent.base_url: https://host[:port], no path.
+func AgentBaseURL(s string) (string, error) {
+	u, err := url.Parse(s)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%q is not a URL", s)
+	case u.Scheme != "https":
+		return "", fmt.Errorf("%q: must be https:// – agents talk to the server only over mTLS", s)
+	case u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || strings.Trim(u.Path, "/") != "":
+		return "", fmt.Errorf("%q: want https://host[:port] without a path, e.g. https://pki.homelab.lan:8444", s)
+	}
+	return strings.TrimRight(s, "/"), nil
+}
+
+// AgentHost is the host of agent.base_url in lower case: the name (or IP)
+// in the agent listener's certificate.
+func AgentHost(base string) string { return ACMEHost(base) }
 
 // ACMEBaseURL checks acme.base_url and returns it without a trailing slash:
 // https only (the proxy terminates TLS; RFC 8555 §6.1), a host, no user,

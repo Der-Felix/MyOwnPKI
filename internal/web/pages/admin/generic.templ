@@ -170,7 +170,10 @@ type Cell struct {
 	Mono, Num       bool
 	NoWrap          bool
 	Break           bool // long values (URLs, errors) wrap anywhere
+	Posts           []PostCommand
 }
+
+type PostCommand struct { Action, CSRF, Label string; Disabled bool }
 
 // Column is one table column.
 type Column struct {
@@ -186,6 +189,8 @@ type Command struct {
 
 // TableData is a table with commands and filters.
 type TableData struct {
+	RefreshURL string // optional passive fragment polling
+	Adaptive  bool   // wrap every column instead of scrolling narrow tables
 	Messages []view.Message
 	Title    string // a heading (in sections)
 	Commands []Command
@@ -207,6 +212,16 @@ templ TablePage(p view.Page, d TableData) {
 
 // Table renders a table; also used inside detail pages.
 templ Table(d TableData) {
+	if d.RefreshURL != "" {
+		<div hx-get={ d.RefreshURL } hx-trigger="every 3s" hx-swap="innerHTML">
+			@tableBody(d)
+		</div>
+	} else {
+		@tableBody(d)
+	}
+}
+
+templ tableBody(d TableData) {
 	<section class="section">
 		if d.Title != "" {
 			<div class="section-head"><h2>{ d.Title }</h2></div>
@@ -235,7 +250,7 @@ templ Table(d TableData) {
 		if len(d.Rows) == 0 {
 			<p class="empty">{ d.Empty }</p>
 		} else {
-			<div class="table-wrap">
+			<div class={ "table-wrap", templ.KV("table-adaptive", d.Adaptive) }>
 				<table class="table">
 					<thead>
 						<tr>
@@ -264,7 +279,14 @@ templ Table(d TableData) {
 
 templ tableCell(c Cell) {
 	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap), templ.KV("break", c.Break) }>
-		if c.Status != "" {
+		if len(c.Posts) > 0 {
+			for _, post := range c.Posts {
+				<form action={ templ.SafeURL(post.Action) } method="post">
+					<input type="hidden" name="csrf_token" value={ post.CSRF }/>
+					<button type="submit" class="btn" disabled?={ post.Disabled }>{ post.Label }</button>
+				</form>
+			}
+		} else if c.Status != "" {
 			@components.Status(c.Status, c.Text)
 		} else if c.Href != "" {
 			<a href={ templ.SafeURL(c.Href) }>{ c.Text }</a>

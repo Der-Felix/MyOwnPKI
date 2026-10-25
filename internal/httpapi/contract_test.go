@@ -30,9 +30,12 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Der-Felix/MyOwnPKI/api"
+	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth/passkeytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -810,6 +813,134 @@ func TestContract(t *testing.T) {
 	} {
 		run(cc)
 	}
+
+	// Agents (v0.3): the agent CA, an admitted agent (join token and check,
+	// verified), two enrollments in the queue, and join tokens.
+	admin.stepUp(t, "demo")
+	if _, cerr := v.engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
+		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
+	}); cerr != nil {
+		t.Fatal(cerr)
+	}
+	enrollAgent := func(host, token string) (string, string) {
+		t.Helper()
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		csr, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+		out, eerr := v.agents.Enroll(t.Context(), agents.EnrollInput{Hostname: host, Token: token, Method: agents.MethodWebroot, SourceIP: "192.0.2.50", CSRDER: csr})
+		if eerr != nil {
+			t.Fatal(eerr)
+		}
+		st, serr := v.agents.EnrollStatus(t.Context(), agents.StatusInput{ID: out.ID, Handle: out.Handle, CheckReady: true, SourceIP: "192.0.2.50"})
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		return out.ID, st.AgentID
+	}
+	agentTok, _, err := v.agents.CreateJoinToken(t.Context(), console, "contract", []string{"proxy1.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, agentID := enrollAgent("proxy1.homelab.lan", agentTok)
+	if agentID == "" {
+		t.Fatal("the agent was not admitted")
+	}
+	approveID, _ := enrollAgent("proxy2.homelab.lan", "")
+	denyID, _ := enrollAgent("proxy3.homelab.lan", "")
+	_, unused, err := v.agents.CreateJoinToken(t.Context(), console, "unused", []string{"*.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := v.agents.ListJoinTokens(t.Context(), console)
+	usedTokenID := ""
+	for _, jt := range tokens {
+		if !jt.UsedAt.IsZero() {
+			usedTokenID = jt.ID
+		}
+	}
+	agentPath := "/agents/" + agentID
+	if err := v.agents.Report(t.Context(), &agents.Caller{Agent: pkidb.Agent{ID: agentID}, Who: console}, agents.ReportInput{Deployments: []agents.DeploymentReport{{Name: "proxy", State: "deployed"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, cc := range []contractCase{
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 202},
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
+		{op: "renewAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
+		{op: "renewAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
+		{op: "renewAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
+		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 200},
+		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
+		{op: "withdrawAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
+		{op: "withdrawAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
+		{op: "withdrawAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
+		{op: "listAgents", as: viewer, want: 200},
+		{op: "listAgents", as: anon, want: 401, note: "no-session"},
+		{op: "getAgent", as: viewer, path: agentPath, want: 200},
+		{op: "getAgent", as: viewer, path: "/agents/agt_nothere", want: 404, kind: "not-found"},
+		{op: "getAgent", as: rootview, path: agentPath, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "getAgent", as: anon, path: agentPath, want: 401, note: "no-session"},
+		{op: "changeAgentNames", as: admin, path: agentPath + "/names", body: map[string]any{"add": []string{"*.apps.homelab.lan"}}, want: 200},
+		{op: "changeAgentNames", as: admin, path: agentPath + "/names", body: map[string]any{"add": []string{"bad name"}}, want: 422, kind: "policy-violation"},
+		{op: "changeAgentNames", as: admin, path: agentPath + "/names", body: map[string]any{"bogus": 1}, want: 400, kind: "bad-request"},
+		{op: "changeAgentNames", as: viewer, path: agentPath + "/names", body: map[string]any{"add": []string{"x.homelab.lan"}}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "changeAgentNames", as: rootview, path: agentPath + "/names", body: map[string]any{"add": []string{"x.homelab.lan"}}, want: 403, note: "no-read"},
+		{op: "changeAgentNames", as: anon, path: agentPath + "/names", body: map[string]any{"add": []string{"x.homelab.lan"}}, want: 401, note: "no-session"},
+		{op: "disableAgent", as: admin, path: agentPath + "/disable", want: 200},
+		{op: "disableAgent", as: admin, path: agentPath + "/disable", want: 409, kind: "conflict"},
+		{op: "disableAgent", as: viewer, path: agentPath + "/disable", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "disableAgent", as: rootview, path: agentPath + "/disable", want: 403, note: "no-read"},
+		{op: "disableAgent", as: anon, path: agentPath + "/disable", want: 401, note: "no-session"},
+		{op: "enableAgent", as: admin, path: agentPath + "/enable", want: 200},
+		{op: "enableAgent", as: viewer, path: agentPath + "/enable", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "enableAgent", as: rootview, path: agentPath + "/enable", want: 403, note: "no-read"},
+		{op: "enableAgent", as: anon, path: agentPath + "/enable", want: 401, note: "no-session"},
+		{op: "listAgentEnrollments", as: viewer, want: 200},
+		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?state=all", want: 200},
+		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?state=bad", want: 400, kind: "bad-request"},
+		{op: "listAgentEnrollments", as: anon, want: 401, note: "no-session"},
+		{op: "approveAgentEnrollment", as: admin, path: "/agent-enrollments/" + approveID + "/approve", want: 204},
+		{op: "approveAgentEnrollment", as: admin, path: "/agent-enrollments/" + approveID + "/approve", want: 409, kind: "conflict"},
+		{op: "approveAgentEnrollment", as: viewer, path: "/agent-enrollments/" + denyID + "/approve", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "approveAgentEnrollment", as: rootview, path: "/agent-enrollments/" + denyID + "/approve", want: 403, note: "no-read"},
+		{op: "approveAgentEnrollment", as: anon, path: "/agent-enrollments/" + denyID + "/approve", want: 401, note: "no-session"},
+		{op: "denyAgentEnrollment", as: viewer, path: "/agent-enrollments/" + denyID + "/deny", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "denyAgentEnrollment", as: rootview, path: "/agent-enrollments/" + denyID + "/deny", want: 403, note: "no-read"},
+		{op: "denyAgentEnrollment", as: anon, path: "/agent-enrollments/" + denyID + "/deny", want: 401, note: "no-session"},
+		{op: "denyAgentEnrollment", as: admin, path: "/agent-enrollments/" + denyID + "/deny", want: 204},
+		{op: "listAgentJoinTokens", as: viewer, want: 200},
+		{op: "listAgentJoinTokens", as: anon, want: 401, note: "no-session"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"label": "web", "names": []string{"web1.homelab.lan"}, "valid_hours": 2}, want: 201},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"label": "web"}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"names": []string{"*"}}, want: 422, kind: "policy-violation"},
+		{op: "createAgentJoinToken", as: viewer, body: map[string]any{"names": []string{"web2.homelab.lan"}}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createAgentJoinToken", as: anon, body: map[string]any{"names": []string{"web2.homelab.lan"}}, want: 401, note: "no-session"},
+		{op: "deleteAgentJoinToken", as: admin, path: "/agent-join-tokens/" + usedTokenID, want: 409, kind: "conflict"},
+		{op: "deleteAgentJoinToken", as: viewer, path: "/agent-join-tokens/" + unused.ID, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "deleteAgentJoinToken", as: rootview, path: "/agent-join-tokens/" + unused.ID, want: 403, note: "no-read"},
+		{op: "deleteAgentJoinToken", as: anon, path: "/agent-join-tokens/" + unused.ID, want: 401, note: "no-session"},
+		{op: "deleteAgentJoinToken", as: admin, path: "/agent-join-tokens/" + unused.ID, want: 204},
+		{op: "revokeAgent", as: viewer, path: agentPath + "/revoke", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "revokeAgent", as: rootview, path: agentPath + "/revoke", want: 403, note: "no-read"},
+		{op: "revokeAgent", as: anon, path: agentPath + "/revoke", want: 401, note: "no-session"},
+	} {
+		run(cc)
+	}
+	// The step-up cases, after the step-up ran out; the revocation last.
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	for _, cc := range []contractCase{
+		{op: "changeAgentNames", as: admin, path: agentPath + "/names", body: map[string]any{"add": []string{"y.homelab.lan"}}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "disableAgent", as: admin, path: agentPath + "/disable", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "enableAgent", as: admin, path: agentPath + "/enable", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "revokeAgent", as: admin, path: agentPath + "/revoke", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "approveAgentEnrollment", as: admin, path: "/agent-enrollments/" + denyID + "/approve", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "denyAgentEnrollment", as: admin, path: "/agent-enrollments/" + denyID + "/deny", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"names": []string{"web3.homelab.lan"}}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "deleteAgentJoinToken", as: admin, path: "/agent-join-tokens/" + usedTokenID, want: 403, kind: "step-up-required", note: "step-up"},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	run(contractCase{op: "revokeAgent", as: admin, path: agentPath + "/revoke", want: 200})
 
 	// Every step-up operation once more with an API token of the admin: a
 	// plain refusal (forbidden), never step-up-required – no POST

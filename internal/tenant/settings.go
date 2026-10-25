@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -36,7 +37,21 @@ type Settings struct {
 	// default on). Get always fills it; in Set, nil keeps the stored value
 	// (a v0.2 client doesn't send it).
 	TrustPage *bool
+	// AgentEnrollment: how agents are admitted (v0.3.0, ADR-18) – auto,
+	// verified (default) or manual. Get always fills it; in Set, nil keeps
+	// the stored value.
+	AgentEnrollment *string
 }
+
+// Agent enrollment modes (docs/PHASE3.md §6.1).
+const (
+	EnrollAuto     = "auto"
+	EnrollVerified = "verified"
+	EnrollManual   = "manual"
+)
+
+// EnrollmentModes lists the valid modes.
+var EnrollmentModes = []string{EnrollAuto, EnrollVerified, EnrollManual}
 
 // ACMELimits are per hour (PHASE2 step 11).
 type ACMELimits struct {
@@ -103,10 +118,17 @@ func (s *Store) read(ctx context.Context, tenant string) (*Settings, error) {
 		return nil, err
 	}
 	trust := r.TrustPage == 1
+	mode := r.AgentEnrollment
 	return &Settings{AllowServerKeygen: r.AllowServerKeygen == 1, Organization: r.SubjectO, OrganizationalUnit: r.SubjectOu,
 		Locality: r.SubjectL, State: r.SubjectSt, Country: r.SubjectC,
 		ACME:      &ACMELimits{OrdersPerAccount: int(r.AcmeOrdersPerHour), FailedPerName: int(r.AcmeFailedPerName), AccountsPerIP: int(r.AcmeAccountsPerIp)},
-		TrustPage: &trust}, nil
+		TrustPage: &trust, AgentEnrollment: &mode}, nil
+}
+
+// AgentEnrollment returns how agents are admitted, without a permission
+// check (the agent listener asks it per enrollment).
+func (s *Store) AgentEnrollment(ctx context.Context, tenant string) (string, error) {
+	return systemdb.New(s.DB).GetAgentEnrollment(ctx, tenant)
 }
 
 // TrustPage reports whether the public listener serves the trust page,
@@ -145,6 +167,9 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if v.ACME != nil {
 		problems = append(problems, v.ACME.check()...)
 	}
+	if v.AgentEnrollment != nil && !slices.Contains(EnrollmentModes, *v.AgentEnrollment) {
+		problems = append(problems, "agent_enrollment: auto, verified or manual")
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s", ErrInvalid, strings.Join(problems, "; "))
 	}
@@ -164,6 +189,10 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if trust {
 		trustInt = 1
 	}
+	mode := *before.AgentEnrollment
+	if v.AgentEnrollment != nil {
+		mode = *v.AgentEnrollment
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -177,7 +206,7 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 		AllowServerKeygen: keygen, SubjectO: v.Organization, SubjectOu: v.OrganizationalUnit, SubjectL: v.Locality,
 		SubjectSt: v.State, SubjectC: v.Country,
 		AcmeOrdersPerHour: int64(limits.OrdersPerAccount), AcmeFailedPerName: int64(limits.FailedPerName), AcmeAccountsPerIp: int64(limits.AccountsPerIP),
-		TrustPage: trustInt, ID: tenant,
+		TrustPage: trustInt, AgentEnrollment: mode, ID: tenant,
 	})
 	if err != nil {
 		return err
@@ -192,6 +221,7 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 			"subject": subjectText(v), "was_subject": subjectText(*before),
 			"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
 			"trust_page": trust, "was_trust_page": *before.TrustPage,
+			"agent_enrollment": mode, "was_agent_enrollment": *before.AgentEnrollment,
 		},
 	}); err != nil {
 		return err

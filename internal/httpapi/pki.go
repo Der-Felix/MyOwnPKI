@@ -314,6 +314,13 @@ func toCertificateJSON(i *ca.CertificateInfo) certificateJSON {
 func (a *API) listCertificates(c *call) error {
 	q := c.r.URL.Query()
 	f := ca.CertificateFilter{CAID: q.Get("ca_id"), Preset: q.Get("preset"), Status: q.Get("status"), Search: q.Get("q"), Cursor: q.Get("cursor")}
+	f.HideAgentCertificates = true
+	if v := q.Get("hide_agent_certificates"); v != "" {
+		if v != "true" && v != "false" {
+			return badRequest("hide_agent_certificates", "true or false")
+		}
+		f.HideAgentCertificates = v == "true"
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > ca.MaxPageSize {

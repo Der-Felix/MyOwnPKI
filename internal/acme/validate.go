@@ -52,6 +52,7 @@ type job struct {
 
 type validator struct {
 	s        *Server
+	log      *slog.Logger
 	resolver *net.Resolver
 	sem      chan struct{}
 	ctx      context.Context
@@ -65,6 +66,14 @@ type validator struct {
 }
 
 func newValidator(s *Server, resolverAddr string) *validator {
+	v := newNetValidator(s.log, resolverAddr)
+	v.s = s
+	return v
+}
+
+// newNetValidator is the network part of the validator, without an ACME
+// server behind it (HTTP01Checker).
+func newNetValidator(log *slog.Logger, resolverAddr string) *validator {
 	r := &net.Resolver{PreferGo: true}
 	if resolverAddr != "" {
 		var d net.Dialer
@@ -73,7 +82,7 @@ func newValidator(s *Server, resolverAddr string) *validator {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	v := &validator{s: s, resolver: r, sem: make(chan struct{}, parallelChecks), ctx: ctx, cancel: cancel}
+	v := &validator{log: log, resolver: r, sem: make(chan struct{}, parallelChecks), ctx: ctx, cancel: cancel}
 	var d net.Dialer
 	v.dial = d.DialContext
 	v.lookupIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
@@ -87,6 +96,12 @@ func newValidator(s *Server, resolverAddr string) *validator {
 func (s *Server) Close() {
 	s.valid.cancel()
 	s.valid.wg.Wait()
+}
+
+// SetNetwork replaces validation network edges for integration tests.
+// Address, port and redirect policy checks still run unchanged.
+func (s *Server) SetNetwork(dial func(context.Context, string, string) (net.Conn, error), lookupIP func(context.Context, string) ([]netip.Addr, error)) {
+	s.valid.dial, s.valid.lookupIP = dial, lookupIP
 }
 
 func (v *validator) start(j job) {
@@ -190,7 +205,7 @@ func (v *validator) policyDial(policy string) func(ctx context.Context, network,
 		for _, a := range addrs {
 			if perr := allowedAddr(a, policy); perr != nil {
 				policyRefused++
-				v.s.log.Info("acme validation: address refused", slog.String("host", host), slog.String("reason", perr.Error()))
+				v.log.Info("acme validation: address refused", slog.String("host", host), slog.String("reason", perr.Error()))
 				continue
 			}
 			conn, derr := v.dial(ctx, network, netip.AddrPortFrom(a.Unmap(), portNumber(port)).String())
@@ -199,7 +214,7 @@ func (v *validator) policyDial(policy string) func(ctx context.Context, network,
 			}
 			dialFailed++
 			kinds = append(kinds, netProblem(derr))
-			v.s.log.Info("acme validation: connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", netProblem(derr)))
+			v.log.Info("acme validation: connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", netProblem(derr)))
 		}
 		switch {
 		case len(addrs) == 0:
@@ -422,4 +437,33 @@ func (v *validator) finish(j job, verr error) {
 	if err != nil {
 		s.log.Error("acme validation result", slog.String("challenge", j.challenge.ID), slog.Any("error", err))
 	}
+}
+
+// HTTP01Checker is the http-01 fetch of this validator for other proofs of
+// control – the agent enrollment (ADR-18, docs/PHASE3.md §6.1) – with exactly
+// the same rules: port 80 only, redirects only to 80/443 of the same host,
+// one resolution through acme.resolver and a connection to exactly the
+// checked address, the domain's address policy, short timeouts, 1 KiB.
+type HTTP01Checker struct{ v *validator }
+
+// NewHTTP01Checker returns a checker that resolves through resolver ("":
+// the system resolver; IP or IP:port as acme.resolver).
+func NewHTTP01Checker(resolver string, log *slog.Logger) *HTTP01Checker {
+	return &HTTP01Checker{v: newNetValidator(log, resolver)}
+}
+
+// SetNetwork replaces the network edges – for tests only, never the rules.
+func (c *HTTP01Checker) SetNetwork(dial func(ctx context.Context, network, addr string) (net.Conn, error),
+	lookupIP func(ctx context.Context, host string) ([]netip.Addr, error)) {
+	c.v.dial, c.v.lookupIP = dial, lookupIP
+}
+
+// Check fetches http://host/.well-known/acme-challenge/<token> and compares
+// the answer with want. policy is the address policy of the domain that
+// covers host ("internal" or "public"). The error says what failed – never
+// what the target answered.
+func (c *HTTP01Checker) Check(ctx context.Context, host, token, want, policy string) error {
+	ctx, cancel := context.WithTimeout(ctx, validateTimeout)
+	defer cancel()
+	return c.v.http01(ctx, "dns", host, token, want, policy, map[string]bool{redirectHost(host): true})
 }

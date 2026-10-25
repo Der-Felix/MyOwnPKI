@@ -75,5 +75,20 @@ func (a *API) table() []Route {
 		{OperationID: "listAuditEntries", Method: http.MethodGet, Path: "/audit", access: signedIn, handle: a.listAuditEntries},
 		{OperationID: "verifyAuditChain", Method: http.MethodPost, Path: "/audit/verify", access: signedIn, body: true, handle: a.verifyAuditChain},
 		{OperationID: "importExternalCertificate", Method: http.MethodPost, Path: "/imports/external-certificate", access: signedIn, body: true, handle: a.importExternalCertificate},
+
+		{OperationID: "listAgents", Method: http.MethodGet, Path: "/agents", access: signedIn, handle: a.listAgents},
+		{OperationID: "getAgent", Method: http.MethodGet, Path: "/agents/{agentId}", access: signedIn, handle: a.getAgent},
+		{OperationID: "renewAgentDeployment", Method: http.MethodPost, Path: "/agents/{agentId}/deployments/{deploymentName}/renew", access: signedIn, handle: a.renewAgentDeployment},
+		{OperationID: "withdrawAgentDeployment", Method: http.MethodDelete, Path: "/agents/{agentId}/deployments/{deploymentName}/renew", access: signedIn, handle: a.withdrawAgentDeployment},
+		{OperationID: "disableAgent", Method: http.MethodPost, Path: "/agents/{agentId}/disable", access: signedIn, handle: a.disableAgent},
+		{OperationID: "enableAgent", Method: http.MethodPost, Path: "/agents/{agentId}/enable", access: signedIn, handle: a.enableAgent},
+		{OperationID: "revokeAgent", Method: http.MethodPost, Path: "/agents/{agentId}/revoke", access: signedIn, handle: a.revokeAgent},
+		{OperationID: "changeAgentNames", Method: http.MethodPost, Path: "/agents/{agentId}/names", access: signedIn, body: true, handle: a.changeAgentNames},
+		{OperationID: "listAgentEnrollments", Method: http.MethodGet, Path: "/agent-enrollments", access: signedIn, handle: a.listAgentEnrollments},
+		{OperationID: "approveAgentEnrollment", Method: http.MethodPost, Path: "/agent-enrollments/{enrollmentId}/approve", access: signedIn, handle: a.approveAgentEnrollment},
+		{OperationID: "denyAgentEnrollment", Method: http.MethodPost, Path: "/agent-enrollments/{enrollmentId}/deny", access: signedIn, handle: a.denyAgentEnrollment},
+		{OperationID: "listAgentJoinTokens", Method: http.MethodGet, Path: "/agent-join-tokens", access: signedIn, handle: a.listAgentJoinTokens},
+		{OperationID: "createAgentJoinToken", Method: http.MethodPost, Path: "/agent-join-tokens", access: signedIn, body: true, handle: a.createAgentJoinToken},
+		{OperationID: "deleteAgentJoinToken", Method: http.MethodDelete, Path: "/agent-join-tokens/{joinTokenId}", access: signedIn, handle: a.deleteAgentJoinToken},
 	}
 }

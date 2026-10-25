@@ -1,0 +1,11 @@
+# Code generation for the agent protocol: the generators come from the
+# approved modules themselves (`go tool` in go.mod), so generated code and
+# runtime libraries always have the same version. No remote plugins.
+version: v2
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal/gen
+    opt: paths=source_relative
+  - local: ["go", "tool", "protoc-gen-connect-go"]
+    out: internal/gen
+    opt: paths=source_relative

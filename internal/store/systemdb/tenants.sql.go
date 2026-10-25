@@ -32,6 +32,18 @@ func (q *Queries) EnsureTenant(ctx context.Context, arg EnsureTenantParams) erro
 	return err
 }
 
+const getAgentEnrollment = `-- name: GetAgentEnrollment :one
+SELECT agent_enrollment FROM tenants WHERE id = ?
+`
+
+// The agent listener asks this for every enrollment (v0.3.0).
+func (q *Queries) GetAgentEnrollment(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getAgentEnrollment, id)
+	var agent_enrollment string
+	err := row.Scan(&agent_enrollment)
+	return agent_enrollment, err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT id, name, allow_server_keygen, created_at
 FROM tenants
@@ -59,7 +71,7 @@ func (q *Queries) GetTenant(ctx context.Context, id string) (GetTenantRow, error
 
 const getTenantSettings = `-- name: GetTenantSettings :one
 SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c,
-       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page
+       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment
 FROM tenants
 WHERE id = ?
 `
@@ -76,6 +88,7 @@ type GetTenantSettingsRow struct {
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
 	TrustPage         int64
+	AgentEnrollment   string
 }
 
 // Settings of a tenant (step 18): server key generation and subject defaults.
@@ -94,6 +107,7 @@ func (q *Queries) GetTenantSettings(ctx context.Context, id string) (GetTenantSe
 		&i.AcmeFailedPerName,
 		&i.AcmeAccountsPerIp,
 		&i.TrustPage,
+		&i.AgentEnrollment,
 	)
 	return i, err
 }
@@ -154,7 +168,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]ListTenantsRow, error) {
 const setTenantSettings = `-- name: SetTenantSettings :execrows
 UPDATE tenants
 SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?,
-    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?
+    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?
 WHERE id = ?
 `
 
@@ -169,6 +183,7 @@ type SetTenantSettingsParams struct {
 	AcmeFailedPerName int64
 	AcmeAccountsPerIp int64
 	TrustPage         int64
+	AgentEnrollment   string
 	ID                string
 }
 
@@ -184,6 +199,7 @@ func (q *Queries) SetTenantSettings(ctx context.Context, arg SetTenantSettingsPa
 		arg.AcmeFailedPerName,
 		arg.AcmeAccountsPerIp,
 		arg.TrustPage,
+		arg.AgentEnrollment,
 		arg.ID,
 	)
 	if err != nil {

@@ -187,7 +187,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
-		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}}
+		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}, Agent: Agent{"marker", "marker", "marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -427,5 +427,55 @@ func TestTLSIssuer(t *testing.T) {
 	}
 	if !good.ACME.DirectTLS() || base.ACME.DirectTLS() || ACMEHost(good.ACME.BaseURL) != "pki.homelab.lan" {
 		t.Errorf("direct TLS %v/%v, host %q", good.ACME.DirectTLS(), base.ACME.DirectTLS(), ACMEHost(good.ACME.BaseURL))
+	}
+}
+
+// TestAgentConfig (docs/PHASE3.md §1.4): off without a base URL; with it,
+// tls_issuer and ca are required, https without a path, a port of its own.
+func TestAgentConfig(t *testing.T) {
+	t.Parallel()
+	base := Default()
+	base.DataDir = absDir(t)
+	if base.Agent.Enabled() || base.Agent.Listen != ":8444" {
+		t.Fatalf("default: %+v", base.Agent)
+	}
+	on := func(c *Config) {
+		c.Agent.BaseURL, c.Agent.TLSIssuer, c.Agent.CA = "https://pki.homelab.lan:8444", "issuing", "agent-ca"
+	}
+	for name, tc := range map[string]struct {
+		mod  func(*Config)
+		want string
+	}{
+		"ca without base URL":     {func(c *Config) { c.Agent.CA = "agent-ca" }, "agent.ca needs agent.base_url"},
+		"issuer without base URL": {func(c *Config) { c.Agent.TLSIssuer = "issuing" }, "agent.tls_issuer needs agent.base_url"},
+		"no issuer":               {func(c *Config) { on(c); c.Agent.TLSIssuer = "" }, "agent.tls_issuer: required"},
+		"no ca":                   {func(c *Config) { on(c); c.Agent.CA = "" }, "agent.ca: required"},
+		"bad ca name":             {func(c *Config) { on(c); c.Agent.CA = "Agent CA" }, "is not a CA name"},
+		"same CA twice":           {func(c *Config) { on(c); c.Agent.CA = "issuing" }, "name another CA as tls_issuer"},
+		"http":                    {func(c *Config) { on(c); c.Agent.BaseURL = "http://pki.homelab.lan:8444" }, "must be https://"},
+		"path":                    {func(c *Config) { on(c); c.Agent.BaseURL = "https://pki.homelab.lan:8444/agent" }, "without a path"},
+		"bad listen":              {func(c *Config) { on(c); c.Agent.Listen = "pki:8444" }, "agent.listen"},
+		"admin port":              {func(c *Config) { on(c); c.Agent.Listen = "127.0.0.1:9443" }, "collides with admin.listen"},
+		"public port":             {func(c *Config) { on(c); c.Agent.Listen = ":8080" }, "collides with public.listen"},
+		"acme port": {func(c *Config) {
+			on(c)
+			c.ACME.BaseURL, c.ACME.TLSIssuer, c.ACME.Listen = "https://pki.homelab.lan/acme", "issuing", ":443"
+			c.Agent.Listen = ":443"
+		}, "collides with acme.listen"},
+	} {
+		c := base
+		tc.mod(&c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+	good := base
+	on(&good)
+	good.ACME.Listen = ":8444" // ACME is off: its listen address is not used
+	if err := good.Validate(); err != nil {
+		t.Error(err)
+	}
+	if !good.Agent.Enabled() || AgentHost("https://PKI.homelab.lan:8444/") != "pki.homelab.lan" {
+		t.Errorf("enabled %v, host %q", good.Agent.Enabled(), AgentHost("https://PKI.homelab.lan:8444/"))
 	}
 }

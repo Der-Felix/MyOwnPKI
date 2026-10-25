@@ -58,6 +58,9 @@ func (c *call) fail(err error) {
 	if errors.Is(err, errReply) {
 		return
 	}
+	if agentError(c, err) {
+		return
+	}
 	var authLocked *auth.LockedError
 	var keysLocked *keys.LockedError
 	var denied *ca.DeniedError

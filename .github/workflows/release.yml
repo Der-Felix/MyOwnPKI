@@ -63,17 +63,19 @@ jobs:
             exit 1
           fi
 
-      # install.sh installs DEFAULT_VERSION when no --version is given: it must
-      # be the release it is published with (a candidate: its base version).
-      - name: install.sh belongs to this release
+      # Each install script installs DEFAULT_VERSION when no --version is
+      # given: it must be the release it is published with (candidate: base).
+      - name: install scripts belong to this release
         run: |
           v="${GITHUB_REF_NAME#v}"
           base="${v%%-*}"
-          d=$(sed -n 's/^DEFAULT_VERSION=//p' deploy/install.sh)
-          if [ "$d" != "$base" ]; then
-            echo "::error::deploy/install.sh has DEFAULT_VERSION=$d, the tag $GITHUB_REF_NAME needs $base"
-            exit 1
-          fi
+          for script in deploy/install.sh deploy/install-agent.sh; do
+            d=$(sed -n 's/^DEFAULT_VERSION=//p' "$script")
+            if [ "$d" != "$base" ]; then
+              echo "::error::$script has DEFAULT_VERSION=$d, the tag $GITHUB_REF_NAME needs $base"
+              exit 1
+            fi
+          done
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -142,9 +144,22 @@ jobs:
             exit 1
           fi
 
+      - name: Release agents contain no e2etest fault injection
+        run: |
+          for arch in amd64 arm64; do
+            binary="$RUNNER_TEMP/myownpki-agent-linux-$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$binary" ./cmd/myownpki-agent
+            if grep -a -q 'e2etest-corrupt-staged-key' "$binary"; then
+              echo "::error::$binary contains the e2etest staged-fault marker"
+              exit 1
+            fi
+          done
+
       - name: GoReleaser (draft release, image, signatures)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # An RC and the final tag may share a commit: never choose via git describe.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
         run: goreleaser release --clean --release-notes "$RUNNER_TEMP/notes.md"
 
       - name: Log out of GHCR

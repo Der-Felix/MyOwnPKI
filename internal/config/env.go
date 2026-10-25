@@ -34,6 +34,10 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "ACME_TRUSTED_PROXIES":   &c.ACME.TrustedProxies,
 		EnvPrefix + "ACME_RESOLVER":          &c.ACME.Resolver,
 		EnvPrefix + "ACME_TLS_ISSUER":        &c.ACME.TLSIssuer,
+		EnvPrefix + "AGENT_BASE_URL":         &c.Agent.BaseURL,
+		EnvPrefix + "AGENT_LISTEN":           &c.Agent.Listen,
+		EnvPrefix + "AGENT_TLS_ISSUER":       &c.Agent.TLSIssuer,
+		EnvPrefix + "AGENT_CA":               &c.Agent.CA,
 	}
 }
 
