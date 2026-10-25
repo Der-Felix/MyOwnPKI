@@ -1007,8 +1007,8 @@ For a new installation, `install-agent.sh --low-ports` installs the same drop-in
 Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
 with `NoNewPrivileges=yes`.
 
-CI runs `nginx -t` on port 443 under the real unit and its low-port drop-in, plus
-`systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full report and
+CI first proves that `nginx -t` on port 443 fails without the low-port drop-in, then proves that it
+succeeds with it. It also runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full report and
 measured overall exposure are documented in the **agent end-to-end** job summary for each run;
 values can differ between systemd releases. No unmeasured local value is claimed here.
 

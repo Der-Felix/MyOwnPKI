@@ -320,9 +320,9 @@ jobs:
           sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
           printf '[Service]\nReadWritePaths=/var/lib/myownpki-agent /var/log/nginx\n' |
             sudo tee /etc/systemd/system/myownpki-agent.service.d/10-paths.conf >/dev/null
-          sudo install -m 0644 deploy/systemd/agent-low-ports.conf /etc/systemd/system/myownpki-agent.service.d/20-low-ports.conf
           {
             printf '[Service]\n'
+            printf 'Restart=no\n'
             printf 'RootDirectory=%s\n' "$rootfs"
             printf 'ExecStart=\n'
             printf 'ExecStart=/usr/local/libexec/myownpki-agent-e2e.test -test.run=^TestNginxPort443InSystemdSandbox$ -test.v\n'
@@ -331,6 +331,24 @@ jobs:
           sudo install -d -m 0700 "$rootfs/var/lib/myownpki-agent"
           sudo install -d -m 0755 "$rootfs/var/log/nginx"
           sudo systemctl daemon-reload
+          # Negative control: without CAP_NET_BIND_SERVICE the same nginx test
+          # must fail and its sanitized stderr must explain the missing right.
+          sudo systemctl start myownpki-agent.service || true
+          for _ in $(seq 1 30); do
+            sudo systemctl is-active --quiet myownpki-agent.service || break
+            sleep 1
+          done
+          result=$(systemctl show --property Result --value myownpki-agent.service)
+          sudo journalctl -u myownpki-agent.service --no-pager -n 100 > "$RUNNER_TEMP/agent-no-low-ports.log"
+          if [ "$result" = success ] || ! grep -q 'Permission denied' "$RUNNER_TEMP/agent-no-low-ports.log"; then
+            echo '::error::the sandbox test did not detect the missing low-port capability'
+            cat "$RUNNER_TEMP/agent-no-low-ports.log"
+            exit 1
+          fi
+          # Positive control: the packaged drop-in fixes exactly this failure.
+          sudo install -m 0644 deploy/systemd/agent-low-ports.conf /etc/systemd/system/myownpki-agent.service.d/20-low-ports.conf
+          sudo systemctl daemon-reload
+          sudo systemctl reset-failed myownpki-agent.service
           if ! sudo systemctl start myownpki-agent.service; then
             sudo journalctl -u myownpki-agent.service --no-pager -n 100
             exit 1
