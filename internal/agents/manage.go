@@ -66,6 +66,10 @@ func (s *Service) GetAgent(ctx context.Context, who keys.Who, id string) (*Agent
 	for _, n := range names {
 		a.Names = append(a.Names, Name{Pattern: n.Pattern, Source: n.Source, AddedBy: n.AddedBy, AddedAt: parseTime(n.AddedAt)})
 	}
+	a.Deployments, err = s.deployments(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	return &a, nil
 }
 
@@ -159,7 +163,11 @@ func (s *Service) SetDisabled(ctx context.Context, who keys.Who, id string, disa
 	if disabled {
 		action = ActionDisable
 	}
-	return s.refused(ctx, who, action, audit.Target{Type: "agent", ID: id}, s.setDisabled(ctx, who, id, disabled, action))
+	err := s.setDisabled(ctx, who, id, disabled, action)
+	if err == nil {
+		s.notify(id)
+	}
+	return s.refused(ctx, who, action, audit.Target{Type: "agent", ID: id}, err)
 }
 
 func (s *Service) setDisabled(ctx context.Context, who keys.Who, id string, disabled bool, action string) error {
@@ -222,6 +230,7 @@ func (s *Service) revoke(ctx context.Context, who keys.Who, id string) error {
 		return err
 	}
 	var errs []error
+	s.notify(id)
 	for _, cert := range []sql.NullString{a.CertID, a.PrevCertID} {
 		if !cert.Valid {
 			continue
@@ -241,12 +250,20 @@ func (s *Service) revoke(ctx context.Context, who keys.Who, id string) error {
 
 // AddName lets an agent order for one more name or pattern.
 func (s *Service) AddName(ctx context.Context, who keys.Who, id, pattern string) error {
-	return s.refused(ctx, who, ActionNames, audit.Target{Type: "agent", ID: id}, s.changeName(ctx, who, id, pattern, true))
+	err := s.changeName(ctx, who, id, pattern, true)
+	if err == nil {
+		s.notify(id)
+	}
+	return s.refused(ctx, who, ActionNames, audit.Target{Type: "agent", ID: id}, err)
 }
 
 // RemoveName takes a name or pattern from an agent's list.
 func (s *Service) RemoveName(ctx context.Context, who keys.Who, id, pattern string) error {
-	return s.refused(ctx, who, ActionNames, audit.Target{Type: "agent", ID: id}, s.changeName(ctx, who, id, pattern, false))
+	err := s.changeName(ctx, who, id, pattern, false)
+	if err == nil {
+		s.notify(id)
+	}
+	return s.refused(ctx, who, ActionNames, audit.Target{Type: "agent", ID: id}, err)
 }
 
 func (s *Service) changeName(ctx context.Context, who keys.Who, id, pattern string, add bool) error {

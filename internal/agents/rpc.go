@@ -25,7 +25,13 @@ const maxMessage = 64 << 10
 // AgentService path, every other path 404. The peer's address and
 // certificate come from the TLS connection – never from a header.
 func (s *Service) Handler() http.Handler {
-	path, h := agentv1connect.NewAgentServiceHandler(&rpc{s: s}, connect.WithReadMaxBytes(maxMessage))
+	path, h := agentv1connect.NewAgentServiceHandler(&rpc{s: s}, connect.WithReadMaxBytes(maxMessage),
+		connect.WithConditionalHandlerOptions(func(spec connect.Spec) []connect.HandlerOption {
+			if spec.Procedure == agentv1connect.AgentServiceReportProcedure {
+				return []connect.HandlerOption{connect.WithReadMaxBytes(4 << 20)}
+			}
+			return nil
+		}))
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +124,42 @@ func (r *rpc) RegisterACMEAccount(ctx context.Context, req *connect.Request[agen
 	return connect.NewResponse(&agentv1.RegisterACMEAccountResponse{}), nil
 }
 
+func (r *rpc) Report(ctx context.Context, req *connect.Request[agentv1.ReportRequest]) (*connect.Response[agentv1.ReportResponse], error) {
+	c, err := r.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	in := ReportInput{Version: req.Msg.AgentVersion, OS: req.Msg.Os, Arch: req.Msg.Arch}
+	for _, d := range req.Msg.Deployments {
+		if d == nil {
+			return nil, r.s.rpcError("Report", ErrInvalid)
+		}
+		in.Deployments = append(in.Deployments, DeploymentReport{Name: d.Name, Profile: d.Profile, Names: d.Names,
+			Challenge: d.Challenge, State: d.State, Serial: d.CertificateSerial, NotAfter: d.NotAfter, Fingerprint: d.ServedFingerprint,
+			DeployedAt: d.DeployedAt, LastError: d.LastError, HandledRenewalVersion: d.HandledRenewalVersion})
+	}
+	if err := r.s.Report(ctx, c, in); err != nil {
+		return nil, r.s.rpcError("Report", err)
+	}
+	return connect.NewResponse(&agentv1.ReportResponse{}), nil
+}
+
+func (r *rpc) WatchDesiredState(ctx context.Context, req *connect.Request[agentv1.WatchDesiredStateRequest]) (*connect.Response[agentv1.WatchDesiredStateResponse], error) {
+	c, err := r.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state, err := r.s.WatchDesiredState(ctx, c, req.Msg.KnownVersion)
+	if err != nil {
+		return nil, r.s.rpcError("WatchDesiredState", err)
+	}
+	out := &agentv1.WatchDesiredStateResponse{Version: state.Version, Changed: state.Changed, AllowedNames: state.AllowedNames}
+	for _, d := range state.Deployments {
+		out.Deployments = append(out.Deployments, &agentv1.DesiredDeployment{Name: d.Name, RenewRequestedAt: d.RequestedAt, RenewalVersion: d.RenewalVersion})
+	}
+	return connect.NewResponse(out), nil
+}
+
 // caller authenticates a procedure that needs an agent certificate – per
 // request (docs/PHASE3.md §2).
 func (r *rpc) caller(ctx context.Context) (*Caller, error) {
@@ -156,6 +198,12 @@ func enrollState(s string) agentv1.EnrollState {
 func (s *Service) rpcError(proc string, err error) error {
 	var d *ca.DeniedError
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, ErrWatchReplaced):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	case errors.Is(err, ErrWatchClosed):
+		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, ErrInvalid):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, ErrNotFound):

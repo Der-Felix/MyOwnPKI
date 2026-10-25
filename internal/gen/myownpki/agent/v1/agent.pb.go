@@ -639,6 +639,408 @@ func (*RegisterACMEAccountResponse) Descriptor() ([]byte, []int) {
 	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{7}
 }
 
+type DeploymentReport struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Name              string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Profile           string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Names             []string               `protobuf:"bytes,3,rep,name=names,proto3" json:"names,omitempty"`
+	Challenge         string                 `protobuf:"bytes,4,opt,name=challenge,proto3" json:"challenge,omitempty"`
+	State             string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	CertificateSerial string                 `protobuf:"bytes,6,opt,name=certificate_serial,json=certificateSerial,proto3" json:"certificate_serial,omitempty"`
+	// Optional UTC RFC 3339 timestamps; the server uses its own receive time.
+	NotAfter          string `protobuf:"bytes,7,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	ServedFingerprint string `protobuf:"bytes,8,opt,name=served_fingerprint,json=servedFingerprint,proto3" json:"served_fingerprint,omitempty"`
+	DeployedAt        string `protobuf:"bytes,9,opt,name=deployed_at,json=deployedAt,proto3" json:"deployed_at,omitempty"`
+	LastError         string `protobuf:"bytes,10,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// Echo the version only after handling this deployment's renew request.
+	HandledRenewalVersion int64 `protobuf:"varint,11,opt,name=handled_renewal_version,json=handledRenewalVersion,proto3" json:"handled_renewal_version,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *DeploymentReport) Reset() {
+	*x = DeploymentReport{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeploymentReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeploymentReport) ProtoMessage() {}
+
+func (x *DeploymentReport) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeploymentReport.ProtoReflect.Descriptor instead.
+func (*DeploymentReport) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DeploymentReport) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetNames() []string {
+	if x != nil {
+		return x.Names
+	}
+	return nil
+}
+
+func (x *DeploymentReport) GetChallenge() string {
+	if x != nil {
+		return x.Challenge
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetCertificateSerial() string {
+	if x != nil {
+		return x.CertificateSerial
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetNotAfter() string {
+	if x != nil {
+		return x.NotAfter
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetServedFingerprint() string {
+	if x != nil {
+		return x.ServedFingerprint
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetDeployedAt() string {
+	if x != nil {
+		return x.DeployedAt
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetHandledRenewalVersion() int64 {
+	if x != nil {
+		return x.HandledRenewalVersion
+	}
+	return 0
+}
+
+type ReportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentVersion  string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	Os            string                 `protobuf:"bytes,2,opt,name=os,proto3" json:"os,omitempty"`
+	Arch          string                 `protobuf:"bytes,3,opt,name=arch,proto3" json:"arch,omitempty"`
+	Deployments   []*DeploymentReport    `protobuf:"bytes,4,rep,name=deployments,proto3" json:"deployments,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportRequest) Reset() {
+	*x = ReportRequest{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportRequest) ProtoMessage() {}
+
+func (x *ReportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
+func (*ReportRequest) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ReportRequest) GetAgentVersion() string {
+	if x != nil {
+		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *ReportRequest) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *ReportRequest) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *ReportRequest) GetDeployments() []*DeploymentReport {
+	if x != nil {
+		return x.Deployments
+	}
+	return nil
+}
+
+type ReportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportResponse) Reset() {
+	*x = ReportResponse{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportResponse) ProtoMessage() {}
+
+func (x *ReportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportResponse.ProtoReflect.Descriptor instead.
+func (*ReportResponse) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+type WatchDesiredStateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	KnownVersion  int64                  `protobuf:"varint,1,opt,name=known_version,json=knownVersion,proto3" json:"known_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchDesiredStateRequest) Reset() {
+	*x = WatchDesiredStateRequest{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchDesiredStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchDesiredStateRequest) ProtoMessage() {}
+
+func (x *WatchDesiredStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchDesiredStateRequest.ProtoReflect.Descriptor instead.
+func (*WatchDesiredStateRequest) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WatchDesiredStateRequest) GetKnownVersion() int64 {
+	if x != nil {
+		return x.KnownVersion
+	}
+	return 0
+}
+
+type DesiredDeployment struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	RenewRequestedAt string                 `protobuf:"bytes,2,opt,name=renew_requested_at,json=renewRequestedAt,proto3" json:"renew_requested_at,omitempty"`
+	RenewalVersion   int64                  `protobuf:"varint,3,opt,name=renewal_version,json=renewalVersion,proto3" json:"renewal_version,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DesiredDeployment) Reset() {
+	*x = DesiredDeployment{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesiredDeployment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesiredDeployment) ProtoMessage() {}
+
+func (x *DesiredDeployment) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesiredDeployment.ProtoReflect.Descriptor instead.
+func (*DesiredDeployment) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *DesiredDeployment) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DesiredDeployment) GetRenewRequestedAt() string {
+	if x != nil {
+		return x.RenewRequestedAt
+	}
+	return ""
+}
+
+func (x *DesiredDeployment) GetRenewalVersion() int64 {
+	if x != nil {
+		return x.RenewalVersion
+	}
+	return 0
+}
+
+type WatchDesiredStateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Changed       bool                   `protobuf:"varint,2,opt,name=changed,proto3" json:"changed,omitempty"`
+	AllowedNames  []string               `protobuf:"bytes,3,rep,name=allowed_names,json=allowedNames,proto3" json:"allowed_names,omitempty"`
+	Deployments   []*DesiredDeployment   `protobuf:"bytes,4,rep,name=deployments,proto3" json:"deployments,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchDesiredStateResponse) Reset() {
+	*x = WatchDesiredStateResponse{}
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchDesiredStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchDesiredStateResponse) ProtoMessage() {}
+
+func (x *WatchDesiredStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_myownpki_agent_v1_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchDesiredStateResponse.ProtoReflect.Descriptor instead.
+func (*WatchDesiredStateResponse) Descriptor() ([]byte, []int) {
+	return file_myownpki_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *WatchDesiredStateResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *WatchDesiredStateResponse) GetChanged() bool {
+	if x != nil {
+		return x.Changed
+	}
+	return false
+}
+
+func (x *WatchDesiredStateResponse) GetAllowedNames() []string {
+	if x != nil {
+		return x.AllowedNames
+	}
+	return nil
+}
+
+func (x *WatchDesiredStateResponse) GetDeployments() []*DesiredDeployment {
+	if x != nil {
+		return x.Deployments
+	}
+	return nil
+}
+
 var File_myownpki_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
@@ -679,7 +1081,39 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\tchain_der\x18\x02 \x03(\fR\bchainDer\"C\n" +
 	"\x1aRegisterACMEAccountRequest\x12%\n" +
 	"\x0ekey_thumbprint\x18\x01 \x01(\tR\rkeyThumbprint\"\x1d\n" +
-	"\x1bRegisterACMEAccountResponse*b\n" +
+	"\x1bRegisterACMEAccountResponse\"\xfd\x02\n" +
+	"\x10DeploymentReport\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x14\n" +
+	"\x05names\x18\x03 \x03(\tR\x05names\x12\x1c\n" +
+	"\tchallenge\x18\x04 \x01(\tR\tchallenge\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state\x12-\n" +
+	"\x12certificate_serial\x18\x06 \x01(\tR\x11certificateSerial\x12\x1b\n" +
+	"\tnot_after\x18\a \x01(\tR\bnotAfter\x12-\n" +
+	"\x12served_fingerprint\x18\b \x01(\tR\x11servedFingerprint\x12\x1f\n" +
+	"\vdeployed_at\x18\t \x01(\tR\n" +
+	"deployedAt\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\n" +
+	" \x01(\tR\tlastError\x126\n" +
+	"\x17handled_renewal_version\x18\v \x01(\x03R\x15handledRenewalVersion\"\x9f\x01\n" +
+	"\rReportRequest\x12#\n" +
+	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x0e\n" +
+	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\x03 \x01(\tR\x04arch\x12E\n" +
+	"\vdeployments\x18\x04 \x03(\v2#.myownpki.agent.v1.DeploymentReportR\vdeployments\"\x10\n" +
+	"\x0eReportResponse\"?\n" +
+	"\x18WatchDesiredStateRequest\x12#\n" +
+	"\rknown_version\x18\x01 \x01(\x03R\fknownVersion\"~\n" +
+	"\x11DesiredDeployment\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
+	"\x12renew_requested_at\x18\x02 \x01(\tR\x10renewRequestedAt\x12'\n" +
+	"\x0frenewal_version\x18\x03 \x01(\x03R\x0erenewalVersion\"\xbc\x01\n" +
+	"\x19WatchDesiredStateResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\x12\x18\n" +
+	"\achanged\x18\x02 \x01(\bR\achanged\x12#\n" +
+	"\rallowed_names\x18\x03 \x03(\tR\fallowedNames\x12F\n" +
+	"\vdeployments\x18\x04 \x03(\v2$.myownpki.agent.v1.DesiredDeploymentR\vdeployments*b\n" +
 	"\vCheckMethod\x12\x1c\n" +
 	"\x18CHECK_METHOD_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17CHECK_METHOD_STANDALONE\x10\x01\x12\x18\n" +
@@ -691,12 +1125,14 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\x1fENROLL_STATE_WAITING_FOR_UNSEAL\x10\x03\x12\x19\n" +
 	"\x15ENROLL_STATE_ADMITTED\x10\x04\x12\x17\n" +
 	"\x13ENROLL_STATE_DENIED\x10\x05\x12\x18\n" +
-	"\x14ENROLL_STATE_EXPIRED\x10\x062\xa1\x03\n" +
+	"\x14ENROLL_STATE_EXPIRED\x10\x062\xe0\x04\n" +
 	"\fAgentService\x12M\n" +
 	"\x06Enroll\x12 .myownpki.agent.v1.EnrollRequest\x1a!.myownpki.agent.v1.EnrollResponse\x12_\n" +
 	"\fEnrollStatus\x12&.myownpki.agent.v1.EnrollStatusRequest\x1a'.myownpki.agent.v1.EnrollStatusResponse\x12k\n" +
 	"\x10RenewCertificate\x12*.myownpki.agent.v1.RenewCertificateRequest\x1a+.myownpki.agent.v1.RenewCertificateResponse\x12t\n" +
-	"\x13RegisterACMEAccount\x12-.myownpki.agent.v1.RegisterACMEAccountRequest\x1a..myownpki.agent.v1.RegisterACMEAccountResponseBFZDgithub.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1;agentv1b\x06proto3"
+	"\x13RegisterACMEAccount\x12-.myownpki.agent.v1.RegisterACMEAccountRequest\x1a..myownpki.agent.v1.RegisterACMEAccountResponse\x12M\n" +
+	"\x06Report\x12 .myownpki.agent.v1.ReportRequest\x1a!.myownpki.agent.v1.ReportResponse\x12n\n" +
+	"\x11WatchDesiredState\x12+.myownpki.agent.v1.WatchDesiredStateRequest\x1a,.myownpki.agent.v1.WatchDesiredStateResponseBFZDgithub.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_myownpki_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -711,7 +1147,7 @@ func file_myownpki_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_myownpki_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_myownpki_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_myownpki_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_myownpki_agent_v1_agent_proto_goTypes = []any{
 	(CheckMethod)(0),                    // 0: myownpki.agent.v1.CheckMethod
 	(EnrollState)(0),                    // 1: myownpki.agent.v1.EnrollState
@@ -723,23 +1159,35 @@ var file_myownpki_agent_v1_agent_proto_goTypes = []any{
 	(*RenewCertificateResponse)(nil),    // 7: myownpki.agent.v1.RenewCertificateResponse
 	(*RegisterACMEAccountRequest)(nil),  // 8: myownpki.agent.v1.RegisterACMEAccountRequest
 	(*RegisterACMEAccountResponse)(nil), // 9: myownpki.agent.v1.RegisterACMEAccountResponse
+	(*DeploymentReport)(nil),            // 10: myownpki.agent.v1.DeploymentReport
+	(*ReportRequest)(nil),               // 11: myownpki.agent.v1.ReportRequest
+	(*ReportResponse)(nil),              // 12: myownpki.agent.v1.ReportResponse
+	(*WatchDesiredStateRequest)(nil),    // 13: myownpki.agent.v1.WatchDesiredStateRequest
+	(*DesiredDeployment)(nil),           // 14: myownpki.agent.v1.DesiredDeployment
+	(*WatchDesiredStateResponse)(nil),   // 15: myownpki.agent.v1.WatchDesiredStateResponse
 }
 var file_myownpki_agent_v1_agent_proto_depIdxs = []int32{
-	0, // 0: myownpki.agent.v1.EnrollRequest.check_method:type_name -> myownpki.agent.v1.CheckMethod
-	1, // 1: myownpki.agent.v1.EnrollStatusResponse.state:type_name -> myownpki.agent.v1.EnrollState
-	2, // 2: myownpki.agent.v1.AgentService.Enroll:input_type -> myownpki.agent.v1.EnrollRequest
-	4, // 3: myownpki.agent.v1.AgentService.EnrollStatus:input_type -> myownpki.agent.v1.EnrollStatusRequest
-	6, // 4: myownpki.agent.v1.AgentService.RenewCertificate:input_type -> myownpki.agent.v1.RenewCertificateRequest
-	8, // 5: myownpki.agent.v1.AgentService.RegisterACMEAccount:input_type -> myownpki.agent.v1.RegisterACMEAccountRequest
-	3, // 6: myownpki.agent.v1.AgentService.Enroll:output_type -> myownpki.agent.v1.EnrollResponse
-	5, // 7: myownpki.agent.v1.AgentService.EnrollStatus:output_type -> myownpki.agent.v1.EnrollStatusResponse
-	7, // 8: myownpki.agent.v1.AgentService.RenewCertificate:output_type -> myownpki.agent.v1.RenewCertificateResponse
-	9, // 9: myownpki.agent.v1.AgentService.RegisterACMEAccount:output_type -> myownpki.agent.v1.RegisterACMEAccountResponse
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0,  // 0: myownpki.agent.v1.EnrollRequest.check_method:type_name -> myownpki.agent.v1.CheckMethod
+	1,  // 1: myownpki.agent.v1.EnrollStatusResponse.state:type_name -> myownpki.agent.v1.EnrollState
+	10, // 2: myownpki.agent.v1.ReportRequest.deployments:type_name -> myownpki.agent.v1.DeploymentReport
+	14, // 3: myownpki.agent.v1.WatchDesiredStateResponse.deployments:type_name -> myownpki.agent.v1.DesiredDeployment
+	2,  // 4: myownpki.agent.v1.AgentService.Enroll:input_type -> myownpki.agent.v1.EnrollRequest
+	4,  // 5: myownpki.agent.v1.AgentService.EnrollStatus:input_type -> myownpki.agent.v1.EnrollStatusRequest
+	6,  // 6: myownpki.agent.v1.AgentService.RenewCertificate:input_type -> myownpki.agent.v1.RenewCertificateRequest
+	8,  // 7: myownpki.agent.v1.AgentService.RegisterACMEAccount:input_type -> myownpki.agent.v1.RegisterACMEAccountRequest
+	11, // 8: myownpki.agent.v1.AgentService.Report:input_type -> myownpki.agent.v1.ReportRequest
+	13, // 9: myownpki.agent.v1.AgentService.WatchDesiredState:input_type -> myownpki.agent.v1.WatchDesiredStateRequest
+	3,  // 10: myownpki.agent.v1.AgentService.Enroll:output_type -> myownpki.agent.v1.EnrollResponse
+	5,  // 11: myownpki.agent.v1.AgentService.EnrollStatus:output_type -> myownpki.agent.v1.EnrollStatusResponse
+	7,  // 12: myownpki.agent.v1.AgentService.RenewCertificate:output_type -> myownpki.agent.v1.RenewCertificateResponse
+	9,  // 13: myownpki.agent.v1.AgentService.RegisterACMEAccount:output_type -> myownpki.agent.v1.RegisterACMEAccountResponse
+	12, // 14: myownpki.agent.v1.AgentService.Report:output_type -> myownpki.agent.v1.ReportResponse
+	15, // 15: myownpki.agent.v1.AgentService.WatchDesiredState:output_type -> myownpki.agent.v1.WatchDesiredStateResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_myownpki_agent_v1_agent_proto_init() }
@@ -753,7 +1201,7 @@ func file_myownpki_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_myownpki_agent_v1_agent_proto_rawDesc), len(file_myownpki_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

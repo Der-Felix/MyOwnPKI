@@ -51,6 +51,11 @@ const (
 	// AgentServiceRegisterACMEAccountProcedure is the fully-qualified name of the AgentService's
 	// RegisterACMEAccount RPC.
 	AgentServiceRegisterACMEAccountProcedure = "/myownpki.agent.v1.AgentService/RegisterACMEAccount"
+	// AgentServiceReportProcedure is the fully-qualified name of the AgentService's Report RPC.
+	AgentServiceReportProcedure = "/myownpki.agent.v1.AgentService/Report"
+	// AgentServiceWatchDesiredStateProcedure is the fully-qualified name of the AgentService's
+	// WatchDesiredState RPC.
+	AgentServiceWatchDesiredStateProcedure = "/myownpki.agent.v1.AgentService/WatchDesiredState"
 )
 
 // AgentServiceClient is a client for the myownpki.agent.v1.AgentService service.
@@ -68,6 +73,11 @@ type AgentServiceClient interface {
 	// RegisterACMEAccount binds this agent to its ACME account key before
 	// newAccount. Repeating the same thumbprint is safe.
 	RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error)
+	// Report sends bounded display data for this authenticated agent only.
+	Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error)
+	// WatchDesiredState waits at most 50 seconds. No executable configuration
+	// is ever delivered over this channel.
+	WatchDesiredState(context.Context, *connect.Request[v1.WatchDesiredStateRequest]) (*connect.Response[v1.WatchDesiredStateResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the myownpki.agent.v1.AgentService service. By
@@ -105,6 +115,18 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("RegisterACMEAccount")),
 			connect.WithClientOptions(opts...),
 		),
+		report: connect.NewClient[v1.ReportRequest, v1.ReportResponse](
+			httpClient,
+			baseURL+AgentServiceReportProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("Report")),
+			connect.WithClientOptions(opts...),
+		),
+		watchDesiredState: connect.NewClient[v1.WatchDesiredStateRequest, v1.WatchDesiredStateResponse](
+			httpClient,
+			baseURL+AgentServiceWatchDesiredStateProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("WatchDesiredState")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -114,6 +136,8 @@ type agentServiceClient struct {
 	enrollStatus        *connect.Client[v1.EnrollStatusRequest, v1.EnrollStatusResponse]
 	renewCertificate    *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
 	registerACMEAccount *connect.Client[v1.RegisterACMEAccountRequest, v1.RegisterACMEAccountResponse]
+	report              *connect.Client[v1.ReportRequest, v1.ReportResponse]
+	watchDesiredState   *connect.Client[v1.WatchDesiredStateRequest, v1.WatchDesiredStateResponse]
 }
 
 // Enroll calls myownpki.agent.v1.AgentService.Enroll.
@@ -136,6 +160,16 @@ func (c *agentServiceClient) RegisterACMEAccount(ctx context.Context, req *conne
 	return c.registerACMEAccount.CallUnary(ctx, req)
 }
 
+// Report calls myownpki.agent.v1.AgentService.Report.
+func (c *agentServiceClient) Report(ctx context.Context, req *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error) {
+	return c.report.CallUnary(ctx, req)
+}
+
+// WatchDesiredState calls myownpki.agent.v1.AgentService.WatchDesiredState.
+func (c *agentServiceClient) WatchDesiredState(ctx context.Context, req *connect.Request[v1.WatchDesiredStateRequest]) (*connect.Response[v1.WatchDesiredStateResponse], error) {
+	return c.watchDesiredState.CallUnary(ctx, req)
+}
+
 // AgentServiceHandler is an implementation of the myownpki.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	// Enroll starts an enrollment (ADR-18): the hostname, a CSR made on the
@@ -151,6 +185,11 @@ type AgentServiceHandler interface {
 	// RegisterACMEAccount binds this agent to its ACME account key before
 	// newAccount. Repeating the same thumbprint is safe.
 	RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error)
+	// Report sends bounded display data for this authenticated agent only.
+	Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error)
+	// WatchDesiredState waits at most 50 seconds. No executable configuration
+	// is ever delivered over this channel.
+	WatchDesiredState(context.Context, *connect.Request[v1.WatchDesiredStateRequest]) (*connect.Response[v1.WatchDesiredStateResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -184,6 +223,18 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("RegisterACMEAccount")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServiceReportHandler := connect.NewUnaryHandler(
+		AgentServiceReportProcedure,
+		svc.Report,
+		connect.WithSchema(agentServiceMethods.ByName("Report")),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentServiceWatchDesiredStateHandler := connect.NewUnaryHandler(
+		AgentServiceWatchDesiredStateProcedure,
+		svc.WatchDesiredState,
+		connect.WithSchema(agentServiceMethods.ByName("WatchDesiredState")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/myownpki.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceEnrollProcedure:
@@ -194,6 +245,10 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 			agentServiceRenewCertificateHandler.ServeHTTP(w, r)
 		case AgentServiceRegisterACMEAccountProcedure:
 			agentServiceRegisterACMEAccountHandler.ServeHTTP(w, r)
+		case AgentServiceReportProcedure:
+			agentServiceReportHandler.ServeHTTP(w, r)
+		case AgentServiceWatchDesiredStateProcedure:
+			agentServiceWatchDesiredStateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -217,4 +272,12 @@ func (UnimplementedAgentServiceHandler) RenewCertificate(context.Context, *conne
 
 func (UnimplementedAgentServiceHandler) RegisterACMEAccount(context.Context, *connect.Request[v1.RegisterACMEAccountRequest]) (*connect.Response[v1.RegisterACMEAccountResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("myownpki.agent.v1.AgentService.RegisterACMEAccount is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("myownpki.agent.v1.AgentService.Report is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) WatchDesiredState(context.Context, *connect.Request[v1.WatchDesiredStateRequest]) (*connect.Response[v1.WatchDesiredStateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("myownpki.agent.v1.AgentService.WatchDesiredState is not implemented"))
 }

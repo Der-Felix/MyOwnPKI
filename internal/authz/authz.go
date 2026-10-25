@@ -48,6 +48,7 @@ const (
 	UploadCRL    Permission = "crl.upload"         // the offline root's CRL; step-up
 	ManageTenant Permission = "tenant.manage"      // tenant settings
 	ManageAgents Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
+	RenewAgent   Permission = "agent.renew"        // request renewal of a locally configured deployment
 )
 
 // Instance permissions: instance admins only.
@@ -58,8 +59,8 @@ const (
 
 var rolePermissions = map[Role][]Permission{
 	Viewer:   {ReadPKI},
-	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey},
-	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents},
+	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent},
+	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent},
 }
 
 var instancePermissions = []Permission{Unseal, ManageUsers}
@@ -224,6 +225,7 @@ var stepUpActions = map[Permission]string{
 	ManageCA:     "manage CAs",
 	UploadCRL:    "upload CRLs",
 	ManageAgents: "manage agents",
+	RenewAgent:   "renew agent deployments",
 	ManageUsers:  "manage users",
 }
 

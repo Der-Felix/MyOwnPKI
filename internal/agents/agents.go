@@ -94,10 +94,14 @@ type Service struct {
 	Clock   clock.Clock
 	Log     *slog.Logger
 	Wake    func()
-	Rand    io.Reader // nil = crypto/rand
+	Rand    io.Reader                                  // nil = crypto/rand
+	Sleep   func(context.Context, time.Duration) error // nil = clock.Sleep
 
-	limitOnce sync.Once
-	limits    *limiter
+	limitOnce     sync.Once
+	limits        *limiter
+	watchMu       sync.Mutex
+	watches       map[string]*watchSlot
+	watchesClosed bool
 }
 
 // Agent is an admitted agent.
@@ -116,6 +120,7 @@ type Agent struct {
 	ApprovedAt     time.Time
 	ApprovedBy     string
 	Names          []Name
+	Deployments    []Deployment
 }
 
 // Name is one entry of an agent's name list.

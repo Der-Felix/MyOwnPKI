@@ -675,6 +675,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		sctx, cancel := context.WithTimeout(ctx, ShutdownBudget)
 		defer cancel()
 		s.log.Info("shutting down")
+		if s.agent != nil {
+			s.agent.svc.CloseWatches()
+		}
 		// Requests get at most half of the budget; the seal must fit after.
 		reqCtx, reqCancel := context.WithTimeout(sctx, ShutdownBudget/2)
 		servers := []*http.Server{s.admin, s.public, s.acmeHS}

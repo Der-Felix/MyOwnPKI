@@ -26,6 +26,11 @@ service AgentService {
   // RegisterACMEAccount binds this agent to its ACME account key before
   // newAccount. Repeating the same thumbprint is safe.
   rpc RegisterACMEAccount(RegisterACMEAccountRequest) returns (RegisterACMEAccountResponse);
+  // Report sends bounded display data for this authenticated agent only.
+  rpc Report(ReportRequest) returns (ReportResponse);
+  // WatchDesiredState waits at most 50 seconds. No executable configuration
+  // is ever delivered over this channel.
+  rpc WatchDesiredState(WatchDesiredStateRequest) returns (WatchDesiredStateResponse);
 }
 
 // CheckMethod is how the agent answers the server's http-01 check.
@@ -111,3 +116,45 @@ message RegisterACMEAccountRequest {
 }
 
 message RegisterACMEAccountResponse {}
+
+message DeploymentReport {
+  string name = 1;
+  string profile = 2;
+  repeated string names = 3;
+  string challenge = 4;
+  string state = 5;
+  string certificate_serial = 6;
+  // Optional UTC RFC 3339 timestamps; the server uses its own receive time.
+  string not_after = 7;
+  string served_fingerprint = 8;
+  string deployed_at = 9;
+  string last_error = 10;
+  // Echo the version only after handling this deployment's renew request.
+  int64 handled_renewal_version = 11;
+}
+
+message ReportRequest {
+  string agent_version = 1;
+  string os = 2;
+  string arch = 3;
+  repeated DeploymentReport deployments = 4;
+}
+
+message ReportResponse {}
+
+message WatchDesiredStateRequest {
+  int64 known_version = 1;
+}
+
+message DesiredDeployment {
+  string name = 1;
+  string renew_requested_at = 2;
+  int64 renewal_version = 3;
+}
+
+message WatchDesiredStateResponse {
+  int64 version = 1;
+  bool changed = 2;
+  repeated string allowed_names = 3;
+  repeated DesiredDeployment deployments = 4;
+}
