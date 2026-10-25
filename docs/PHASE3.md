@@ -606,9 +606,10 @@ of SANs).
 
 ## 8. v0.3.1 (owner decisions, 2026-10-25)
 
-v0.3.1 makes agent installation a guided, verifiable operation, revokes certificates after a proven
-replacement, makes the step-up lifetime configurable and continues a web action after its second
-factor. **Steps 15–19 are v0.3.1. Step 20 (the knowledge base) is only reserved for v0.3.2.**
+v0.3.1 makes agent installation a guided, verifiable operation, lets operators choose whether a
+proven replacement revokes its predecessor immediately, after a grace period or never, makes the
+step-up lifetime configurable and continues a web action after its second factor. **Steps 15–19 are
+v0.3.1. Step 20 (the knowledge base) is only reserved for v0.3.2.**
 Monitoring (steps 11–13) comes after that; it is not pulled into v0.3.1.
 
 ### 8.1 Work plan and evidence
@@ -617,9 +618,9 @@ Monitoring (steps 11–13) comes after that; it is not pulled into v0.3.1.
 |---|---|---|---|
 | 15 | 0.3.1 | **Agent packages and one setup path.** GoReleaser's nFPM integration (no Go dependency) builds `myownpki-agent` as `.deb` and `.rpm` for linux/amd64 and linux/arm64: binary, unit and drop-ins as examples, `agent.yaml` as a conffile, no service start before enrollment. The logic of `install-agent.sh` moves to `myownpki-agent setup`: server URL, root SHA-256, webroot or standalone, optional `--token-file`, optional `--low-ports`. Tarball and packages use the same setup code. | Inspect both package formats on both architectures. Fresh installation never starts or enables the service. `setup` is idempotent, preserves an existing `agent.yaml`, checks the root fingerprint, writes token files 0600 and starts only after admission; a pending approval prints the later start command. Tarball and package runs produce the same effective configuration. Shell/Go tests and real systemd installation in Linux CI. |
 | 16 | 0.3.1 | **Distribution and guided installation.** `install.sh` installs and updates the matching agent `.deb`, `.rpm` and tarball beside the server, always checked against `checksums.txt`; never mixed versions. The server image already contains the same immutable artifacts (§8.2). The agent listener offers only the manifest-listed artifacts and their checksums for unauthenticated read. *Agents → Install agent* builds the complete root/fingerprint, package/checksum, install and `setup` commands; optional host-scoped, one-time join token. Agent list marks older agents and shows the update command. | Wrong root fingerprint, changed artifact, changed checksum, wrong version and path traversal all stop before installation. No client certificate is needed only for those reads; enrollment and every other RPC still requires its existing authentication. No arbitrary filesystem path, redirect or command is accepted. Web tests cover roles, CSRF, one token shown once and absent from argv, URL and logs. Linux E2E installs the served package, verifies and enrolls, and updates an older agent. |
-| 17 | 0.3.1 | **Revoke superseded certificates after a proven replacement.** A new accepted `deployed` report revokes the previously deployed certificate and older, never-deployed certificates of the same ACME account and exact deployment-name set with reason `superseded`. Never revoke a certificate currently served by any deployment of this agent, never for `failed` or `rolled_back`, and never across accounts. Tenant setting `revoke_superseded_deployments`, default on. | Test previous deployment, aborted/failed orders, exact set equality and multiple candidates. Current-serving certificates of every deployment, same serial, failed, rolled_back, newer certificates and other accounts stay valid. Ambiguous mapping logs and revokes nothing. Repeated reports stay idempotent. Old and new certificates and separately produced CRLs are checked; unchanged serials cause no mass revocation on upgrade. |
+| 17 | 0.3.1 | **Configurable predecessor handling.** On renewal, choose `revoke now`, `revoke after N days` (1–30, proposed 7), or `never revoke`, always with reason `superseded`. Agent revocation or scheduling starts only after an accepted `deployed` report with its TLS check; other certificates use the completed renewal issuance. Tenant defaults are separate for agent deployments and other certificates, with agent/deployment and one-operation overrides. The existing scheduler executes planned revocations idempotently. See "Predecessor handling" below. | Test all three choices, defaults and every override, UI/step-up summaries, ACME exact-name-set renewal, N bounds and additive REST. For agents cover previous and never-deployed/discarded certificates, exact set equality, current-serving exclusions, `failed`/`rolled_back`, other accounts, the delay starting at `deployed`, and no duplicate schedule. Fake-clock tests cover execution, cancellation, revoke-now, restart/unseal catch-up, audit, filters/dashboard and CRLs; ambiguous mappings still revoke and schedule nothing. |
 | 18 | 0.3.1 | **Step-up lifetime per tenant.** Tenant setting `step_up_minutes`: 5, 10, 15, 30 or 60 minutes, default remains today's 5. Admin only, with audit; applies to new step-up proofs, not retroactively to existing timestamps. | Every allowed value works; another number, zero, negative and values above 60 are refused. Viewer/operator get 403, admin change is audited. Fake-clock tests cover exact expiry at the selected duration and the unchanged default. |
-| 19 | 0.3.1 | **Continue the web action after step-up.** A required second factor creates a server-side pending action, bound to the session, valid at most 5 minutes, single-use and protected by the existing CSRF check. The challenge page states the action. Correct proof executes the original normalized action once instead of asking for its inputs again. Nothing sensitive goes into a URL. | Fake-clock and handler tests: action executes exactly once; replay, other session, expired entry and wrong CSRF fail. Action summary is visible. No pending ID appears in URL, access log, redirect or HTML attribute other than the POST field. Server restart discards it safely. Injected action names/fields are refused. A business failure cannot cause a replay. REST contract remains unchanged. |
+| 19 | 0.3.1 | **Continue the web action after step-up.** A required second factor creates a server-side pending action, bound to the session, valid at most 5 minutes, single-use and protected by the existing CSRF check. The challenge page states the action. Correct proof executes the original normalized action once instead of asking for its inputs again. Nothing sensitive goes into a URL. | Fake-clock and handler tests: action executes exactly once; replay, other session, expired entry and wrong CSRF fail. Action summary is visible. No pending ID appears in URL, access log, redirect or HTML attribute other than the POST field. Server restart discards it safely. Injected action names/fields are refused. A business failure cannot cause a replay. Step 19 does not change the REST contract. |
 | 20 | **0.3.2 only** | **Knowledge Base as GitHub Wiki.** Sources under `docs/wiki/`; CI checks links. A command copies them into a separate Wiki checkout; the owner commits and pushes. Then monitoring. | `task wiki:check` finds a missing local target and a broken relative anchor; no network-dependent link test. `task wiki:sync` copies only the documented source set and prints the resulting `git status`; it never commits or pushes and never touches the main checkout. |
 | 21 | 0.3.1 | **Trust without self-confirmation.** Trust page and admin UI show SHA-256 and SHA-1, the latter only for comparison with the Windows certificate dialog. SHA-256 remains authoritative and tools verify only SHA-256. The Windows helper has no embedded expected fingerprint: it shows both and imports only after the user confirms an independent comparison, or automatically with `-ExpectedSha256 <value>` from the admin UI. The same rule applies to generated agent-install commands. | UI tests for both labels and SHA-256 authority. Helper tests prove no embedded expectation, SHA-256/SHA-1 display, mismatch aborts without import, match or explicit user confirmation imports. `-ExpectedSha256` uses only the authenticated-UI value. Agent-install tests show that no expected value is derived from the downloaded certificate or artifact. |
 
@@ -677,38 +678,69 @@ informational hint and the same verified package/update command for its installe
 architecture. There is no automatic update or remote command. A newer agent remains compatible via
 the additive protobuf rules; no downgrade is suggested.
 
-**Superseded certificates.**
+**Predecessor handling (owner addition, 2026-10-25).**
 
-- Compare the previously stored serial before applying the accepted report. Revoke only on a real
+- Every renewal offers three choices for its predecessor: **revoke now**, **revoke after N days**
+  (N = 1–30, proposed default 7), or **never revoke**. The eventual revocation reason is always
+  `superseded`. For an agent, "now" still means only after its accepted `deployed` report with the
+  passed TLS check; for UI, REST and non-agent ACME renewal it means after the completed issuance.
+- The tenant has separate defaults for **agent deployments** and **other certificates** (UI, REST
+  and ACME without an agent). An agent-wide default overrides the tenant's agent setting; an
+  optional deployment override supports services with different replacement cadences. *Renew now*
+  on an agent and *Renew* on an owned certificate show a confirmation with that effective default
+  preselected. A choice and, for a delayed revocation, the day count apply to exactly that operation.
+  The step-up summary repeats both. REST renewal accepts the same optional choice; omission keeps
+  the effective default. Changing tenant, agent or deployment defaults is admin-only and audited.
+- For non-agent ACME clients such as certbot, acme.sh and Caddy, a new order by the same account for
+  the identical normalized name set is a renewal and applies the tenant default for other
+  certificates. ACME gains no nonstandard negotiation field. A delayed period for these certificates
+  starts at issuance; the agent-specific `deployed` rule below does not apply to them.
+- Compare the previously stored serial before applying an accepted agent report. Act only on a real
   serial transition to `deployed`, which already means the TLS check passed. The previous
   certificate's issuance record must be linked to the same `acme_accounts.agent_id`; otherwise it is
   left valid and the mismatch is logged for diagnosis, without granting a cross-account revocation.
 - Extend `pki.db` with `agent_deployment_certificates(agent_id, deployment, certificate_id,
   first_deployed_at, last_deployed_at)`, unique over all three IDs. An accepted `deployed` report
   inserts or updates this history. **Never deployed** means no accepted row in this history, not
-  merely a different current state. A failed or aborted order has no such row; a previously deployed
-  one has it. Every serial currently reported as `deployed` by any deployment of this agent is
-  excluded in every case.
+  merely a different current state. Older issued but never-deployed/discarded certificates from
+  failed or aborted orders of the same deployment are handled by the selected choice too. Every
+  serial currently reported as `deployed` by any deployment of this agent is excluded in every case.
 - The mapping is three-way and exact: the account is the authenticated agent's linked ACME account;
   the normalized, sorted, duplicate-free identifier set of the ACME order must equal the report's
   deployment-name set; and the candidate certificate's `created_at` must be before the `created_at`
   of the newly confirmed certificate. No agent-provided timestamp decides age. The newly confirmed
-  certificate itself and anything newer is excluded.
-- For the newly deployed serial, require one certificate/order record with that exact account and
-  name set. For each older candidate, require its own exact record. If the current mapping is not
-  unique, an order is missing, names differ or timestamps tie, **revoke nothing in that ambiguous
-  group and log the ambiguity**. Never guess by hostname alone or revoke another account's
-  certificate. An otherwise valid candidate whose own record is clear is not blocked by an
-  unrelated, already revoked duplicate.
-- Revocation, report/history update, certificate linkage and `agent.deployment.superseded` audit
-  enqueue happen in one `pki.db` transaction. An already revoked certificate is idempotent and
-  creates no duplicate audit entry. The tenant setting is read for that report; changing it is
-  admin-only and audited.
-- **CRL production stays outside this transaction and follows the existing CRL scheduler.** A report
-  fails only for a real database error, never because a CRL has not been produced yet and never
-  merely because the mapping was ambiguous. The agent repeats a real failure with its ordinary
-  report backoff; it does not spin through the 60 reports/10 minutes limit. A later scheduled report
-  can complete an interrupted transaction and remains idempotent.
+  certificate itself and anything newer is excluded. For every candidate require its own exact
+  record. If the mapping is not unique, an order is missing, names differ or timestamps tie, **revoke
+  and schedule nothing in that ambiguous group and log the ambiguity**. Never guess by hostname
+  alone or act across accounts. An already revoked, unrelated duplicate does not block a clear
+  candidate.
+- For agents, a delay starts at the server-recorded accepted `deployed` time, never at issuance or
+  an agent-provided time. `failed` and `rolled_back` neither revoke nor create a schedule. `never
+  revoke` does neither. Repeated reports and later matching replacements never create a second
+  schedule or silently move an existing one.
+- A pending entry appears as **Revocation planned · \<date\>** in certificate lists and details and
+  beside the deployment on the agent page. The certificate filter gains `planned`; the dashboard
+  shows **N revocations due in the next 7 days**. An authorized user can **revoke now** or **cancel
+  the planned revocation** at any time before execution. Both are audited and require step-up like
+  revocation; cancellation leaves the certificate otherwise unchanged.
+- The existing scheduler executes due entries idempotently, rechecking that the certificate is still
+  planned and not already revoked. It catches up overdue entries after restart and unseal. Immediate
+  revocation or schedule creation, report/history update, certificate linkage and audit enqueue
+  happen in one `pki.db` transaction. Execution writes the final `superseded` revocation and audit
+  idempotently. **CRL production stays outside these transactions and follows the existing CRL
+  scheduler.** A report fails only for a real database error, never because a CRL has not been
+  produced yet or because mapping was ambiguous; ordinary report backoff continues to apply.
+- Authorization is checked again for every explicit plan, cancellation and revoke-now action:
+  whoever may revoke the certificate may plan it. An explicit predecessor from another ACME account
+  requires admin; an agent report or ordinary ACME order can never select another account's
+  certificate. The scheduler executes only a persisted, already authorized plan and accepts no
+  account or serial supplied by an agent report, so scheduling cannot expand the caller's rights.
+- The migration is additive: nullable per-certificate plan metadata and the new default/override
+  settings leave existing certificates and revocation states untouched. REST is additive too:
+  certificate responses expose the planned timestamp, plan/cancel endpoints use the same permission
+  and step-up rules, and renewal accepts the optional choice plus days. Existing clients that omit
+  the fields retain the configured behavior. Upgrade with unchanged serials creates no revocation or
+  schedule.
 
 **Step-up continuation.**
 
@@ -763,9 +795,11 @@ commits, pushes, switches the main checkout or deletes the Wiki checkout.
   administrator, never by the server on itself. No autostart, no remote update command and no second
   implementation in shell reduce the risk of executing unexpected content. Checksums are verified
   before any binary is installed.
-- **Superseded revocation:** account ownership and a proven TLS-serving state are mandatory. This
-  avoids a compromised report revoking another account's certificate or a failed rollback revoking
-  the still-serving old certificate. The setting can disable the behavior during migration review.
+- **Predecessor revocation and scheduling:** account ownership and, for agents, a proven TLS-serving
+  state are mandatory. This avoids a compromised report revoking another account's certificate or a
+  failed rollback revoking the still-serving old certificate. `never revoke` supports migration
+  review. Explicit scheduling repeats the revocation permission and step-up checks; the scheduler
+  cannot turn an untrusted report into a cross-account revocation.
 - **Pending-action replay and tampering:** session and credentials binding, short expiry, CSRF,
   action allowlisting and atomic single consumption are all required. Raw form actions, arbitrary
   callbacks and URL state are refused. A pending entry never changes who may perform the action.
@@ -785,10 +819,15 @@ commits, pushes, switches the main checkout or deletes the Wiki checkout.
    The UI never suggests a downgrade; protobuf compatibility checks remain mandatory.
 5. Pending-action summaries show only the action and non-secret target. Sensitive parameters stay
    in memory and are never logged, as inventoried below.
+6. **Open – factory defaults for predecessor handling.** Proposal: agent deployments use `revoke now`
+   after the confirmed deployment; other certificates use `revoke after 7 days`. The owner must
+   choose both defaults before implementation.
 
 | Action | Parameters held in the pending entry | What the summary shows |
 |---|---|---|
 | Revoke certificate | certificate ID, reason | Common name, serial and reason; no key material |
+| Plan/cancel certificate revocation | certificate ID, planned time or cancellation | Common name, serial, `superseded`, planned date or cancellation |
+| Renew certificate | certificate ID, predecessor choice, optional days | Common name, serial, predecessor choice and days when applicable |
 | Download private key | certificate ID | Common name and serial; never the private key |
 | Export certificate / PKCS#12 | certificate ID, format, password, delete-key flag | Common name, serial, format and deletion choice; never password, key or bundle |
 | Create/import CA; offline flow | parent, CA name, subject, algorithm, validity, path length, constraints, EKU limit, base URL, public CSR/certificate PEM | CA name, parent and operation; public policy only, never private keys or full PEM |
@@ -798,7 +837,7 @@ commits, pushes, switches the main checkout or deletes the Wiki checkout.
 | Approve/deny enrollment | enrollment ID | Hostname and approve/deny, no CSR or handle |
 | Add/remove agent name | agent ID, add/remove, name/pattern | Hostname, operation and name/pattern |
 | Disable/enable/revoke agent | agent ID | Hostname and operation |
-| Renew/withdraw deployment | agent ID, deployment name | Hostname, deployment and renew/withdraw |
+| Renew/withdraw deployment | agent ID, deployment name, predecessor choice and optional days when renewing | Hostname, deployment, renew/withdraw, and predecessor choice with days when applicable |
 | Create user | username, initial password, role, scope, instance-admin flag | Username, role, scope and instance-admin choice; never password, TOTP secret or recovery codes |
 | Change user roles, unlock, disable/enable | user ID, role, scope | Username and role/scope or account operation |
 | Change own password | current and new password values | "Change your password"; no values |
