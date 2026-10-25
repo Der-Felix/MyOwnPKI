@@ -28,6 +28,7 @@ Usage: install-agent.sh --server URL --ca-bundle FILE [options]   (as root)
   --ca-bundle FILE      root certificate trusted for the agent and ACME listeners
   --token-file FILE     join token; deleted only after successful enrollment
   --webroot DIR         existing webroot for enrollment http-01; default standalone
+  --low-ports           allow standalone and hooks (for example nginx -t) to bind ports below 1024
   --version V           release to install (default $DEFAULT_VERSION)
   --archive FILE        local myownpki-agent_<version>_linux_<arch>.tar.gz;
                         checksums.txt and optionally its signature must be next to it
@@ -51,6 +52,7 @@ server=
 ca_bundle=
 token_file=
 webroot=
+low_ports=false
 config_opts=false
 
 parse_args() {
@@ -60,6 +62,7 @@ parse_args() {
 		--ca-bundle) ca_bundle=${2:?--ca-bundle needs a file}; shift 2 ;;
 		--token-file) token_file=${2:?--token-file needs a file}; shift 2 ;;
 		--webroot) webroot=${2:?--webroot needs a directory}; config_opts=true; shift 2 ;;
+		--low-ports) low_ports=true; shift ;;
 		--version) version=${2:?--version needs a value}; shift 2 ;;
 		--archive) archive=${2:?--archive needs a file}; shift 2 ;;
 		-h | --help) usage; exit 0 ;;
@@ -239,7 +242,8 @@ install_units() {
 		printf '[Service]\nReadWritePaths=%s %s\n' "$DATA" "$webroot" >"$work/10-paths.conf"
 		put "$work/10-paths.conf" "$PATHS" 0644
 		$put_changed && unit_changed=true
-	elif $created_config; then
+	fi
+	if $low_ports || { $created_config && [ -z "$webroot" ]; }; then
 		put "$work/x/deploy/systemd/agent-low-ports.conf" "$LOWPORTS" 0644
 		$put_changed && unit_changed=true
 	fi
