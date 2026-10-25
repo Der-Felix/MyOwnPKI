@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os/exec"
 	"time"
@@ -25,9 +26,16 @@ func (a *Agent) runHook(ctx context.Context, name string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) // #nosec G204 G702 -- only fixed argv from the local root-owned allowlist, never a shell
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard             // hook output can contain secrets
+	var stderr tailWriter
+	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hook %q failed: %w", name, err)
+		if output := sanitizeHookOutput(stderr.data); output != "" {
+			if a.log != nil {
+				a.log.Error("deployment hook failed", slog.String("hook", name), slog.Any("error", err), slog.String("output", output))
+			}
+			return errors.New(hookErrorText(name, err, output))
+		}
+		return errors.New(hookErrorText(name, err, ""))
 	}
 	return nil
 }
@@ -175,7 +183,7 @@ func (a *Agent) rollback(ctx context.Context, group reloadGroup, j *deployJourna
 		hasFirst = hasFirst || meta.First
 		message := safeDeployError(problem)
 		if rollbackErr != nil {
-			message = clippedError(cause, 450) + "; rollback failed: " + clippedError(rollbackErr, 450)
+			message = joinedDeployError(cause, rollbackErr)
 		}
 		results = append(results, DeploymentResult{Name: meta.Name, State: state, Serial: meta.OldSerial, NotAfter: meta.OldNotAfter,
 			Fingerprint: observed[meta.Name], LastError: message})
@@ -190,7 +198,7 @@ func (a *Agent) rollback(ctx context.Context, group reloadGroup, j *deployJourna
 	if rollbackErr != nil {
 		for i := range results {
 			results[i].State = "failed"
-			results[i].LastError = clippedError(cause, 450) + "; rollback failed: " + clippedError(rollbackErr, 450)
+			results[i].LastError = joinedDeployError(cause, rollbackErr)
 		}
 		if serr := a.saveDeploymentResults(results); serr != nil {
 			rollbackErr = errors.Join(rollbackErr, serr)
@@ -207,9 +215,5 @@ func clippedError(err error, limit int) string {
 	if err == nil {
 		return ""
 	}
-	text := err.Error()
-	if len(text) > limit {
-		return text[:limit] + "..."
-	}
-	return text
+	return clipDeployErrorText(err.Error(), limit)
 }

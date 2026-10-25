@@ -135,7 +135,8 @@ The http-01 and tls-alpn-01 validators connect to hostnames an ACME client chose
   sources (hostname, token, admin) count as approved under the new_name level for that account.
 - **No remote command execution.** The server can only trigger hooks the agent's local config allowlists.
 - Agent deployment hooks use only the locally configured executable and fixed arguments, without
-  a shell; their output is discarded because it may contain secrets. File operations remain
+  a shell. On failure, the last stderr lines are bounded to 1 KiB of valid UTF-8 without control
+  characters and logged as `output`; hooks must not write secrets to stderr. File operations remain
   inside `paths` through os.Root. Backups and the journal stay in the root-only state directory.
   A shared reload hook defines one rollback group. Recover an unfinished journal before another
   pass, using only paths and hooks still authorized by the local configuration.

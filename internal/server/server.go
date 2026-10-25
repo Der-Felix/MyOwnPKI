@@ -494,7 +494,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	s.admin = &http.Server{
 		Handler:           s.adminHandler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second,
-		MaxHeaderBytes: 64 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+		MaxHeaderBytes: 64 << 10, ErrorLog: slog.NewLogLogger(httpErrorLogHandler{Handler: s.log.Handler()}, slog.LevelDebug),
 	}
 	if cfg.Public.Listen != "" {
 		if s.publicLn, err = lc.Listen(ctx, "tcp", cfg.Public.Listen); err != nil {
@@ -504,7 +504,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		s.public = &http.Server{
 			Handler:           s.publicHandler(),
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
-			MaxHeaderBytes: 8 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+			MaxHeaderBytes: 8 << 10, ErrorLog: slog.NewLogLogger(httpErrorLogHandler{Handler: s.log.Handler()}, slog.LevelDebug),
 		}
 	}
 	if s.acme != nil {
@@ -532,7 +532,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		s.acmeHS = &http.Server{
 			Handler:           s.acme,
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
-			MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+			MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(httpErrorLogHandler{Handler: s.log.Handler()}, slog.LevelDebug),
 		}
 		s.log.Info("ACME listening", slog.String("listen", scheme+s.acmeLn.Addr().String()), slog.String("directory", s.acme.BaseURL()+"/directory"))
 	}

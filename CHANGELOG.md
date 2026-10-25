@@ -77,6 +77,30 @@ hardened systemd installation complete the release.
 - pki.db migration 0013 stores reported deployments and renewal requests. The release now has 18
   assets, including the two agent archives and `install-agent.sh`.
 
+### Fixed
+
+- Enrollment without a matching domain stores a clear failed check instead of panicking; the
+  service and Connect-RPC both return the pending enrollment with that explanation.
+- Handler panics are logged at error level with the RPC procedure and stack on the agent listener;
+  HTTP server panics are also logged at error level on the admin and ACME listeners. Panic messages
+  remain visible when the configured log level is info, while TLS handshake noise stays at debug.
+- Domain creation and editing require a signing CA whose EKU limit allows serverAuth, in the form
+  and in the service and REST API. New forms start with "Please select" instead of the first CA.
+- `install-agent.sh` no longer claims that a token file was kept when enrollment ran without one.
+- nginx test and reload hooks need `20-low-ports.conf` for listeners below 1024, including webroot
+  mode. `install-agent.sh --low-ports` installs that capability explicitly.
+- Failed hooks include sanitized, bounded stderr in the agent log and deployment `last_error`:
+  valid UTF-8 at every boundary, the final diagnostic lines preserved, Unicode format characters
+  removed and the complete error within the server limit, including rollback failures.
+- Renewal requests appear as status badges with a separate Withdraw action, deployment tables wrap
+  without horizontal overflow, and removable agent names have a per-row Remove action instead of a
+  separate form.
+- The Windows trust-page text requires comparing the root fingerprint with an independently obtained
+  value from the admin UI or an administrator, not with the file that carries the root itself.
+- Agent end-to-end CI runs `nginx -t` on port 443 under the real systemd unit, first proving the
+  failure without the low-port drop-in and then success with it. The exported nginx rootfs has the
+  package's temporary directories, and the negative-control log is written with `tee`.
+
 ## [0.2.2] - 2026-10-24
 
 The server can issue the TLS certificates of its own listeners from one of its intermediates, so

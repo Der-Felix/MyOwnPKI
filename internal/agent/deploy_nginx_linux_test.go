@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -18,8 +19,7 @@ import (
 // The server process, config, PID, ports and certificate files belong only
 // to this test; an installed system nginx is never signaled or reloaded.
 func TestNginxDeployProfiles(t *testing.T) {
-	bin, err := exec.LookPath("nginx")
-	if err != nil {
+	if _, err := exec.LookPath("nginx"); err != nil {
 		if os.Getenv("MYOWNPKI_REQUIRE_NGINX") == "1" {
 			t.Fatal("nginx is required by the agent end-to-end CI job")
 		}
@@ -35,47 +35,7 @@ func TestNginxDeployProfiles(t *testing.T) {
 			addr := freeNginxAddress(t)
 			d.Check = addr
 			r.a.cfg.Deployments[0] = d
-			prefix := t.TempDir()
-			files := deploymentPaths(d)
-			cert := files.Fullchain
-			if cert == "" {
-				cert = files.Certificate
-			}
-			configuration := fmt.Sprintf("pid %s;\nerror_log %s;\nevents {}\nhttp { access_log off; server { listen %s ssl; server_name %s; ssl_certificate %s; ssl_certificate_key %s; return 200; } }\n",
-				strconv.Quote(filepath.Join(prefix, "nginx.pid")), strconv.Quote(filepath.Join(prefix, "error.log")), addr, d.Names[0], strconv.Quote(cert), strconv.Quote(files.Key))
-			configPath := filepath.Join(prefix, "nginx.conf")
-			if err := os.WriteFile(configPath, []byte(configuration), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			r.a.cfg.Hooks["test"] = []string{bin, "-p", prefix, "-c", configPath, "-t", "-q"}
-			r.a.cfg.Hooks["reload"] = []string{bin, "-p", prefix, "-c", configPath, "-s", "reload"}
-			r.a.runHookForTest = nil
-			r.a.Sleep = sleep                                                                                 // readiness of a real subprocess uses the production bounded TLS retries
-			cmd := exec.CommandContext(t.Context(), bin, "-p", prefix, "-c", configPath, "-g", "daemon off;") // #nosec G204 G702 -- test-only nginx executable and private config
-			// T.Context is canceled before cleanup. Quit the owned master
-			// gracefully so it also stops its workers before Wait returns.
-			cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGQUIT) }
-			cmd.WaitDelay = 5 * time.Second
-			cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			t.Cleanup(func() {
-				_ = cmd.Process.Signal(syscall.SIGQUIT)
-				timer := time.NewTimer(5 * time.Second)
-				defer timer.Stop()
-				select {
-				case <-done:
-				case <-timer.C:
-					_ = cmd.Process.Kill()
-					<-done
-				}
-			})
-			if _, err := r.a.checkServed(t.Context(), d, fingerprint(r.old[d.Name].Leaf.Raw)); err != nil {
-				t.Fatal(err)
-			}
+			files := startNginx(t, r, d)
 			if _, err := r.a.RunPass(t.Context(), nil); err != nil {
 				t.Fatal(err)
 			}
@@ -106,6 +66,83 @@ func TestNginxDeployProfiles(t *testing.T) {
 			}
 			r.assertFiles(t, r.next)
 		})
+	}
+}
+
+func startNginx(t *testing.T, r *deployRig, d Deployment) Files {
+	t.Helper()
+	bin, err := exec.LookPath("nginx")
+	if err != nil {
+		t.Fatal("nginx is required")
+	}
+	prefix := t.TempDir()
+	files := deploymentPaths(d)
+	certificate := files.Fullchain
+	if certificate == "" {
+		certificate = files.Certificate
+	}
+	configuration := fmt.Sprintf("pid %s;\nerror_log %s;\nevents {}\nhttp { access_log off; server { listen %s ssl; server_name %s; ssl_certificate %s; ssl_certificate_key %s; return 200; } }\n",
+		strconv.Quote(filepath.Join(prefix, "nginx.pid")), strconv.Quote(filepath.Join(prefix, "error.log")), d.Check, d.Names[0], strconv.Quote(certificate), strconv.Quote(files.Key))
+	configPath := filepath.Join(prefix, "nginx.conf")
+	if err := os.WriteFile(configPath, []byte(configuration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.a.cfg.Hooks["test"] = []string{bin, "-p", prefix, "-c", configPath, "-t", "-q"}
+	r.a.cfg.Hooks["reload"] = []string{bin, "-p", prefix, "-c", configPath, "-s", "reload"}
+	r.a.runHookForTest = nil
+	r.a.Sleep = sleep
+	cmd := exec.CommandContext(t.Context(), bin, "-p", prefix, "-c", configPath, "-g", "daemon off;") // #nosec G204 G702 -- test-only nginx executable and private config
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGQUIT) }
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(syscall.SIGQUIT)
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+	waitForNginxPID(t, filepath.Join(prefix, "nginx.pid"), done)
+	if _, err := r.a.checkServed(t.Context(), d, fingerprint(r.old[d.Name].Leaf.Raw)); err != nil {
+		t.Fatalf("nginx did not serve the old certificate after writing its PID: %v", err)
+	}
+	return files
+}
+
+func waitForNginxPID(t *testing.T, path string, done <-chan error) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("nginx exited before writing a valid PID: %v", err)
+		case <-deadline.C:
+			t.Fatalf("nginx did not write a valid PID within 10s: %s", path)
+		case <-ticker.C:
+			data, err := os.ReadFile(path) // #nosec G304 -- test-owned PID file
+			if err != nil {
+				continue
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err == nil && pid > 0 {
+				return
+			}
+		}
 	}
 }
 

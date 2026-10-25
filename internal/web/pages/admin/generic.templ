@@ -173,7 +173,26 @@ type Cell struct {
 	Posts           []PostCommand
 }
 
-type PostCommand struct { Action, CSRF, Label string; Disabled bool }
+type PostField struct { Name, Value string }
+
+type PostCommand struct {
+	Action, CSRF, Label string
+	Disabled, Command, Danger bool
+	Fields []PostField
+}
+
+func postClass(post PostCommand) string {
+	if post.Command {
+		if post.Danger {
+			return "cmd cmd-danger"
+		}
+		return "cmd"
+	}
+	if post.Danger {
+		return "btn btn-danger"
+	}
+	return "btn"
+}
 
 // Column is one table column.
 type Column struct {
@@ -279,19 +298,25 @@ templ tableBody(d TableData) {
 
 templ tableCell(c Cell) {
 	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap), templ.KV("break", c.Break) }>
+		if c.Status != "" {
+			@components.Status(c.Status, c.Text)
+		}
 		if len(c.Posts) > 0 {
 			for _, post := range c.Posts {
 				<form action={ templ.SafeURL(post.Action) } method="post">
 					<input type="hidden" name="csrf_token" value={ post.CSRF }/>
-					<button type="submit" class="btn" disabled?={ post.Disabled }>{ post.Label }</button>
+					for _, field := range post.Fields {
+						<input type="hidden" name={ field.Name } value={ field.Value }/>
+					}
+					<button type="submit" class={ postClass(post) } disabled?={ post.Disabled }>{ post.Label }</button>
 				</form>
 			}
-		} else if c.Status != "" {
-			@components.Status(c.Status, c.Text)
-		} else if c.Href != "" {
-			<a href={ templ.SafeURL(c.Href) }>{ c.Text }</a>
-		} else {
-			{ c.Text }
+		} else if c.Status == "" {
+			if c.Href != "" {
+				<a href={ templ.SafeURL(c.Href) }>{ c.Text }</a>
+			} else {
+				{ c.Text }
+			}
 		}
 		if c.Rel != "" {
 			<span class="rel">{ c.Rel }</span>

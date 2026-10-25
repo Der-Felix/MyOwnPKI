@@ -95,27 +95,27 @@ func (a *app) agentDetail(c *rc) {
 	if ag.CertificateID != "" {
 		sections[0].KV = append(sections[0].KV, view.KV{Key: "Certificate page", Value: "View agent certificate", Href: "/certificates/" + ag.CertificateID})
 	}
-	names := &admin.TableData{Title: "Names it may order", Empty: "None.", Columns: []admin.Column{{Label: "Name"}, {Label: "From"}, {Label: "Added"}}}
-	var nameOpts []admin.Option
+	base := "/agents/" + ag.ID
+	canManage := c.may(authz.ManageAgents, "") && ag.Status != agents.StatusRevoked
+	names := &admin.TableData{Title: "Names it may order", Empty: "None.", Columns: []admin.Column{{Label: "Name"}, {Label: "From"}, {Label: "Added"}, {Label: ""}}}
 	for _, n := range ag.Names {
-		names.Rows = append(names.Rows, []admin.Cell{{Text: n.Pattern, Mono: true}, {Text: n.Source}, {Text: dateTime(n.AddedAt) + " – " + n.AddedBy}})
-		nameOpts = append(nameOpts, admin.Option{Value: n.Pattern, Label: n.Pattern})
+		row := []admin.Cell{{Text: n.Pattern, Mono: true}, {Text: n.Source}, {Text: dateTime(n.AddedAt) + " – " + n.AddedBy}}
+		if canManage && n.Source != "hostname" {
+			row = append(row, admin.Cell{Posts: []admin.PostCommand{{Action: base + "/names", CSRF: c.sess.CSRFToken, Label: "Remove", Command: true, Danger: true,
+				Fields: []admin.PostField{{Name: "action", Value: "remove"}, {Name: "name", Value: n.Pattern}}}}})
+		} else {
+			row = append(row, admin.Cell{})
+		}
+		names.Rows = append(names.Rows, row)
 	}
 	sections = append(sections, admin.Section{Text: []string{
 		"The ACME server refuses an order of this agent for any other name. *.suffix covers every name below the suffix.",
 	}, Table: names})
-	if c.may(authz.ManageAgents, "") && ag.Status != agents.StatusRevoked {
-		base := "/agents/" + ag.ID
+	if canManage {
 		forms := []admin.FormData{c.form(admin.FormData{
 			Title: "Add a name", Action: base + "/names", Submit: "Add name",
 			Fields: []admin.Field{{ID: "action", Type: "hidden", Value: "add"}, {ID: "name", Label: "Name or pattern", Required: true, Hint: "e.g. wiki.homelab.lan or *.apps.homelab.lan"}},
 		})}
-		if len(nameOpts) > 0 {
-			forms = append(forms, c.form(admin.FormData{
-				Title: "Remove a name", Action: base + "/names", Submit: "Remove name",
-				Fields: []admin.Field{{ID: "action", Type: "hidden", Value: "remove"}, {ID: "name", Label: "Name", Type: "select", Options: nameOpts}},
-			}))
-		}
 		if ag.Status == agents.StatusActive {
 			forms = append(forms, c.form(admin.FormData{Title: "Disable", Action: base + "/disable", Submit: "Disable agent",
 				Intro: []string{"Cut off at its next call; its certificates stay valid. Enable it again here."}}))
@@ -188,12 +188,13 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 			Label: "Renew now", Disabled: pending || d.Removed || ag.Status != agents.StatusActive || !c.may(authz.RenewAgent, "")}
 		renewal := admin.Cell{Posts: []admin.PostCommand{renew}}
 		if pending {
-			renew.Label = "Requested"
-			renewal.Rel = dateTime(d.RenewRequestedAt) + " by " + d.RenewRequestedBy
+			renewal.Text = "Renewal requested · " + dateTime(d.RenewRequestedAt) + " by " + d.RenewRequestedBy
+			renewal.Status = view.StatusInfo
 			if ag.Silent(a.now()) {
-				renewal.Rel = "waiting for the agent (last seen " + dateTime(lastSeen) + ")"
+				renewal.Text = "waiting for the agent (last seen " + dateTime(lastSeen) + ")"
+				renewal.Status = view.StatusWarn
 			}
-			renewal.Posts = []admin.PostCommand{renew, {Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/withdraw",
+			renewal.Posts = []admin.PostCommand{{Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/withdraw",
 				CSRF: c.sess.CSRFToken, Label: "Withdraw", Disabled: !c.may(authz.RenewAgent, "")}}
 		}
 		t.Rows = append(t.Rows, []admin.Cell{{Text: d.Name, Rel: details},

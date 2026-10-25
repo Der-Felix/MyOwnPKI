@@ -967,6 +967,10 @@ tested, reloaded and, on failure, rolled back as one group. Automatic renewal ru
 lifetime or earlier when ARI requests it. *Renew now* uses the same path; failures back off rather
 than retrying continuously.
 
+When a hook fails, the last stderr lines are included as `output` in the agent log and in the
+deployment's `last_error`, bounded to 1 KiB of valid UTF-8 without control characters. **Hooks must
+not write secrets to stderr**, even with this filtering.
+
 The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
 `ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
 `@system-service` system calls. Its base writable path is only the state directory. The installer
@@ -980,19 +984,36 @@ drop-in to contain **exactly the state, webroot and deployment parent directorie
 ReadWritePaths=/var/lib/myownpki-agent /var/www/html /etc/nginx/myownpki /var/log/nginx
 ```
 
+If `nginx -t` reports `Read-only file system` for its temporary directories, add those directories
+to `10-paths.conf` as well (for example the `/var/cache/nginx` and `/var/lib/nginx` subdirectories).
+
 Do not make `/etc`, `/var` or `/` writable. The sandbox prevents writes outside the allowed paths
 and thereby contains filesystem mistakes in the agent. It is **not a security boundary against
 code running as root in the agent process**: `systemctl reload` needs access to systemd over D-Bus,
 and the same access would also allow `systemd-run`. The actual protection is that the agent accepts
 no commands from the server and runs hooks only from the root-owned `agent.yaml`.
 
-Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`;
-webroot mode does not. Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user
-switch do not work with `NoNewPrivileges=yes`.
+Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`.
+The nginx test and reload hooks need it too, **also in webroot mode**: `nginx -t` opens the
+configured listen sockets, so a listener on port 443 otherwise fails with `bind() ... Permission
+denied`. Install it from the release archive and restart the agent:
 
-CI runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full
-report and measured overall exposure are documented in the **agent end-to-end** job summary for
-each run; values can differ between systemd releases. No unmeasured local value is claimed here.
+```bash
+sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
+sudo install -m 0644 deploy/systemd/agent-low-ports.conf \
+  /etc/systemd/system/myownpki-agent.service.d/20-low-ports.conf
+sudo systemctl daemon-reload
+sudo systemctl restart myownpki-agent
+```
+
+For a new installation, `install-agent.sh --low-ports` installs the same drop-in explicitly.
+Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
+with `NoNewPrivileges=yes`.
+
+CI first proves that `nginx -t` on port 443 fails without the low-port drop-in, then proves that it
+succeeds with it. It also runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full report and
+measured overall exposure are documented in the **agent end-to-end** job summary for each run;
+values can differ between systemd releases. No unmeasured local value is claimed here.
 
 ### 12.4 Firewall
 

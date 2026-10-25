@@ -39,4 +39,54 @@ fi
 if (parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/missing.pem"); then
 	fail "missing CA bundle accepted"
 fi
+
+cat >"$tmp/agent-fails" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod 0755 "$tmp/agent-fails"
+BIN=$tmp/agent-fails
+CONF=$tmp/agent.yaml
+DATA=$tmp/state
+mkdir "$DATA"
+token_file=
+if message=$(enroll 2>&1); then
+	fail "failing enrollment without a token succeeded"
+fi
+[ "$message" = "install-agent.sh: enrollment failed – see the message above; run the script again after fixing it" ] ||
+	fail "wrong tokenless enrollment error: $message"
+token_file=$tmp/token
+if message=$(enroll 2>&1); then
+	fail "failing enrollment with a token succeeded"
+fi
+[ "$message" = "install-agent.sh: enrollment failed; the token file was kept" ] ||
+	fail "wrong enrollment error with a token: $message"
+
+work=$tmp/units
+mkdir -p "$work/x/deploy/systemd"
+touch "$work/x/deploy/systemd/myownpki-agent.service" "$work/x/deploy/systemd/agent-low-ports.conf"
+UNIT=$tmp/myownpki-agent.service
+PATHS=$tmp/10-paths.conf
+LOWPORTS=$tmp/20-low-ports.conf
+installed=$tmp/installed-units
+put() { put_changed=true; printf '%s\n' "$2" >>"$installed"; }
+systemctl() { return 0; }
+created_config=true
+webroot=$tmp/www
+low_ports=false
+: >"$installed"
+install_units
+if grep -Fqx "$LOWPORTS" "$installed"; then
+	fail "webroot installs low-ports without --low-ports"
+fi
+parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" --webroot "$tmp/www" --low-ports
+: >"$installed"
+install_units
+grep -Fqx "$LOWPORTS" "$installed" || fail "--low-ports was not installed in webroot mode"
+grep -Fqx "$PATHS" "$installed" || fail "webroot paths are missing with --low-ports"
+webroot=
+low_ports=false
+: >"$installed"
+install_units
+grep -Fqx "$LOWPORTS" "$installed" || fail "standalone no longer installs low-ports"
 printf 'install-agent.sh function tests passed\n'

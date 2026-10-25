@@ -26,6 +26,7 @@ const maxMessage = 64 << 10
 // certificate come from the TLS connection – never from a header.
 func (s *Service) Handler() http.Handler {
 	path, h := agentv1connect.NewAgentServiceHandler(&rpc{s: s}, connect.WithReadMaxBytes(maxMessage),
+		connect.WithInterceptors(recoverConnect(s)),
 		connect.WithConditionalHandlerOptions(func(spec connect.Spec) []connect.HandlerOption {
 			if spec.Procedure == agentv1connect.AgentServiceReportProcedure {
 				return []connect.HandlerOption{connect.WithReadMaxBytes(4 << 20)}

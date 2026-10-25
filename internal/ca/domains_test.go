@@ -114,6 +114,23 @@ func TestDomainRefusals(t *testing.T) {
 	}
 }
 
+func TestDomainRejectsCAWithoutServerAuth(t *testing.T) {
+	t.Parallel()
+	v := domainEnv(t)
+	v.intermediate(t, "agent-ca", "root", func(r *IntermediateRequest) { r.EKULimit = []string{"clientAuth"} })
+	request := DomainRequest{Name: "agent-only.lan", DomainSettings: DomainSettings{CA: ptr("agent-ca"), Preset: ptr("server")}, Who: tester}
+	if _, err := v.e.CreateDomain(t.Context(), request); !deniedWith(err, `CA "agent-ca" does not allow serverAuth required by preset "server"`) {
+		t.Fatalf("create with a clientAuth-only CA: %v", err)
+	}
+	d, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.e.UpdateDomain(t.Context(), d.ID, DomainSettings{CA: ptr("agent-ca"), Preset: ptr("server")}, tester); !deniedWith(err, `CA "agent-ca" does not allow serverAuth required by preset "server"`) {
+		t.Fatalf("update to a clientAuth-only CA: %v", err)
+	}
+}
+
 func TestDomainLookup(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)

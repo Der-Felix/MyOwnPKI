@@ -326,6 +326,9 @@ func (s *Service) check(ctx context.Context, row pkidb.AgentEnrollment) error {
 		}
 		return err
 	}
+	if d == nil {
+		return fmt.Errorf("no domain covers %s – an admin of the PKI must add one", row.Hostname)
+	}
 	return s.Checker.Check(ctx, row.Hostname, row.CheckToken, row.CheckToken+"."+row.SpkiSha256, d.AddressPolicy)
 }
 
