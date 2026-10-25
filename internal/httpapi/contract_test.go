@@ -817,11 +817,25 @@ func TestContract(t *testing.T) {
 	// Agents (v0.3): the agent CA, an admitted agent (join token and check,
 	// verified), two enrollments in the queue, and join tokens.
 	admin.stepUp(t, "demo")
-	if _, cerr := v.engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
+	agentCA, err := v.engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
 		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
-	}); cerr != nil {
-		t.Fatal(cerr)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cc := range []struct {
+		op, method, path string
+		body             map[string]any
+	}{
+		{op: "createDomain", method: http.MethodPost, path: "/domains", body: map[string]any{"name": "agent-only.lan", "ca_id": agentCA.ID, "preset": "server"}},
+		{op: "updateDomain", method: http.MethodPatch, path: "/domains/" + keepID, body: map[string]any{"ca_id": agentCA.ID, "preset": "server"}},
+	} {
+		response := admin.do(t, cc.method, cc.path, cc.body)
+		s.check(t, s.routeOf(t, v.api, cc.op), response)
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `CA \"agent-ca\" does not allow serverAuth required by preset \"server\"`) {
+			t.Errorf("%s with a clientAuth-only CA: %d %s", cc.op, response.Code, response.Body.String())
+		}
 	}
 	enrollAgent := func(host, token string) (string, string) {
 		t.Helper()

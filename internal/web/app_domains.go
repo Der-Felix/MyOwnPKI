@@ -64,9 +64,10 @@ func (a *app) domainFields(c *rc, d *ca.Domain) ([]admin.Field, error) {
 		d = &ca.Domain{IncludeSubdomains: true, ChallengeTypes: []string{ca.ChallengeHTTP01, ca.ChallengeDNS01},
 			Approval: ca.ApprovalAccount, Preset: "server", AddressPolicy: ca.AddressInternal}
 	}
-	var caOpts []admin.Option
+	caOpts := []admin.Option{{Value: "", Label: "Please select", Selected: d.CA == ""}}
 	for _, info := range cas {
-		if info.Kind != ca.KindIntermediate || info.Status != ca.StatusActive || info.KeyMode == ca.KeyModeOffline {
+		if info.Kind != ca.KindIntermediate || info.Status != ca.StatusActive || info.KeyMode == ca.KeyModeOffline ||
+			len(info.EKULimit) > 0 && !slices.Contains(info.EKULimit, "serverAuth") {
 			continue
 		}
 		caOpts = append(caOpts, admin.Option{Value: info.Name, Label: info.Name, Selected: info.Name == d.CA})
@@ -94,7 +95,7 @@ func (a *app) domainFields(c *rc, d *ca.Domain) ([]admin.Field, error) {
 		validity = strconv.Itoa(d.ValidityDays)
 	}
 	return []admin.Field{
-		{ID: "ca", Label: "Signing CA", Type: "select", Options: caOpts, Hint: "An intermediate whose name constraints permit the domain."},
+		{ID: "ca", Label: "Signing CA", Type: "select", Required: true, Options: caOpts, Hint: "An intermediate whose name constraints permit the domain and whose EKU limit allows serverAuth."},
 		{ID: "subdomains", Label: "Names below the domain too (nas.homelab.lan for homelab.lan)", Type: "checkbox", Checked: d.IncludeSubdomains},
 		{ID: "wildcards", Label: "Wildcards (*.name) – proven by dns-01 only", Type: "checkbox", Checked: d.Wildcards},
 		{ID: "http01", Label: "http-01 (the server fetches a file on port 80)", Type: "checkbox", Checked: d.AllowsChallenge(ca.ChallengeHTTP01)},

@@ -262,6 +262,9 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 	if err != nil {
 		return nil, nil, err
 	}
+	if denied := checkEKULimit(is.constraints, []asn1.ObjectIdentifier{oidServerAuth}); len(denied) > 0 {
+		problems = append(problems, fmt.Sprintf("CA %q does not allow serverAuth required by preset %q", d.CA, d.Preset))
+	}
 	if is.ca.Kind == KindRoot {
 		return append(problems, "a root CA only signs intermediate CAs – choose an intermediate"), nil, nil
 	}

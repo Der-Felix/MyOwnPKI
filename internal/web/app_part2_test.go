@@ -316,6 +316,51 @@ func tarGz(t *testing.T, dir string) []byte {
 	return buf.Bytes()
 }
 
+func TestDomainFormOffersOnlyServerAuthCAs(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	if _, err := v.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
+		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: testinstance.Console,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	assertChoices := func(page string) {
+		t.Helper()
+		if !strings.Contains(page, `value=""`) || !strings.Contains(page, `value="issuing"`) {
+			t.Errorf("domain form has no neutral placeholder or valid CA: %s", page)
+		}
+		if strings.Contains(page, `value="agent-ca"`) {
+			t.Error("domain form offers a clientAuth-only CA")
+		}
+	}
+	newPage := b.get(t, "/domains/new").html()
+	assertChoices(newPage)
+	if !strings.Contains(newPage, `value="" selected>Please select</option>`) {
+		t.Error("new domain preselects a CA instead of asking for a choice")
+	}
+
+	form := url.Values{"csrf_token": {b.csrf(t)}, "name": {"agent-only.lan"}, "ca": {"agent-ca"}, "subdomains": {"yes"}, "http01": {"yes"},
+		"approval": {"open"}, "preset": {"server"}, "address": {"internal"}}
+	r := b.post(t, "/domains", form)
+	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/domains/new"), "does not allow serverAuth required by preset") {
+		t.Errorf("web refusal does not explain serverAuth: %d", r.Code)
+	}
+	issuing := "issuing"
+	domain, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	editPage := b.get(t, "/domains/"+domain.ID).html()
+	assertChoices(editPage)
+	if !strings.Contains(editPage, `value="issuing" selected>issuing</option>`) {
+		t.Error("edit domain does not keep its current CA selected")
+	}
+}
+
 // TestDomainPages (PHASE2 step 1): create, change, a refused change and the
 // deletion through the forms; viewers see the list without commands.
 func TestDomainPages(t *testing.T) {
