@@ -461,7 +461,9 @@ certificates and ACME keep working meanwhile.
   Reload/TLS-check failure: restore, test the restored files, attempt one reload and verify the old
   leaf of every existing deployment. A rollback failure reports
   `failed` with the original and rollback errors. No retry loop. Hook arguments come only from
-  local configuration and output is discarded; each invocation has a 30-second timeout.
+  local configuration; on failure, the last stderr lines are bounded to 1 KiB of valid UTF-8
+  without control characters and logged as `output`. Hooks must not write secrets to stderr.
+  Each invocation has a 30-second timeout.
 - Without a previous certificate/key, remove newly created files and keep that deployment `failed`.
   For a mixed group restore existing files, remove first-installation files and always run the
   test hooks. If they pass and a reload was attempted, reload once and verify the old fingerprint

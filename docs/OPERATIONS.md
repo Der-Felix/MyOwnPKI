@@ -967,6 +967,10 @@ tested, reloaded and, on failure, rolled back as one group. Automatic renewal ru
 lifetime or earlier when ARI requests it. *Renew now* uses the same path; failures back off rather
 than retrying continuously.
 
+When a hook fails, the last stderr lines are included as `output` in the agent log and in the
+deployment's `last_error`, bounded to 1 KiB of valid UTF-8 without control characters. **Hooks must
+not write secrets to stderr**, even with this filtering.
+
 The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
 `ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
 `@system-service` system calls. Its base writable path is only the state directory. The installer

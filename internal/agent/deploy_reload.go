@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os/exec"
 	"time"
@@ -25,8 +26,15 @@ func (a *Agent) runHook(ctx context.Context, name string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) // #nosec G204 G702 -- only fixed argv from the local root-owned allowlist, never a shell
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard             // hook output can contain secrets
+	var stderr tailWriter
+	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
 	if err := cmd.Run(); err != nil {
+		if output := sanitizeHookOutput(stderr.data); output != "" {
+			if a.log != nil {
+				a.log.Error("deployment hook failed", slog.String("hook", name), slog.Any("error", err), slog.String("output", output))
+			}
+			return fmt.Errorf("hook %q failed: %w; output: %s", name, err, output)
+		}
 		return fmt.Errorf("hook %q failed: %w", name, err)
 	}
 	return nil
