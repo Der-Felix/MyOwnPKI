@@ -138,7 +138,7 @@ func (s *Server) listenAgents(ctx context.Context, lc *net.ListenConfig) error {
 		// WriteTimeout leaves room for the http-01 check inside a call and
 		// for the long-poll of the desired state (at most 50 s, step 8a).
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 120 * time.Second,
-		MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+		MaxHeaderBytes: 16 << 10, ErrorLog: slog.NewLogLogger(httpErrorLogHandler{Handler: s.log.Handler()}, slog.LevelDebug),
 	}
 	s.log.Info("agents listening", slog.String("listen", "https://"+a.ln.Addr().String()), slog.String("base_url", s.opt.Config.Agent.BaseURL),
 		slog.String("agent_ca", a.svc.CA))
