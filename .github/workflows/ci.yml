@@ -339,7 +339,7 @@ jobs:
             sleep 1
           done
           result=$(systemctl show --property Result --value myownpki-agent.service)
-          sudo journalctl -u myownpki-agent.service --no-pager -n 100 > "$RUNNER_TEMP/agent-no-low-ports.log"
+          sudo journalctl -u myownpki-agent.service --no-pager -n 100 | tee "$RUNNER_TEMP/agent-no-low-ports.log" >/dev/null
           if [ "$result" = success ] || ! grep -q 'Permission denied' "$RUNNER_TEMP/agent-no-low-ports.log"; then
             echo '::error::the sandbox test did not detect the missing low-port capability'
             cat "$RUNNER_TEMP/agent-no-low-ports.log"
