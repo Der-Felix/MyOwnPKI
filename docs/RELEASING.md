@@ -66,7 +66,8 @@ $env:NO_PROXY = "github.com,api.github.com"
 ## Before the tag
 
 1. Check the branch: read the report at the top of `docs/NIGHTLOG.md` (after a night run), test in
-   the browser, run `task check`.
+   the browser, run `task check` and `task ci:local`. Include every SKIP line in the release
+   report; a SKIP is not a successful check.
 2. `CHANGELOG.md`: the section `## [<version>] - <date>` must carry the day you push the tag –
    change it if not and commit (`docs: date of v<version>`). The release notes are taken from this
    section; the workflow stops if it is missing. What the workflow will take (Git Bash – the same

@@ -166,15 +166,31 @@ tasks:
     cmds:
       - golangci-lint run ./...
 
-  lint:ci:
-    desc: Lint the GitHub Actions workflows with actionlint (run scripts with ShellCheck, if installed)
+  tools:actionlint:
+    internal: true
+    silent: true
     cmds:
       - |
-        v=$(actionlint -version | head -n 1)
+        if [ ! -x "{{.ROOT_DIR}}/.tools/actionlint{{exeExt}}" ]; then
+          mkdir -p "{{.ROOT_DIR}}/.tools"
+          if command -v actionlint >/dev/null 2>&1; then
+            ln -s "$(command -v actionlint)" "{{.ROOT_DIR}}/.tools/actionlint{{exeExt}}"
+          else
+            GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools" go install "github.com/rhysd/actionlint/cmd/actionlint@v{{.ACTIONLINT_VERSION}}"
+          fi
+        fi
+
+  lint:ci:
+    desc: Lint the GitHub Actions workflows with actionlint (run scripts with ShellCheck, if installed)
+    deps: [tools:actionlint]
+    cmds:
+      - |
+        v=$("{{.ROOT_DIR}}/.tools/actionlint{{exeExt}}" -version | head -n 1)
+        v=${v#v}
         if [ "$v" != "{{.ACTIONLINT_VERSION}}" ]; then
           echo "actionlint: found '$v', expected {{.ACTIONLINT_VERSION}} (https://github.com/rhysd/actionlint/releases)"; exit 1
         fi
-      - actionlint
+      - "{{.ROOT_DIR}}/.tools/actionlint{{exeExt}}"
 
   release:check:
     desc: Check .goreleaser.yaml with the pinned GoReleaser (needs goreleaser, see Taskfile.yml)
@@ -243,6 +259,11 @@ tasks:
       - task: lint
       - task: test
       - task: build
+
+  ci:local:
+    desc: 'Run every locally possible CI step in CI order, with a PASS/FAIL/SKIP table (options: --list, --only JOB)'
+    cmds:
+      - bash scripts/ci/local.sh {{.CLI_ARGS}}
 
   clean:
     desc: Remove build output

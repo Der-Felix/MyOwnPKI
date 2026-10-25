@@ -46,8 +46,15 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
 - **Generated code** (templ, sqlc) is regenerated with `task generate`
   and committed.
 - **API changes** go into `api/openapi.yaml` first (ADR-05) and pass `task lint:api` (vacuum).
-- **Workflow changes** pass `task lint:ci` (actionlint). Both tools are pinned binaries – versions in
-  `Taskfile.yml`; CI runs them on every push.
+- **Workflow changes** put new or changed steps in `scripts/ci` and register them in
+  `scripts/ci/local.sh`. Run `task ci:local` and `task lint:ci` (actionlint), and report every
+  SKIP line. Use `task ci:local -- --list` or `-- --only JOB` to inspect or select jobs. Both
+  lint tools are pinned binaries – versions in `Taskfile.yml`; CI runs them on every push.
+  `MYOWNPKI_CI_REMOTE_HOST` is reserved for a future remote Linux runner; remote execution
+  requires owner approval and is not implemented. Set `MYOWNPKI_CI_DISPOSABLE=1` **only on a
+  machine that will be discarded afterwards**: the guarded systemd/install steps replace units,
+  binaries and state as root. Without GitHub Actions or this explicit opt-in they are skipped;
+  the scripts also refuse to overwrite a pre-existing installation.
 
 ## Commits and pull requests
 
