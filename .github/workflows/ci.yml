@@ -300,6 +300,25 @@ jobs:
             --workdir /src \
             nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903 \
             bash -c 'nginx -v && go test -count=1 -v ./internal/server -run "^(TestAgentEndToEnd|TestRenewNowOverRESTServesNewCertificate)$" && go test -count=1 -v -tags e2etest ./internal/agent -run "^(TestNginxDeployProfiles|TestNginxStagedFaultRollsBack)$"'
+      # Measure the production unit before any CI-only drop-ins are installed.
+      - name: systemd-analyze verify and security
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/myownpki-agent" ./cmd/myownpki-agent
+          sudo install -m 0755 "$RUNNER_TEMP/myownpki-agent" /usr/local/bin/myownpki-agent
+          sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
+          sudo systemctl daemon-reload
+          systemd-analyze verify /etc/systemd/system/myownpki-agent.service
+          systemd-analyze security --no-pager myownpki-agent.service | tee "$RUNNER_TEMP/agent-security.txt"
+          exposure=$(sed -n 's/.*Overall exposure level for .*: \([0-9.]*\).*/\1/p' "$RUNNER_TEMP/agent-security.txt")
+          [ -n "$exposure" ] || { echo '::error::no overall exposure in systemd-analyze output'; exit 1; }
+          {
+            printf '### systemd-analyze security myownpki-agent.service\n\nOverall exposure: **%s** (systemd %s)\n\n' \
+              "$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
+            printf '<details><summary>All checks</summary>\n\n```text\n'
+            cat "$RUNNER_TEMP/agent-security.txt"
+            printf '```\n\n</details>\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Run nginx itself, not a look-alike, under the real unit. Exporting the
       # pinned image supplies its matching loader and libraries; no apt package
       # or second image is needed. Only ExecStart is replaced for this test.
@@ -308,7 +327,18 @@ jobs:
           image=nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903
           rootfs=/var/lib/myownpki-agent-e2e/rootfs
           container=$(docker create "$image")
-          trap 'docker rm -f "$container" 2>/dev/null || true' EXIT
+          cleanup_agent_e2e() {
+            if [ -n "${container:-}" ]; then
+              docker rm -f "$container" 2>/dev/null || true
+            fi
+            sudo systemctl stop myownpki-agent.service >/dev/null 2>&1 || true
+            sudo rm -rf /etc/systemd/system/myownpki-agent.service.d \
+              /etc/systemd/system/myownpki-agent.service /var/lib/myownpki-agent-e2e \
+              /usr/local/bin/myownpki-agent
+            sudo systemctl reset-failed myownpki-agent.service >/dev/null 2>&1 || true
+            sudo systemctl daemon-reload
+          }
+          trap cleanup_agent_e2e EXIT
           sudo rm -rf /var/lib/myownpki-agent-e2e
           sudo install -d -m 0755 "$rootfs"
           docker export "$container" | sudo tar -x -C "$rootfs"
@@ -375,24 +405,6 @@ jobs:
             exit 1
           fi
           systemctl show --property Result --property ExecMainStatus myownpki-agent.service
-
-      - name: systemd-analyze verify and security
-        run: |
-          go build -trimpath -o "$RUNNER_TEMP/myownpki-agent" ./cmd/myownpki-agent
-          sudo install -m 0755 "$RUNNER_TEMP/myownpki-agent" /usr/local/bin/myownpki-agent
-          sudo install -m 0644 deploy/systemd/myownpki-agent.service /etc/systemd/system/myownpki-agent.service
-          sudo systemctl daemon-reload
-          systemd-analyze verify /etc/systemd/system/myownpki-agent.service
-          systemd-analyze security --no-pager myownpki-agent.service | tee "$RUNNER_TEMP/agent-security.txt"
-          exposure=$(sed -n 's/.*Overall exposure level for .*: \([0-9.]*\).*/\1/p' "$RUNNER_TEMP/agent-security.txt")
-          [ -n "$exposure" ] || { echo '::error::no overall exposure in systemd-analyze output'; exit 1; }
-          {
-            printf '### systemd-analyze security myownpki-agent.service\n\nOverall exposure: **%s** (systemd %s)\n\n' \
-              "$exposure" "$(systemctl --version | awk 'NR == 1 { print $2 }')"
-            printf '<details><summary>All checks</summary>\n\n```text\n'
-            cat "$RUNNER_TEMP/agent-security.txt"
-            printf '```\n\n</details>\n'
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the
