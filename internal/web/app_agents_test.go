@@ -228,6 +228,46 @@ func TestAgentPages(t *testing.T) {
 	}
 }
 
+func TestDashboardExcludesAgentIdentitiesAndWarnsPerAgent(t *testing.T) {
+	t.Parallel()
+	v, svc := newAgentsUIEnv(t)
+	firstToken, _, err := svc.CreateJoinToken(t.Context(), testinstance.Console, "first", []string{"proxy1.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll(t, svc, "proxy1.homelab.lan", firstToken, "0.3.0")
+	deployment, err := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"app.homelab.lan"}, ValidityDays: 10, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Clock.Advance(5*24*time.Hour + 12*time.Hour)
+	secondToken, _, err := svc.CreateJoinToken(t.Context(), testinstance.Console, "second", []string{"proxy2.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll(t, svc, "proxy2.homelab.lan", secondToken, "0.3.0")
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	page := b.get(t, "/").html()
+	if !strings.Contains(page, "The agent certificate of proxy1.homelab.lan expires") || strings.Contains(page, "The agent certificate of proxy2.homelab.lan") {
+		t.Error("dashboard does not warn only for the agent whose certificate has less than 48 hours left")
+	}
+	if !regexp.MustCompile(`(?s)<dt>Expire in 30 days</dt>\s*<dd>\s*<a[^>]*>1</a>`).MatchString(page) {
+		t.Error("30-day count includes agent identity certificates")
+	}
+	_, expiring, found := strings.Cut(page, `id="h-expiring"`)
+	if !found {
+		t.Fatal("dashboard expiry section missing")
+	}
+	if strings.Contains(expiring, "proxy1.homelab.lan") || strings.Contains(expiring, "proxy2.homelab.lan") || !strings.Contains(expiring, deployment.SerialHex) {
+		t.Error("dashboard expiry table does not contain exactly the end-entity certificates")
+	}
+	linked := b.get(t, "/certificates?status=expiring").html()
+	if strings.Contains(linked, "proxy1.homelab.lan") || strings.Contains(linked, "proxy2.homelab.lan") || !strings.Contains(linked, deployment.SerialHex) {
+		t.Error("Show expiring does not exclude only agent identity certificates")
+	}
+}
+
 func TestAgentCertificateFilter(t *testing.T) {
 	t.Parallel()
 	v, svc := newAgentsUIEnv(t)

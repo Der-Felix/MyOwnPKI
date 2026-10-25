@@ -18,12 +18,14 @@ SELECT c.ca_id,
                                    AND c.not_after <= CAST(?2 AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expiring,
        CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(?2 AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS valid
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+WHERE CAST(?3 AS INTEGER) = 0 OR NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by))
 GROUP BY c.ca_id
 `
 
 type CountCertificatesParams struct {
-	Now  string
-	Soon string
+	Now        string
+	Soon       string
+	HideAgents int64
 }
 
 type CountCertificatesRow struct {
@@ -38,7 +40,7 @@ type CountCertificatesRow struct {
 // (not revoked, past notAfter), expiring (valid, notAfter before soon) and
 // valid (the rest). The caller drops the CAs the user may not read.
 func (q *Queries) CountCertificates(ctx context.Context, arg CountCertificatesParams) ([]CountCertificatesRow, error) {
-	rows, err := q.db.QueryContext(ctx, countCertificates, arg.Now, arg.Soon)
+	rows, err := q.db.QueryContext(ctx, countCertificates, arg.Now, arg.Soon, arg.HideAgents)
 	if err != nil {
 		return nil, err
 	}

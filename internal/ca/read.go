@@ -364,9 +364,10 @@ type Counts struct {
 func (c Counts) Total() int64 { return c.Valid + c.Expired + c.Revoked }
 
 // CertificateCounts counts the certificates who may read, in total and per
-// issuing CA ID.
-func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, map[string]Counts, error) {
+// issuing CA ID. An optional filter excludes agent identity certificates.
+func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who, filters ...CertificateFilter) (Counts, map[string]Counts, error) {
 	now := e.now()
+	hideAgents := len(filters) > 0 && filters[0].HideAgentCertificates
 	q := pkidb.New(e.PKI)
 	cas, err := q.ListCAs(ctx)
 	if err != nil {
@@ -376,7 +377,7 @@ func (e *Engine) CertificateCounts(ctx context.Context, who keys.Who) (Counts, m
 	for _, c := range cas {
 		names[c.ID] = c.Name
 	}
-	rows, err := q.CountCertificates(ctx, pkidb.CountCertificatesParams{Now: now.Format(dbTime), Soon: now.Add(ExpiringWindow).Format(dbTime)})
+	rows, err := q.CountCertificates(ctx, pkidb.CountCertificatesParams{HideAgents: boolInt(hideAgents), Now: now.Format(dbTime), Soon: now.Add(ExpiringWindow).Format(dbTime)})
 	if err != nil {
 		return Counts{}, nil, err
 	}

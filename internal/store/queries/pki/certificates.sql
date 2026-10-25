@@ -54,6 +54,7 @@ SELECT c.ca_id,
                                    AND c.not_after <= CAST(sqlc.arg(soon) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS expiring,
        CAST(coalesce(sum(CASE WHEN r.certificate_id IS NULL AND c.not_after > CAST(sqlc.arg(soon) AS TEXT) THEN 1 ELSE 0 END), 0) AS INTEGER) AS valid
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+WHERE CAST(sqlc.arg(hide_agents) AS INTEGER) = 0 OR NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by))
 GROUP BY c.ca_id;
 
 -- name: CountFingerprint :one
