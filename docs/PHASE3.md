@@ -601,3 +601,212 @@ Nothing else is opened on the host; in standalone mode port 80 is open only whil
 
 Nothing is open for v0.3.0. With monitoring (v0.3.x): Q7 (notification defaults) and Q8 (TLS scan
 of SANs).
+
+---
+
+## 8. v0.3.1 (owner decisions, 2026-10-25)
+
+v0.3.1 makes agent installation a guided, verifiable operation, revokes certificates after a proven
+replacement, makes the step-up lifetime configurable and continues a web action after its second
+factor. **Steps 15–19 are v0.3.1. Step 20 (the knowledge base) is only reserved for v0.3.2.**
+Monitoring (steps 11–13) comes after that; it is not pulled into v0.3.1.
+
+### 8.1 Work plan and evidence
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 15 | 0.3.1 | **Agent packages and one setup path.** GoReleaser's nFPM integration (no Go dependency) builds `myownpki-agent` as `.deb` and `.rpm` for linux/amd64 and linux/arm64: binary, unit and drop-ins as examples, `agent.yaml` as a conffile, no service start before enrollment. The logic of `install-agent.sh` moves to `myownpki-agent setup`: server URL, root SHA-256, webroot or standalone, optional `--token-file`, optional `--low-ports`. Tarball and packages use the same setup code. | Inspect both package formats on both architectures. Fresh installation never starts or enables the service. `setup` is idempotent, preserves an existing `agent.yaml`, checks the root fingerprint, writes token files 0600 and starts only after admission; a pending approval prints the later start command. Tarball and package runs produce the same effective configuration. Shell/Go tests and real systemd installation in Linux CI. |
+| 16 | 0.3.1 | **Distribution and guided installation.** `install.sh` installs and updates the matching agent `.deb`, `.rpm` and tarball beside the server, always checked against `checksums.txt`; never mixed versions. The server image already contains the same immutable artifacts (§8.2). The agent listener offers only the manifest-listed artifacts and their checksums for unauthenticated read. *Agents → Install agent* builds the complete root/fingerprint, package/checksum, install and `setup` commands; optional host-scoped, one-time join token. Agent list marks older agents and shows the update command. | Wrong root fingerprint, changed artifact, changed checksum, wrong version and path traversal all stop before installation. No client certificate is needed only for those reads; enrollment and every other RPC still requires its existing authentication. No arbitrary filesystem path, redirect or command is accepted. Web tests cover roles, CSRF, one token shown once and absent from argv, URL and logs. Linux E2E installs the served package, verifies and enrolls, and updates an older agent. |
+| 17 | 0.3.1 | **Revoke superseded certificates after a proven replacement.** A new accepted `deployed` report revokes the previously deployed certificate and older, never-deployed certificates of the same ACME account and exact deployment-name set with reason `superseded`. Never revoke a certificate currently served by any deployment of this agent, never for `failed` or `rolled_back`, and never across accounts. Tenant setting `revoke_superseded_deployments`, default on. | Test previous deployment, aborted/failed orders, exact set equality and multiple candidates. Current-serving certificates of every deployment, same serial, failed, rolled_back, newer certificates and other accounts stay valid. Ambiguous mapping logs and revokes nothing. Repeated reports stay idempotent. Old and new certificates and separately produced CRLs are checked; unchanged serials cause no mass revocation on upgrade. |
+| 18 | 0.3.1 | **Step-up lifetime per tenant.** Tenant setting `step_up_minutes`: 5, 10, 15, 30 or 60 minutes, default remains today's 5. Admin only, with audit; applies to new step-up proofs, not retroactively to existing timestamps. | Every allowed value works; another number, zero, negative and values above 60 are refused. Viewer/operator get 403, admin change is audited. Fake-clock tests cover exact expiry at the selected duration and the unchanged default. |
+| 19 | 0.3.1 | **Continue the web action after step-up.** A required second factor creates a server-side pending action, bound to the session, valid at most 5 minutes, single-use and protected by the existing CSRF check. The challenge page states the action. Correct proof executes the original normalized action once instead of asking for its inputs again. Nothing sensitive goes into a URL. | Fake-clock and handler tests: action executes exactly once; replay, other session, expired entry and wrong CSRF fail. Action summary is visible. No pending ID appears in URL, access log, redirect or HTML attribute other than the POST field. Server restart discards it safely. Injected action names/fields are refused. A business failure cannot cause a replay. REST contract remains unchanged. |
+| 20 | **0.3.2 only** | **Knowledge Base as GitHub Wiki.** Sources under `docs/wiki/`; CI checks links. A command copies them into a separate Wiki checkout; the owner commits and pushes. Then monitoring. | `task wiki:check` finds a missing local target and a broken relative anchor; no network-dependent link test. `task wiki:sync` copies only the documented source set and prints the resulting `git status`; it never commits or pushes and never touches the main checkout. |
+| 21 | 0.3.1 | **Trust without self-confirmation.** Trust page and admin UI show SHA-256 and SHA-1, the latter only for comparison with the Windows certificate dialog. SHA-256 remains authoritative and tools verify only SHA-256. The Windows helper has no embedded expected fingerprint: it shows both and imports only after the user confirms an independent comparison, or automatically with `-ExpectedSha256 <value>` from the admin UI. The same rule applies to generated agent-install commands. | UI tests for both labels and SHA-256 authority. Helper tests prove no embedded expectation, SHA-256/SHA-1 display, mismatch aborts without import, match or explicit user confirmation imports. `-ExpectedSha256` uses only the authenticated-UI value. Agent-install tests show that no expected value is derived from the downloaded certificate or artifact. |
+
+Once `fix/ci-local` is merged, the Linux evidence for steps 15 and 16 runs through `task ci:local`
+and the corresponding `scripts/ci/` entries. The same script is the single source for local and
+GitHub Actions execution; new or changed checks are registered there rather than duplicated inline.
+
+### 8.2 Design decisions
+
+**Package contents and setup.**
+
+- Packages install files only. There are no package-script hooks, service enablement or enrollment at
+  package installation time. `agent.yaml` is a conffile and is never silently replaced. The unit and
+  drop-ins are examples until `setup` installs/enables them.
+- `setup` owns the behavior that was in `install-agent.sh`: validate server URL and root fingerprint,
+  create state/config/drop-ins, honor webroot/standalone and `--low-ports`, enroll, and only then
+  enable/start. A pending enrollment leaves the service disabled and prints the command for after
+  approval. Update mode keeps local configuration and restarts an already enrolled service.
+- `install-agent.sh` becomes, if retained for one release, a thin compatibility wrapper around the
+  binary from the verified tarball. It contains no second setup implementation. The documented
+  default is the package or tarball plus `setup`.
+- The server-side `install.sh` stores the agent artifacts in a new, explicitly configured
+  `agent.package_dir` (host default `/var/lib/myownpki/agent-dist`). It downloads both package
+  formats and the tarball of its **own exact version**, verifies every file against the release
+  `checksums.txt`, and stops on a missing/changed file. It never installs or enrolls an agent on the
+  PKI server itself.
+- **Docker solution:** GoReleaser puts those same files and `checksums.txt` into the server image
+  under `/opt/myownpki/agent-dist`; `agent.package_dir` points there in the container. No runtime
+  download is needed. The directory is read-only to the server process and is the only source of
+  the download manifest. Development without these files returns 404, not an empty manifest.
+- The artifact manifest maps a small allowlist of version, format and architecture to exact files.
+  There is no user-provided filesystem path, symlink following, directory listing, upload, delete,
+  redirect or proxy fetch. Package and checksum downloads are immutable and bounded in size. The
+  agent listener's other procedures are unchanged.
+- The UI flow is admin-only with fresh step-up because it can create a join token. A token has the
+  exact hostname, one use and a 15-minute expiry. It is displayed once, written by the operator to a
+  root-only file (0600) and passed only through `--token-file`; it never appears in an argument,
+  URL, report, access log or page after the first display.
+
+**The guided commands and their trust chain.**
+
+1. Download the root as PEM from the existing public trust-page endpoint over HTTP and compare its
+   SHA-256 fingerprint with the value shown by the admin UI. HTTP alone is not trusted; the
+   comparison with the value seen in the authenticated UI is the trust decision.
+2. Download the selected package and `checksums.txt` from the agent listener over HTTPS using that
+   verified root, then check the package against the displayed/listed SHA-256. A checksum fetched
+   over HTTP can never authorize an installation.
+3. Install the package with the OS package manager (or unpack the tarball).
+4. Run `myownpki-agent setup` with the server URL, expected root fingerprint and local mode. Use a
+   token file when a token was requested. The generated commands are copyable; downloaded content
+   is never piped into a shell, and no token appears in the command line.
+
+The agent list compares its reported agent version with the server version. An older agent gets an
+informational hint and the same verified package/update command for its installed format and
+architecture. There is no automatic update or remote command. A newer agent remains compatible via
+the additive protobuf rules; no downgrade is suggested.
+
+**Superseded certificates.**
+
+- Compare the previously stored serial before applying the accepted report. Revoke only on a real
+  serial transition to `deployed`, which already means the TLS check passed. The previous
+  certificate's issuance record must be linked to the same `acme_accounts.agent_id`; otherwise it is
+  left valid and the mismatch is logged for diagnosis, without granting a cross-account revocation.
+- Extend `pki.db` with `agent_deployment_certificates(agent_id, deployment, certificate_id,
+  first_deployed_at, last_deployed_at)`, unique over all three IDs. An accepted `deployed` report
+  inserts or updates this history. **Never deployed** means no accepted row in this history, not
+  merely a different current state. A failed or aborted order has no such row; a previously deployed
+  one has it. Every serial currently reported as `deployed` by any deployment of this agent is
+  excluded in every case.
+- The mapping is three-way and exact: the account is the authenticated agent's linked ACME account;
+  the normalized, sorted, duplicate-free identifier set of the ACME order must equal the report's
+  deployment-name set; and the candidate certificate's `created_at` must be before the `created_at`
+  of the newly confirmed certificate. No agent-provided timestamp decides age. The newly confirmed
+  certificate itself and anything newer is excluded.
+- For the newly deployed serial, require one certificate/order record with that exact account and
+  name set. For each older candidate, require its own exact record. If the current mapping is not
+  unique, an order is missing, names differ or timestamps tie, **revoke nothing in that ambiguous
+  group and log the ambiguity**. Never guess by hostname alone or revoke another account's
+  certificate. An otherwise valid candidate whose own record is clear is not blocked by an
+  unrelated, already revoked duplicate.
+- Revocation, report/history update, certificate linkage and `agent.deployment.superseded` audit
+  enqueue happen in one `pki.db` transaction. An already revoked certificate is idempotent and
+  creates no duplicate audit entry. The tenant setting is read for that report; changing it is
+  admin-only and audited.
+- **CRL production stays outside this transaction and follows the existing CRL scheduler.** A report
+  fails only for a real database error, never because a CRL has not been produced yet and never
+  merely because the mapping was ambiguous. The agent repeats a real failure with its ordinary
+  report backoff; it does not spin through the 60 reports/10 minutes limit. A later scheduled report
+  can complete an interrupted transaction and remains idempotent.
+
+**Step-up continuation.**
+
+- Pending actions live in **server memory**, not in the browser or a URL. A 256-bit random ID is the
+  lookup key in a POST field; a restart discards the entry and tells the user to start the action
+  again. There is no persistent payload to leak through a database export and no new database schema.
+- Each entry contains session ID, user ID, credentials epoch, creation/expiry time and an
+  **allowlisted action type with normalized target/parameters**, never a callback or arbitrary raw
+  request. Summary text is built by the server and contains no secret values. Existing role and
+  object checks run again at execution.
+- The existing step-up form remains POST+CSRF. Session, credentials epoch and absolute/idle expiry
+  are checked again. The pending entry expires independently after at most 5 minutes, even when the
+  configured step-up lifetime is longer.
+- Consumption is atomic under a mutex: the entry is marked consumed before the business handler can
+  run, so double-click, concurrent tabs and retry cannot execute it twice. A crash or business error
+  does not silently replay it; the operator starts over deliberately. The business audit entry is
+  written once by the original action, not once for the challenge and once for the continuation.
+- **REST stays as it is.** Its `step-up-required` response is an explicit, stateless contract for
+  API clients; each request already carries its action and CSRF/auth proof. Introducing a stored
+  one-time continuation would change retry semantics and require clients to keep UI state. API
+  clients repeat the original operation with a fresh proof instead.
+
+**Trust without self-confirmation.**
+
+- The trust page and the authenticated CA/agent pages show SHA-256 and SHA-1. SHA-1 is labeled
+  explicitly **only for comparison with the Windows certificate dialog**, never as the authoritative
+  integrity check. SHA-256 remains the value every tool checks; SHA-1 is display-only.
+- The Windows helper contains no expected fingerprint. It computes and shows both values. Import
+  requires the user's confirmation that the values were compared with an independently obtained
+  SHA-256, or the explicit `-ExpectedSha256 <value>` parameter. Automation accepts that parameter
+  only as an exact 64-hex-character value shown by the authenticated admin UI. A mismatch, malformed
+  value or unattended missing comparison stops before any store change.
+- Every generated command follows the same rule: expected roots, certificate fingerprints and
+  package checksums come from the authenticated UI, never from the certificate, artifact, download
+  page or checksum file being verified. Agent installation therefore cannot confirm a malicious
+  root or package with its own data.
+
+**Knowledge base reserved for 0.3.2.**
+
+`task wiki:check` validates local Markdown targets and relative anchors deterministically; external
+URLs do not require network access in CI. `task wiki:sync -- /path/to/wiki-checkout` copies the
+reviewed source set and prints `git status`, including deletions for the owner to review. It never
+commits, pushes, switches the main checkout or deletes the Wiki checkout.
+
+### 8.3 Security and operational risks
+
+- **Unauthenticated artifact reads:** artifacts contain no tenant data or secrets and are generic,
+  but their integrity is not taken from transport or a checksum alone. The out-of-band root
+  fingerprint, HTTPS and package SHA-256 form the complete chain. A wrong root or package fails
+  closed. Only manifest-listed immutable files are public.
+- **Package and update execution:** package files and the guided commands are executed by the
+  administrator, never by the server on itself. No autostart, no remote update command and no second
+  implementation in shell reduce the risk of executing unexpected content. Checksums are verified
+  before any binary is installed.
+- **Superseded revocation:** account ownership and a proven TLS-serving state are mandatory. This
+  avoids a compromised report revoking another account's certificate or a failed rollback revoking
+  the still-serving old certificate. The setting can disable the behavior during migration review.
+- **Pending-action replay and tampering:** session and credentials binding, short expiry, CSRF,
+  action allowlisting and atomic single consumption are all required. Raw form actions, arbitrary
+  callbacks and URL state are refused. A pending entry never changes who may perform the action.
+- **Sensitive data:** pending actions stay in memory and are not logged. Join tokens are shown once
+  and accepted only through a 0600 file. `setup` and package scripts never print them. There is no
+  sensitive value in generated URLs, redirects, action summaries or REST responses.
+
+### 8.4 Owner decisions (2026-10-25)
+
+1. Package CI uses pinned containers for **Debian 12 and 13, Ubuntu 24.04, and Rocky/Alma 9 and 10**.
+   There is no apt/yum repository metadata in this release.
+2. `agent.package_dir` is accepted: `/var/lib/myownpki/agent-dist` on hosts and
+   `/opt/myownpki/agent-dist` in Docker.
+3. `install-agent.sh` stays for one release as a thin wrapper with a deprecation notice and is
+   removed in v0.3.2. The shared implementation is `myownpki-agent setup`.
+4. An agent downgrade is allowed only when the administrator explicitly invokes the package manager.
+   The UI never suggests a downgrade; protobuf compatibility checks remain mandatory.
+5. Pending-action summaries show only the action and non-secret target. Sensitive parameters stay
+   in memory and are never logged, as inventoried below.
+
+| Action | Parameters held in the pending entry | What the summary shows |
+|---|---|---|
+| Revoke certificate | certificate ID, reason | Common name, serial and reason; no key material |
+| Download private key | certificate ID | Common name and serial; never the private key |
+| Export certificate / PKCS#12 | certificate ID, format, password, delete-key flag | Common name, serial, format and deletion choice; never password, key or bundle |
+| Create/import CA; offline flow | parent, CA name, subject, algorithm, validity, path length, constraints, EKU limit, base URL, public CSR/certificate PEM | CA name, parent and operation; public policy only, never private keys or full PEM |
+| Change CA limits, sign/upload CRL | CA ID, limits, CRL PEM | CA name and operation or limits; no full CRL |
+| Renew, retire or revoke CA | CA ID, reason | CA name, generation when applicable and reason |
+| Create join token | label, hostname/patterns, TTL | Label, exact hostname/patterns and expiry; never token or token hash |
+| Approve/deny enrollment | enrollment ID | Hostname and approve/deny, no CSR or handle |
+| Add/remove agent name | agent ID, add/remove, name/pattern | Hostname, operation and name/pattern |
+| Disable/enable/revoke agent | agent ID | Hostname and operation |
+| Renew/withdraw deployment | agent ID, deployment name | Hostname, deployment and renew/withdraw |
+| Create user | username, initial password, role, scope, instance-admin flag | Username, role, scope and instance-admin choice; never password, TOTP secret or recovery codes |
+| Change user roles, unlock, disable/enable | user ID, role, scope | Username and role/scope or account operation |
+| Change own password | current and new password values | "Change your password"; no values |
+| Change authenticator or make recovery codes | current password, confirmation code | Operation only; no password, secret or recovery code |
+| Create API token | name, role, scope, days | Name, role, scope and expiry; never token secret |
+| Revoke API token | token ID | Token name only, never token secret |
+| Remove passkey | passkey ID, current password | Passkey name only; no password or credential data |
+
+The table is exhaustive for the existing step-up-protected web forms. New actions must be added to it
+with their allowlisted parameter shape before continuation is enabled. A pending action never uses a
+raw request body or a caller-provided callback.
