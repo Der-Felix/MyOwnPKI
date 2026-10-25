@@ -70,7 +70,13 @@ templ KVList(rows []view.KV) {
 	<dl class="kv">
 		for _, r := range rows {
 			<dt>{ r.Key }</dt>
-			<dd class={ templ.KV("mono", r.Mono) }>{ r.Value }</dd>
+			<dd class={ templ.KV("mono", r.Mono) }>
+				if r.Href != "" {
+					<a href={ templ.SafeURL(r.Href) }>{ r.Value }</a>
+				} else {
+					{ r.Value }
+				}
+			</dd>
 		}
 	</dl>
 }

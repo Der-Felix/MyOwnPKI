@@ -190,6 +190,7 @@ type Command struct {
 // TableData is a table with commands and filters.
 type TableData struct {
 	RefreshURL string // optional passive fragment polling
+	Adaptive  bool   // wrap every column instead of scrolling narrow tables
 	Messages []view.Message
 	Title    string // a heading (in sections)
 	Commands []Command
@@ -249,7 +250,7 @@ templ tableBody(d TableData) {
 		if len(d.Rows) == 0 {
 			<p class="empty">{ d.Empty }</p>
 		} else {
-			<div class="table-wrap">
+			<div class={ "table-wrap", templ.KV("table-adaptive", d.Adaptive) }>
 				<table class="table">
 					<thead>
 						<tr>

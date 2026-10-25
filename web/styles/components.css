@@ -262,6 +262,23 @@
   overflow-x: auto;
 }
 
+.table-adaptive {
+  overflow-x: visible;
+}
+
+.table-adaptive .table {
+  table-layout: fixed;
+}
+
+.table-adaptive .table th,
+.table-adaptive .table td,
+.table-adaptive .table td.mono,
+.table-adaptive .table td.nowrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

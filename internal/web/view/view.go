@@ -119,6 +119,7 @@ type Message struct {
 // KV is one row of a key/value list.
 type KV struct {
 	Key, Value string
+	Href       string
 	Mono       bool
 }
 

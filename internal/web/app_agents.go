@@ -83,17 +83,17 @@ func (a *app) agentDetail(c *rc) {
 		cert = ag.CertSerial
 	}
 	st := a.agentStatus(*ag)
-	sections := []admin.Section{{KV: []view.KV{
+	sections := []admin.Section{{Text: []string{"The agent certificate is valid for 7 days and renewed by the agent at 2/3 of its lifetime."}, KV: []view.KV{
 		{Key: "Host", Value: ag.Hostname}, {Key: "Status", Value: st.Text}, {Key: "Agent", Value: ag.ID},
 		{Key: "System", Value: ag.OS + "/" + ag.Arch + ", agent " + orDash(ag.Version)}, {Key: "Last seen", Value: dateTime(ag.LastSeenAt)},
-		{Key: "Admitted", Value: dateTime(ag.ApprovedAt) + " by " + ag.ApprovedBy + " (mode " + ag.EnrollmentMode + ")"},
-		{Key: "Agent certificate (serial)", Value: cert},
+		{Key: "Admitted", Value: dateTime(ag.ApprovedAt) + " by " + ag.ApprovedBy},
+		{Key: "Agent certificate (serial)", Value: cert, Mono: true},
 	}}}
 	deployments := a.agentDeploymentTable(c, ag)
 	deployments.RefreshURL = "/agents/" + ag.ID + "/deployments"
 	sections = append(sections, admin.Section{Table: &deployments})
 	if ag.CertificateID != "" {
-		sections[0].Text = []string{"The agent certificate (7 days, renewed by the agent at 2/3) is under Certificates: /certificates/" + ag.CertificateID}
+		sections[0].KV = append(sections[0].KV, view.KV{Key: "Certificate page", Value: "View agent certificate", Href: "/certificates/" + ag.CertificateID})
 	}
 	names := &admin.TableData{Title: "Names it may order", Empty: "None.", Columns: []admin.Column{{Label: "Name"}, {Label: "From"}, {Label: "Added"}}}
 	var nameOpts []admin.Option
@@ -133,9 +133,17 @@ func (a *app) agentDetail(c *rc) {
 }
 
 func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
-	t := admin.TableData{Title: "Deployments", Empty: "This agent has not reported any deployments yet.", Columns: []admin.Column{
+	t := admin.TableData{Title: "Deployments", Empty: "This agent has not reported any deployments yet.", Adaptive: true, Columns: []admin.Column{
 		{Label: "Deployment"}, {Label: "State"}, {Label: "Serial"}, {Label: "Expires"}, {Label: "Last error"}, {Label: "Renewal"},
 	}}
+	patterns := make([]string, 0, len(ag.Names))
+	for _, name := range ag.Names {
+		patterns = append(patterns, name.Pattern)
+	}
+	lastSeen := ag.LastSeenAt
+	if lastSeen.IsZero() {
+		lastSeen = ag.ApprovedAt
+	}
 	for _, d := range ag.Deployments {
 		status := view.StatusNeutral
 		switch d.State {
@@ -157,6 +165,18 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 			}
 			details += strings.Join(d.Names, ", ")
 		}
+		var refused []string
+		for _, name := range d.Names {
+			if !agents.MatchesAny(patterns, name) {
+				refused = append(refused, name)
+			}
+		}
+		if len(refused) > 0 {
+			if details != "" {
+				details += " · "
+			}
+			details += "not covered by Names it may order: " + strings.Join(refused, ", ") + "; the ACME server will refuse them"
+		}
 		if d.Removed {
 			if details != "" {
 				details += " · "
@@ -170,6 +190,9 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 		if pending {
 			renew.Label = "Requested"
 			renewal.Rel = dateTime(d.RenewRequestedAt) + " by " + d.RenewRequestedBy
+			if ag.Silent(a.now()) {
+				renewal.Rel = "waiting for the agent (last seen " + dateTime(lastSeen) + ")"
+			}
 			renewal.Posts = []admin.PostCommand{renew, {Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/withdraw",
 				CSRF: c.sess.CSRFToken, Label: "Withdraw", Disabled: !c.may(authz.RenewAgent, "")}}
 		}

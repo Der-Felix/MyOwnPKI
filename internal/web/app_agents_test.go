@@ -139,8 +139,8 @@ func TestAgentPages(t *testing.T) {
 	}
 	caller := &agents.Caller{Agent: pkidb.Agent{ID: id}, Who: testinstance.Console}
 	reports := []agents.DeploymentReport{
-		{Name: "proxy", Profile: "nginx", State: "deployed", Serial: "AA", NotAfter: v.Clock.Now().Add(24 * time.Hour).Format(time.RFC3339)},
-		{Name: "broken", Profile: "file", State: "failed", LastError: "<img src=x onerror=alert(1)>"},
+		{Name: "proxy", Profile: "nginx", Names: []string{"proxy1.homelab.lan", "other.homelab.lan"}, State: "deployed", Serial: "AA", NotAfter: v.Clock.Now().Add(24 * time.Hour).Format(time.RFC3339)},
+		{Name: "broken", Profile: "file", Names: []string{"app.apps.homelab.lan"}, State: "failed", LastError: "<img src=x onerror=alert(1)>"},
 		{Name: "removed", Profile: "file", State: "rolled_back"},
 	}
 	report := agents.ReportInput{Version: "<script>x</script>", OS: "linux", Arch: "amd64", Deployments: reports}
@@ -156,10 +156,14 @@ func TestAgentPages(t *testing.T) {
 	}
 	detail := b.get(t, "/agents/"+id).html()
 	for _, want := range []string{"*.apps.homelab.lan", "token", "Add name", "Disable agent", "Revoke agent", "&lt;script&gt;",
-		"deployed", "failed", "rolled back", "AA", "Renew now", "Requested", "Withdraw", "not in the agent configuration", "&lt;img src=x onerror=alert(1)&gt;"} {
+		"deployed", "failed", "rolled back", "AA", "Renew now", "Requested", "Withdraw", "not in the agent configuration", "&lt;img src=x onerror=alert(1)&gt;",
+		"table-adaptive", "not covered by Names it may order: other.homelab.lan; the ACME server will refuse them", "View agent certificate"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("agent page lacks %q", want)
 		}
+	}
+	if strings.Contains(detail, "mode verified (mode verified)") || strings.Contains(detail, "Certificates: /certificates/") {
+		t.Error("agent page repeats the enrollment mode or shows a naked certificate path")
 	}
 	if !strings.Contains(detail, `action="/agents/`+id+`/deployments/removed/withdraw"`) || !strings.Contains(detail, `name="csrf_token" value="`+token+`"`) {
 		t.Error("withdraw has no form with the session's CSRF token")
@@ -225,6 +229,34 @@ func TestAgentPages(t *testing.T) {
 		if page.Code != http.StatusOK || strings.Contains(page.html(), "Create token") || strings.Contains(page.html(), "Revoke agent") {
 			t.Errorf("viewer %s: %d", p, page.Code)
 		}
+	}
+}
+
+func TestAgentSilentRenewalWaitsForAgent(t *testing.T) {
+	t.Parallel()
+	v, svc := newAgentsUIEnv(t)
+	secret, _, err := svc.CreateJoinToken(t.Context(), testinstance.Console, "silent", []string{"proxy1.homelab.lan"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll(t, svc, "proxy1.homelab.lan", secret, "0.3.0")
+	list, err := svc.ListAgents(t.Context(), testinstance.Console)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("agent missing: %v", err)
+	}
+	id := list[0].ID
+	caller := &agents.Caller{Agent: pkidb.Agent{ID: id}, Who: testinstance.Console}
+	if err := svc.Report(t.Context(), caller, agents.ReportInput{Deployments: []agents.DeploymentReport{{Name: "proxy", State: "deployed"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestRenewal(t.Context(), testinstance.Console, id, "proxy"); err != nil {
+		t.Fatal(err)
+	}
+	v.Clock.Advance(15 * time.Minute)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "waiting for the agent (last seen ") {
+		t.Error("a silent agent with an open request has no waiting explanation")
 	}
 }
 
