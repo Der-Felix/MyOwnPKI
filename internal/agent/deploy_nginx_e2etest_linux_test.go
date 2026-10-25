@@ -88,3 +88,28 @@ func TestNginxStagedFaultRollsBack(t *testing.T) {
 		})
 	}
 }
+
+func TestNginxPort443InSystemdSandbox(t *testing.T) {
+	if os.Getenv("MYOWNPKI_SYSTEMD_E2E") != "1" {
+		t.Skip("runs only as the ExecStart of the real unit in the agent CI job")
+	}
+	bin, err := exec.LookPath("nginx")
+	if err != nil {
+		t.Fatal("nginx is required in the systemd sandbox")
+	}
+	prefix := "/var/lib/myownpki-agent/nginx-e2e"
+	if err := os.MkdirAll(prefix, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(prefix, "nginx.conf")
+	configuration := fmt.Sprintf("pid %s;\nerror_log /var/log/nginx/myownpki-agent-e2e-error.log;\nevents {}\nhttp { access_log off; server { listen 0.0.0.0:443; server_name _; return 200; } }\n",
+		strconv.Quote(filepath.Join(prefix, "nginx.pid")))
+	if err := os.WriteFile(configPath, []byte(configuration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{cfg: &Config{Hooks: map[string][]string{"test": {bin, "-p", prefix, "-c", configPath, "-t", "-q"}}}}
+	group := reloadGroup{deployments: []Deployment{{Name: "proxy", TestHook: "test"}}}
+	if err := a.runTests(t.Context(), group); err != nil {
+		t.Fatalf("nginx -t on port 443 failed inside the real unit: %v", err)
+	}
+}
