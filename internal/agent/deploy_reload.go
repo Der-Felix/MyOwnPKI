@@ -98,6 +98,9 @@ func (a *Agent) deployGroup(ctx context.Context, group reloadGroup, materials ma
 		}
 		return a.rollback(ctx, group, j, false, err)
 	}
+	if err := a.injectStagedFault(group); err != nil {
+		return a.rollback(ctx, group, j, false, err)
+	}
 	if err := a.runTests(ctx, group); err != nil {
 		return a.rollback(ctx, group, j, false, err)
 	}

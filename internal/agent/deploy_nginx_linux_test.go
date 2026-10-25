@@ -20,6 +20,9 @@ import (
 func TestNginxDeployProfiles(t *testing.T) {
 	bin, err := exec.LookPath("nginx")
 	if err != nil {
+		if os.Getenv("MYOWNPKI_REQUIRE_NGINX") == "1" {
+			t.Fatal("nginx is required by the agent end-to-end CI job")
+		}
 		t.Skip("nginx is not installed; the Linux agent CI container runs this test")
 	}
 	for _, profile := range []string{ProfileNginx, ProfileFile} {
