@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"runtime"
 	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -348,7 +349,7 @@ func TestWatchBackoffDoublesCapsAndResets(t *testing.T) {
 	}
 }
 
-func TestServerRestartReconnectsManyAgentsWithoutBurst(t *testing.T) {
+func TestManyAgentsReconnectWithFullJitterAfterRestart(t *testing.T) {
 	const count = 64
 	inst := testinstance.New(t, testinstance.Options{})
 	f := inst.Clock
@@ -370,67 +371,51 @@ func TestServerRestartReconnectsManyAgentsWithoutBurst(t *testing.T) {
 	if err := old.RequestRenewal(t.Context(), testinstance.Console, callers[0].Agent.ID, "proxy"); err != nil {
 		t.Fatal(err)
 	}
-
-	var current atomic.Pointer[serveragents.Service]
-	current.Store(old)
-	var restarting atomic.Bool
-	var entered, connected atomic.Int64
-	var mu sync.Mutex
-	buckets := map[int64]int{}
-	ctx, cancel := context.WithCancel(t.Context())
-	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
-	for i, caller := range callers {
-		desiredVersion := int64(1)
-		if i == 0 {
-			desiredVersion = 2
-		}
-		var waitingOnce sync.Once
-		client := runtimeClient{watch: func(ctx context.Context, req *connect.Request[agentv1.WatchDesiredStateRequest]) (*connect.Response[agentv1.WatchDesiredStateResponse], error) {
-			svc := current.Load()
-			if svc == old && req.Msg.KnownVersion == desiredVersion {
-				waitingOnce.Do(func() { entered.Add(1) })
-			}
-			if restarting.Load() && svc != old && req.Msg.KnownVersion == desiredVersion {
-				mu.Lock()
-				buckets[f.Now().UnixNano()/int64(100*time.Millisecond)]++
-				mu.Unlock()
-				connected.Add(1)
-			}
-			state, err := svc.WatchDesiredState(ctx, caller, req.Msg.KnownVersion)
-			if err != nil {
-				return nil, err
-			}
-			out := &agentv1.WatchDesiredStateResponse{Version: state.Version, Changed: state.Changed, AllowedNames: state.AllowedNames}
-			for _, d := range state.Deployments {
-				out.Deployments = append(out.Deployments, &agentv1.DesiredDeployment{Name: d.Name, RenewRequestedAt: d.RequestedAt, RenewalVersion: d.RenewalVersion})
-			}
-			return connect.NewResponse(out), nil
-		}}
-		a := runtimeAgent(f, client)
-		a.Random = func() float64 { return (float64(i) + 0.5) / count }
-		workers.Go(func() { a.watchLoop(ctx, make(chan *agentv1.WatchDesiredStateResponse, 1)) })
-	}
-	awaitRuntime(t, func() bool { return entered.Load() == count && f.Waiting() == count })
 	old.CloseWatches()
 	restarted := &serveragents.Service{PKI: inst.PKIDB.Write, Clock: f, Sleep: f.Sleep}
-	current.Store(restarted)
 	state, err := restarted.WatchDesiredState(t.Context(), callers[0], 0)
 	if err != nil || state.Version != 2 || len(state.Deployments) != 1 || state.Deployments[0].RenewalVersion != 2 {
 		t.Fatalf("outstanding request lost at restart: %+v, %v", state, err)
 	}
-	restarting.Store(true)
-	awaitRuntime(t, func() bool { return f.Waiting() == count })
-	for step := 1; step <= 10; step++ {
-		f.Advance(100 * time.Millisecond)
-		want := int64(float64(step)*float64(count)/10 + 0.5)
-		awaitRuntime(t, func() bool { return connected.Load() >= want })
+
+	type reconnect struct {
+		at     time.Time
+		agent  int
+		jitter time.Duration
 	}
-	if connected.Load() != count {
-		t.Fatal("agents did not reconnect within their backoff")
+	start := f.Now()
+	events := make([]reconnect, 0, count)
+	for i := range count {
+		a := &Agent{Random: func() float64 { return (float64(i) + 0.5) / count }}
+		delay := a.watchBackoffDelay(time.Second)
+		if delay < 0 || delay >= time.Second {
+			t.Fatalf("full jitter outside [0,1s): %v", delay)
+		}
+		events = append(events, reconnect{at: start.Add(delay), agent: i, jitter: delay})
 	}
-	mu.Lock()
-	defer mu.Unlock()
+	sort.Slice(events, func(i, j int) bool { return events[i].at.Before(events[j].at) })
+	buckets := map[int64]int{}
+	connected := 0
+	for _, event := range events {
+		f.Set(event.at)
+		caller := callers[event.agent]
+		knownVersion := int64(1)
+		if event.agent == 0 {
+			knownVersion = 2
+		}
+		// Cancellation releases an unchanged long-poll synchronously. The
+		// server has already authenticated, limited and read the reconnect.
+		callCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := restarted.WatchDesiredState(callCtx, caller, knownVersion); !errors.Is(err, context.Canceled) {
+			t.Fatalf("reconnect %d: %v", event.agent, err)
+		}
+		buckets[event.at.UnixNano()/int64(100*time.Millisecond)]++
+		connected++
+	}
+	if connected != count {
+		t.Fatalf("reconnected=%d, want %d", connected, count)
+	}
 	for _, size := range buckets {
 		if size > 7 {
 			t.Fatalf("reconnect burst=%d agents in one fake 100ms bucket", size)

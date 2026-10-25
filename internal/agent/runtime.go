@@ -148,6 +148,10 @@ func (a *Agent) reportLoop(ctx context.Context) {
 	}
 }
 
+func (a *Agent) watchBackoffDelay(backoff time.Duration) time.Duration {
+	return time.Duration(a.fraction() * float64(backoff))
+}
+
 func (a *Agent) watchLoop(ctx context.Context, updates chan<- *agentv1.WatchDesiredStateResponse) {
 	var version int64
 	backoff := time.Second
@@ -165,7 +169,7 @@ func (a *Agent) watchLoop(ctx context.Context, updates chan<- *agentv1.WatchDesi
 			if ctx.Err() != nil {
 				return
 			}
-			if a.Sleep(ctx, time.Duration(a.fraction()*float64(backoff))) != nil {
+			if a.Sleep(ctx, a.watchBackoffDelay(backoff)) != nil {
 				return
 			}
 			backoff = min(2*backoff, time.Minute)
