@@ -2566,6 +2566,7 @@ components:
           items: { $ref: "#/components/schemas/AgentName" }
 
     AgentDeployment:
+      description: "Deployment state reported by an agent as display data, and its open renewal request"
       type: object
       additionalProperties: false
       required: [name, profile, names, challenge, state, serial, certificate_id, not_after, deployed_at, fingerprint, last_error, last_report_at, renew_requested_at, renew_requested_by, removed]
