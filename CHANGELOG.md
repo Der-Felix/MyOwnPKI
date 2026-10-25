@@ -7,6 +7,14 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Fixed
+
+- Enrollment without a matching domain stores a clear failed check instead of panicking; the
+  service and Connect-RPC both return the pending enrollment with that explanation.
+- Handler panics are logged at error level with the RPC procedure and stack on the agent listener;
+  HTTP server panics are also logged at error level on the admin and ACME listeners.
+- `install-agent.sh` no longer claims that a token file was kept when enrollment ran without one.
+
 ## [0.3.0] - 2026-10-25
 
 The Linux agent: trusted enrollment, ACME issuance, atomic deployment with rollback, scheduled

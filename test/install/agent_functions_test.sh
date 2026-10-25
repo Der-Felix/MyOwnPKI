@@ -39,4 +39,26 @@ fi
 if (parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/missing.pem"); then
 	fail "missing CA bundle accepted"
 fi
+
+cat >"$tmp/agent-fails" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod 0755 "$tmp/agent-fails"
+BIN=$tmp/agent-fails
+CONF=$tmp/agent.yaml
+DATA=$tmp/state
+mkdir "$DATA"
+token_file=
+if message=$(enroll 2>&1); then
+	fail "failing enrollment without a token succeeded"
+fi
+[ "$message" = "install-agent.sh: enrollment failed – see the message above; run the script again after fixing it" ] ||
+	fail "wrong tokenless enrollment error: $message"
+token_file=$tmp/token
+if message=$(enroll 2>&1); then
+	fail "failing enrollment with a token succeeded"
+fi
+[ "$message" = "install-agent.sh: enrollment failed; the token file was kept" ] ||
+	fail "wrong enrollment error with a token: $message"
 printf 'install-agent.sh function tests passed\n'

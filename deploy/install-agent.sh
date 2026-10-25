@@ -254,7 +254,12 @@ enroll() {
 	[ ! -f "$DATA/agent.json" ] || return 0
 	local args=(enroll --config "$CONF")
 	[ -z "$token_file" ] || args+=(--token-file "$token_file")
-	"$BIN" "${args[@]}" || die "enrollment failed; the token file was kept"
+	if ! "$BIN" "${args[@]}"; then
+		if [ -n "$token_file" ]; then
+			die "enrollment failed; the token file was kept"
+		fi
+		die "enrollment failed – see the message above; run the script again after fixing it"
+	fi
 	if [ -f "$DATA/agent.json" ] && [ -n "$token_file" ]; then
 		rm -f "$token_file"
 		changed "deleted the used token file"
