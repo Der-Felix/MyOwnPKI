@@ -40,13 +40,18 @@ type agentEnv struct {
 	webroot string   // or a real webroot directory (the agent writes into it)
 }
 
-func newAgentEnv(t *testing.T) *agentEnv {
+func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 	t.Helper()
 	cfg := testConfig(t)
 	cfg.Agent.BaseURL, cfg.Agent.Listen, cfg.Agent.TLSIssuer, cfg.Agent.CA = "https://pki.homelab.lan:8444", "127.0.0.1:0", "issuing", "agent-ca"
 	cfg.ACME.BaseURL, cfg.ACME.Listen, cfg.ACME.TLSIssuer = "https://pki.homelab.lan/acme", "127.0.0.1:0", "issuing"
+	opt := Options{Config: cfg, Log: slog.New(slog.DiscardHandler), Hostname: "pki01", Version: "test"}
+	for _, fn := range configure {
+		fn(&opt)
+	}
+	cfg = opt.Config
 	pass := initialized(t, cfg)
-	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.DiscardHandler), Hostname: "pki01", Version: "test"})
+	srv, err := Open(t.Context(), opt)
 	if err != nil {
 		t.Fatal(err)
 	}
