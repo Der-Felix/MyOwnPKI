@@ -158,6 +158,8 @@ jobs:
       - name: GoReleaser (draft release, image, signatures)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # An RC and the final tag may share a commit: never choose via git describe.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
         run: goreleaser release --clean --release-notes "$RUNNER_TEMP/notes.md"
 
       - name: Log out of GHCR

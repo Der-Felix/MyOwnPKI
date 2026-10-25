@@ -138,7 +138,9 @@ git tag -a "v${VERSION}" -m "MyOwnPKI v${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-The workflow refuses a tag whose commit is not on main. When it is done, check the draft:
+The workflow refuses a tag whose commit is not on main. It sets `GORELEASER_CURRENT_TAG` to the
+pushed tag because an RC and the final release can point to the same commit; `git describe` could
+otherwise select the RC instead of the final tag. When it is done, check the draft:
 
 ```bash
 RELEASE="${VERSION}"
