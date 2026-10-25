@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"testing"
 	"unicode"
 	"unicode/utf8"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestSanitizeHookOutputIsBoundedUTF8AndPlainText(t *testing.T) {
@@ -25,6 +28,24 @@ func TestSanitizeHookOutputIsBoundedUTF8AndPlainText(t *testing.T) {
 	}
 	if strings.Contains(output, "first line") || !strings.Contains(output, "last line") {
 		t.Fatalf("output is not the sanitized tail: %q", output)
+	}
+}
+
+func TestDeployErrorClippingKeepsUTF8AtRuneBoundary(t *testing.T) {
+	t.Parallel()
+	boundary := strings.Repeat("a", 999) + "é" + "tail"
+	for name, output := range map[string]string{
+		"safeDeployError": safeDeployError(errors.New(boundary)),
+		"clippedError":    clippedError(errors.New(boundary), 1000),
+		"hookOutput":      sanitizeHookOutput([]byte(strings.Repeat("a", 1023) + "é" + "tail")),
+	} {
+		if !utf8.ValidString(output) || len(output) > hookOutputLimit {
+			t.Errorf("%s split a rune or exceeded the limit: len=%d valid=%v", name, len(output), utf8.ValidString(output))
+		}
+	}
+	report := reportDeployment(Deployment{Name: "proxy"}, DeploymentResult{State: "failed", LastError: safeDeployError(errors.New(boundary))})
+	if _, err := proto.Marshal(report); err != nil {
+		t.Fatalf("last_error cannot be marshaled: %v", err)
 	}
 }
 

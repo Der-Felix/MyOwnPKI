@@ -13,6 +13,29 @@ const (
 
 type tailWriter struct{ data []byte }
 
+// clipUTF8 limits valid UTF-8 text to a byte budget without splitting a rune.
+// With keepTail it keeps the end, otherwise the beginning.
+func clipUTF8(text string, limit int, keepTail bool) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(text) <= limit {
+		return text
+	}
+	if keepTail {
+		start := len(text) - limit
+		for start < len(text) && !utf8.RuneStart(text[start]) {
+			start++
+		}
+		return text[start:]
+	}
+	end := limit
+	for end > 0 && !utf8.RuneStart(text[end]) {
+		end--
+	}
+	return text[:end]
+}
+
 func (w *tailWriter) Write(p []byte) (int, error) {
 	if len(p) >= hookOutputCapture {
 		w.data = append(w.data[:0], p[len(p)-hookOutputCapture:]...)
@@ -34,13 +57,8 @@ func sanitizeHookOutput(data []byte) string {
 			out.WriteRune(r)
 		}
 	}
-	clean := out.String()
-	if len(clean) > hookOutputLimit {
-		start := len(clean) - hookOutputLimit
-		for start < len(clean) && !utf8.RuneStart(clean[start]) {
-			start++
-		}
-		clean = clean[start:]
+	clean := clipUTF8(out.String(), hookOutputLimit, true)
+	if len(out.String()) > hookOutputLimit {
 		if newline := strings.IndexByte(clean, '\n'); newline >= 0 {
 			clean = clean[newline+1:]
 		}

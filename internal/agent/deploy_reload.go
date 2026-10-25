@@ -217,7 +217,7 @@ func clippedError(err error, limit int) string {
 	}
 	text := err.Error()
 	if len(text) > limit {
-		return text[:limit] + "..."
+		return clipUTF8(text, limit, false) + "..."
 	}
 	return text
 }

@@ -207,7 +207,7 @@ func safeDeployError(err error) string {
 	}
 	text := err.Error()
 	if len(text) > 1000 {
-		return text[:1000] + "..."
+		return clipUTF8(text, 1000, false) + "..."
 	}
 	return text
 }
