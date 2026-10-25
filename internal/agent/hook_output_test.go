@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -55,6 +56,40 @@ func TestAgentHookHelper(t *testing.T) {
 	}
 	_, _ = fmt.Fprint(os.Stderr, os.Getenv("MYOWNPKI_AGENT_HOOK_OUTPUT"))
 	os.Exit(1)
+}
+
+func TestHookAndRollbackErrorsKeepOutputTail(t *testing.T) {
+	t.Parallel()
+	r := newDeployRig(t, ProfileNginx)
+	r.installOld(t)
+	output := "first line\n" + strings.Repeat("x", 1800) + "\nFINAL_NGINX_ERROR"
+	if combined := joinedDeployError(errors.New(hookErrorText("reload", errors.New("exit status 1"), output)), errors.New(hookErrorText("reload", errors.New("exit status 1"), output))); !strings.Contains(combined, "rollback failed") {
+		t.Fatalf("combined error lost rollback suffix: %s", combined)
+	}
+	r.a.runHookForTest = func(_ context.Context, name string) error {
+		if name == "reload" {
+			return errors.New(hookErrorText(name, errors.New("exit status 1"), output))
+		}
+		return nil
+	}
+	group := groups(r.a.cfg.Deployments)[0]
+	journal, err := r.a.stageGroup(group, map[string]*Material{"service0": testMaterial(t, "service0.homelab.lan", 900)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, passErr := r.a.rollback(t.Context(), group, journal, true, errors.New(hookErrorText("reload", errors.New("exit status 1"), output)))
+	if len(results) != 1 {
+		t.Fatalf("results=%d", len(results))
+	}
+	message := results[0].LastError
+	if len(message) > deployErrorLimit || !utf8.ValidString(message) {
+		t.Fatalf("invalid last_error: len=%d valid=%v", len(message), utf8.ValidString(message))
+	}
+	for _, want := range []string{`hook "reload" failed: exit status 1`, "FINAL_NGINX_ERROR", "rollback failed"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("last_error lacks %q (state=%s, pass error=%v): %s", want, results[0].State, passErr, message)
+		}
+	}
 }
 
 func TestRunHookFailureLogsAndReturnsSanitizedStderr(t *testing.T) {

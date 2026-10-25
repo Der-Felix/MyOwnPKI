@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -34,6 +35,39 @@ func clipUTF8(text string, limit int, keepTail bool) string {
 		end--
 	}
 	return text[:end]
+}
+
+const deployErrorLimit = 1000
+
+// clipDeployErrorText keeps the error prefix and, when stderr follows, its
+// tail. This preserves the hook name and the final diagnostic line.
+func clipDeployErrorText(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	const marker = "; output: "
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return clipUTF8(text, limit, false)
+	}
+	prefix := text[:index+len(marker)]
+	if len(prefix) >= limit {
+		return clipUTF8(prefix, limit, false)
+	}
+	return prefix + clipUTF8(text[len(prefix):], limit-len(prefix), true)
+}
+
+func hookErrorText(name string, cause error, output string) string {
+	prefix := fmt.Sprintf("hook %q failed: %v", name, cause)
+	if output == "" {
+		return clipDeployErrorText(prefix, deployErrorLimit)
+	}
+	return clipDeployErrorText(prefix+"; output: "+output, deployErrorLimit)
+}
+
+func joinedDeployError(cause, rollbackErr error) string {
+	suffix := clipDeployErrorText("; rollback failed: "+rollbackErr.Error(), deployErrorLimit/2)
+	return clipDeployErrorText(cause.Error(), deployErrorLimit-len(suffix)) + suffix
 }
 
 func (w *tailWriter) Write(p []byte) (int, error) {

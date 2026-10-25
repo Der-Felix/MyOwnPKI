@@ -33,9 +33,9 @@ func (a *Agent) runHook(ctx context.Context, name string) error {
 			if a.log != nil {
 				a.log.Error("deployment hook failed", slog.String("hook", name), slog.Any("error", err), slog.String("output", output))
 			}
-			return fmt.Errorf("hook %q failed: %w; output: %s", name, err, output)
+			return errors.New(hookErrorText(name, err, output))
 		}
-		return fmt.Errorf("hook %q failed: %w", name, err)
+		return errors.New(hookErrorText(name, err, ""))
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ func (a *Agent) rollback(ctx context.Context, group reloadGroup, j *deployJourna
 		hasFirst = hasFirst || meta.First
 		message := safeDeployError(problem)
 		if rollbackErr != nil {
-			message = clippedError(cause, 450) + "; rollback failed: " + clippedError(rollbackErr, 450)
+			message = joinedDeployError(cause, rollbackErr)
 		}
 		results = append(results, DeploymentResult{Name: meta.Name, State: state, Serial: meta.OldSerial, NotAfter: meta.OldNotAfter,
 			Fingerprint: observed[meta.Name], LastError: message})
@@ -198,7 +198,7 @@ func (a *Agent) rollback(ctx context.Context, group reloadGroup, j *deployJourna
 	if rollbackErr != nil {
 		for i := range results {
 			results[i].State = "failed"
-			results[i].LastError = clippedError(cause, 450) + "; rollback failed: " + clippedError(rollbackErr, 450)
+			results[i].LastError = joinedDeployError(cause, rollbackErr)
 		}
 		if serr := a.saveDeploymentResults(results); serr != nil {
 			rollbackErr = errors.Join(rollbackErr, serr)
@@ -215,9 +215,5 @@ func clippedError(err error, limit int) string {
 	if err == nil {
 		return ""
 	}
-	text := err.Error()
-	if len(text) > limit {
-		return clipUTF8(text, limit, false) + "..."
-	}
-	return text
+	return clipDeployErrorText(err.Error(), limit)
 }

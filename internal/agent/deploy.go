@@ -202,14 +202,7 @@ func groupFailure(group reloadGroup, cause error) []DeploymentResult {
 }
 
 func safeDeployError(err error) string {
-	if err == nil {
-		return ""
-	}
-	text := err.Error()
-	if len(text) > 1000 {
-		return clipUTF8(text, 1000, false) + "..."
-	}
-	return text
+	return clippedError(err, deployErrorLimit)
 }
 
 func (a *Agent) deploymentResults() ([]DeploymentResult, error) {
