@@ -330,6 +330,15 @@ jobs:
           } | sudo tee /etc/systemd/system/myownpki-agent.service.d/99-ci.conf >/dev/null
           sudo install -d -m 0700 "$rootfs/var/lib/myownpki-agent"
           sudo install -d -m 0755 "$rootfs/var/log/nginx"
+          nginx_uid=$(awk -F: '$1 == "nginx" { print $3 }' "$rootfs/etc/passwd")
+          nginx_gid=$(awk -F: '$1 == "nginx" { print $4 }' "$rootfs/etc/passwd")
+          [ -n "$nginx_uid" ] && [ -n "$nginx_gid" ] || { echo '::error::nginx user missing in the pinned image'; exit 1; }
+          for directory in body fastcgi proxy scgi uwsgi; do
+            sudo install -d -m 0755 -o "$nginx_uid" -g "$nginx_gid" "$rootfs/var/lib/nginx/$directory"
+          done
+          for directory in client_temp fastcgi_temp proxy_temp scgi_temp uwsgi_temp; do
+            sudo install -d -m 0755 -o "$nginx_uid" -g "$nginx_gid" "$rootfs/var/cache/nginx/$directory"
+          done
           sudo systemctl daemon-reload
           # Negative control: without CAP_NET_BIND_SERVICE the same nginx test
           # must fail and its sanitized stderr must explain the missing right.
@@ -340,7 +349,7 @@ jobs:
           done
           result=$(systemctl show --property Result --value myownpki-agent.service)
           sudo journalctl -u myownpki-agent.service --no-pager -n 100 | tee "$RUNNER_TEMP/agent-no-low-ports.log" >/dev/null
-          if [ "$result" = success ] || ! grep -q 'Permission denied' "$RUNNER_TEMP/agent-no-low-ports.log"; then
+          if [ "$result" = success ] || ! grep -Fq 'bind() to 0.0.0.0:443 failed (13: Permission denied)' "$RUNNER_TEMP/agent-no-low-ports.log"; then
             echo '::error::the sandbox test did not detect the missing low-port capability'
             cat "$RUNNER_TEMP/agent-no-low-ports.log"
             exit 1

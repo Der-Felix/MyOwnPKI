@@ -984,6 +984,9 @@ drop-in to contain **exactly the state, webroot and deployment parent directorie
 ReadWritePaths=/var/lib/myownpki-agent /var/www/html /etc/nginx/myownpki /var/log/nginx
 ```
 
+If `nginx -t` reports `Read-only file system` for its temporary directories, add those directories
+to `10-paths.conf` as well (for example the `/var/cache/nginx` and `/var/lib/nginx` subdirectories).
+
 Do not make `/etc`, `/var` or `/` writable. The sandbox prevents writes outside the allowed paths
 and thereby contains filesystem mistakes in the agent. It is **not a security boundary against
 code running as root in the agent process**: `systemctl reload` needs access to systemd over D-Bus,
