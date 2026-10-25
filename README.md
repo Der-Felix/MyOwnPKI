@@ -75,7 +75,7 @@ curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
 sha256sum --check --ignore-missing checksums.txt
-sudo bash install.sh --tls-names "pki.homelab.lan, 192.168.10.5"
+sudo bash install.sh --tls-names "pki.homelab.lan, 192.0.2.5"
 ```
 
 It checks the archive it downloads (SHA-256, and the Sigstore signature when cosign is installed –

@@ -405,13 +405,13 @@ func TestTLSIssuer(t *testing.T) {
 		want string
 	}{
 		"admin: no names":    {func(c *Config) { c.Admin.TLSIssuer = "issuing" }, "admin.tls_issuer needs admin.tls_names"},
-		"admin: bad CA name": {func(c *Config) { c.Admin.TLSIssuer, c.Admin.TLSNames = "Issuing CA", "pki.u.lab" }, "is not a CA name"},
+		"admin: bad CA name": {func(c *Config) { c.Admin.TLSIssuer, c.Admin.TLSNames = "Issuing CA", "pki.homelab.lan" }, "is not a CA name"},
 		"admin: and own files": {func(c *Config) {
-			c.Admin.TLSIssuer, c.Admin.TLSNames, c.Admin.TLSCertFile, c.Admin.TLSKeyFile = "issuing", "pki.u.lab", "/c", "/k"
+			c.Admin.TLSIssuer, c.Admin.TLSNames, c.Admin.TLSCertFile, c.Admin.TLSKeyFile = "issuing", "pki.homelab.lan", "/c", "/k"
 		}, "set one of them"},
 		"acme: no base URL":   {func(c *Config) { c.ACME.TLSIssuer = "issuing" }, "acme.tls_issuer needs acme.base_url"},
-		"acme: http base URL": {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "issuing", "http://pki.u.lab/acme" }, "must be https://"},
-		"acme: bad CA name":   {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "../x", "https://pki.u.lab/acme" }, "is not a CA name"},
+		"acme: http base URL": {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "issuing", "http://pki.homelab.lan/acme" }, "must be https://"},
+		"acme: bad CA name":   {func(c *Config) { c.ACME.TLSIssuer, c.ACME.BaseURL = "../x", "https://pki.homelab.lan/acme" }, "is not a CA name"},
 	} {
 		c := base
 		tc.mod(&c)
@@ -420,12 +420,12 @@ func TestTLSIssuer(t *testing.T) {
 		}
 	}
 	good := base
-	good.Admin.TLSIssuer, good.Admin.TLSNames = "issuing", "pki.u.lab, 172.20.23.20"
-	good.ACME.TLSIssuer, good.ACME.BaseURL, good.ACME.Listen = "issuing", "https://PKI.u.lab/acme", ":443"
+	good.Admin.TLSIssuer, good.Admin.TLSNames = "issuing", "pki.homelab.lan, 192.0.2.20"
+	good.ACME.TLSIssuer, good.ACME.BaseURL, good.ACME.Listen = "issuing", "https://PKI.homelab.lan/acme", ":443"
 	if err := good.Validate(); err != nil {
 		t.Error(err)
 	}
-	if !good.ACME.DirectTLS() || base.ACME.DirectTLS() || ACMEHost(good.ACME.BaseURL) != "pki.u.lab" {
+	if !good.ACME.DirectTLS() || base.ACME.DirectTLS() || ACMEHost(good.ACME.BaseURL) != "pki.homelab.lan" {
 		t.Errorf("direct TLS %v/%v, host %q", good.ACME.DirectTLS(), base.ACME.DirectTLS(), ACMEHost(good.ACME.BaseURL))
 	}
 }

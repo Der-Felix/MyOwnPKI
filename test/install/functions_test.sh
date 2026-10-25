@@ -44,38 +44,38 @@ rc_of() {
 }
 
 # "This machine": two IPv4 addresses and one IPv6 address.
-own_addresses() { printf '%s\n' 172.20.23.20 10.9.8.7 2001:db8::20; }
-own_name() { echo pki.u.lab; }
+own_addresses() { printf '%s\n' 192.0.2.20 198.51.100.7 2001:db8::20; }
+own_name() { echo pki.homelab.lan; }
 
 reset_opts
 parse_args
 defaults
-check "default tls_names" "$tls_names" "pki.u.lab, 172.20.23.20, 10.9.8.7, 2001:db8::20"
+check "default tls_names" "$tls_names" "pki.homelab.lan, 192.0.2.20, 198.51.100.7, 2001:db8::20"
 check "default admin.listen" "$admin_listen" "0.0.0.0:9443"
-check "default allowed_networks: loopback for the health check, the /24s" "$allowed" "127.0.0.1, 172.20.23.0/24, 10.9.8.0/24"
+check "default allowed_networks: loopback for the health check, the /24s" "$allowed" "127.0.0.1, 192.0.2.0/24, 198.51.100.0/24"
 check "default public.listen" "$public_listen" ":8080"
 check "no config options" "$config_opts" "false"
 
 reset_opts
 parse_args --admin-listen "[::]:9443"
 defaults
-check "[::] listen: ::1 for the health check" "$allowed" "::1, 172.20.23.0/24, 10.9.8.0/24"
+check "[::] listen: ::1 for the health check" "$allowed" "::1, 192.0.2.0/24, 198.51.100.0/24"
 
 reset_opts
-parse_args --version v0.2.1 --tls-names "pki.u.lab, 172.20.23.20" --admin-listen 172.20.23.20:9443 \
-	--allowed-networks "192.168.5.0/24,10.0.0.0/8" --public-port-80
+parse_args --version v0.2.1 --tls-names "pki.homelab.lan, 192.0.2.20" --admin-listen 192.0.2.20:9443 \
+	--allowed-networks "198.51.100.0/24,10.0.0.0/8" --public-port-80
 defaults
 check "--version without v" "$version" "0.2.1"
-check "--tls-names" "$tls_names" "pki.u.lab, 172.20.23.20"
-check "--allowed-networks plus the listen address" "$allowed" "172.20.23.20, 192.168.5.0/24, 10.0.0.0/8"
+check "--tls-names" "$tls_names" "pki.homelab.lan, 192.0.2.20"
+check "--allowed-networks plus the listen address" "$allowed" "192.0.2.20, 198.51.100.0/24, 10.0.0.0/8"
 check "--public-port-80" "$public_listen" ":80"
 check "config options seen" "$config_opts" "true"
 
 # The generated config: exactly the four keys changed, and config check passes.
 render_config "$root/deploy/config.example.yaml" >"$tmp/config.yaml"
 check "changed lines (3 header + 4 keys)" "$(diff "$root/deploy/config.example.yaml" "$tmp/config.yaml" | grep -c '^>')" "7"
-check "admin.listen" "$(config_value "$tmp/config.yaml" admin listen)" "172.20.23.20:9443"
-check "admin.allowed_networks" "$(config_value "$tmp/config.yaml" admin allowed_networks)" "172.20.23.20, 192.168.5.0/24, 10.0.0.0/8"
+check "admin.listen" "$(config_value "$tmp/config.yaml" admin listen)" "192.0.2.20:9443"
+check "admin.allowed_networks" "$(config_value "$tmp/config.yaml" admin allowed_networks)" "192.0.2.20, 198.51.100.0/24, 10.0.0.0/8"
 check "public.listen" "$(config_value "$tmp/config.yaml" public listen)" ":80"
 check "acme.listen untouched" "$(config_value "$tmp/config.yaml" acme listen)" "127.0.0.1:8081"
 check "data_dir" "$(config_value "$tmp/config.yaml" "" data_dir)" "/var/lib/myownpki"
@@ -96,13 +96,13 @@ check "--public-port-80: low ports" "$low_ports" "true"
 # --acme: ACME with its own TLS – three more keys, the port of the URL, the
 # low-ports drop-in only below 1024.
 reset_opts
-parse_args --acme https://pki.u.lab/acme/
+parse_args --acme https://pki.homelab.lan/acme/
 defaults
-check "--acme: base URL without the trailing slash" "$opt_acme" "https://pki.u.lab/acme"
+check "--acme: base URL without the trailing slash" "$opt_acme" "https://pki.homelab.lan/acme"
 check "--acme: port 443, low ports, CA issuing" "$acme_port $low_ports $opt_acme_ca" "443 true issuing"
 render_config "$root/deploy/config.example.yaml" >"$tmp/acme.yaml"
 check "--acme: changed lines (3 header + 6 keys; public.listen stays :8080)" "$(diff "$root/deploy/config.example.yaml" "$tmp/acme.yaml" | grep -c '^>')" "9"
-check "--acme: acme.base_url" "$(config_value "$tmp/acme.yaml" acme base_url)" "https://pki.u.lab/acme"
+check "--acme: acme.base_url" "$(config_value "$tmp/acme.yaml" acme base_url)" "https://pki.homelab.lan/acme"
 check "--acme: acme.listen" "$(config_value "$tmp/acme.yaml" acme listen)" ":443"
 check "--acme: acme.tls_issuer" "$(config_value "$tmp/acme.yaml" acme tls_issuer)" "issuing"
 check "--acme: admin.listen still set" "$(config_value "$tmp/acme.yaml" admin listen)" "0.0.0.0:9443"
@@ -115,14 +115,14 @@ else
 	fail=1
 fi
 reset_opts
-parse_args --acme https://172.20.23.20:8443 --acme-ca lab-issuing
+parse_args --acme https://192.0.2.20:8443 --acme-ca lab-issuing
 check "--acme on 8443: no low ports, own CA" "$acme_port $low_ports $opt_acme_ca" "8443 false lab-issuing"
 # shellcheck disable=SC2329 # called through refused
 fresh_parse() { reset_opts && parse_args "$@"; }
-refused fresh_parse --acme http://pki.u.lab/acme
-refused fresh_parse --acme 'https://pki.u.lab/acme"x'
-refused fresh_parse --acme https://pki.u.lab:99999/acme
-refused fresh_parse --acme https://pki.u.lab/acme --acme-ca 'Issuing CA'
+refused fresh_parse --acme http://pki.homelab.lan/acme
+refused fresh_parse --acme 'https://pki.homelab.lan/acme"x'
+refused fresh_parse --acme https://pki.homelab.lan:99999/acme
+refused fresh_parse --acme https://pki.homelab.lan/acme --acme-ca 'Issuing CA'
 refused fresh_parse --acme-ca issuing
 
 # low-ports.conf and its old name public-port-80.conf grant the same.

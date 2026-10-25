@@ -60,7 +60,7 @@ auth:
   # this file has both; `myownpki backup` includes it.
   key_file: ""
   # Reverse proxies whose X-Forwarded-For header is believed (IPs or CIDRs,
-  # comma-separated), for example "10.0.0.5, 192.168.1.0/24". Empty: the
+  # comma-separated), for example "10.0.0.5, 198.51.100.0/24". Empty: the
   # direct peer is the client. Never list networks that clients use.
   trusted_proxies: ""
   # The address users open the admin UI with, for example
@@ -86,7 +86,7 @@ acme:
   # with tls_issuer: every client connects directly.
   trusted_proxies: "127.0.0.1, ::1"
   # DNS server for dns-01 and for resolving http-01 names: the server that
-  # knows your internal names (split DNS), e.g. 192.168.10.53. Empty: the
+  # knows your internal names (split DNS), e.g. 192.0.2.53. Empty: the
   # system resolver.
   resolver: ""
   # An intermediate CA of this instance (its name, e.g. issuing; not a root):
