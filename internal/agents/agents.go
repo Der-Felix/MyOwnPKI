@@ -61,6 +61,9 @@ const (
 	statusPerHour   = 1200
 	// Renewals of the agent certificate per agent and hour.
 	renewPerHour = 6
+	// Authenticated reports and desired-state watches per agent and 10 minutes.
+	reportPerWindow = 60
+	watchPerWindow  = 120
 )
 
 // Errors the transport maps to its codes.

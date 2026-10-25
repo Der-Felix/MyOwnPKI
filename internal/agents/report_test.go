@@ -322,6 +322,55 @@ func TestReportFullInventoryRetainsOnlyRequestedRemovedDeployment(t *testing.T) 
 	}
 }
 
+func TestReportAndWatchLimitsArePerAgent(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, tenant.EnrollAuto)
+	flooded, other := agentCaller(t, e, "proxy1.homelab.lan"), agentCaller(t, e, "proxy2.homelab.lan")
+
+	// The fastest ordinary heartbeat interval is 270 s: ceil(600/270) = 3
+	// reports per window. A 45 s long-poll gives ceil(600/45) = 14 watches.
+	normalReports := int((10*time.Minute + 270*time.Second - 1) / (270 * time.Second))
+	normalWatches := int((10*time.Minute + 45*time.Second - 1) / (45 * time.Second))
+	if normalReports != 3 || normalWatches != 14 || normalReports > reportPerWindow/2 || normalWatches > watchPerWindow/2 {
+		t.Fatalf("ordinary rates approach the limits: reports=%d/%d watches=%d/%d", normalReports, reportPerWindow, normalWatches, watchPerWindow)
+	}
+
+	for i := range reportPerWindow {
+		state := "deployed"
+		if i%2 == 0 {
+			state = "pending"
+		}
+		if err := e.s.Report(t.Context(), flooded, ReportInput{Deployments: []DeploymentReport{{Name: "proxy", State: state}}}); err != nil {
+			t.Fatalf("report %d: %v", i, err)
+		}
+	}
+	for range 20 {
+		if err := e.s.Report(t.Context(), flooded, ReportInput{Deployments: []DeploymentReport{{Name: "proxy", State: "failed"}}}); !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("flooded report: %v", err)
+		}
+	}
+	if err := e.s.Report(t.Context(), other, ReportInput{Deployments: []DeploymentReport{{Name: "proxy", State: "deployed"}}}); err != nil {
+		t.Fatalf("another agent was blocked by the flood: %v", err)
+	}
+	e.inst.Deliver(t)
+	var stateAudits int
+	if err := e.inst.TenantAudit.Read.QueryRowContext(t.Context(), `SELECT count(*) FROM audit_entries WHERE action = 'agent.deployment.state'`).Scan(&stateAudits); err != nil || stateAudits != reportPerWindow+1 {
+		t.Fatalf("state audit entries=%d, want %d: %v", stateAudits, reportPerWindow+1, err)
+	}
+
+	for i := range watchPerWindow {
+		if _, err := e.s.WatchDesiredState(t.Context(), flooded, 0); err != nil {
+			t.Fatalf("watch %d: %v", i, err)
+		}
+	}
+	if _, err := e.s.WatchDesiredState(t.Context(), flooded, 0); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("flooded watch: %v", err)
+	}
+	if _, err := e.s.WatchDesiredState(t.Context(), other, 0); err != nil {
+		t.Fatalf("another agent cannot watch: %v", err)
+	}
+}
+
 func TestWatchTimeoutReplacementCapacityAndShutdown(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, tenant.EnrollAuto)

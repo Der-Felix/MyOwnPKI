@@ -81,6 +81,7 @@ func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult
 func (a *Agent) runPass(ctx context.Context, names []string, requested map[string]int64) ([]DeploymentResult, error) {
 	a.passMu.Lock()
 	defer a.passMu.Unlock()
+	defer a.wakeReport()
 	unlock, err := a.deploymentLock()
 	if err != nil {
 		return nil, err
@@ -155,7 +156,6 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 		if saveErr := a.saveDeploymentResults(current); saveErr != nil {
 			return results, errors.Join(append(errs, saveErr)...)
 		}
-		a.wakeReport()
 		if errors.Is(err, ErrACMEAccountRegistration) {
 			break // another group would try the same account key again
 		}

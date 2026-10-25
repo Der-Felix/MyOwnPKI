@@ -129,13 +129,16 @@ func (a *Agent) reportLoop(ctx context.Context) {
 		err := a.report(callCtx)
 		cancel()
 		var wait time.Duration
-		if err != nil {
+		switch {
+		case connect.CodeOf(err) == connect.CodeResourceExhausted:
+			wait = 270*time.Second + time.Duration(a.fraction()*float64(time.Minute))
+		case err != nil:
 			if ctx.Err() == nil {
 				a.log.Warn("agent report failed", slog.Any("error", err))
 			}
 			wait = time.Duration(a.fraction() * float64(backoff))
 			backoff = min(2*backoff, time.Minute)
-		} else {
+		default:
 			backoff = time.Second
 			wait = 270*time.Second + time.Duration(a.fraction()*float64(time.Minute))
 		}
@@ -337,7 +340,6 @@ func (a *Agent) schedule(ctx context.Context, state *agentv1.WatchDesiredStateRe
 	if len(refused) > 0 {
 		a.passMu.Lock()
 		err := a.saveDeploymentResults(refused)
-		a.wakeReport()
 		a.passMu.Unlock()
 		if err != nil {
 			return 0, err
@@ -355,6 +357,9 @@ func (a *Agent) schedule(ctx context.Context, state *agentv1.WatchDesiredStateRe
 		if runErr != nil && ctx.Err() == nil {
 			a.log.Warn("deployment pass failed", slog.Any("error", runErr))
 		}
+	}
+	if len(refused) > 0 && len(due) == 0 {
+		a.wakeReport()
 	}
 	return max(wait, time.Second), nil
 }

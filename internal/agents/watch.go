@@ -108,6 +108,9 @@ func (s *Service) desired(ctx context.Context, id string) (*DesiredState, error)
 // WatchDesiredState subscribes before reading the database: a commit
 // between the read and the wait can never be lost.
 func (s *Service) WatchDesiredState(ctx context.Context, c *Caller, known int64) (*DesiredState, error) {
+	if !s.limiter().allow("watch:"+c.Agent.ID, watchPerWindow, 10*time.Minute, s.now()) {
+		return nil, ErrRateLimited
+	}
 	if known < 0 {
 		return nil, ErrInvalid
 	}

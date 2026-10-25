@@ -198,6 +198,76 @@ func TestReportsEveryFiveMinutesAndImmediatelyAfterResult(t *testing.T) {
 	awaitRuntime(t, func() bool { return calls.Load() == 3 && f.Waiting() == 1 })
 }
 
+func TestRunPassSendsOneReportWithAllResults(t *testing.T) {
+	t.Parallel()
+	r := newDeployRig(t, ProfileNginx, ProfileFile)
+	r.installOld(t)
+	f := clock.NewFake(r.a.Now())
+	var calls atomic.Int64
+	var mu sync.Mutex
+	var reports [][]DeploymentResult
+	client := runtimeClient{report: func(_ context.Context, req *connect.Request[agentv1.ReportRequest]) (*connect.Response[agentv1.ReportResponse], error) {
+		calls.Add(1)
+		mu.Lock()
+		var states []DeploymentResult
+		for _, deployment := range req.Msg.Deployments {
+			states = append(states, DeploymentResult{Name: deployment.Name, State: deployment.State})
+		}
+		reports = append(reports, states)
+		mu.Unlock()
+		return connect.NewResponse(&agentv1.ReportResponse{}), nil
+	}}
+	r.a.Now, r.a.Sleep, r.a.Random = f.Now, f.Sleep, func() float64 { return 0.5 }
+	r.a.ch = &channel{client: client}
+	r.a.ch.cert.Store(&tls.Certificate{})
+	r.a.reportWake = make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); r.a.reportLoop(ctx) }()
+	defer func() { cancel(); <-done }()
+	awaitRuntime(t, func() bool { return calls.Load() == 1 && f.Waiting() == 1 })
+	if _, err := r.a.RunPass(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	awaitRuntime(t, func() bool { return calls.Load() == 2 && f.Waiting() == 1 })
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reports) != 2 || len(reports[1]) != 2 {
+		t.Fatalf("reports after one pass: %+v", reports)
+	}
+	for _, deployment := range reports[1] {
+		if deployment.State != "deployed" {
+			t.Fatalf("result missing from combined report: %+v", reports[1])
+		}
+	}
+}
+
+func TestReportRateLimitWaitsForNextScheduledReport(t *testing.T) {
+	t.Parallel()
+	f := clock.NewFake(time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC))
+	var calls atomic.Int64
+	client := runtimeClient{report: func(context.Context, *connect.Request[agentv1.ReportRequest]) (*connect.Response[agentv1.ReportResponse], error) {
+		calls.Add(1)
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("limited"))
+	}}
+	a := runtimeAgent(f, client)
+	r := newDeployRig(t, ProfileFile)
+	a.cfg, a.st = r.a.cfg, r.a.st
+	waits := make(chan time.Duration, 2)
+	a.Sleep = func(ctx context.Context, d time.Duration) error { waits <- d; return f.Sleep(ctx, d) }
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); a.reportLoop(ctx) }()
+	defer func() { cancel(); <-done }()
+	for i := range 2 {
+		if got := <-waits; got != 5*time.Minute {
+			t.Fatalf("rate-limited report delay=%v, want 5m", got)
+		}
+		awaitRuntime(t, func() bool { return calls.Load() == int64(i+1) && f.Waiting() == 1 })
+		f.Advance(5 * time.Minute)
+	}
+}
+
 func TestReportPrunesRemovedDeploymentOnlyAfterAcceptance(t *testing.T) {
 	t.Parallel()
 	r := newDeployRig(t, ProfileFile)

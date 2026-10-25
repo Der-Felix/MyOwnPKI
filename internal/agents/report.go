@@ -110,6 +110,9 @@ func validReport(in ReportInput) error {
 // Report replaces only this agent's inventory. No agent ID, path or hook
 // can be provided by the sender. Heartbeats do not fill the audit log.
 func (s *Service) Report(ctx context.Context, caller *Caller, in ReportInput) error {
+	if !s.limiter().allow("report:"+caller.Agent.ID, reportPerWindow, 10*time.Minute, s.now()) {
+		return ErrRateLimited
+	}
 	if err := validReport(in); err != nil {
 		return err
 	}
