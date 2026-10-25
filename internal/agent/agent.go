@@ -17,7 +17,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"slices"
 	"sync"
 	"time"
 
@@ -48,7 +47,11 @@ type Agent struct {
 	acmeDial       func(context.Context, string, string) (net.Conn, error)
 	obtainForTest  func(context.Context, Deployment) (*Material, error)
 	runHookForTest func(context.Context, string) error
-	deployStarted  bool
+	reportWake     chan struct{}
+	runMu          sync.Mutex
+	ariForTest     func(context.Context, *x509.Certificate) (renewalWindow, error)
+	// Random returns a value in [0,1); tests inject stable independent streams.
+	Random func() float64
 
 	// Version, OS and Arch are reported at enrollment.
 	Version, OS, Arch string
@@ -74,7 +77,8 @@ func New(cfg *Config, log *slog.Logger, version string) (*Agent, error) {
 	a := &Agent{
 		cfg: cfg, st: state{dir: cfg.StateDir}, ch: ch, log: log, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		StandaloneAddr: ":80", Now: clock.System{}.Now, Sleep: sleep,
-		acmeDial: defaultACMEDial,
+		acmeDial:   defaultACMEDial,
+		reportWake: make(chan struct{}, 1),
 	}
 	if err := a.st.ensure(); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
@@ -214,14 +218,13 @@ func (a *Agent) handle(e *enrollmentState, key *ecdsa.PrivateKey, m *agentv1.Enr
 	return res, nil
 }
 
-// Run keeps the agent's certificate: it waits for a pending enrollment,
-// renews at 2/3 of the 7 days (with jitter), and enrolls again with the key
-// of the last certificate when that one expired. Later blocks add the
-// heartbeat, the desired state and the deployments.
+// Run maintains the agent identity, reports deployment results and follows
+// desired state. Certificate and deployment renewals keep their own schedules.
 func (a *Agent) Run(ctx context.Context) error {
-	if _, err := a.Recover(ctx); err != nil {
-		return fmt.Errorf("recover deployment: %w", err)
-	}
+	return a.run(ctx)
+}
+
+func (a *Agent) maintainIdentity(ctx context.Context) error {
 	backoff := time.Minute
 	for ctx.Err() == nil { // a stop (SIGTERM) ends the loop; it is no failure
 		var err error
@@ -269,24 +272,6 @@ func (a *Agent) step(ctx context.Context) error {
 		return nil
 	}
 	if at := RenewAt(id.Leaf, serialFraction(id.Leaf)); now.Before(at) {
-		if !a.deployStarted {
-			a.deployStarted = true
-			known, err := a.deploymentResults()
-			if err != nil {
-				return err
-			}
-			var names []string
-			for _, d := range a.cfg.Deployments {
-				if !slices.ContainsFunc(known, func(r DeploymentResult) bool { return r.Name == d.Name }) {
-					names = append(names, d.Name)
-				}
-			}
-			if len(names) > 0 {
-				if _, err := a.RunPass(ctx, names); err != nil {
-					return err
-				}
-			}
-		}
 		// Wake at least hourly: a new `enroll` or a changed state counts.
 		return a.Sleep(ctx, min(at.Sub(now), time.Hour))
 	}

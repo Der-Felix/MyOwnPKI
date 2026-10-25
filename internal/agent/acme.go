@@ -142,7 +142,7 @@ func (a *Agent) account() (*accountUser, string, error) {
 }
 
 // Obtain gets a new certificate by the ordinary ACME path (ADR-19).
-// Scheduling and Report use this same operation in block D.
+// Scheduled and operator-requested renewals use this same operation.
 func (a *Agent) Obtain(ctx context.Context, d Deployment) (*Material, error) {
 	a.passMu.Lock()
 	defer a.passMu.Unlock()
@@ -170,13 +170,24 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		}
 		return nil, fmt.Errorf("register the ACME account key: %w", explainTLS(rerr))
 	}
-	roots, err := rootPool(a.cfg.CABundle)
+	ac, roots, closeClient, err := a.legoClient(ctx, u)
 	if err != nil {
 		return nil, err
 	}
+	defer closeClient()
+	return a.obtainWithClient(ctx, d, u, base, ac, roots)
+}
+
+// legoClient is shared by issuance and ARI. Both ignore environment trust
+// and proxy settings and propagate the caller's cancellation.
+func (a *Agent) legoClient(ctx context.Context, u *accountUser) (*lego.Client, *x509.CertPool, func(), error) {
+	roots, err := rootPool(a.cfg.CABundle)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	proxy, err := proxyFunc(a.cfg.Proxy)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	transport := &http.Transport{
 		Proxy: proxy, DialContext: a.acmeDial,
@@ -184,7 +195,6 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second,
 		MaxResponseHeaderBytes: 64 << 10, IdleConnTimeout: 30 * time.Second,
 	}
-	defer transport.CloseIdleConnections()
 	client := &http.Client{Timeout: time.Minute, Transport: contextTransport{ctx, transport},
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if r.URL.Scheme != "https" || r.URL.User != nil || len(via) >= 5 {
@@ -199,8 +209,14 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		HTTPClient: client, Certificate: lego.CertificateConfig{Timeout: time.Minute, DisableCommonName: true}}
 	ac, err := lego.NewClient(config)
 	if err != nil {
-		return nil, fmt.Errorf("ACME directory: %w", err)
+		transport.CloseIdleConnections()
+		return nil, nil, nil, fmt.Errorf("ACME directory: %w", err)
 	}
+	return ac, roots, transport.CloseIdleConnections, nil
+}
+
+func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUser, base string, ac *lego.Client, roots *x509.CertPool) (*Material, error) {
+	var err error
 	if u.reg == nil {
 		u.reg, err = ac.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
 		if err != nil {
@@ -244,6 +260,31 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 	defer clear(privateDER)
 	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})
 	return checkedMaterial(issued.Certificate, privatePEM, d.Names, roots, a.Now())
+}
+
+type renewalWindow struct {
+	Start, End time.Time
+	RetryAfter time.Duration
+}
+
+func (a *Agent) renewalInfo(ctx context.Context, leaf *x509.Certificate) (renewalWindow, error) {
+	u, _, err := a.account()
+	if err != nil {
+		return renewalWindow{}, err
+	}
+	ac, _, closeClient, err := a.legoClient(ctx, u)
+	if err != nil {
+		return renewalWindow{}, err
+	}
+	defer closeClient()
+	info, err := ac.Certificate.GetRenewalInfo(certificate.RenewalInfoRequest{Cert: leaf})
+	if err != nil {
+		return renewalWindow{}, err
+	}
+	if !info.SuggestedWindow.End.After(info.SuggestedWindow.Start) {
+		return renewalWindow{}, errors.New("ARI returned an invalid renewal window")
+	}
+	return renewalWindow{info.SuggestedWindow.Start.UTC(), info.SuggestedWindow.End.UTC(), info.RetryAfter}, nil
 }
 
 // checkedMaterial independently verifies what the ACME server returned,

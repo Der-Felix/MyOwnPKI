@@ -18,15 +18,19 @@ import (
 const deploymentStateFile = "deployments.json"
 
 // DeploymentResult contains only reportable metadata, never key material,
-// hook output, paths or commands. Block D sends it over Report.
+// hook output, paths or commands. The runtime sends it over Report.
 type DeploymentResult struct {
-	Name        string    `json:"name"`
-	State       string    `json:"state"`
-	Serial      string    `json:"serial,omitempty"`
-	NotAfter    time.Time `json:"not_after,omitempty"`
-	Fingerprint string    `json:"fingerprint,omitempty"`
-	DeployedAt  time.Time `json:"deployed_at,omitempty"`
-	LastError   string    `json:"last_error,omitempty"`
+	Name                  string    `json:"name"`
+	State                 string    `json:"state"`
+	Serial                string    `json:"serial,omitempty"`
+	NotAfter              time.Time `json:"not_after,omitempty"`
+	Fingerprint           string    `json:"fingerprint,omitempty"`
+	DeployedAt            time.Time `json:"deployed_at,omitempty"`
+	LastError             string    `json:"last_error,omitempty"`
+	AttemptedAt           time.Time `json:"attempted_at,omitempty"`
+	Failures              int       `json:"failures,omitempty"`
+	NextAttempt           time.Time `json:"next_attempt,omitempty"`
+	HandledRenewalVersion int64     `json:"handled_renewal_version,omitempty"`
 }
 
 type reloadGroup struct {
@@ -69,8 +73,12 @@ func certificateSerial(leaf *x509.Certificate) string {
 
 // RunPass renews the named deployments through their local configuration.
 // nil selects all deployments. No request can supply paths or hook names.
-// Scheduling and desired-state delivery are deliberately left to block D.
+// The runtime calls the same operation for scheduled and requested renewals.
 func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult, error) {
+	return a.runPass(ctx, names, nil)
+}
+
+func (a *Agent) runPass(ctx context.Context, names []string, requested map[string]int64) ([]DeploymentResult, error) {
 	a.passMu.Lock()
 	defer a.passMu.Unlock()
 	unlock, err := a.deploymentLock()
@@ -78,13 +86,13 @@ func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult
 		return nil, err
 	}
 	defer unlock()
-	if _, err := os.Stat(a.st.path(journalFile)); err == nil {
+	if _, statErr := os.Stat(a.st.path(journalFile)); statErr == nil {
 		return nil, errors.New("deployment: an unfinished journal must be recovered before another pass")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
 	}
-	if err := a.checkDeploymentTargets(); err != nil {
-		return nil, err
+	if targetErr := a.checkDeploymentTargets(); targetErr != nil {
+		return nil, targetErr
 	}
 	selected := make([]Deployment, 0, len(a.cfg.Deployments))
 	for _, d := range a.cfg.Deployments {
@@ -99,6 +107,10 @@ func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult
 	}
 	var results []DeploymentResult
 	var errs []error
+	previous, err := a.deploymentResults()
+	if err != nil {
+		return nil, err
+	}
 	for _, group := range groups(selected) {
 		materials := map[string]*Material{}
 		var obtainErr error
@@ -121,6 +133,21 @@ func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult
 		for _, m := range materials {
 			clear(m.Key)
 		}
+		for i := range current {
+			old := DeploymentResult{}
+			for _, r := range previous {
+				if r.Name == current[i].Name {
+					old = r
+					break
+				}
+			}
+			current[i].AttemptedAt = a.Now().UTC()
+			current[i].HandledRenewalVersion = max(old.HandledRenewalVersion, requested[current[i].Name])
+			if current[i].State == "failed" || current[i].State == "rolled_back" {
+				current[i].Failures = min(old.Failures+1, 7)
+				current[i].NextAttempt = a.Now().Add(deploymentBackoff(current[i].Failures)).UTC()
+			}
+		}
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -128,6 +155,7 @@ func (a *Agent) RunPass(ctx context.Context, names []string) ([]DeploymentResult
 		if saveErr := a.saveDeploymentResults(current); saveErr != nil {
 			return results, errors.Join(append(errs, saveErr)...)
 		}
+		a.wakeReport()
 		if errors.Is(err, ErrACMEAccountRegistration) {
 			break // another group would try the same account key again
 		}
@@ -197,6 +225,38 @@ func (a *Agent) saveDeploymentResults(results []DeploymentResult) error {
 		return err
 	}
 	return a.durableState(deploymentStateFile, data)
+}
+
+func sameDeploymentResult(a, b DeploymentResult) bool {
+	return a.Name == b.Name && a.State == b.State && a.Serial == b.Serial && a.NotAfter.Equal(b.NotAfter) &&
+		a.Fingerprint == b.Fingerprint && a.DeployedAt.Equal(b.DeployedAt) && a.LastError == b.LastError &&
+		a.AttemptedAt.Equal(b.AttemptedAt) && a.Failures == b.Failures && a.NextAttempt.Equal(b.NextAttempt) &&
+		a.HandledRenewalVersion == b.HandledRenewalVersion
+}
+
+// pruneDeploymentResults deletes only the unchanged results accepted by the
+// server. A newer local result must be sent once more before its removal.
+func (a *Agent) pruneDeploymentResults(reported []DeploymentResult) (bool, error) {
+	previous, err := a.deploymentResults()
+	if err != nil {
+		return false, err
+	}
+	for _, result := range reported {
+		previous = slices.DeleteFunc(previous, func(old DeploymentResult) bool {
+			return old.Name == result.Name && sameDeploymentResult(old, result)
+		})
+	}
+	data, err := json.Marshal(previous)
+	if err != nil {
+		return false, err
+	}
+	if writeErr := a.durableState(deploymentStateFile, data); writeErr != nil {
+		return false, writeErr
+	}
+	remaining := slices.ContainsFunc(previous, func(r DeploymentResult) bool {
+		return !slices.ContainsFunc(a.cfg.Deployments, func(d Deployment) bool { return d.Name == r.Name })
+	})
+	return remaining, nil
 }
 
 // checkDeploymentTargets catches aliases between profiles and groups

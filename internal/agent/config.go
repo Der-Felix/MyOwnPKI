@@ -220,6 +220,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	seen := map[string]bool{}
+	if len(c.Deployments) > 100 {
+		add("deployments: at most 100")
+	}
 	seenFiles := map[string]string{}
 	for i, d := range c.Deployments {
 		where := fmt.Sprintf("deployments[%d]", i)
