@@ -82,6 +82,9 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 	a.passMu.Lock()
 	defer a.passMu.Unlock()
 	defer a.wakeReport()
+	if err := a.checkWritable(a.st.dir); err != nil {
+		return nil, err
+	}
 	unlock, err := a.deploymentLock()
 	if err != nil {
 		return nil, err
@@ -112,6 +115,23 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 	if err != nil {
 		return nil, err
 	}
+	failures := a.deploymentWriteFailures(selected)
+	deployable := make([]Deployment, 0, len(selected))
+	for _, d := range selected {
+		writeErr := failures[d.Name]
+		if writeErr == nil {
+			deployable = append(deployable, d)
+			continue
+		}
+		current := []DeploymentResult{{Name: d.Name, State: "failed", LastError: safeDeployError(writeErr)}}
+		a.applyResultHistory(current, previous, requested)
+		results = append(results, current...)
+		errs = append(errs, writeErr)
+		if saveErr := a.saveDeploymentResults(current); saveErr != nil {
+			return results, errors.Join(append(errs, saveErr)...)
+		}
+	}
+	selected = deployable
 	for _, group := range groups(selected) {
 		materials := map[string]*Material{}
 		var obtainErr error
@@ -134,21 +154,7 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 		for _, m := range materials {
 			clear(m.Key)
 		}
-		for i := range current {
-			old := DeploymentResult{}
-			for _, r := range previous {
-				if r.Name == current[i].Name {
-					old = r
-					break
-				}
-			}
-			current[i].AttemptedAt = a.Now().UTC()
-			current[i].HandledRenewalVersion = max(old.HandledRenewalVersion, requested[current[i].Name])
-			if current[i].State == "failed" || current[i].State == "rolled_back" {
-				current[i].Failures = min(old.Failures+1, 7)
-				current[i].NextAttempt = a.Now().Add(deploymentBackoff(current[i].Failures)).UTC()
-			}
-		}
+		a.applyResultHistory(current, previous, requested)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -166,6 +172,25 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 		}
 	}
 	return results, errors.Join(errs...)
+}
+
+func (a *Agent) applyResultHistory(current, previous []DeploymentResult, requested map[string]int64) {
+	for i := 0; i < len(current); i++ {
+		result := &current[i]
+		old := DeploymentResult{}
+		for _, r := range previous {
+			if r.Name == result.Name {
+				old = r
+				break
+			}
+		}
+		result.AttemptedAt = a.Now().UTC()
+		result.HandledRenewalVersion = max(old.HandledRenewalVersion, requested[result.Name])
+		if result.State == "failed" || result.State == "rolled_back" {
+			result.Failures = min(old.Failures+1, 7)
+			result.NextAttempt = a.Now().Add(deploymentBackoff(result.Failures)).UTC()
+		}
+	}
 }
 
 func groupFailure(group reloadGroup, cause error) []DeploymentResult {

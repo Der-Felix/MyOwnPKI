@@ -369,6 +369,9 @@ func (a *Agent) run(ctx context.Context) error {
 		return errors.New("the agent is already running")
 	}
 	defer a.runMu.Unlock()
+	if err := a.preflightStart(); err != nil {
+		return fmt.Errorf("startup write check: %w", err)
+	}
 	if _, err := a.Recover(ctx); err != nil {
 		return fmt.Errorf("recover deployment: %w", err)
 	}

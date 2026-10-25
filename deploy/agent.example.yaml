@@ -1,0 +1,10 @@
+# Minimal agent configuration. See docs/OPERATIONS.md, chapter Agent.
+server: "https://pki.homelab.lan:8444"
+ca_bundle: "/etc/myownpki-agent/root.pem"
+hostname: "proxy1.homelab.lan"
+state_dir: "/var/lib/myownpki-agent"
+log_level: "info"
+enrollment:
+  challenge: standalone
+paths: []
+deployments: []

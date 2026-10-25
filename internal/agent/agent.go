@@ -39,17 +39,18 @@ var ErrEnrolled = errors.New("this agent is enrolled and its certificate is vali
 
 // Agent is myownpki-agent.
 type Agent struct {
-	cfg            *Config
-	st             state
-	ch             *channel
-	log            *slog.Logger
-	passMu         sync.Mutex // one ACME/deploy/recovery pass; responders share port 80 and the state directory
-	acmeDial       func(context.Context, string, string) (net.Conn, error)
-	obtainForTest  func(context.Context, Deployment) (*Material, error)
-	runHookForTest func(context.Context, string) error
-	reportWake     chan struct{}
-	runMu          sync.Mutex
-	ariForTest     func(context.Context, *x509.Certificate) (renewalWindow, error)
+	cfg             *Config
+	st              state
+	ch              *channel
+	log             *slog.Logger
+	passMu          sync.Mutex // one ACME/deploy/recovery pass; responders share port 80 and the state directory
+	acmeDial        func(context.Context, string, string) (net.Conn, error)
+	obtainForTest   func(context.Context, Deployment) (*Material, error)
+	runHookForTest  func(context.Context, string) error
+	openRootForTest func(string) (*os.Root, error)
+	reportWake      chan struct{}
+	runMu           sync.Mutex
+	ariForTest      func(context.Context, *x509.Certificate) (renewalWindow, error)
 	// Random returns a value in [0,1); tests inject stable independent streams.
 	Random func() float64
 
