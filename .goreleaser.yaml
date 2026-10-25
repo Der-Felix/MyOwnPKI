@@ -19,8 +19,6 @@ before:
     - go mod verify
 
 builds:
-  # Only the server: myownpki-agent and myownpki-ctl print --version only
-  # so far and are released once they do something.
   - id: myownpki
     main: ./cmd/myownpki
     binary: myownpki
@@ -42,6 +40,21 @@ builds:
       - darwin_arm64_v8.0
       - windows_amd64_v1
       - freebsd_amd64_v1
+  - id: myownpki-agent
+    main: ./cmd/myownpki-agent
+    binary: myownpki-agent
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.version=v{{ .Version }}
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.commit={{ .FullCommit }}
+      - -X github.com/Der-Felix/MyOwnPKI/internal/version.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    targets:
+      - linux_amd64_v1
+      - linux_arm64_v8.0
 
 archives:
   - id: myownpki
@@ -87,14 +100,41 @@ archives:
         info:
           mode: 0o755
           mtime: "{{ .CommitDate }}"
+  - id: myownpki-agent
+    ids: [myownpki-agent]
+    formats: [tar.gz]
+    name_template: "myownpki-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      mode: 0o755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: *fileinfo
+      - src: CHANGELOG.md
+        info: *fileinfo
+      - src: THIRD_PARTY.md
+        info: *fileinfo
+      - src: docs/OPERATIONS.md
+        info: *fileinfo
+      - src: deploy/agent.example.yaml
+        info: *fileinfo
+      - src: deploy/systemd/myownpki-agent.service
+        info: *fileinfo
+      - src: deploy/systemd/agent-low-ports.conf
+        info: *fileinfo
+      - src: deploy/install-agent.sh
+        info:
+          mode: 0o755
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
   algorithm: sha256
-  # install.sh is also an asset of its own, so it can be checked – and its
-  # signature is the one of checksums.txt – before it runs.
+  # Both install scripts are assets of their own, so they can be checked –
+  # and checksums.txt is signed – before they run.
   extra_files:
     - glob: deploy/install.sh
+    - glob: deploy/install-agent.sh
 
 # One SPDX SBOM per archive. No --enrich: it looks things up on the network
 # during the build, which a reproducible build must not do.
@@ -160,6 +200,7 @@ release:
   name_template: "MyOwnPKI {{ .Tag }}"
   extra_files:
     - glob: deploy/install.sh
+    - glob: deploy/install-agent.sh
 
 # The release notes come from CHANGELOG.md: release.yml always passes the
 # section of the tag with --release-notes (and stops if there is none), and
