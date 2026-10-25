@@ -110,20 +110,22 @@ type Agent struct {
 }
 
 type AgentDeployment struct {
-	AgentID           string
-	Name              string
-	Profile           string
-	Names             string
-	Challenge         string
-	State             string
-	CertificateSerial sql.NullString
-	NotAfter          sql.NullString
-	ServedFingerprint sql.NullString
-	DeployedAt        sql.NullString
-	LastError         sql.NullString
-	LastReportAt      string
-	RenewRequestedAt  sql.NullString
-	RenewRequestedBy  sql.NullString
+	AgentID               string
+	Name                  string
+	Profile               string
+	Names                 string
+	Challenge             string
+	State                 string
+	CertificateSerial     sql.NullString
+	NotAfter              sql.NullString
+	ServedFingerprint     sql.NullString
+	DeployedAt            sql.NullString
+	LastError             sql.NullString
+	LastReportAt          string
+	RenewRequestedAt      sql.NullString
+	RenewRequestedBy      sql.NullString
+	RenewRequestedVersion sql.NullInt64
+	Reported              int64
 }
 
 type AgentEnrollment struct {

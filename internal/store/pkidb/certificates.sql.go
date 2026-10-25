@@ -288,25 +288,27 @@ const listCertificates = `-- name: ListCertificates :many
 SELECT c.id, c.ca_id, c.ca_generation, c.source, c.preset, c.serial_hex, c.subject_dn, c.common_name, c.not_before, c.not_after, c.key_algorithm, c.key_id, c.cert_der, c.fingerprint_sha256, c.renewal_of, c.requested_by, c.custom_ku, c.custom_eku, c.created_at, r.reason AS revocation_reason, r.revoked_at, r.invalidity_date
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
 WHERE (CAST(?1 AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
-  AND (CAST(?3 AS TEXT) = '' OR c.ca_id = CAST(?3 AS TEXT))
-  AND (CAST(?4 AS TEXT) = '' OR c.preset = CAST(?4 AS TEXT))
-  AND (CAST(?5 AS TEXT) = ''
-       OR (CAST(?5 AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
-       OR (CAST(?5 AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > ?6)
-       OR (CAST(?5 AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= ?6))
-  AND (CAST(?7 AS TEXT) = '' OR c.not_after < CAST(?7 AS TEXT))
-  AND (CAST(?8 AS TEXT) = ''
-       OR instr(lower(c.common_name), CAST(?8 AS TEXT)) > 0
-       OR instr(lower(c.serial_hex), CAST(?8 AS TEXT)) > 0
-       OR EXISTS (SELECT 1 FROM certificate_sans s WHERE s.certificate_id = c.id AND instr(lower(s.value), CAST(?8 AS TEXT)) > 0))
-  AND (CAST(?9 AS TEXT) = '' OR c.id < CAST(?9 AS TEXT))
+  AND (CAST(?3 AS INTEGER) = 0 OR NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by)))
+  AND (CAST(?4 AS TEXT) = '' OR c.ca_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = '' OR c.preset = CAST(?5 AS TEXT))
+  AND (CAST(?6 AS TEXT) = ''
+       OR (CAST(?6 AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
+       OR (CAST(?6 AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > ?7)
+       OR (CAST(?6 AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= ?7))
+  AND (CAST(?8 AS TEXT) = '' OR c.not_after < CAST(?8 AS TEXT))
+  AND (CAST(?9 AS TEXT) = ''
+       OR instr(lower(c.common_name), CAST(?9 AS TEXT)) > 0
+       OR instr(lower(c.serial_hex), CAST(?9 AS TEXT)) > 0
+       OR EXISTS (SELECT 1 FROM certificate_sans s WHERE s.certificate_id = c.id AND instr(lower(s.value), CAST(?9 AS TEXT)) > 0))
+  AND (CAST(?10 AS TEXT) = '' OR c.id < CAST(?10 AS TEXT))
 ORDER BY c.id DESC
-LIMIT ?10
+LIMIT ?11
 `
 
 type ListCertificatesParams struct {
 	AllCas        int64
 	AllowedCas    string
+	HideAgents    int64
 	CaID          string
 	Preset        string
 	Status        string
@@ -335,6 +337,7 @@ func (q *Queries) ListCertificates(ctx context.Context, arg ListCertificatesPara
 	rows, err := q.db.QueryContext(ctx, listCertificates,
 		arg.AllCas,
 		arg.AllowedCas,
+		arg.HideAgents,
 		arg.CaID,
 		arg.Preset,
 		arg.Status,
