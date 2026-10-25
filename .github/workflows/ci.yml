@@ -299,7 +299,7 @@ jobs:
             --volume "$RUNNER_TEMP/agent-tmp:/tmp" \
             --workdir /src \
             nginx:1.29.2-trixie@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903 \
-            bash -c 'nginx -v && go test -count=1 -v ./internal/server -run "^(TestAgentEndToEnd|TestRenewNowOverRESTServesNewCertificate)$" && go test -count=1 -v -tags e2etest ./internal/agent -run "^(TestNginxDeployProfiles|TestNginxStagedFaultRollsBack)$"'
+            bash -c 'nginx -v && go test -count=1 -v ./internal/server -run "^(TestAgentEndToEnd|TestRenewNowOverRESTServesNewCertificate)$" && go test -count=5 -v -tags e2etest ./internal/agent -run "^(TestNginxDeployProfiles|TestNginxStagedFaultRollsBack)$"'
       # Measure the production unit before any CI-only drop-ins are installed.
       - name: systemd-analyze verify and security
         run: |
