@@ -252,7 +252,7 @@ func TestIssuedTLSDenied(t *testing.T) {
 	e.inst.Unseal(t)
 	if _, err := e.inst.Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
 		CASettings: ca.CASettings{Name: "lab", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
-		Subject: ca.Subject{CommonName: "Lab CA"}, NameConstraints: ca.NameConstraints{PermittedDNS: []string{"u.lab"}},
+		Subject: ca.Subject{CommonName: "Lab CA"}, NameConstraints: ca.NameConstraints{PermittedDNS: []string{"dmz.homelab.lan"}},
 		Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
@@ -286,10 +286,10 @@ func TestIssuedTLSDenied(t *testing.T) {
 	}
 
 	// A name inside the constraints: issued, and the message is gone.
-	m = e.manager("lab", []string{"pki.u.lab"})
+	m = e.manager("lab", []string{"pki.dmz.homelab.lan"})
 	m.renew(ctx)
 	if served(t, m) == e.boot || len(m.attention(false)) != 0 {
-		t.Errorf("pki.u.lab: %s\n%s", kinds(m.attention(false)), e.logs)
+		t.Errorf("pki.dmz.homelab.lan: %s\n%s", kinds(m.attention(false)), e.logs)
 	}
 	// An unknown CA: refused with its name.
 	m = e.manager("nope", []string{"pki.homelab.lan"})

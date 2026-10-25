@@ -16,7 +16,7 @@ admin:
   # the port mapping in docker-compose.yml (host loopback only by default).
   # The server logs a warning about this; it is expected here.
   listen: 0.0.0.0:9443
-  # The names you type into the browser, e.g. "pki.homelab.lan, 192.168.10.5"
+  # The names you type into the browser, e.g. "pki.homelab.lan, 192.0.2.5"
   # – the container's own host name is random.
   tls_names: ""
   # With a port published on other host addresses, set this to your admin
