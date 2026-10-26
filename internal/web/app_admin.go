@@ -288,6 +288,10 @@ func (a *app) settingsPage(c *rc) {
 				Hint: "Applies to new confirmations only; an existing confirmation keeps its original lifetime"},
 		},
 	})
+	d.Fields = append(d.Fields, predecessorFields("agent_predecessor", "agent_predecessor_days", *s.AgentPredecessor)...)
+	d.Fields[len(d.Fields)-2].Label = "Agent deployments: predecessor default"
+	d.Fields = append(d.Fields, predecessorFields("other_predecessor", "other_predecessor_days", *s.OtherPredecessor)...)
+	d.Fields[len(d.Fields)-2].Label = "Other certificates: predecessor default"
 	if !c.may(authz.ManageTenant, "") {
 		d.Intro = append(d.Intro, "Only a tenant admin can change these.")
 	}
@@ -312,10 +316,12 @@ func (a *app) saveSettings(c *rc) {
 		n := num("step_up_minutes")
 		stepUp = &n
 	}
+	agentPolicy := predecessorFromForm(f, "agent_predecessor", "agent_predecessor_days")
+	otherPolicy := predecessorFromForm(f, "other_predecessor", "other_predecessor_days")
 	err := a.d.Settings.Set(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
 		OrganizationalUnit: strings.TrimSpace(f("ou")), Locality: strings.TrimSpace(f("l")), State: strings.TrimSpace(f("st")), Country: strings.TrimSpace(f("c")),
 		ACME:      &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")},
-		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp}, c.who())
+		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}, c.who())
 	if err != nil {
 		c.refused(err, "/admin/settings")
 		return

@@ -23,11 +23,13 @@ ON CONFLICT (agent_id, name) DO UPDATE SET profile = excluded.profile, names = e
     reported = TRUE;
 
 -- name: ClearDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL
+UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL,
+    renew_predecessor_choice = NULL, renew_predecessor_days = NULL
 WHERE agent_id = ? AND name = ? AND renew_requested_version = ?;
 
 -- name: RequestDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?
+UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?,
+    renew_predecessor_choice = ?, renew_predecessor_days = ?
 WHERE agent_id = ? AND name = ? AND renew_requested_at IS NULL;
 
 -- name: WithdrawDeploymentRenewal :execrows

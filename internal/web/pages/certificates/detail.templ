@@ -60,6 +60,7 @@ type RealActions struct {
 	CanDownloadKey bool // operator on the issuing CA, key stored on the server
 	// CanRenew and CanRevoke offer those commands (step 19).
 	CanRenew, CanRevoke bool
+	RevocationPlanned bool
 }
 
 // Detail renders one certificate with tabs.
@@ -218,7 +219,15 @@ templ realActions(d DetailData) {
 	}
 	if d.Real.CanRevoke && !d.Revoked {
 		@components.CommandGroup("Dangerous") {
-			<a class="cmd cmd-danger" href={ templ.SafeURL("/certificates/" + d.ID + "/revoke") }>Revoke</a>
+			<a class="cmd cmd-danger" href={ templ.SafeURL("/certificates/" + d.ID + "/revoke") }>Revoke now</a>
+			if d.Real.RevocationPlanned {
+				<form action={ templ.SafeURL("/certificates/" + d.ID + "/revocation-cancel") } method="post">
+					<input type="hidden" name="csrf_token" value={ d.Real.CSRF }/>
+					<button type="submit" class="cmd">Cancel planned revocation</button>
+				</form>
+			} else {
+				<a class="cmd" href={ templ.SafeURL("/certificates/" + d.ID + "/revocation-plan") }>Plan revocation</a>
+			}
 		}
 	}
 }

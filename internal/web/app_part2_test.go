@@ -44,7 +44,7 @@ func TestCertificateActions(t *testing.T) {
 	detail := "/certificates/" + issued.ID
 
 	// Renew: 303 to the successor.
-	r := b.post(t, detail+"/renew", url.Values{"csrf_token": {token}, "alg": {"ecdsa-p256"}})
+	r := b.post(t, detail+"/renew", url.Values{"csrf_token": {token}, "alg": {"ecdsa-p256"}, "predecessor": {"never"}})
 	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/certificates/crt_") || r.location() == detail {
 		t.Fatalf("renew: %d %q", r.Code, r.location())
 	}
@@ -219,7 +219,8 @@ func TestAdministrationPages(t *testing.T) {
 	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="300"`) || !strings.Contains(page, `value="5"`) || !strings.Contains(page, `value="10"`) {
 		t.Errorf("default limits not shown")
 	}
-	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"}}
+	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"},
+		"agent_predecessor": {"now"}, "other_predecessor": {"after"}, "other_predecessor_days": {"7"}}
 	form := func(extra url.Values) url.Values {
 		out := url.Values{"csrf_token": {token}}
 		maps.Copy(out, limits)

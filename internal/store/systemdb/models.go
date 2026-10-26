@@ -67,21 +67,25 @@ type Session struct {
 }
 
 type Tenant struct {
-	ID                string
-	Name              string
-	AllowServerKeygen int64
-	CreatedAt         string
-	SubjectO          string
-	SubjectOu         string
-	SubjectL          string
-	SubjectSt         string
-	SubjectC          string
-	AcmeOrdersPerHour int64
-	AcmeFailedPerName int64
-	AcmeAccountsPerIp int64
-	TrustPage         int64
-	AgentEnrollment   string
-	StepUpMinutes     int64
+	ID                     string
+	Name                   string
+	AllowServerKeygen      int64
+	CreatedAt              string
+	SubjectO               string
+	SubjectOu              string
+	SubjectL               string
+	SubjectSt              string
+	SubjectC               string
+	AcmeOrdersPerHour      int64
+	AcmeFailedPerName      int64
+	AcmeAccountsPerIp      int64
+	TrustPage              int64
+	AgentEnrollment        string
+	StepUpMinutes          int64
+	AgentPredecessorChoice string
+	AgentPredecessorDays   int64
+	OtherPredecessorChoice string
+	OtherPredecessorDays   int64
 }
 
 type Unseal struct {

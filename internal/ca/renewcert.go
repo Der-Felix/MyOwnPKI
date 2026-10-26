@@ -15,6 +15,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -30,20 +31,35 @@ type RenewCertRequest struct {
 	// KeyAlgorithm of a new server key; "" = the original's.
 	KeyAlgorithm string
 	ValidityDays int
-	// RevokePrevious revokes the original as superseded after the renewal
-	// (needs certificate.revoke and a fresh step-up, checked first).
-	RevokePrevious bool
+	// RevokePrevious is the legacy tri-state pointer: true = now, false = never,
+	// nil = tenant default. Predecessor wins when both are present.
+	RevokePrevious *bool
+	Predecessor    *predecessor.Policy
 	Who            keys.Who
 }
 
-// Renewed is the successor and, if asked, the revocation of the original.
+// Renewed is the successor and, for an immediate choice, its predecessor revocation.
 type Renewed struct {
 	*Issued
-	Revoked *RevokeResult
+	Revoked   *RevokeResult
+	PlannedAt *time.Time
+}
+
+// EffectiveOtherPredecessor reads the tenant policy for UI, REST and ACME.
+func (e *Engine) EffectiveOtherPredecessor(ctx context.Context) (predecessor.Policy, error) {
+	if e.OtherPredecessor == nil {
+		return predecessor.DefaultOther, nil
+	}
+	policy, err := e.OtherPredecessor(ctx)
+	if err != nil {
+		return predecessor.Policy{}, err
+	}
+	return policy.Normalize(), policy.Validate()
 }
 
 // RenewCertificate issues the successor through the normal issuance path
-// (same checks and audit, renewal_of set).
+// (same checks and audit, renewal_of set). Its predecessor action is atomic
+// with the new certificate; CRL signing follows the commit.
 func (e *Engine) RenewCertificate(ctx context.Context, req RenewCertRequest) (*Renewed, error) {
 	info, err := e.Certificate(ctx, req.Who, req.ID)
 	if err != nil {
@@ -59,7 +75,22 @@ func (e *Engine) RenewCertificate(ctx context.Context, req RenewCertRequest) (*R
 	case info.KeyStored && req.CSR != nil:
 		return nil, deny("the certificate has a server-generated key – the successor gets a new one; don't send a CSR")
 	}
-	if req.RevokePrevious {
+	policy := predecessor.Policy{}
+	if req.Predecessor != nil {
+		policy = *req.Predecessor
+	} else if req.RevokePrevious != nil {
+		policy.Choice = predecessor.Never
+		if *req.RevokePrevious {
+			policy.Choice = predecessor.Now
+		}
+	} else if policy, err = e.EffectiveOtherPredecessor(ctx); err != nil {
+		return nil, err
+	}
+	policy = policy.Normalize()
+	if verr := policy.Validate(); verr != nil {
+		return nil, deny("%s", verr)
+	}
+	if policy.Choice != predecessor.Never {
 		if derr := e.authorize(req.Who, authz.RevokeCert, info.CAName, e.now()); derr != nil {
 			return nil, derr
 		}
@@ -84,14 +115,26 @@ func (e *Engine) RenewCertificate(ctx context.Context, req RenewCertRequest) (*R
 	} else if custom != nil {
 		r.CustomKeyUsage, r.CustomExtKeyUsage = custom[0], custom[1]
 	}
+	var revocations []*RevokeResult
+	r.Stored = func(ctx context.Context, tx *sql.Tx, issued *Issued) error {
+		var applyErr error
+		revocations, applyErr = e.ApplyPredecessor(ctx, pkidb.New(tx), tx, info.ID, issued.ID, policy, "renewal", req.Who, e.now())
+		return applyErr
+	}
 	issued, err := e.Issue(ctx, r)
 	if err != nil {
 		return nil, err
 	}
 	out := &Renewed{Issued: issued}
-	if req.RevokePrevious && info.Status != CertRevoked {
-		if out.Revoked, err = e.Revoke(ctx, RevokeRequest{CertificateID: info.ID, Reason: "superseded", Who: req.Who}); err != nil {
-			return out, fmt.Errorf("the successor %s was issued, but the original was not revoked: %w", issued.ID, err)
+	if len(revocations) > 0 {
+		out.Revoked = revocations[0]
+		e.PublishPredecessorRevocations(ctx, revocations, req.Who)
+	} else if policy.Choice == predecessor.After && info.Status != CertRevoked {
+		if plan, perr := pkidb.New(e.PKI).GetRevocationPlan(ctx, info.ID); perr == nil {
+			t := parseDBTime(plan.PlannedAt)
+			out.PlannedAt = &t
+		} else if !errors.Is(perr, sql.ErrNoRows) {
+			return nil, perr
 		}
 	}
 	return out, nil

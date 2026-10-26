@@ -174,7 +174,7 @@ func TestAgentPages(t *testing.T) {
 	if !strings.Contains(detail, `action="/agents/`+id+`/deployments/removed/withdraw"`) || !strings.Contains(detail, `name="csrf_token" value="`+token+`"`) {
 		t.Error("withdraw has no form with the session's CSRF token")
 	}
-	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
+	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}, "predecessor": {"now"}}); r.Code != http.StatusSeeOther {
 		t.Fatalf("renew: %d", r.Code)
 	}
 	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Renewal requested") || !strings.Contains(page, "Withdraw") {
@@ -203,14 +203,14 @@ func TestAgentPages(t *testing.T) {
 	ob := v.browser("192.0.2.3")
 	ob.signIn(t, "operator", testinstance.Password)
 	operatorPage := ob.get(t, "/agents/"+id).html()
-	if strings.Contains(operatorPage, "disabled>Renew now") || strings.Contains(operatorPage, "disabled>Withdraw") {
+	if !strings.Contains(operatorPage, `href="/agents/`+id+`/deployments/proxy/renew"`) || strings.Contains(operatorPage, "disabled>Withdraw") {
 		t.Error("operator does not get enabled renew/withdraw actions")
 	}
 	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
 	vb := v.browser("192.0.2.2")
 	vb.signIn(t, "viewer", testinstance.Password)
 	viewerPage := vb.get(t, "/agents/"+id).html()
-	if !strings.Contains(viewerPage, "disabled>Renew now") || !strings.Contains(viewerPage, "disabled>Withdraw") {
+	if strings.Contains(viewerPage, `href="/agents/`+id+`/deployments/proxy/renew"`) || !strings.Contains(viewerPage, "disabled>Withdraw") {
 		t.Error("viewer actions are not disabled")
 	}
 	viewerToken := vb.csrf(t)
@@ -232,7 +232,8 @@ func TestAgentPages(t *testing.T) {
 	}
 
 	// The tenant setting.
-	b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "agent_enrollment": {"manual"}, "acme_orders": {"300"}, "acme_failed": {"5"}, "acme_accounts": {"10"}})
+	b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "agent_enrollment": {"manual"}, "acme_orders": {"300"}, "acme_failed": {"5"}, "acme_accounts": {"10"},
+		"agent_predecessor": {"now"}, "other_predecessor": {"after"}, "other_predecessor_days": {"7"}})
 	if mode, _ := (&tenant.Store{DB: v.SystemDB.Read, Clock: v.Clock}).AgentEnrollment(t.Context(), store.DefaultTenant); mode != "manual" {
 		t.Errorf("mode %q", mode)
 	}

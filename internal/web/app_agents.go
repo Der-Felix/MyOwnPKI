@@ -116,6 +116,15 @@ func (a *app) agentDetail(c *rc) {
 			Title: "Add a name", Action: base + "/names", Submit: "Add name",
 			Fields: []admin.Field{{ID: "action", Type: "hidden", Value: "add"}, {ID: "name", Label: "Name or pattern", Required: true, Hint: "e.g. wiki.homelab.lan or *.apps.homelab.lan"}},
 		})}
+		agentPolicyFields := predecessorFields("predecessor", "predecessor_days", ag.EffectivePolicy)
+		agentPolicyFields = append(agentPolicyFields, admin.Field{ID: "inherit", Label: "Inherit the tenant agent default", Type: "checkbox", Checked: ag.Predecessor == nil})
+		forms = append(forms, c.form(admin.FormData{Title: "Agent predecessor default", Action: base + "/predecessor-policy", Submit: "Save predecessor default", Fields: agentPolicyFields}))
+		for _, deployment := range ag.Deployments {
+			fields := predecessorFields("predecessor", "predecessor_days", deployment.EffectivePolicy)
+			fields = append(fields, admin.Field{ID: "inherit", Label: "Inherit the agent default", Type: "checkbox", Checked: deployment.Predecessor == nil})
+			forms = append(forms, c.form(admin.FormData{Title: "Predecessor default: " + deployment.Name,
+				Action: base + "/deployments/" + deployment.Name + "/predecessor-policy", Submit: "Save deployment default", Fields: fields}))
+		}
 		if ag.Status == agents.StatusActive {
 			forms = append(forms, c.form(admin.FormData{Title: "Disable", Action: base + "/disable", Submit: "Disable agent",
 				Intro: []string{"Cut off at its next call; its certificates stay valid. Enable it again here."}}))
@@ -184,9 +193,11 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 			details += "not in the agent configuration"
 		}
 		pending := !d.RenewRequestedAt.IsZero()
-		renew := admin.PostCommand{Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/renew", CSRF: c.sess.CSRFToken,
-			Label: "Renew now", Disabled: pending || d.Removed || ag.Status != agents.StatusActive || !c.may(authz.RenewAgent, "")}
-		renewal := admin.Cell{Posts: []admin.PostCommand{renew}}
+		renewal := admin.Cell{}
+		if !pending && !d.Removed && ag.Status == agents.StatusActive && c.may(authz.RenewAgent, "") {
+			renewal.Text = "Renew now"
+			renewal.Href = "/agents/" + ag.ID + "/deployments/" + d.Name + "/renew"
+		}
 		if pending {
 			renewal.Text = "Renewal requested · " + dateTime(d.RenewRequestedAt) + " by " + d.RenewRequestedBy
 			renewal.Status = view.StatusInfo
@@ -196,6 +207,10 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 			}
 			renewal.Posts = []admin.PostCommand{{Action: "/agents/" + ag.ID + "/deployments/" + d.Name + "/withdraw",
 				CSRF: c.sess.CSRFToken, Label: "Withdraw", Disabled: !c.may(authz.RenewAgent, "")}}
+		}
+		if d.RevocationPlannedAt != nil {
+			renewal.Text = "Revocation planned · " + view.Date(*d.RevocationPlannedAt)
+			renewal.Status = view.StatusInfo
 		}
 		t.Rows = append(t.Rows, []admin.Cell{{Text: d.Name, Rel: details},
 			{Text: strings.ReplaceAll(d.State, "_", " "), Status: status}, serial, {Text: dateTime(d.NotAfter), NoWrap: true},
@@ -217,17 +232,66 @@ func (a *app) agentDeployments(c *rc) {
 	render(c.w, c.r, a.log, http.StatusOK, admin.Table(a.agentDeploymentTable(c, ag)))
 }
 
+func (a *app) agentRenewPage(c *rc) {
+	if a.d.Agents == nil {
+		http.NotFound(c.w, c.r)
+		return
+	}
+	id, name := c.r.PathValue("id"), c.r.PathValue("name")
+	ag, err := a.d.Agents.GetAgent(c.r.Context(), c.who(), id)
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	back := "/agents/" + id
+	for _, deployment := range ag.Deployments {
+		if deployment.Name != name {
+			continue
+		}
+		render(c.w, c.r, a.log, http.StatusOK, admin.FormPage(c.page("Renew "+name, "agents", view.Crumb{Label: "Agents", Href: "/agents"}, view.Crumb{Label: ag.Hostname, Href: back}), c.form(admin.FormData{
+			Intro:  []string{"Renewal starts on the agent. The predecessor action happens only after an accepted deployed report with its TLS check."},
+			Action: back + "/deployments/" + name + "/renew", Submit: "Renew now", Cancel: back,
+			Fields: predecessorFields("predecessor", "predecessor_days", deployment.EffectivePolicy),
+		})))
+		return
+	}
+	c.fail(ca.ErrNotFound)
+}
+
 func (a *app) agentRenew(c *rc) {
 	if a.d.Agents == nil {
 		http.NotFound(c.w, c.r)
 		return
 	}
 	id := c.r.PathValue("id")
-	if err := a.d.Agents.RequestRenewal(c.r.Context(), c.who(), id, c.r.PathValue("name")); err != nil {
-		c.refused(err, "/agents/"+id)
+	policy := predecessorFromForm(c.r.PostFormValue, "predecessor", "predecessor_days")
+	if err := a.d.Agents.RequestRenewal(c.r.Context(), c.who(), id, c.r.PathValue("name"), policy); err != nil {
+		c.refused(err, "/agents/"+id+"/deployments/"+c.r.PathValue("name")+"/renew")
 		return
 	}
-	c.done("/agents/"+id, "Renewal requested.")
+	c.done("/agents/"+id, "Renewal requested; predecessor: "+predecessorText(policy)+".")
+}
+
+func (a *app) agentPredecessorPolicy(c *rc) {
+	if a.d.Agents == nil {
+		http.NotFound(c.w, c.r)
+		return
+	}
+	id, name := c.r.PathValue("id"), c.r.PathValue("name")
+	back := "/agents/" + id
+	if yes(c.r.PostFormValue("inherit")) {
+		if err := a.d.Agents.SetPredecessorPolicy(c.r.Context(), c.who(), id, name, nil); err != nil {
+			c.refused(err, back)
+			return
+		}
+	} else {
+		policy := predecessorFromForm(c.r.PostFormValue, "predecessor", "predecessor_days")
+		if err := a.d.Agents.SetPredecessorPolicy(c.r.Context(), c.who(), id, name, &policy); err != nil {
+			c.refused(err, back)
+			return
+		}
+	}
+	c.done(back, "Predecessor policy saved.")
 }
 
 func (a *app) agentWithdraw(c *rc) {

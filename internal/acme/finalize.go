@@ -203,10 +203,21 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 		s.invalidate(ctx, &o, perr)
 		return
 	}
+	who := keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: o.AccountID, Name: "acme:" + o.AccountID}, Principal: authz.System("acme")}
+	policy, err := s.engine.EffectiveOtherPredecessor(ctx)
+	if err != nil {
+		s.log.Error("acme predecessor policy", slog.String("order", o.ID), slog.Any("error", err))
+		return
+	}
+	names := make(map[string]struct{}, len(idents))
+	for _, id := range idents {
+		names[id.key()] = struct{}{}
+	}
+	var revocations []*ca.RevokeResult
 	req := ca.Request{
 		CSR:       pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: o.CsrDer}),
 		RenewalOf: o.Replaces.String, // RFC 9773 replaces; "" when not a renewal
-		Who:       keys.Who{Actor: audit.Actor{Type: audit.ActorACMEAccount, ID: o.AccountID, Name: "acme:" + o.AccountID}, Principal: authz.System("acme")},
+		Who:       who,
 		ACME: &ca.ACMEOrder{OrderID: o.ID, AccountID: o.AccountID, Stored: func(ctx context.Context, tx *sql.Tx, is *ca.Issued) error {
 			// Also serialize the final permission check with names/status
 			// changes in pki.db: a concurrent removal cannot publish a certificate.
@@ -220,7 +231,16 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 			if n != 1 {
 				return errors.New("the order is no longer processing")
 			}
-			return nil
+			if account.AgentID.Valid {
+				return nil
+			}
+			var ambiguous []string
+			var perr error
+			revocations, ambiguous, perr = s.engine.ApplyACMEPredecessor(ctx, pkidb.New(tx), tx, account.ID, is.ID, names, policy, who)
+			for _, id := range ambiguous {
+				s.log.Warn("ambiguous ACME predecessor mapping", slog.String("order", o.ID), slog.String("certificate", id))
+			}
+			return perr
 		}},
 	}
 	for _, id := range idents {
@@ -239,6 +259,7 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 	var denied *ca.DeniedError
 	switch {
 	case err == nil:
+		s.engine.PublishPredecessorRevocations(ctx, revocations, who)
 	case errors.Is(err, keys.ErrSealed):
 		// Issued at the unseal (ProcessPending).
 	case errors.As(err, &denied):

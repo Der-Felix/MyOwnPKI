@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,6 +196,49 @@ func parseDateOrTime(s string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
+func (a *app) planRevocationPage(c *rc) {
+	info, detail, ok := a.certificateFor(c)
+	if !ok {
+		return
+	}
+	render(c.w, c.r, a.log, http.StatusOK, admin.FormPage(a.certPage(c, info, "Plan revocation"), c.form(admin.FormData{
+		Intro:  []string{"Plan a final superseded revocation. You can revoke now or cancel the plan at any time before execution."},
+		Action: detail + "/revocation-plan", Submit: "Plan revocation", Cancel: detail, Danger: true,
+		Fields: []admin.Field{{ID: "days", Label: "Revoke after this many days", Type: "number", Value: "7", Required: true, Hint: "1 to 30"}},
+	})))
+}
+
+func (a *app) planRevocation(c *rc) {
+	info, detail, ok := a.certificateFor(c)
+	if !ok {
+		return
+	}
+	days, parseErr := strconv.Atoi(c.r.PostFormValue("days"))
+	if parseErr != nil || days < 1 || days > 30 {
+		c.setFlash(view.Message{Kind: view.MessageError, Text: "Days: enter a whole number from 1 to 30."})
+		c.redirect(detail + "/revocation-plan")
+		return
+	}
+	planned := a.now().Add(time.Duration(days) * 24 * time.Hour)
+	if err := a.d.Engine.PlanRevocation(c.r.Context(), ca.PlanRevocationRequest{CertificateID: info.ID, PlannedAt: planned, Who: c.who()}); err != nil {
+		c.refused(err, detail+"/revocation-plan")
+		return
+	}
+	c.done(detail, "Revocation planned · "+view.Date(planned)+". Reason: superseded.")
+}
+
+func (a *app) cancelRevocationPlan(c *rc) {
+	info, detail, ok := a.certificateFor(c)
+	if !ok {
+		return
+	}
+	if err := a.d.Engine.CancelRevocationPlan(c.r.Context(), c.who(), info.ID); err != nil {
+		c.refused(err, detail)
+		return
+	}
+	c.done(detail, "Planned revocation canceled. The certificate is otherwise unchanged.")
+}
+
 func (a *app) renewPage(c *rc) {
 	info, detail, ok := a.certificateFor(c)
 	if !ok {
@@ -214,9 +258,12 @@ func (a *app) renewPage(c *rc) {
 		d.Fields = append(d.Fields, admin.Field{ID: "csr", Label: "New CSR (PEM)", Type: "textarea", Rows: 8, Required: true,
 			Hint: "The original came from a CSR: create a new key and CSR on the device and paste the CSR here."})
 	}
-	if c.may(authz.RevokeCert, info.CAName) && info.Status != ca.CertRevoked {
-		d.Fields = append(d.Fields, admin.Field{ID: "revoke_previous", Label: "Revoke this certificate afterwards (superseded)", Type: "checkbox"})
+	policy, err := a.d.Engine.EffectiveOtherPredecessor(c.r.Context())
+	if err != nil {
+		c.fail(err)
+		return
 	}
+	d.Fields = append(d.Fields, predecessorFields("predecessor", "predecessor_days", policy)...)
 	render(c.w, c.r, a.log, http.StatusOK, admin.FormPage(a.certPage(c, info, "Renew certificate"), c.form(d)))
 }
 
@@ -225,7 +272,8 @@ func (a *app) renew(c *rc) {
 	if !ok {
 		return
 	}
-	req := ca.RenewCertRequest{ID: info.ID, KeyAlgorithm: c.r.PostFormValue("alg"), RevokePrevious: yes(c.r.PostFormValue("revoke_previous")), Who: c.who()}
+	policy := predecessorFromForm(c.r.PostFormValue, "predecessor", "predecessor_days")
+	req := ca.RenewCertRequest{ID: info.ID, KeyAlgorithm: c.r.PostFormValue("alg"), Predecessor: &policy, Who: c.who()}
 	if csr := strings.TrimSpace(c.r.PostFormValue("csr")); csr != "" {
 		req.CSR = []byte(csr)
 	}
@@ -240,6 +288,9 @@ func (a *app) renew(c *rc) {
 	}
 	for _, w := range res.Warnings {
 		more = append(more, view.Message{Kind: view.MessageWarning, Text: w})
+	}
+	if res.PlannedAt != nil {
+		more = append(more, view.Message{Kind: view.MessageInfo, Text: "Predecessor revocation planned for " + view.DateTime(*res.PlannedAt) + "."})
 	}
 	c.done("/certificates/"+url.PathEscape(res.ID), "Renewed: this is the successor.", more...)
 }

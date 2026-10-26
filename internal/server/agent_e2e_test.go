@@ -348,7 +348,7 @@ func TestRenewNowOverRESTServesNewCertificate(t *testing.T) {
 	if status, _, err := api(http.MethodGet, "/auth/session", nil); err != nil || status != http.StatusOK || csrfToken == "" {
 		t.Fatalf("REST session: %d, %v", status, err)
 	}
-	if status, body, err := api(http.MethodPost, "/agents/"+res.AgentID+"/deployments/proxy/renew", nil); err != nil || status != http.StatusAccepted {
+	if status, body, err := api(http.MethodPost, "/agents/"+res.AgentID+"/deployments/proxy/renew", map[string]any{}); err != nil || status != http.StatusAccepted {
 		t.Fatalf("renew now over REST: %d, %v: %s", status, err, body)
 	}
 	second := waitServedSerial(t, endpointClient, endpointURL, first, 5*time.Second)

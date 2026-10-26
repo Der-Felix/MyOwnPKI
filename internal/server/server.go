@@ -32,6 +32,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/httpapi"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/publish"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
@@ -56,6 +57,7 @@ const (
 	jobCheckpoint = "audit-checkpoint"
 	jobHeads      = "audit-heads"
 	jobCRL        = "crl-renew"
+	jobRevoke     = "revocation-plans"
 	jobSessions   = "sessions-prune"
 	jobOutbox     = "outbox-cleanup"
 	jobRefusals   = "admin-refusals"
@@ -228,6 +230,14 @@ func (s *Server) build(key *auth.Key) error {
 			t, err := systemdb.New(s.sys.Read).GetTenant(ctx, store.DefaultTenant)
 			return t.AllowServerKeygen == 1, err
 		},
+		OtherPredecessor: func(ctx context.Context) (predecessor.Policy, error) {
+			settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk}
+			v, err := settings.Defaults(ctx, store.DefaultTenant)
+			if err != nil {
+				return predecessor.Policy{}, err
+			}
+			return *v.OtherPredecessor, nil
+		},
 	}
 	s.auth = auth.NewService(s.sys.Write, s.ia.Write, key, s.clk)
 	s.auth.Wake = s.wakeUp
@@ -243,6 +253,9 @@ func (s *Server) build(key *auth.Key) error {
 		s.deliver(ctx)
 		if err := s.cp.MakeAll(ctx, "unseal"); err != nil {
 			s.log.Error("checkpoint at unseal", slog.Any("error", err))
+		}
+		if err := s.engine.ExecuteDueRevocations(ctx); err != nil {
+			s.log.Warn("planned revocations at unseal", slog.Any("error", err))
 		}
 		if _, err := s.engine.RenewCRLs(ctx, "unseal"); err != nil {
 			s.log.Warn("CRL renewal at unseal", slog.Any("error", err))
@@ -272,6 +285,7 @@ func (s *Server) build(key *auth.Key) error {
 		}
 		return err
 	})
+	s.jobs.add(jobRevoke, time.Minute, 0, s.engine.ExecuteDueRevocations)
 	s.jobs.add(jobSessions, time.Hour, time.Hour, func(ctx context.Context) error {
 		_, err := s.auth.PruneSessions(ctx)
 		return err

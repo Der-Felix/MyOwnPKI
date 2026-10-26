@@ -43,6 +43,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -60,6 +61,8 @@ type Engine struct {
 	// ServerKeygen reports the tenant switch allow_server_keygen (system.db).
 	// It is asked per request, so a change applies at once.
 	ServerKeygen func(context.Context) (bool, error)
+	// OtherPredecessor returns the tenant policy for non-agent renewals.
+	OtherPredecessor func(context.Context) (predecessor.Policy, error)
 	// Wake, if set, is called after a commit with an outbox row.
 	Wake func()
 	// Rand is the randomness for serials and keys; nil = crypto/rand.

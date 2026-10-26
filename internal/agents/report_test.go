@@ -158,7 +158,7 @@ func TestRenewalRequestRolesVersionAndAudit(t *testing.T) {
 	}
 	for _, role := range []authz.Role{authz.Viewer, authz.Operator, authz.Admin} {
 		who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, ID: "test-user", Name: "operator"}, Principal: &authz.Principal{
-			Kind: authz.KindUser, UserID: "test-user", Bindings: []authz.Binding{{Tenant: "default", Role: role}},
+			Kind: authz.KindUser, UserID: "test-user", Bindings: []authz.Binding{{Tenant: "default", Role: role}}, StepUpAt: e.inst.Clock.Now(),
 		}}
 		err := e.s.RequestRenewal(t.Context(), who, c.Agent.ID, "proxy")
 		if role == authz.Viewer {
@@ -226,7 +226,7 @@ func TestWithdrawRenewalRolesVersionRaceAndAudit(t *testing.T) {
 				t.Fatal(err)
 			}
 			who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, ID: "test-user", Name: "operator"}, Principal: &authz.Principal{
-				Kind: authz.KindUser, UserID: "test-user", Bindings: []authz.Binding{{Tenant: "default", Role: role}},
+				Kind: authz.KindUser, UserID: "test-user", Bindings: []authz.Binding{{Tenant: "default", Role: role}}, StepUpAt: e.inst.Clock.Now(),
 			}}
 			err = e.s.WithdrawRenewal(t.Context(), who, c.Agent.ID, "proxy")
 			if role == authz.Viewer {

@@ -38,6 +38,8 @@ func (a *app) certStatus(i *ca.CertificateInfo) (view.Status, string) {
 	switch {
 	case i.Status == ca.CertRevoked:
 		return view.StatusCrit, "Revoked"
+	case i.RevocationPlannedAt != nil:
+		return view.StatusInfo, "Revocation planned · " + view.Date(*i.RevocationPlannedAt)
 	case i.Status == ca.CertExpired:
 		return view.StatusCrit, "Expired"
 	case i.NotAfter.Sub(a.now()) <= ca.ExpiringWindow:
@@ -151,6 +153,11 @@ func (a *app) dashboard(c *rc) {
 		c.fail(err)
 		return
 	}
+	planned, err := a.d.Engine.RevocationsDue(ctx, c.who())
+	if err != nil {
+		c.fail(err)
+		return
+	}
 	n := func(v int64) string { return strconv.FormatInt(v, 10) }
 	d := overview.Data{
 		Real:     true,
@@ -161,6 +168,7 @@ func (a *app) dashboard(c *rc) {
 			{Label: "Expire in 30 days", Value: n(endEntity.Expiring), Href: "/certificates?status=expiring", Status: alarm(endEntity.Expiring, view.StatusWarn)},
 			{Label: "Expired", Value: n(total.Expired), Href: "/certificates?status=expired", Status: alarm(total.Expired, view.StatusCrit)},
 			{Label: "Revoked", Value: n(total.Revoked), Href: "/certificates?status=revoked"},
+			{Label: "Revocations due in next 7 days", Value: n(planned), Href: "/certificates?status=planned", Status: alarm(planned, view.StatusInfo)},
 			{Label: "Certificate authorities", Value: strconv.Itoa(len(cas)), Href: "/authorities"},
 		},
 		Attention: []view.Message{},
@@ -244,7 +252,7 @@ func (a *app) dashboard(c *rc) {
 
 var realStatusFilters = []view.Option{
 	{Value: "", Label: "All"}, {Value: "valid", Label: "Valid"}, {Value: "expiring", Label: "Expires soon"},
-	{Value: "expired", Label: "Expired"}, {Value: "revoked", Label: "Revoked"},
+	{Value: "expired", Label: "Expired"}, {Value: "revoked", Label: "Revoked"}, {Value: "planned", Label: "Revocation planned"},
 }
 
 func (a *app) certificateList(c *rc) {
@@ -359,7 +367,8 @@ func (a *app) certificateDetail(c *rc) {
 		ID: info.ID, CommonName: cmp.Or(info.CommonName, info.Serial), Status: st, StatusText: text, Tab: tab,
 		KeyStored: info.KeyStored, Revoked: info.Status == ca.CertRevoked, Messages: c.messages(),
 		Real: &certificates.RealActions{CSRF: c.sess.CSRFToken, CanDownloadKey: info.KeyStored && c.may(authz.DownloadKey, info.CAName),
-			CanRenew: info.Source != "external" && info.Preset != "" && c.may(authz.IssueCert, info.CAName), CanRevoke: info.Source != "external" && c.may(authz.RevokeCert, info.CAName)},
+			CanRenew: info.Source != "external" && info.Preset != "" && c.may(authz.IssueCert, info.CAName), CanRevoke: info.Source != "external" && c.may(authz.RevokeCert, info.CAName),
+			RevocationPlanned: info.RevocationPlannedAt != nil},
 	}
 	for _, t := range realCertTabs {
 		d.Tabs = append(d.Tabs, view.Tab{Label: t.label, Href: "/certificates/" + info.ID + t.suffix, Active: t.key == tab})
@@ -382,6 +391,9 @@ func (a *app) certificateDetail(c *rc) {
 	}
 	if info.RevokedAt != nil {
 		d.Overview = append(d.Overview, view.KV{Key: "Revoked", Value: view.DateTime(*info.RevokedAt) + ", reason: " + info.RevocationReason})
+	}
+	if info.RevocationPlannedAt != nil {
+		d.Overview = append(d.Overview, view.KV{Key: "Revocation planned", Value: view.DateTime(*info.RevocationPlannedAt) + ", reason: superseded"})
 	}
 	for _, n := range info.DNSNames {
 		d.Names = append(d.Names, view.KV{Key: "DNS name", Value: n})

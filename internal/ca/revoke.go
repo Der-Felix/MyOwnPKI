@@ -78,10 +78,12 @@ type RevokeCARequest struct {
 
 // RevokeResult says whether the revocation is already published.
 type RevokeResult struct {
-	Serial    string
-	CRL       *CRLResult // nil when no CRL could be signed yet
-	Published bool       // false: stored, but not on a CRL yet (sealed server)
-	Warnings  []string
+	Serial       string
+	CRL          *CRLResult // nil when no CRL could be signed yet
+	Published    bool       // false: stored, but not on a CRL yet (sealed server)
+	Warnings     []string
+	caID         string
+	caGeneration int64
 }
 
 // Revoke revokes an end-entity certificate and signs the new CRL of its
@@ -138,10 +140,23 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 	if now.After(cert.NotAfter) {
 		warnings = append(warnings, "the certificate has expired already – the revocation is recorded and published until the CRL drops expired entries")
 	}
-	blocked, err := spkiHash(cert.PublicKey)
+	var out *RevokeResult
+	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		var terr error
+		out, terr = e.revokeStored(ctx, q, tx, row, req, now)
+		return terr
+	})
 	if err != nil {
 		return nil, err
 	}
+	out.Warnings = warnings
+	e.publishAfterRevocation(ctx, out, row.CaID.String, row.CaGeneration.Int64, req.Who)
+	return out, nil
+}
+
+// revokeStored writes an authorized revocation in an existing transaction.
+func (e *Engine) revokeStored(ctx context.Context, q *pkidb.Queries, tx *sql.Tx, row pkidb.Certificate, req RevokeRequest, now time.Time) (*RevokeResult, error) {
+	stamp := now.Format(audit.TimeFormat)
 	details := map[string]any{
 		"serial": row.SerialHex, "reason": req.Reason, "ca_id": row.CaID.String, "ca_generation": row.CaGeneration.Int64,
 		"subject": row.SubjectDn,
@@ -150,33 +165,36 @@ func (e *Engine) revoke(ctx context.Context, req RevokeRequest, now time.Time) (
 		details["invalidity_date"] = req.InvalidityDate.UTC().Format(time.RFC3339)
 	}
 	if req.Reason == ReasonKeyCompromise {
+		cert, err := x509.ParseCertificate(row.CertDer)
+		if err != nil {
+			return nil, fmt.Errorf("certificate %s: stored certificate: %w", row.ID, err)
+		}
+		blocked, err := spkiHash(cert.PublicKey)
+		if err != nil {
+			return nil, err
+		}
 		details["blocked_key"] = blocked
+		if err := q.BlockKey(ctx, pkidb.BlockKeyParams{
+			SpkiSha256: blocked, Reason: req.Reason, SourceType: "certificate", SourceID: row.ID, BlockedAt: stamp, BlockedBy: requestedBy(req.Who),
+		}); err != nil {
+			return nil, err
+		}
 	}
-	stamp := now.Format(audit.TimeFormat)
-	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
-		if terr := q.InsertRevocation(ctx, pkidb.InsertRevocationParams{
-			CertificateID: row.ID, Reason: req.Reason, RevokedAt: stamp, InvalidityDate: nullTime(req.InvalidityDate), RevokedBy: requestedBy(req.Who),
-		}); terr != nil {
-			return terr
-		}
-		if req.Reason == ReasonKeyCompromise {
-			if terr := q.BlockKey(ctx, pkidb.BlockKeyParams{
-				SpkiSha256: blocked, Reason: req.Reason, SourceType: "certificate", SourceID: row.ID, BlockedAt: stamp, BlockedBy: requestedBy(req.Who),
-			}); terr != nil {
-				return terr
-			}
-		}
-		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: req.Who.Actor, Action: ActionRevoke, Target: audit.Target{Type: "certificate", ID: row.ID},
-			Result: audit.ResultSuccess, SourceIP: req.Who.SourceIP, Details: details,
-		})
-	})
-	if err != nil {
+	if err := q.InsertRevocation(ctx, pkidb.InsertRevocationParams{
+		CertificateID: row.ID, Reason: req.Reason, RevokedAt: stamp, InvalidityDate: nullTime(req.InvalidityDate), RevokedBy: requestedBy(req.Who),
+	}); err != nil {
 		return nil, err
 	}
-	out := &RevokeResult{Serial: row.SerialHex, Warnings: warnings}
-	e.publishAfterRevocation(ctx, out, row.CaID.String, row.CaGeneration.Int64, req.Who)
-	return out, nil
+	if _, err := q.DeleteRevocationPlan(ctx, row.ID); err != nil {
+		return nil, err
+	}
+	if err := audit.Enqueue(ctx, tx, now, audit.Entry{
+		Time: now, Actor: req.Who.Actor, Action: ActionRevoke, Target: audit.Target{Type: "certificate", ID: row.ID},
+		Result: audit.ResultSuccess, SourceIP: req.Who.SourceIP, Details: details,
+	}); err != nil {
+		return nil, err
+	}
+	return &RevokeResult{Serial: row.SerialHex, caID: row.CaID.String, caGeneration: row.CaGeneration.Int64}, nil
 }
 
 // publishAfterRevocation signs the CRL that makes a revocation effective.

@@ -19,39 +19,44 @@ type agentNameJSON struct {
 }
 
 type agentJSON struct {
-	ID             string                `json:"id"`
-	Hostname       string                `json:"hostname"`
-	Status         string                `json:"status"`
-	EnrollmentMode string                `json:"enrollment_mode"`
-	OS             string                `json:"os"`
-	Arch           string                `json:"arch"`
-	Version        string                `json:"version"`
-	CreatedAt      time.Time             `json:"created_at"`
-	ApprovedAt     time.Time             `json:"approved_at"`
-	ApprovedBy     string                `json:"approved_by"`
-	LastSeenAt     *time.Time            `json:"last_seen_at"`
-	CertificateID  *string               `json:"certificate_id"`
-	Names          []agentNameJSON       `json:"names"`
-	Silent         bool                  `json:"silent"`
-	Deployments    []agentDeploymentJSON `json:"deployments"`
+	ID             string                 `json:"id"`
+	Hostname       string                 `json:"hostname"`
+	Status         string                 `json:"status"`
+	EnrollmentMode string                 `json:"enrollment_mode"`
+	OS             string                 `json:"os"`
+	Arch           string                 `json:"arch"`
+	Version        string                 `json:"version"`
+	CreatedAt      time.Time              `json:"created_at"`
+	ApprovedAt     time.Time              `json:"approved_at"`
+	ApprovedBy     string                 `json:"approved_by"`
+	LastSeenAt     *time.Time             `json:"last_seen_at"`
+	CertificateID  *string                `json:"certificate_id"`
+	Names          []agentNameJSON        `json:"names"`
+	Silent         bool                   `json:"silent"`
+	Predecessor    *predecessorPolicyJSON `json:"predecessor_policy"`
+	Effective      predecessorPolicyJSON  `json:"effective_predecessor"`
+	Deployments    []agentDeploymentJSON  `json:"deployments"`
 }
 
 type agentDeploymentJSON struct {
-	Name             string     `json:"name"`
-	Profile          string     `json:"profile"`
-	Names            []string   `json:"names"`
-	Challenge        string     `json:"challenge"`
-	State            string     `json:"state"`
-	Serial           string     `json:"serial"`
-	CertificateID    *string    `json:"certificate_id"`
-	NotAfter         *time.Time `json:"not_after"`
-	DeployedAt       *time.Time `json:"deployed_at"`
-	Fingerprint      string     `json:"fingerprint"`
-	LastError        string     `json:"last_error"`
-	LastReportAt     time.Time  `json:"last_report_at"`
-	RenewRequestedAt *time.Time `json:"renew_requested_at"`
-	RenewRequestedBy string     `json:"renew_requested_by"`
-	Removed          bool       `json:"removed"`
+	Name             string                 `json:"name"`
+	Profile          string                 `json:"profile"`
+	Names            []string               `json:"names"`
+	Challenge        string                 `json:"challenge"`
+	State            string                 `json:"state"`
+	Serial           string                 `json:"serial"`
+	CertificateID    *string                `json:"certificate_id"`
+	NotAfter         *time.Time             `json:"not_after"`
+	DeployedAt       *time.Time             `json:"deployed_at"`
+	Fingerprint      string                 `json:"fingerprint"`
+	LastError        string                 `json:"last_error"`
+	LastReportAt     time.Time              `json:"last_report_at"`
+	RenewRequestedAt *time.Time             `json:"renew_requested_at"`
+	RenewRequestedBy string                 `json:"renew_requested_by"`
+	Removed          bool                   `json:"removed"`
+	Predecessor      *predecessorPolicyJSON `json:"predecessor_policy"`
+	Effective        predecessorPolicyJSON  `json:"effective_predecessor"`
+	PlannedAt        *time.Time             `json:"revocation_planned_at"`
 }
 
 func timeOrNil(t time.Time) *time.Time {
@@ -65,6 +70,10 @@ func toAgentJSON(a *agents.Agent) agentJSON {
 	out := agentJSON{
 		ID: a.ID, Hostname: a.Hostname, Status: a.Status, EnrollmentMode: a.EnrollmentMode, OS: a.OS, Arch: a.Arch,
 		Version: a.Version, CreatedAt: a.CreatedAt, ApprovedAt: a.ApprovedAt, ApprovedBy: a.ApprovedBy, Names: []agentNameJSON{}, Deployments: []agentDeploymentJSON{},
+		Effective: toPredecessorPolicyJSON(a.EffectivePolicy),
+	}
+	if a.Predecessor != nil {
+		out.Predecessor = predecessorPolicyPtr(*a.Predecessor)
 	}
 	if !a.LastSeenAt.IsZero() {
 		out.LastSeenAt = &a.LastSeenAt
@@ -79,7 +88,11 @@ func toAgentJSON(a *agents.Agent) agentJSON {
 		row := agentDeploymentJSON{Name: d.Name, Profile: d.Profile, Names: nonNil(d.Names), Challenge: d.Challenge, State: d.State,
 			Serial: d.Serial, NotAfter: timeOrNil(d.NotAfter), DeployedAt: timeOrNil(d.DeployedAt), Fingerprint: d.Fingerprint,
 			LastError: d.LastError, LastReportAt: d.LastReportAt, RenewRequestedAt: timeOrNil(d.RenewRequestedAt),
-			RenewRequestedBy: d.RenewRequestedBy, Removed: d.Removed}
+			RenewRequestedBy: d.RenewRequestedBy, Removed: d.Removed,
+			Effective: toPredecessorPolicyJSON(d.EffectivePolicy), PlannedAt: d.RevocationPlannedAt}
+		if d.Predecessor != nil {
+			row.Predecessor = predecessorPolicyPtr(*d.Predecessor)
+		}
 		if d.CertificateID != "" {
 			row.CertificateID = &d.CertificateID
 		}
@@ -200,7 +213,24 @@ func (a *API) renewAgentDeployment(c *call) error {
 	if id == "" {
 		return agents.ErrNotFound
 	}
-	if rerr := s.RequestRenewal(c.ctx(), c.who(), id, c.r.PathValue("deploymentName")); rerr != nil {
+	var req struct {
+		Predecessor *predecessorPolicyJSON `json:"predecessor"`
+	}
+	if c.r.ContentLength != 0 {
+		if decodeErr := c.decode(&req); decodeErr != nil {
+			return decodeErr
+		}
+	}
+	name := c.r.PathValue("deploymentName")
+	if req.Predecessor != nil {
+		policy := req.Predecessor.value()
+		if policyErr := policy.Validate(); policyErr != nil {
+			return badRequest("/predecessor", "%s", policyErr)
+		}
+		if rerr := s.RequestRenewal(c.ctx(), c.who(), id, name, policy); rerr != nil {
+			return rerr
+		}
+	} else if rerr := s.RequestRenewal(c.ctx(), c.who(), id, name); rerr != nil {
 		return rerr
 	}
 	ag, err := s.GetAgent(c.ctx(), c.who(), id)
@@ -265,6 +295,55 @@ func (a *API) enableAgent(c *call) error {
 
 func (a *API) revokeAgent(c *call) error {
 	return a.agentAction(c, func(s *agents.Service, id string) error { return s.Revoke(c.ctx(), c.who(), id) })
+}
+
+func (a *API) setPredecessorPolicy(c *call, deployment, clear bool) error {
+	s, err := a.agentsOn(c)
+	if err != nil {
+		return err
+	}
+	id := pathID(c, "agentId")
+	if id == "" {
+		return agents.ErrNotFound
+	}
+	name := ""
+	if deployment {
+		name = c.r.PathValue("deploymentName")
+	}
+	if clear {
+		if err := s.SetPredecessorPolicy(c.ctx(), c.who(), id, name, nil); err != nil {
+			return err
+		}
+		return a.replyAgent(c, s, id)
+	}
+	var req predecessorPolicyJSON
+	if err := c.decode(&req); err != nil {
+		return err
+	}
+	policy := req.value()
+	if err := policy.Validate(); err != nil {
+		return badRequest("/choice", "%s", err)
+	}
+	if err := s.SetPredecessorPolicy(c.ctx(), c.who(), id, name, &policy); err != nil {
+		return err
+	}
+	return a.replyAgent(c, s, id)
+}
+
+func (a *API) setAgentPredecessorPolicy(c *call) error {
+	return a.setPredecessorPolicy(c, false, false)
+}
+
+func (a *API) clearAgentPredecessorPolicy(c *call) error {
+	return a.setPredecessorPolicy(c, false, true)
+}
+
+func (a *API) setDeploymentPredecessorPolicy(c *call) error {
+	return a.setPredecessorPolicy(c, true, false)
+}
+
+func (a *API) clearDeploymentPredecessorPolicy(c *call) error {
+	return a.setPredecessorPolicy(c, true, true)
 }
 
 func (a *API) changeAgentNames(c *call) error {

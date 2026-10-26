@@ -482,6 +482,14 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.0 to v0.3.1: system.db migration 0013 adds independent predecessor defaults and pki.db
+migration 0014 adds revocation plans, accepted agent deployment history and nullable policy/request
+fields. These migrations are additive: existing certificates and revocations are unchanged and an
+unchanged agent serial does not create a plan or revocation. The current factory values follow the
+proposal (agent: immediate after confirmed deployment; other certificates: after seven days); the
+owner question remains open in `docs/PHASE3.md` §8.4. Review both defaults under *Administration →
+Tenant settings* after upgrading.
+
 ## 10. ACME server
 
 Since v0.2 MyOwnPKI issues certificates over ACME (RFC 8555) – the protocol of Let's Encrypt –
@@ -734,6 +742,13 @@ certificatesResolvers:
 renew; the window opens at about 2/3 of the lifetime (day 60–63 of 90) and lasts 9 days. A revoked
 certificate gets a window in the past, so its client renews at once. Clients without ARI renew by
 their own rule (certbot: 30 days before expiry) – also fine.
+
+For a non-agent ACME account, a completed order is a predecessor renewal only when an older valid
+order of **the same account** has the identical normalized, sorted, duplicate-free DNS/IP name set.
+The tenant's *Other certificates* predecessor policy applies at issuance: immediate, after 1–30 days,
+or never, always with reason `superseded`. No ACME extension or client setting is needed. A similar
+name, a subset/superset or another account never selects a predecessor. Agent-linked accounts wait
+for the deployed report instead (chapter 12).
 
 **Revocation** from the client – `certbot revoke --cert-path …`, `lego certificates revoke …` – signs
 the CRL at once. The certificate's own key can revoke it too (a leaked key, without the account).
@@ -994,6 +1009,30 @@ The `file` profile fits existing paths and nginx configuration. Replace the depl
 tested, reloaded and, on failure, rolled back as one group. Automatic renewal runs at 2/3 of the
 lifetime or earlier when ARI requests it. *Renew now* uses the same path; failures back off rather
 than retrying continuously.
+
+**Predecessor handling.** The renewal confirmation offers *Revoke now*, *Revoke after N days*
+(1–30) and *Never revoke*, preselected from the deployment override, then the agent override, then
+the tenant agent default. The choice and day count are snapshotted for that one request and repeated
+in the step-up summary. Agent-wide and deployment defaults are changed by an admin on the agent page
+and audited. The separate *Other certificates* default applies to UI, REST and non-agent ACME
+renewals. REST renewal bodies accept the same optional `predecessor` object (`choice`, `days`).
+
+An agent predecessor is revoked or scheduled only after an accepted `deployed` report with a real
+serial transition and a nonempty served fingerprint matching the stored certificate. The account,
+exact normalized order/deployment name sets and server-recorded certificate age must all match.
+Older never-deployed or discarded certificates of that exact deployment are included; every serial
+currently served by any deployment of the agent is excluded. `failed` and `rolled_back` do nothing.
+Missing, tied, duplicated or foreign-account mappings revoke and schedule nothing and are logged for
+diagnosis. A delay starts at the accepted server deployment time, not at issuance or an agent-provided
+timestamp. Repeated reports neither duplicate nor move plans.
+
+A pending entry appears as **Revocation planned · date** on certificate lists/details and beside the
+deployment. Use certificate status `planned` or the dashboard's seven-day count to review them. An
+authorized operator can revoke now or cancel before execution; both need step-up and are audited.
+REST exposes `revocation_planned_at` and `PUT`/`DELETE
+/api/v1/certificates/{id}/revocation-plan`. Plans execute idempotently after restart and unseal;
+revocation is committed before CRL signing, and the normal CRL scheduler publishes it. No report
+fails merely because a CRL cannot yet be signed or a mapping is ambiguous.
 
 When a hook fails, the last stderr lines are included as `output` in the agent log and in the
 deployment's `last_error`, bounded to 1 KiB of valid UTF-8 without control characters. **Hooks must

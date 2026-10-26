@@ -9,6 +9,24 @@ change the API, the configuration and the database schema; the release notes say
 
 ### Added
 
+- **Configurable predecessor handling on renewal:** choose immediate, delayed (1–30 days) or no
+  revocation, always with reason `superseded`. Tenant defaults are independent for agent deployments
+  and other certificates, with agent-wide, per-deployment and one-operation overrides. Current
+  migration defaults follow the proposal (agent: immediately after confirmed deployment; other
+  certificates: after seven days); the owner decision remains open in `docs/PHASE3.md` §8.4.
+  Non-agent ACME renewals require the same account and exact normalized name set. Agent actions
+  start only at an accepted deployed report with a matching served fingerprint, exact account/order/
+  name mapping and a real serial transition; failed, rolled-back, currently serving, foreign-account
+  and ambiguous certificates are protected. Delayed agent plans start at server-recorded deployment
+  time and repeated reports never duplicate or move plans.
+- **Planned revocations:** certificate lists/details and agent deployments show `Revocation planned`,
+  the certificate filter and dashboard cover plans due within seven days, and authorized users can
+  plan, cancel or revoke now with step-up and audit. The scheduler executes due plans idempotently,
+  including restart/unseal catch-up; CRL publication follows the committed transaction through the
+  existing CRL jobs. Additive system.db migration 0013 and pki.db migration 0014 create no revocations
+  or schedules on upgrade with unchanged serials. REST adds renewal policy fields, plan/cancel
+  endpoints, planned timestamps and agent/deployment policy endpoints; legacy `revoke_previous`
+  remains supported.
 - **Web action continuation after step-up:** protected forms show a safe action summary and run once
   after the second factor, without asking for their inputs again. In-memory pending actions use
   256-bit IDs in POST fields only, are bound to the session, user and credentials epoch, expire after

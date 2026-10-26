@@ -16,6 +16,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -60,7 +61,14 @@ func (s *Server) buildAgents() error {
 	settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
 	s.agent = &agentSide{svc: &agents.Service{
 		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, CA: cfg.Agent.CA,
-		Mode:    func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
+		Mode: func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
+		AgentPredecessor: func(ctx context.Context) (predecessor.Policy, error) {
+			v, err := settings.Defaults(ctx, store.DefaultTenant)
+			if err != nil {
+				return predecessor.Policy{}, err
+			}
+			return *v.AgentPredecessor, nil
+		},
 		Checker: acme.NewHTTP01Checker(resolver, s.log), Clock: s.clk, Log: s.log, Wake: s.wakeUp,
 	}}
 	s.jobs.add(jobAgentCAs, agentCAsEvery, agentCAsEvery, func(ctx context.Context) error { s.refreshAgentCAs(ctx); return nil })

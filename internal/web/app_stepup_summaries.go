@@ -2,7 +2,9 @@ package web
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -14,11 +16,14 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 	case "POST /certificates/{id}/revoke":
 		summary = a.certificateActionSummary(c, entry, "Revoke certificate", "reason "+entry.form["reason"])
 	case "POST /certificates/{id}/renew":
-		detail := "keep the predecessor"
-		if yes(entry.form["revoke_previous"]) {
-			detail = "revoke the predecessor as superseded"
-		}
-		summary = a.certificateActionSummary(c, entry, "Renew certificate", detail)
+		policy := predecessorFromForm(func(name string) string { return entry.form[name] }, "predecessor", "predecessor_days")
+		summary = a.certificateActionSummary(c, entry, "Renew certificate", predecessorText(policy))
+	case "POST /certificates/{id}/revocation-plan":
+		days, _ := strconv.Atoi(entry.form["days"])
+		planned := entry.createdAt.Add(time.Duration(days) * 24 * time.Hour)
+		summary = a.certificateActionSummary(c, entry, "Plan certificate revocation", "superseded; Revocation planned · "+planned.Format("2006-01-02"))
+	case "POST /certificates/{id}/revocation-cancel":
+		summary = a.certificateActionSummary(c, entry, "Cancel planned certificate revocation", "superseded; certificate otherwise unchanged")
 	case "POST /certificates/{id}/export":
 		detail := "format " + entry.form["format"]
 		if yes(entry.form["delete"]) {
@@ -79,6 +84,16 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 			verb = "Remove"
 		}
 		summary = a.agentActionSummary(c, entry, verb+" allowed name", entry.form["name"])
+	case "POST /agents/{id}/deployments/{name}/renew":
+		policy := predecessorFromForm(func(name string) string { return entry.form[name] }, "predecessor", "predecessor_days")
+		summary = a.agentActionSummary(c, entry, "Renew deployment "+entry.path["name"], predecessorText(policy))
+	case "POST /agents/{id}/predecessor-policy", "POST /agents/{id}/deployments/{name}/predecessor-policy":
+		detail := "inherit the parent default"
+		if !yes(entry.form["inherit"]) {
+			policy := predecessorFromForm(func(name string) string { return entry.form[name] }, "predecessor", "predecessor_days")
+			detail = predecessorText(policy)
+		}
+		summary = a.agentActionSummary(c, entry, "Change predecessor default "+entry.path["name"], detail)
 	case "POST /agents/{id}/{action}":
 		verbs := map[string]string{"disable": "Disable agent", "enable": "Enable agent", "revoke": "Revoke agent"}
 		verb := verbs[entry.path["action"]]

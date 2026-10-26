@@ -110,7 +110,7 @@ func (q *Queries) ExpireEnrollments(ctx context.Context, expiresAt string) (int6
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE id = ?
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at, predecessor_choice, predecessor_days FROM agents WHERE id = ?
 `
 
 func (q *Queries) GetAgent(ctx context.Context, id string) (Agent, error) {
@@ -136,12 +136,14 @@ func (q *Queries) GetAgent(ctx context.Context, id string) (Agent, error) {
 		&i.ApprovedAt,
 		&i.ApprovedBy,
 		&i.UpdatedAt,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }
 
 const getAgentByACMEThumbprint = `-- name: GetAgentByACMEThumbprint :one
-SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE acme_key_thumbprint = ?
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at, predecessor_choice, predecessor_days FROM agents WHERE acme_key_thumbprint = ?
 `
 
 func (q *Queries) GetAgentByACMEThumbprint(ctx context.Context, acmeKeyThumbprint sql.NullString) (Agent, error) {
@@ -167,12 +169,14 @@ func (q *Queries) GetAgentByACMEThumbprint(ctx context.Context, acmeKeyThumbprin
 		&i.ApprovedAt,
 		&i.ApprovedBy,
 		&i.UpdatedAt,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }
 
 const getAgentByCertSerial = `-- name: GetAgentByCertSerial :one
-SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE cert_serial = ?1 OR prev_cert_serial = ?1
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at, predecessor_choice, predecessor_days FROM agents WHERE cert_serial = ?1 OR prev_cert_serial = ?1
 `
 
 func (q *Queries) GetAgentByCertSerial(ctx context.Context, serial sql.NullString) (Agent, error) {
@@ -198,6 +202,8 @@ func (q *Queries) GetAgentByCertSerial(ctx context.Context, serial sql.NullStrin
 		&i.ApprovedAt,
 		&i.ApprovedBy,
 		&i.UpdatedAt,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }
@@ -461,7 +467,7 @@ func (q *Queries) ListAgentNames(ctx context.Context, agentID string) ([]AgentNa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents ORDER BY hostname, id
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at, predecessor_choice, predecessor_days FROM agents ORDER BY hostname, id
 `
 
 func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
@@ -493,6 +499,8 @@ func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
 			&i.ApprovedAt,
 			&i.ApprovedBy,
 			&i.UpdatedAt,
+			&i.PredecessorChoice,
+			&i.PredecessorDays,
 		); err != nil {
 			return nil, err
 		}
@@ -508,7 +516,7 @@ func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
 }
 
 const listAgentsByHostname = `-- name: ListAgentsByHostname :many
-SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at FROM agents WHERE hostname = ? ORDER BY created_at, id
+SELECT id, hostname, status, enrollment_mode, proof, cert_id, cert_serial, prev_cert_id, prev_cert_serial, acme_key_thumbprint, os, arch, agent_version, desired_version, last_seen_at, created_at, approved_at, approved_by, updated_at, predecessor_choice, predecessor_days FROM agents WHERE hostname = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListAgentsByHostname(ctx context.Context, hostname string) ([]Agent, error) {
@@ -540,6 +548,8 @@ func (q *Queries) ListAgentsByHostname(ctx context.Context, hostname string) ([]
 			&i.ApprovedAt,
 			&i.ApprovedBy,
 			&i.UpdatedAt,
+			&i.PredecessorChoice,
+			&i.PredecessorDays,
 		); err != nil {
 			return nil, err
 		}

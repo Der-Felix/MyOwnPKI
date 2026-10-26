@@ -287,8 +287,9 @@ func (q *Queries) ListCertificateSANs(ctx context.Context, certificateID string)
 }
 
 const listCertificates = `-- name: ListCertificates :many
-SELECT c.id, c.ca_id, c.ca_generation, c.source, c.preset, c.serial_hex, c.subject_dn, c.common_name, c.not_before, c.not_after, c.key_algorithm, c.key_id, c.cert_der, c.fingerprint_sha256, c.renewal_of, c.requested_by, c.custom_ku, c.custom_eku, c.created_at, r.reason AS revocation_reason, r.revoked_at, r.invalidity_date
+SELECT c.id, c.ca_id, c.ca_generation, c.source, c.preset, c.serial_hex, c.subject_dn, c.common_name, c.not_before, c.not_after, c.key_algorithm, c.key_id, c.cert_der, c.fingerprint_sha256, c.renewal_of, c.requested_by, c.custom_ku, c.custom_eku, c.created_at, r.reason AS revocation_reason, r.revoked_at, r.invalidity_date, p.planned_at AS revocation_planned_at
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+LEFT JOIN certificate_revocation_plans p ON p.certificate_id = c.id
 WHERE (CAST(?1 AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
   AND (CAST(?3 AS INTEGER) = 0 OR NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by)))
   AND (CAST(?4 AS TEXT) = '' OR c.ca_id = CAST(?4 AS TEXT))
@@ -296,7 +297,8 @@ WHERE (CAST(?1 AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(?
   AND (CAST(?6 AS TEXT) = ''
        OR (CAST(?6 AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
        OR (CAST(?6 AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > ?7)
-       OR (CAST(?6 AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= ?7))
+       OR (CAST(?6 AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= ?7)
+       OR (CAST(?6 AS TEXT) = 'planned' AND r.certificate_id IS NULL AND p.certificate_id IS NOT NULL))
   AND (CAST(?8 AS TEXT) = '' OR c.not_after < CAST(?8 AS TEXT))
   AND (CAST(?9 AS TEXT) = ''
        OR instr(lower(c.common_name), CAST(?9 AS TEXT)) > 0
@@ -322,10 +324,11 @@ type ListCertificatesParams struct {
 }
 
 type ListCertificatesRow struct {
-	Certificate      Certificate
-	RevocationReason sql.NullString
-	RevokedAt        sql.NullString
-	InvalidityDate   sql.NullString
+	Certificate         Certificate
+	RevocationReason    sql.NullString
+	RevokedAt           sql.NullString
+	InvalidityDate      sql.NullString
+	RevocationPlannedAt sql.NullString
 }
 
 // One page of certificates, newest first: IDs sort by creation time, so the
@@ -379,6 +382,7 @@ func (q *Queries) ListCertificates(ctx context.Context, arg ListCertificatesPara
 			&i.RevocationReason,
 			&i.RevokedAt,
 			&i.InvalidityDate,
+			&i.RevocationPlannedAt,
 		); err != nil {
 			return nil, err
 		}
