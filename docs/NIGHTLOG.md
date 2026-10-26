@@ -1,3 +1,116 @@
+# Night log – v0.3.1 Block A
+
+> Autonomous implementation on `release/v0.3.1`, rebased onto `origin/main` `642ddda` before the
+> work. Steps 18, 19 and 17/17b of PHASE3 §8 are implemented and committed locally. Nothing was
+> pushed, merged, tagged or published. Every code commit below had a complete `task ci:local` run
+> with exit 0. This report is a separate documentation commit.
+
+## Report for the owner
+
+### Result
+
+All three requested steps and the pending-action review fix are complete. There is no unfinished
+code in the worktree. Linux/systemd/Docker-only checks remain explicitly SKIPPED on this Windows
+host and are not claimed as locally verified; their complete SKIP lines appear below.
+
+| Commit | Content |
+|---|---|
+| `fbca59b` | Step 18: per-tenant step-up lifetime, 5/10/15/30/60 minutes, default 5, admin+audit |
+| `90c8db4` | Step 19: single-use in-memory continuation of protected web actions after step-up |
+| `b6b363a` | Review fix: one pending action per session plus global entry/archive limits |
+| `9c56c8e` | Steps 17/17b: immediate/delayed/never predecessor handling, ACME/agent/UI/REST/scheduler |
+
+### Decisions made during implementation
+
+- **Proof lifetime is a snapshot.** Every new proof stores the tenant setting effective at its
+  creation. Existing sessions and proofs never gain or lose lifetime retroactively.
+- **Selector in a cookie in addition to the POST field.** Step-up continuation uses a short-lived
+  `HttpOnly; Secure; SameSite=Strict` cookie scoped to `/step-up` to select the summary after PRG.
+  The pending ID also appears in the hidden POST field, never in a URL, access log or other HTML
+  attribute. Consumption uses the POSTed ID, not the cookie.
+- **Pending memory is bounded.** One open action per session; a newer one invalidates the older ID.
+  Globally at most 64 entries and 64 MiB of legacy archives. Expiry is swept on put, get and consume.
+- **No planning without a TLS fingerprint.** Agent deployments without a nonempty served fingerprint
+  matching the reported certificate cause no predecessor revocation or schedule. This is the safe
+  behavior for deployments without a real TLS check, not an assumption that file writes prove TLS.
+- **Provisional factory defaults.** Agent deployments default to immediate revocation only after
+  confirmed deployment; other certificates default to revocation after seven days. The owner
+  question about these factory defaults remains open below.
+- **Legacy REST remains tri-state.** Explicit `revoke_previous:false` means never, true means now,
+  omission uses the tenant default. The new predecessor object takes precedence when both are sent.
+- **Restrictive planning bounds and storage.** Explicit plans require a future time no more than 30
+  days ahead. Plans live outside the immutable certificates table; upgrades do not backfill history
+  or cause mass revocation. Exact account/order/name mapping and current-serving exclusions remain
+  mandatory. Existing plans are never duplicated or silently moved.
+
+### Tests and evidence
+
+- `task ci:local` before every commit: exit 0 each time; `task check`, generated-code check,
+  `go test ./...`, lint, actionlint, registry self-test, API lint, ShellCheck, vuln, cross-build,
+  ACME lego, Windows helper and Linux test-binary cross-compiles all PASS.
+- Step-specific fake-clock tests cover exact proof expiry, non-retroactivity, pending replay,
+  concurrent consumption, foreign sessions, credentials epochs, restart, CSRF, business failure,
+  global limits, archive bytes, predecessor delays, scheduler restart and real `OnUnseal` catch-up.
+- Renewal tests cover all choices, tenant/agent/deployment/one-operation overrides, actual ACME
+  finalize with exact name sets, failed/rolled-back deployments, discarded certificates, missing
+  or duplicate orders, timestamp ties, cross-account input, missing TLS fingerprints, plan/cancel,
+  revoke-now, audit-once and CRL reason `superseded`.
+- Migration tests start before the additive predecessor migrations and prove existing certificates
+  and revocations stay untouched with no mass revocation or planning. `task generate` produced no
+  remaining diff. `task lint:api` passed with 18 informational notices and no errors or warnings.
+
+Final `task ci:local` table (same 19 PASS / 11 SKIP pattern as every implementation commit):
+
+```text
+Job          | Step                                         | Status | Duration | Skip reason
+-------------+----------------------------------------------+--------+----------+------------
+check        | check                                        | PASS | 71s      |
+check        | generate:check                               | PASS | 14s      |
+check        | agent protocol compatibility                 | PASS | 4s       |
+check        | fuzz ACME JWS parser                         | PASS | 34s      |
+check        | upgrade from previous release                | PASS | 8s       |
+race         | tests with race detector                     | SKIP | 0s       | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | 0s       | needs macOS + Homebrew
+test-os      | OpenSSL used by the tests                    | PASS | 0s       |
+test-os      | go test                                      | PASS | 14s      |
+test-os      | Windows trust-page helper                    | PASS | 5s       |
+cross        | cross-compile release platforms              | PASS | 27s      |
+vuln         | govulncheck                                  | PASS | 4s       |
+lint-meta    | actionlint                                   | PASS | 2s       |
+lint-meta    | registry coverage                            | PASS | 2s       |
+lint-meta    | vacuum OpenAPI                               | PASS | 1s       |
+shellcheck   | ShellCheck sources                           | PASS | 11s      |
+shellcheck   | legacy smoke test                            | SKIP | 0s       | needs Linux
+conformance  | lego walking skeleton EAB ARI                | PASS | 18s      |
+conformance  | real-client conformance                      | SKIP | 0s       | needs Linux + docker
+agent-e2e    | download pinned Go modules                   | PASS | 1s       |
+agent-e2e    | cross-compile Linux agent test binary        | PASS | 5s       |
+agent-e2e    | cross-compile Linux server test binary       | PASS | 3s       |
+agent-e2e    | install-agent functions                      | PASS | 1s       |
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | 0s       | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | 0s       | needs Linux + goreleaser
+install      | install.sh functions                         | SKIP | 0s       | needs Linux + goreleaser
+install      | second build for update                      | SKIP | 0s       | needs Linux
+install      | install start update as root                 | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+
+Local CI finished: no failures
+```
+
+### Open owner question
+
+Should the provisional factory defaults stay as implemented: **agent = revoke immediately after
+confirmed deployment**, **other certificates = revoke after 7 days**? PHASE3 keeps this question
+open; no claim of an owner decision is made here.
+
+### Not finished
+
+Nothing in the requested Block A scope. The Linux/systemd/Docker rows above still need their real
+CI environments; they were not simulated or counted as local passes.
+
+---
+
 # Night log – v0.2.2
 
 > Autonomous run, night of 2026-10-24, branch `night/v0.2.2` (from `origin/main` 123ba9b, no
