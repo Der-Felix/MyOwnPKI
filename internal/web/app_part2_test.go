@@ -113,7 +113,7 @@ func TestCertificateActions(t *testing.T) {
 	other, _ := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"git.homelab.lan"}, Who: testinstance.Console})
 	v.Clock.Advance(authz.StepUpWindow + time.Second)
 	r = b.post(t, "/certificates/"+other.ID+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}})
-	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/step-up?next=") {
+	if r.Code != http.StatusSeeOther || r.location() != "/step-up" {
 		t.Errorf("revoke without step-up: %d %q", r.Code, r.location())
 	}
 }
@@ -382,6 +382,7 @@ func TestDomainPages(t *testing.T) {
 		t.Errorf("detail:\n%s", got)
 	}
 	// Wildcards without dns-01: refused, with the reason on the page.
+	form.Del("name")
 	form.Set("wildcards", "yes")
 	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "dns-01") {
 		t.Errorf("refused change: %d", rr.Code)

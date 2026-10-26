@@ -199,30 +199,51 @@ func (a *app) seal(c *rc) {
 }
 
 func (a *app) stepUpPage(c *rc) {
-	next := safeNext(c.r.URL.Query().Get("next"))
+	entry, err := a.pending.get(c.pendingSelector(), c.sess.Binding(), c.sess.UserID, a.now())
+	if err != nil {
+		clearStepUpSelector(c.w)
+		c.notice(http.StatusBadRequest, "Start again", view.Message{Kind: view.MessageError, Text: errPendingAction.Error()})
+		return
+	}
 	p := c.page("Confirm with your second factor", "")
-	p.Description = "This action needs a fresh code. Afterwards you are back on the page and start the action again."
-	render(c.w, c.r, a.log, http.StatusOK, signin.StepUp(p, signin.FormData{Next: next, CSRF: c.sess.CSRFToken, Messages: c.messages()}))
+	p.Description = "This action needs a fresh code and runs once after confirmation."
+	render(c.w, c.r, a.log, http.StatusOK, signin.StepUp(p, signin.StepUpData{
+		FormData:  signin.FormData{Next: entry.back, CSRF: c.sess.CSRFToken, Messages: c.messages()},
+		PendingID: c.pendingSelector(), Summary: entry.summary,
+	}))
 }
 
-// stepUp: back to the page, never the action itself (owner 2026-10-17).
 func (a *app) stepUp(c *rc) {
-	next := safeNext(c.r.PostFormValue("next"))
+	id := c.r.PostFormValue("pending_id")
+	before := c.sess.Binding()
+	if _, err := a.pending.get(id, before, c.sess.UserID, a.now()); err != nil {
+		clearStepUpSelector(c.w)
+		c.notice(http.StatusBadRequest, "Start again", view.Message{Kind: view.MessageError, Text: errPendingAction.Error()})
+		return
+	}
 	sess, err := a.d.Auth.StepUpFrom(c.r.Context(), c.token, c.r.PostFormValue("code"), c.client)
 	var locked *auth.LockedError
 	switch {
 	case err == nil:
-		c.setFlash(view.Message{Kind: view.MessageSuccess, Text: "Confirmed for " + minutes(sess.StepUpDuration.Minutes()) + " – start the action again."})
-		c.redirect(next)
+		c.sess = sess
+		http.SetCookie(c.w, auth.SessionCookie(c.token))
+		entry, consumeErr := a.pending.consume(id, before, sess.Binding(), sess.UserID, a.now())
+		if consumeErr != nil {
+			clearStepUpSelector(c.w)
+			c.notice(http.StatusBadRequest, "Start again", view.Message{Kind: view.MessageError, Text: errPendingAction.Error()})
+			return
+		}
+		clearStepUpSelector(c.w)
+		c.executePending(entry)
 	case errors.Is(err, auth.ErrInvalidCode):
 		c.setFlash(view.Message{Kind: view.MessageError, Text: "Wrong or already used code – enter the current one."})
-		c.redirect(loginURL("/step-up", next))
+		c.redirect("/step-up")
 	case errors.As(err, &locked):
 		c.setFlash(view.Message{Kind: view.MessageError, Text: "Too many failed attempts – try again in " + minutes(locked.RetryAfter.Minutes()) + "."})
-		c.redirect(loginURL("/step-up", next))
+		c.redirect("/step-up")
 	default:
 		a.log.ErrorContext(c.r.Context(), "step-up", slog.Any("error", err))
 		c.setFlash(view.Message{Kind: view.MessageError, Text: "The confirmation failed – the server log has the details."})
-		c.redirect(loginURL("/step-up", next))
+		c.redirect("/step-up")
 	}
 }

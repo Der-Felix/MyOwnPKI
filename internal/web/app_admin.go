@@ -439,17 +439,21 @@ func (a *app) importPage(c *rc) {
 }
 
 func (a *app) runImport(c *rc) {
-	file, _, err := c.r.FormFile("archive")
-	if err != nil {
-		c.setFlash(view.Message{Kind: view.MessageError, Text: "Choose the archive (.tar.gz)."})
-		c.redirect("/admin/import")
-		return
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, legacy.MaxArchive+1))
-	if err != nil {
-		c.refused(err, "/admin/import")
-		return
+	data := c.actionArchive
+	if !c.continuing {
+		file, _, err := c.r.FormFile("archive")
+		if err != nil {
+			c.setFlash(view.Message{Kind: view.MessageError, Text: "Choose the archive (.tar.gz)."})
+			c.redirect("/admin/import")
+			return
+		}
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, legacy.MaxArchive+1))
+		if err != nil {
+			c.refused(err, "/admin/import")
+			return
+		}
+		c.actionArchive = append([]byte(nil), data...)
 	}
 	fsys, err := legacy.FromArchive(data)
 	if err != nil {

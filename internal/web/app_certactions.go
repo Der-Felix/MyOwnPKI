@@ -33,8 +33,7 @@ func (c *rc) refused(err error, back string) {
 	add := func(text string) { msgs = append(msgs, view.Message{Kind: view.MessageError, Text: text}) }
 	switch {
 	case errors.Is(err, authz.ErrStepUpRequired):
-		c.setFlash(view.Message{Kind: view.MessageInfo, Text: "This needs a fresh second factor – confirm it, then send the form again."})
-		c.redirect(loginURL("/step-up", back))
+		c.beginStepUp(back)
 		return
 	case errors.Is(err, ca.ErrNotFound), errors.Is(err, auth.ErrNoUser):
 		c.fail(ca.ErrNotFound)

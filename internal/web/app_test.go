@@ -249,9 +249,8 @@ func TestIssueWithACSR(t *testing.T) {
 	}
 }
 
-// TestKeyDownloadNeedsAFreshCode: without a fresh second factor the key
-// download goes to /step-up and back to the certificate – it doesn't start
-// by itself; afterwards the download is the file itself.
+// TestKeyDownloadNeedsAFreshCode: the step-up continuation answers with the
+// key download itself, even when the tenant allows a longer proof lifetime.
 func TestKeyDownloadNeedsAFreshCode(t *testing.T) {
 	t.Parallel()
 	v := newUIEnv(t)
@@ -270,7 +269,7 @@ func TestKeyDownloadNeedsAFreshCode(t *testing.T) {
 	token := b.csrf(t)
 	v.Clock.Advance(authz.StepUpWindow + time.Second)
 	r := b.post(t, detail+"/key", url.Values{"csrf_token": {token}})
-	if r.Code != http.StatusSeeOther || r.location() != "/step-up?next=%2Fcertificates%2F"+issued.ID {
+	if r.Code != http.StatusSeeOther || r.location() != "/step-up" {
 		t.Fatalf("without a fresh code: %d %q", r.Code, r.location())
 	}
 	settings := &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}
@@ -284,13 +283,7 @@ func TestKeyDownloadNeedsAFreshCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Clock.Advance(30 * time.Second)
-	if rr := b.post(t, "/step-up", url.Values{"csrf_token": {token}, "code": {v.Code("demo")}, "next": {detail}}); rr.Code != http.StatusSeeOther || rr.location() != detail {
-		t.Fatalf("step-up: %d %q", rr.Code, rr.location())
-	}
-	if flash := flashOf(t, b, detail); !strings.Contains(flash, "Confirmed for 30 minutes") {
-		t.Errorf("step-up flash: %q", flash)
-	}
-	r = b.post(t, detail+"/key", url.Values{"csrf_token": {token}})
+	r = confirmPending(t, b, token, "demo")
 	if r.Code != http.StatusOK || r.Header().Get("Content-Type") != "application/x-pem-file" || r.Header().Get("Cache-Control") != "no-store" ||
 		r.Header().Get("Content-Disposition") != `attachment; filename="nas.homelab.lan.key.pem"` || !strings.HasPrefix(r.html(), "-----BEGIN PRIVATE KEY-----") {
 		t.Errorf("download: %d %v", r.Code, r.Header())
@@ -423,12 +416,15 @@ func realPages(t *testing.T) map[string]string {
 		if err != nil {
 			t.Fatal(err)
 		}
+		token := b.csrf(t)
+		v.Clock.Advance(authz.StepUpWindow + time.Second)
+		b.post(t, "/certificates/"+issued.ID+"/key", url.Values{"csrf_token": {token}})
 		for _, p := range []string{
 			"/domains", "/domains/new", "/domains/" + dom.ID,
 			"/", "/certificates", "/certificates?status=expiring&q=nas", "/certificates/" + issued.ID,
 			"/certificates/" + issued.ID + "/extensions", "/certificates/" + issued.ID + "/chain", "/certificates/new",
 			"/authorities", "/authorities/" + v.CAIDs["issuing"], "/authorities/" + v.CAIDs["root"],
-			"/admin/appearance", "/design", "/step-up?next=%2F", "/certificates/crt_none",
+			"/admin/appearance", "/design", "/step-up", "/certificates/crt_none",
 			"/certificates/" + issued.ID + "/revoke", "/certificates/" + issued.ID + "/renew", "/certificates/" + issued.ID + "/export",
 			"/authorities/new", "/authorities/import", "/authorities/" + v.CAIDs["issuing"] + "/manage", "/authorities/" + v.CAIDs["root"] + "/manage",
 			"/presets", "/presets/server", "/admin/users", "/admin/users/new", "/admin/users/" + v.UserID(t, "demo"), "/admin/settings",
@@ -437,7 +433,7 @@ func realPages(t *testing.T) map[string]string {
 		} {
 			out["real "+p] = b.get(t, p).html()
 		}
-		token := b.csrf(t)
+		confirmPending(t, b, token, "demo")
 		csrPEM, _ := testCSRWith(t, "web.homelab.lan", []string{"web.homelab.lan"}, nil)
 		form := func(from int, extra url.Values) url.Values {
 			f := url.Values{"csrf_token": {token}, "from": {fmt.Sprint(from)}, "go": {"next"}, "preset": {"server"}, "ca": {v.CAIDs["issuing"]},
@@ -552,9 +548,9 @@ func TestAuditHasTheAddress(t *testing.T) {
 	b.post(t, "/login/code", url.Values{"code": {"000000"}})
 	b.post(t, "/login/code", url.Values{"code": {v.Code("demo")}})
 	token := b.csrf(t)
-	b.post(t, "/step-up", url.Values{"csrf_token": {token}, "code": {"000000"}})
+	_, _ = v.Auth.StepUpFrom(t.Context(), b.cookies[auth.CookieName], "000000", auth.Client{IP: ip})
 	v.Clock.Advance(30 * time.Second)
-	b.post(t, "/step-up", url.Values{"csrf_token": {token}, "code": {v.Code("demo")}})
+	_, _ = v.Auth.StepUpFrom(t.Context(), b.cookies[auth.CookieName], v.Code("demo"), auth.Client{IP: ip})
 	b.post(t, "/unseal", url.Values{"csrf_token": {token}, "passphrase": {"not the passphrase"}})
 	b.post(t, "/unseal", url.Values{"csrf_token": {token}, "passphrase": {v.Passphrase}})
 	got := testinstance.AuditIPs(t, v.InstanceAudit)

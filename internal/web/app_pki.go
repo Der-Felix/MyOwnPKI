@@ -473,8 +473,7 @@ func (a *app) certificateDownload(c *rc) {
 }
 
 // keyDownload is the one POST that answers with content: the key itself.
-// Without a fresh second factor it goes to the step-up page and back to the
-// certificate – the download is then started again by hand.
+// Without a fresh second factor it continues from the step-up page.
 func (a *app) keyDownload(c *rc) {
 	ctx := c.r.Context()
 	id := c.r.PathValue("id")
@@ -482,7 +481,7 @@ func (a *app) keyDownload(c *rc) {
 	key, err := a.d.Engine.ExportKey(ctx, c.who(), id)
 	switch {
 	case errors.Is(err, authz.ErrStepUpRequired):
-		c.redirect(loginURL("/step-up", detail))
+		c.beginStepUp(detail)
 		return
 	case errors.Is(err, ca.ErrNoStoredKey):
 		c.setFlash(view.Message{Kind: view.MessageError, Text: ca.ErrNoStoredKey.Error() + "."})

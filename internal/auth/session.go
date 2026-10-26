@@ -76,8 +76,21 @@ type Session struct {
 	// (no cookie, no CSRF token, never a step-up).
 	TokenID, TokenName string
 
-	idHash  string
-	pending bool
+	idHash           string
+	credentialsEpoch int64
+	pending          bool
+}
+
+// SessionBinding identifies the server-side session and the user's credentials
+// generation without exposing either as mutable Session fields.
+type SessionBinding struct {
+	SessionIDHash    string
+	CredentialsEpoch int64
+}
+
+// Binding returns the immutable binding of this authenticated session.
+func (s *Session) Binding() SessionBinding {
+	return SessionBinding{SessionIDHash: s.idHash, CredentialsEpoch: s.credentialsEpoch}
 }
 
 // IdleExpiresAt is when the session ends without further activity.
@@ -215,7 +228,7 @@ func sessionOf(row systemdb.Session, u systemdb.User, bindings []systemdb.RoleBi
 	sess := &Session{
 		UserID: u.ID, Username: u.Username, CSRFToken: row.CsrfToken, CreatedAt: parseTime(row.CreatedAt), LastSeen: parseTime(row.LastSeenAt),
 		ExpiresAt: parseTime(row.ExpiresAt), StepUpAt: parseNullTime(row.StepupAt), StepUpDuration: time.Duration(row.StepupMinutes) * time.Minute,
-		idHash: row.IDHash, pending: row.State == statePassword,
+		idHash: row.IDHash, credentialsEpoch: u.CredentialsEpoch, pending: row.State == statePassword,
 	}
 	if !sess.pending {
 		p := &authz.Principal{Kind: authz.KindUser, UserID: u.ID, Username: u.Username, InstanceAdmin: u.InstanceAdmin == 1,

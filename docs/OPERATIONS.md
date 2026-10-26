@@ -258,6 +258,15 @@ affects only proofs created afterwards: an existing confirmation neither gains n
 `step_up_valid_until` in the session API shows its actual expiry. Existing sessions upgraded from an
 older release keep the previous five-minute lifetime.
 
+In the web UI, a protected form that needs a fresh proof opens a confirmation page naming the action
+and its non-secret target. A correct code runs that action once; there is no need to fill in the form
+again. Downloads and one-time secrets appear in the continuation response as before. The pending
+action is bound to the session, user and credentials generation, is protected by CSRF, and expires
+after **5 minutes regardless of the longer proof lifetime above**. It exists only in server memory:
+a restart, expiry, changed credentials or another session requires starting the action again. A
+failed business action is consumed too, so retrying cannot repeat it accidentally. REST behavior is
+unchanged: API clients repeat the original operation with a fresh proof.
+
 ### Health checks and monitoring
 
 ```bash
