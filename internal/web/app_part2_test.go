@@ -226,13 +226,14 @@ func TestAdministrationPages(t *testing.T) {
 		maps.Copy(out, extra)
 		return out
 	}
-	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}}))
+	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}, "step_up_minutes": {"30"}}))
 	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
 		t.Fatalf("settings: %d", r.Code)
 	}
-	// The ACME limits (PHASE2 step 11) are stored and shown.
-	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) {
-		t.Errorf("limits not shown: %s", page)
+	// The ACME limits (PHASE2 step 11) and step-up lifetime are stored and shown.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) ||
+		!strings.Contains(page, `name="step_up_minutes"`) || !strings.Contains(page, `value="30" selected>30 minutes</option>`) {
+		t.Errorf("limits or step-up lifetime not shown: %s", page)
 	}
 	for _, bad := range []url.Values{{"acme_orders": {"0"}}, {"acme_failed": {"101"}}, {"acme_accounts": {"many"}}} {
 		if rr := b.post(t, "/admin/settings", form(bad)); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "per hour") {

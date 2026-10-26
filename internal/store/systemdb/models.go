@@ -55,14 +55,15 @@ type RoleBinding struct {
 }
 
 type Session struct {
-	IDHash     string
-	UserID     string
-	State      string
-	CsrfToken  string
-	CreatedAt  string
-	LastSeenAt string
-	ExpiresAt  string
-	StepupAt   sql.NullString
+	IDHash        string
+	UserID        string
+	State         string
+	CsrfToken     string
+	CreatedAt     string
+	LastSeenAt    string
+	ExpiresAt     string
+	StepupAt      sql.NullString
+	StepupMinutes int64
 }
 
 type Tenant struct {
@@ -80,6 +81,7 @@ type Tenant struct {
 	AcmeAccountsPerIp int64
 	TrustPage         int64
 	AgentEnrollment   string
+	StepUpMinutes     int64
 }
 
 type Unseal struct {

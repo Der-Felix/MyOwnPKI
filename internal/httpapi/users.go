@@ -390,8 +390,10 @@ type settingsJSON struct {
 	ACMELimits *acmeLimitsJSON `json:"acme_limits,omitempty"`
 	// Optional in a PUT (v0.2 clients don't send it): absent keeps the value.
 	TrustPage *bool `json:"trust_page,omitempty"`
-	// Optional in a PUT (v0.2 clients don.t send it): absent keeps the mode.
+	// Optional in a PUT (v0.2 clients don't send it): absent keeps the mode.
 	AgentEnrollment *string `json:"agent_enrollment,omitempty"`
+	// Optional in a PUT (v0.3.0 clients don't send it): absent keeps the value.
+	StepUpMinutes *int `json:"step_up_minutes,omitempty"`
 }
 
 type acmeLimitsJSON struct {
@@ -413,7 +415,7 @@ func toSettingsJSON(s *tenant.Settings) settingsJSON {
 		Organization: s.Organization, OrganizationalUnit: s.OrganizationalUnit, Locality: s.Locality, State: s.State, Country: s.Country,
 	},
 		ACMELimits: &acmeLimitsJSON{OrdersPerAccount: s.ACME.OrdersPerAccount, FailedPerName: s.ACME.FailedPerName, AccountsPerIP: s.ACME.AccountsPerIP},
-		TrustPage:  s.TrustPage, AgentEnrollment: s.AgentEnrollment}
+		TrustPage:  s.TrustPage, AgentEnrollment: s.AgentEnrollment, StepUpMinutes: s.StepUpMinutes}
 }
 
 func (a *API) getSettings(c *call) error {
@@ -431,7 +433,8 @@ func (a *API) putSettings(c *call) error {
 	}
 	d := req.SubjectDefaults
 	v := tenant.Settings{AllowServerKeygen: req.AllowServerKeygen, Organization: d.Organization,
-		OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, State: d.State, Country: d.Country, TrustPage: req.TrustPage, AgentEnrollment: req.AgentEnrollment}
+		OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, State: d.State, Country: d.Country,
+		TrustPage: req.TrustPage, AgentEnrollment: req.AgentEnrollment, StepUpMinutes: req.StepUpMinutes}
 	if l := req.ACMELimits; l != nil {
 		v.ACME = &tenant.ACMELimits{OrdersPerAccount: l.OrdersPerAccount, FailedPerName: l.FailedPerName, AccountsPerIP: l.AccountsPerIP}
 	}

@@ -269,8 +269,9 @@ paths:
       operationId: stepUp
       summary: Confirm the second factor again for a sensitive action
       description: |
-        Refreshes `step_up_valid_until` of the current session (5 minutes). TOTP only – recovery
-        codes are for signing in. For WebAuthn, use `/auth/webauthn/begin` + `/auth/webauthn/finish`
+        Refreshes `step_up_valid_until` of the current session using the tenant's configured
+        lifetime (5 minutes by default). TOTP only – recovery codes are for signing in.
+        For WebAuthn, use `/auth/webauthn/begin` + `/auth/webauthn/finish`
         while signed in instead (step 17).
       x-required-role: signed-in
       requestBody:
@@ -2727,6 +2728,12 @@ components:
             admin decides every enrollment. Always in the answer; optional in a change.
           type: string
           enum: [auto, verified, manual]
+        step_up_minutes:
+          description: |
+            Lifetime of a new second-factor proof for sensitive actions (since 0.3.1, default 5).
+            Always in the answer; optional in a change. Existing proofs keep their original lifetime.
+          type: integer
+          enum: [5, 10, 15, 30, 60]
 
     PasswordChange:
       description: "Password change of the logged-in user"

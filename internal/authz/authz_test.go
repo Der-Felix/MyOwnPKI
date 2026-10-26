@@ -147,23 +147,53 @@ func TestSpecialPrincipals(t *testing.T) {
 // the step-up prompt it could not answer.
 func TestTokenNeverSatisfiesStepUp(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
-	p := &Principal{Kind: KindUser, UserID: "u1", ViaToken: true, InstanceAdmin: true, StepUpAt: now,
+	tokenNow := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	p := &Principal{Kind: KindUser, UserID: "u1", ViaToken: true, InstanceAdmin: true, StepUpAt: tokenNow,
 		Bindings: []Binding{{Tenant: "default", Role: Admin}}}
 	for _, perm := range stepUp {
 		if stepUpActions[perm] == "" {
 			t.Errorf("%s: no action text for the token refusal", perm)
 		}
-		err := p.Check(perm, Resource{Tenant: "default"}, now)
+		err := p.Check(perm, Resource{Tenant: "default"}, tokenNow)
 		var tok *TokenStepUpError
 		if !errors.As(err, &tok) || !errors.Is(err, ErrDenied) || errors.Is(err, ErrStepUpRequired) {
 			t.Errorf("%s: %v", perm, err)
 		}
 	}
-	if err := p.Check(IssueCert, Resource{Tenant: "default"}, now); err != nil {
+	if err := p.Check(IssueCert, Resource{Tenant: "default"}, tokenNow); err != nil {
 		t.Errorf("issuing needs no step-up, a token may: %v", err)
 	}
-	if err := p.FreshStepUp(now); !errors.Is(err, ErrDenied) {
+	if err := p.FreshStepUp(tokenNow); !errors.Is(err, ErrDenied) {
 		t.Errorf("own account by token: %v", err)
+	}
+}
+
+func TestPerProofStepUpDuration(t *testing.T) {
+	t.Parallel()
+	p := user(Binding{Tenant: "default", Role: Admin})
+	res := Resource{Tenant: "default"}
+	for _, minutes := range []int{5, 10, 15, 30, 60} {
+		p.StepUpDuration = time.Duration(minutes) * time.Minute
+		at := now.Add(p.StepUpDuration)
+		if err := p.Check(RevokeCert, res, at); err != nil {
+			t.Errorf("%d minutes at exact expiry: %v", minutes, err)
+		}
+		if err := p.FreshStepUp(at); err != nil {
+			t.Errorf("%d minutes own account at exact expiry: %v", minutes, err)
+		}
+		at = at.Add(time.Nanosecond)
+		if err := p.Check(RevokeCert, res, at); !errors.Is(err, ErrStepUpRequired) {
+			t.Errorf("%d minutes after expiry: %v", minutes, err)
+		}
+		if err := p.FreshStepUp(at); !errors.Is(err, ErrStepUpRequired) {
+			t.Errorf("%d minutes own account after expiry: %v", minutes, err)
+		}
+	}
+	p.StepUpDuration = 0
+	if err := p.Check(RevokeCert, res, now.Add(StepUpWindow)); err != nil {
+		t.Errorf("zero duration does not use the default: %v", err)
+	}
+	if err := p.Check(RevokeCert, res, now.Add(StepUpWindow+time.Nanosecond)); !errors.Is(err, ErrStepUpRequired) {
+		t.Errorf("zero duration past the default: %v", err)
 	}
 }

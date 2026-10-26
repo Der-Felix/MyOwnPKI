@@ -245,6 +245,19 @@ myownpki serve --config /etc/myownpki/config.yaml
 - Stop the server with SIGTERM or Ctrl+C: it finishes requests, seals and writes a last audit
   checkpoint (within 8 seconds). With systemd, use `KillSignal=SIGTERM` and `TimeoutStopSec=30`.
 
+### Step-up confirmation lifetime
+
+Sensitive actions need a fresh second factor. A tenant admin chooses how long that confirmation
+stays valid in *Administration → Tenant settings*: **5, 10, 15, 30 or 60 minutes**, default **5**.
+The same value is available as `step_up_minutes` in `GET` and `PUT /api/v1/settings`; viewers and
+operators can read settings but cannot change them. Every change is audited as `tenant.settings`
+with the old and new values.
+
+The lifetime is snapshotted with each TOTP, recovery-code or passkey proof. Changing the setting
+affects only proofs created afterwards: an existing confirmation neither gains nor loses time, and
+`step_up_valid_until` in the session API shows its actual expiry. Existing sessions upgraded from an
+older release keep the previous five-minute lifetime.
+
 ### Health checks and monitoring
 
 ```bash

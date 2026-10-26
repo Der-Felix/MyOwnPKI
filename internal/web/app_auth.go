@@ -208,11 +208,11 @@ func (a *app) stepUpPage(c *rc) {
 // stepUp: back to the page, never the action itself (owner 2026-10-17).
 func (a *app) stepUp(c *rc) {
 	next := safeNext(c.r.PostFormValue("next"))
-	_, err := a.d.Auth.StepUpFrom(c.r.Context(), c.token, c.r.PostFormValue("code"), c.client)
+	sess, err := a.d.Auth.StepUpFrom(c.r.Context(), c.token, c.r.PostFormValue("code"), c.client)
 	var locked *auth.LockedError
 	switch {
 	case err == nil:
-		c.setFlash(view.Message{Kind: view.MessageSuccess, Text: "Confirmed for 5 minutes – start the action again."})
+		c.setFlash(view.Message{Kind: view.MessageSuccess, Text: "Confirmed for " + minutes(sess.StepUpDuration.Minutes()) + " – start the action again."})
 		c.redirect(next)
 	case errors.Is(err, auth.ErrInvalidCode):
 		c.setFlash(view.Message{Kind: view.MessageError, Text: "Wrong or already used code – enter the current one."})

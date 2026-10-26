@@ -442,7 +442,13 @@ func (s *Service) FinishPasskeyLogin(ctx context.Context, token string, body []b
 	if aerr := s.direct(ctx, &u, c.IP, "user.step_up", audit.ResultSuccess, map[string]any{"factor": "passkey", "passkey": stored.ID}); aerr != nil {
 		return nil, fmt.Errorf("step-up refused – the audit entry can't be written: %w", aerr)
 	}
-	if serr := q.SetStepUp(ctx, systemdb.SetStepUpParams{StepupAt: sql.NullString{String: formatTime(now), Valid: true}, IDHash: sess.idHash}); serr != nil {
+	stepUpMinutes, err := q.GetStepUpMinutes(ctx, s.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	if serr := q.SetStepUp(ctx, systemdb.SetStepUpParams{
+		StepupAt: sql.NullString{String: formatTime(now), Valid: true}, StepupMinutes: stepUpMinutes, IDHash: sess.idHash,
+	}); serr != nil {
 		return nil, serr
 	}
 	if lerr := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, LockedUntil: s.keepLock(u, device, now), UpdatedAt: formatTime(now), ID: u.ID}); lerr != nil {

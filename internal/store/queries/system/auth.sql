@@ -78,8 +78,8 @@ DELETE FROM role_bindings WHERE user_id = ? AND tenant_id = ? AND ca = ?;
 SELECT * FROM role_bindings WHERE user_id = ? ORDER BY tenant_id, ca;
 
 -- name: InsertSession :exec
-INSERT INTO sessions (id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO sessions (id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at, stepup_minutes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSession :one
 SELECT * FROM sessions WHERE id_hash = ?;
@@ -88,7 +88,7 @@ SELECT * FROM sessions WHERE id_hash = ?;
 UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?;
 
 -- name: SetStepUp :exec
-UPDATE sessions SET stepup_at = ? WHERE id_hash = ?;
+UPDATE sessions SET stepup_at = ?, stepup_minutes = ? WHERE id_hash = ?;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE id_hash = ?;

@@ -68,7 +68,7 @@ var instancePermissions = []Permission{Unseal, ManageUsers}
 // stepUp: permissions that need a fresh second factor (security.md).
 var stepUp = []Permission{RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageUsers, ManageAgents}
 
-// StepUpWindow is how long a fresh second factor counts.
+// StepUpWindow is the default when a principal has no per-proof duration.
 const StepUpWindow = 5 * time.Minute
 
 // NeedsStepUp reports whether p needs a fresh second factor.
@@ -104,6 +104,9 @@ type Principal struct {
 	Bindings      []Binding
 	// StepUpAt is the last fresh second factor of this session; zero = none.
 	StepUpAt time.Time
+	// StepUpDuration is the lifetime snapshotted with that proof; zero uses
+	// StepUpWindow for principals built outside an authenticated session.
+	StepUpDuration time.Duration
 	// ViaToken: the request carries an API token. A token never satisfies
 	// step-up (step 18): those actions need a person with a fresh code.
 	ViaToken bool
@@ -153,10 +156,17 @@ func (p *Principal) Check(perm Permission, res Resource, now time.Time) error {
 	// sessions store milliseconds – a step-up in the same second must not
 	// look like one from the future (live run finding 2026-10-17).
 	stepUp := p.StepUpAt.Truncate(time.Second)
-	if NeedsStepUp(perm) && (p.StepUpAt.IsZero() || now.Sub(stepUp) > StepUpWindow || now.Before(stepUp)) {
+	if NeedsStepUp(perm) && (p.StepUpAt.IsZero() || now.Sub(stepUp) > p.stepUpWindow() || now.Before(stepUp)) {
 		return fmt.Errorf("%w (%s)", ErrStepUpRequired, perm)
 	}
 	return nil
+}
+
+func (p *Principal) stepUpWindow() time.Duration {
+	if p.StepUpDuration > 0 {
+		return p.StepUpDuration
+	}
+	return StepUpWindow
 }
 
 // hasTenantPermission: a tenant-wide binding, or a binding for res.CA.
@@ -195,7 +205,7 @@ func (p *Principal) FreshStepUp(now time.Time) error {
 		return &TokenStepUpError{Action: "change the sign-in of an account"}
 	}
 	stepUp := p.StepUpAt.Truncate(time.Second)
-	if p.StepUpAt.IsZero() || now.Sub(stepUp) > StepUpWindow || now.Before(stepUp) {
+	if p.StepUpAt.IsZero() || now.Sub(stepUp) > p.stepUpWindow() || now.Before(stepUp) {
 		return fmt.Errorf("%w (own account)", ErrStepUpRequired)
 	}
 	return nil

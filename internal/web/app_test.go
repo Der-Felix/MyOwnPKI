@@ -21,6 +21,8 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
@@ -271,9 +273,22 @@ func TestKeyDownloadNeedsAFreshCode(t *testing.T) {
 	if r.Code != http.StatusSeeOther || r.location() != "/step-up?next=%2Fcertificates%2F"+issued.ID {
 		t.Fatalf("without a fresh code: %d %q", r.Code, r.location())
 	}
+	settings := &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}
+	current, err := settings.Get(t.Context(), store.DefaultTenant, testinstance.Console)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thirty := 30
+	current.StepUpMinutes = &thirty
+	if err := settings.Set(t.Context(), store.DefaultTenant, *current, testinstance.Console); err != nil {
+		t.Fatal(err)
+	}
 	v.Clock.Advance(30 * time.Second)
 	if rr := b.post(t, "/step-up", url.Values{"csrf_token": {token}, "code": {v.Code("demo")}, "next": {detail}}); rr.Code != http.StatusSeeOther || rr.location() != detail {
 		t.Fatalf("step-up: %d %q", rr.Code, rr.location())
+	}
+	if flash := flashOf(t, b, detail); !strings.Contains(flash, "Confirmed for 30 minutes") {
+		t.Errorf("step-up flash: %q", flash)
 	}
 	r = b.post(t, detail+"/key", url.Values{"csrf_token": {token}})
 	if r.Code != http.StatusOK || r.Header().Get("Content-Type") != "application/x-pem-file" || r.Header().Get("Cache-Control") != "no-store" ||

@@ -190,7 +190,11 @@ func sessionJSON(s *auth.Session) sessionOut {
 		}
 	}
 	if !s.StepUpAt.IsZero() {
-		t := s.StepUpAt.Add(authz.StepUpWindow).UTC()
+		window := s.StepUpDuration
+		if window <= 0 {
+			window = authz.StepUpWindow
+		}
+		t := s.StepUpAt.Add(window).UTC()
 		out.StepUpValidUntil = &t
 	}
 	return out

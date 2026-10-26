@@ -7,6 +7,14 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Added
+
+- **Tenant-configurable step-up lifetime:** tenant admins can choose 5, 10, 15, 30 or 60 minutes
+  (default 5) in *Tenant settings* or through the additive `step_up_minutes` REST field. Changes
+  are audited and apply only to new TOTP, recovery-code and passkey proofs; each session snapshots
+  the lifetime, so existing proofs are unchanged. system.db migration 0012 adds the setting and
+  per-session snapshots, with five minutes retained for existing sessions.
+
 ## [0.3.0] - 2026-10-25
 
 The Linux agent: trusted enrollment, ACME issuance, atomic deployment with rollback, scheduled

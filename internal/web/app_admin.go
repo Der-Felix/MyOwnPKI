@@ -284,6 +284,8 @@ func (a *app) settingsPage(c *rc) {
 			{ID: "trust_page", Label: "Public trust page at / of the public listener (CA certificates, fingerprints, install guides)", Type: "checkbox", Checked: s.TrustPage != nil && *s.TrustPage},
 			{ID: "agent_enrollment", Label: "Agents: how an enrollment is admitted", Type: "select", Options: enrollmentOptions(s.AgentEnrollment),
 				Hint: "verified: join token and passed check (one alone waits for an admin); auto: either one; manual: an admin decides every enrollment"},
+			{ID: "step_up_minutes", Label: "Second-factor confirmation: valid for", Type: "select", Options: stepUpOptions(s.StepUpMinutes),
+				Hint: "Applies to new confirmations only; an existing confirmation keeps its original lifetime"},
 		},
 	})
 	if !c.may(authz.ManageTenant, "") {
@@ -305,10 +307,15 @@ func (a *app) saveSettings(c *rc) {
 	if m := f("agent_enrollment"); m != "" {
 		mode = &m
 	}
+	var stepUp *int // absent: the stored lifetime stays
+	if f("step_up_minutes") != "" {
+		n := num("step_up_minutes")
+		stepUp = &n
+	}
 	err := a.d.Settings.Set(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
 		OrganizationalUnit: strings.TrimSpace(f("ou")), Locality: strings.TrimSpace(f("l")), State: strings.TrimSpace(f("st")), Country: strings.TrimSpace(f("c")),
 		ACME:      &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")},
-		TrustPage: &trust, AgentEnrollment: mode}, c.who())
+		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp}, c.who())
 	if err != nil {
 		c.refused(err, "/admin/settings")
 		return
@@ -523,6 +530,22 @@ func enrollmentOptions(current *string) []admin.Option {
 		{tenant.EnrollManual, "manual – an admin decides"},
 	} {
 		out = append(out, admin.Option{Value: m.v, Label: m.label, Selected: m.v == cur})
+	}
+	return out
+}
+
+func stepUpOptions(current *int) []admin.Option {
+	cur := tenant.DefaultStepUpMinutes
+	if current != nil {
+		cur = *current
+	}
+	out := make([]admin.Option, 0, len(tenant.StepUpMinuteValues))
+	for _, minutes := range tenant.StepUpMinuteValues {
+		label := strconv.Itoa(minutes) + " minutes"
+		if minutes == tenant.DefaultStepUpMinutes {
+			label += " (default)"
+		}
+		out = append(out, admin.Option{Value: strconv.Itoa(minutes), Label: label, Selected: minutes == cur})
 	}
 	return out
 }

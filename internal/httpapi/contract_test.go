@@ -684,7 +684,14 @@ func TestContract(t *testing.T) {
 		{op: "getSettings", as: viewer, want: 200},
 		{op: "updateSettings", as: anon, body: settings, want: 401, note: "no-session"},
 		{op: "updateSettings", as: viewer, body: settings, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateSettings", as: self, body: settings, want: 403, kind: "forbidden", note: "operator"},
 		{op: "updateSettings", as: admin, body: settings, want: 200},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 30), want: 200, note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 0), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, -1), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 7), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 61), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 5), want: 200, note: "step-up-lifetime"},
 		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 100, 3, 20), want: 200, note: "acme-limits"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
@@ -1136,5 +1143,12 @@ func withTrustPage(settings map[string]any, on bool) map[string]any {
 	out := map[string]any{}
 	maps.Copy(out, settings)
 	out["trust_page"] = on
+	return out
+}
+
+func withStepUp(settings map[string]any, minutes int) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["step_up_minutes"] = minutes
 	return out
 }
