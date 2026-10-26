@@ -15,11 +15,16 @@ import (
 )
 
 const (
-	pendingActionTTL     = 5 * time.Minute
-	stepUpSelectorCookie = "__Secure-myownpki_step_up"
+	pendingActionTTL             = 5 * time.Minute
+	maxPendingActions            = 64
+	maxPendingActionArchiveBytes = 64 << 20
+	stepUpSelectorCookie         = "__Secure-myownpki_step_up"
 )
 
-var errPendingAction = errors.New("the confirmation is invalid or expired; start the action again")
+var (
+	errPendingAction         = errors.New("the confirmation is invalid or expired; start the action again")
+	errTooManyPendingActions = errors.New("too many open confirmations – try again later")
+)
 
 type actionSpec struct {
 	fields  []string
@@ -60,12 +65,15 @@ func cloneStrings(in map[string]string) map[string]string {
 }
 
 type pendingActions struct {
-	mu      sync.Mutex
-	entries map[string]*pendingAction
+	mu              sync.Mutex
+	entries         map[string]*pendingAction
+	archiveBytes    int
+	maxEntries      int
+	maxArchiveBytes int
 }
 
 func newPendingActions() *pendingActions {
-	return &pendingActions{entries: map[string]*pendingAction{}}
+	return &pendingActions{entries: map[string]*pendingAction{}, maxEntries: maxPendingActions, maxArchiveBytes: maxPendingActionArchiveBytes}
 }
 
 func (s *pendingActions) put(entry *pendingAction) (string, error) {
@@ -76,18 +84,47 @@ func (s *pendingActions) put(entry *pendingAction) (string, error) {
 	id := base64.RawURLEncoding.EncodeToString(idBytes)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked(entry.createdAt)
+	var replaced []string
+	replacedArchiveBytes := 0
 	for existingID, existing := range s.entries {
-		if !entry.createdAt.Before(existing.expiresAt) {
-			delete(s.entries, existingID)
+		if existing.sessionIDHash == entry.sessionIDHash {
+			replaced = append(replaced, existingID)
+			replacedArchiveBytes += len(existing.archive)
 		}
 	}
-	s.entries[id] = entry.clone()
+	archiveBytes := s.archiveBytes - replacedArchiveBytes + len(entry.archive)
+	if len(s.entries)-len(replaced)+1 > s.maxEntries || archiveBytes > s.maxArchiveBytes {
+		return "", errTooManyPendingActions
+	}
+	stored := entry.clone()
+	for _, existingID := range replaced {
+		s.deleteLocked(existingID)
+	}
+	s.entries[id] = stored
+	s.archiveBytes = archiveBytes
 	return id, nil
+}
+
+func (s *pendingActions) deleteLocked(id string) {
+	if entry := s.entries[id]; entry != nil {
+		s.archiveBytes -= len(entry.archive)
+		delete(s.entries, id)
+	}
+}
+
+func (s *pendingActions) pruneLocked(now time.Time) {
+	for id, entry := range s.entries {
+		if !now.Before(entry.expiresAt) {
+			s.deleteLocked(id)
+		}
+	}
 }
 
 func (s *pendingActions) get(id string, binding auth.SessionBinding, userID string, now time.Time) (*pendingAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked(now)
 	entry, err := s.validLocked(id, binding, userID, now)
 	return entry.clone(), err
 }
@@ -98,7 +135,7 @@ func (s *pendingActions) validLocked(id string, binding auth.SessionBinding, use
 		return nil, errPendingAction
 	}
 	if !now.Before(entry.expiresAt) {
-		delete(s.entries, id)
+		s.deleteLocked(id)
 		return nil, errPendingAction
 	}
 	if entry.sessionIDHash != binding.SessionIDHash || entry.userID != userID || entry.credentialsEpoch != binding.CredentialsEpoch {
@@ -110,11 +147,12 @@ func (s *pendingActions) validLocked(id string, binding auth.SessionBinding, use
 func (s *pendingActions) consume(id string, before, fresh auth.SessionBinding, userID string, now time.Time) (*pendingAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked(now)
 	entry, err := s.validLocked(id, before, userID, now)
 	if err != nil || fresh.SessionIDHash != before.SessionIDHash || fresh.CredentialsEpoch != before.CredentialsEpoch {
 		return nil, errPendingAction
 	}
-	delete(s.entries, id)
+	s.deleteLocked(id)
 	return entry.clone(), nil
 }
 
@@ -189,6 +227,11 @@ func (c *rc) beginStepUp(back string) {
 	}
 	entry.summary = c.a.actionSummary(c, entry)
 	id, err := c.a.pending.put(entry)
+	if errors.Is(err, errTooManyPendingActions) {
+		c.setFlash(view.Message{Kind: view.MessageError, Text: errTooManyPendingActions.Error()})
+		c.redirect(back)
+		return
+	}
 	if err != nil {
 		c.fail(err)
 		return

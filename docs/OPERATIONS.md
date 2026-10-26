@@ -267,6 +267,12 @@ a restart, expiry, changed credentials or another session requires starting the 
 failed business action is consumed too, so retrying cannot repeat it accidentally. REST behavior is
 unchanged: API clients repeat the original operation with a fresh proof.
 
+A session has at most one open confirmation: starting another invalidates the previous pending ID.
+The server keeps at most **64** pending actions and **64 MiB** of pending legacy archives in total;
+when either budget is full, the form reports “too many open confirmations – try again later” without
+replacing existing state. Expired entries and their archive bytes are reclaimed whenever an action
+is created, read or consumed.
+
 ### Health checks and monitoring
 
 ```bash

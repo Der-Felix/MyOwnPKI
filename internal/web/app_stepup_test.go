@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -345,6 +346,128 @@ func TestPendingActionConcurrentConsumption(t *testing.T) {
 	wg.Wait()
 	if runs.Load() != 1 {
 		t.Errorf("consumed %d times", runs.Load())
+	}
+}
+
+func testPendingEntry(session string, now time.Time, archiveBytes int) *pendingAction {
+	return &pendingAction{sessionIDHash: session, userID: "user-" + session, credentialsEpoch: 1,
+		createdAt: now, expiresAt: now.Add(pendingActionTTL), action: "POST /certificates/{id}/revoke", archive: make([]byte, archiveBytes)}
+}
+
+func testPendingBinding(session string) auth.SessionBinding {
+	return auth.SessionBinding{SessionIDHash: session, CredentialsEpoch: 1}
+}
+
+func TestPendingActionReplacedBySameSession(t *testing.T) {
+	t.Parallel()
+	store := newPendingActions()
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	first, err := store.put(testPendingEntry("session", now, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.put(testPendingEntry("session", now, 5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := testPendingBinding("session")
+	if _, err := store.get(first, binding, "user-session", now); !errors.Is(err, errPendingAction) {
+		t.Errorf("replaced ID remains valid: %v", err)
+	}
+	if _, err := store.get(second, binding, "user-session", now); err != nil {
+		t.Fatalf("replacement is invalid: %v", err)
+	}
+	if len(store.entries) != 1 || store.archiveBytes != 5 {
+		t.Errorf("replacement accounting: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+	}
+}
+
+func TestPendingActionGlobalEntryLimit(t *testing.T) {
+	t.Parallel()
+	store := newPendingActions()
+	store.maxEntries = 2
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	first, err := store.put(testPendingEntry("one", now, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.put(testPendingEntry("two", now, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.put(testPendingEntry("three", now, 3)); !errors.Is(err, errTooManyPendingActions) {
+		t.Fatalf("entry limit: %v", err)
+	}
+	if len(store.entries) != 2 || store.archiveBytes != 3 {
+		t.Errorf("failed put grew state: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+	}
+	if _, err := store.get(first, testPendingBinding("one"), "user-one", now); err != nil {
+		t.Errorf("failed put removed an existing entry: %v", err)
+	}
+	if _, err := store.put(testPendingEntry("one", now, 4)); err != nil {
+		t.Errorf("replacement at the entry limit must be allowed: %v", err)
+	}
+	if len(store.entries) != 2 || store.archiveBytes != 6 {
+		t.Errorf("replacement at limit: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+	}
+}
+
+func TestPendingActionGlobalArchiveLimit(t *testing.T) {
+	t.Parallel()
+	store := newPendingActions()
+	store.maxArchiveBytes = 10
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	first, err := store.put(testPendingEntry("one", now, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.put(testPendingEntry("two", now, 3)); !errors.Is(err, errTooManyPendingActions) {
+		t.Fatalf("archive limit: %v", err)
+	}
+	if len(store.entries) != 1 || store.archiveBytes != 8 {
+		t.Errorf("failed archive put grew state: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+	}
+	second, err := store.put(testPendingEntry("one", now, 10))
+	if err != nil {
+		t.Fatalf("archive replacement: %v", err)
+	}
+	if _, err := store.get(first, testPendingBinding("one"), "user-one", now); !errors.Is(err, errPendingAction) {
+		t.Errorf("replaced archive ID remains valid: %v", err)
+	}
+	if _, err := store.put(testPendingEntry("one", now, 11)); !errors.Is(err, errTooManyPendingActions) {
+		t.Fatalf("oversized replacement: %v", err)
+	}
+	if _, err := store.get(second, testPendingBinding("one"), "user-one", now); err != nil {
+		t.Errorf("failed replacement removed the current entry: %v", err)
+	}
+	if len(store.entries) != 1 || store.archiveBytes != 10 {
+		t.Errorf("archive replacement accounting: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+	}
+}
+
+func TestPendingActionExpirySweepOutsidePut(t *testing.T) {
+	t.Parallel()
+	for _, method := range []string{"get", "consume"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			store := newPendingActions()
+			now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+			if _, err := store.put(testPendingEntry("one", now, 2)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.put(testPendingEntry("two", now, 3)); err != nil {
+				t.Fatal(err)
+			}
+			expired := now.Add(pendingActionTTL)
+			binding := testPendingBinding("missing")
+			if method == "get" {
+				_, _ = store.get("missing", binding, "nobody", expired)
+			} else {
+				_, _ = store.consume("missing", binding, binding, "nobody", expired)
+			}
+			if len(store.entries) != 0 || store.archiveBytes != 0 {
+				t.Errorf("expiry sweep: %d entries, %d bytes", len(store.entries), store.archiveBytes)
+			}
+		})
 	}
 }
 

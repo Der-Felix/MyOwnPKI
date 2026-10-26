@@ -15,7 +15,9 @@ change the API, the configuration and the database schema; the release notes say
   five minutes independently of the configured proof lifetime, and are consumed atomically before
   the existing authorized handler. Replay, concurrent clicks, restart and business failure cannot
   repeat the action; downloads, one-time secrets and multipart legacy imports keep their response
-  behavior. REST step-up responses and the OpenAPI contract are unchanged.
+  behavior. A new confirmation replaces the session's previous one, global entry/archive budgets
+  reject unbounded growth, and every store operation reclaims expired state. REST step-up responses
+  and the OpenAPI contract are unchanged.
 - **Tenant-configurable step-up lifetime:** tenant admins can choose 5, 10, 15, 30 or 60 minutes
   (default 5) in *Tenant settings* or through the additive `step_up_minutes` REST field. Changes
   are audited and apply only to new TOTP, recovery-code and passkey proofs; each session snapshots
