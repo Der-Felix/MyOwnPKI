@@ -278,6 +278,12 @@ jobs:
           goreleaser: "true"
       - name: Snapshot build (no SBOMs, no signatures, no image)
         run: bash scripts/ci/install-snapshot.sh
+      - name: Inspect agent packages (both formats and architectures)
+        run: bash scripts/ci/agent-package-inspect.sh
+      - name: Install agent packages in pinned distributions
+        run: bash scripts/ci/agent-package-distros.sh
+      - name: Real agent package setup and systemd
+        run: bash scripts/ci/agent-package-systemd.sh
       - name: install.sh functions (no root)
         run: bash scripts/ci/install-functions.sh
       # A second binary with another version for the update path.

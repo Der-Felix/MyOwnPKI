@@ -160,10 +160,11 @@ gh release view "v${RELEASE}" --json name,isDraft,isPrerelease,assets --jq "{nam
 ```
 
 - `isDraft` true; `isPrerelease` true for a candidate, false for the real release.
-- 18 assets: 5 server archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
+- 22 assets: 5 server archives (`myownpki_<release>_linux_amd64.tar.gz`, `…_linux_arm64.tar.gz`,
   `…_darwin_arm64.tar.gz`, `…_freebsd_amd64.tar.gz`, `…_windows_amd64.zip`), 2 agent archives for
-  Linux amd64/arm64, 7 SBOMs (`*.sbom.json`), `install.sh`, `install-agent.sh`, `checksums.txt` and
-  `checksums.txt.sigstore.json`. The archives also hold their install scripts and systemd units.
+  Linux amd64/arm64, 4 agent nFPM packages (`.deb` and `.rpm` for Linux amd64/arm64), 7 SBOMs
+  (`*.sbom.json`), `install.sh`, `install-agent.sh`, `checksums.txt` and
+  `checksums.txt.sigstore.json`. The archives also hold their install scripts and systemd examples.
 
 The release notes – **the text must not be empty**: the length is more than 0, and the text starts
 with the first lines of the version's CHANGELOG section, without a list of commits:

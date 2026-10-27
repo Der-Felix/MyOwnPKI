@@ -33,6 +33,9 @@ steps=(
   'agent-e2e|systemd verify and security|linux_systemd_disposable|bash scripts/ci/agent-e2e-systemd.sh'
   'agent-e2e|nginx port 443 systemd controls|linux_systemd_docker_disposable|bash scripts/ci/agent-e2e-nginx-systemd.sh'
   'install|GoReleaser snapshot|linux_goreleaser|bash scripts/ci/install-snapshot.sh'
+  'install|agent package formats and architectures|linux_docker_dpkg|bash scripts/ci/agent-package-inspect.sh'
+  'install|agent packages in pinned distributions|linux_docker_openssl|bash scripts/ci/agent-package-distros.sh'
+  'install|agent package real setup and systemd|linux_systemd_openssl_disposable|bash scripts/ci/agent-package-systemd.sh'
   'install|install.sh functions|linux_goreleaser|bash scripts/ci/install-functions.sh'
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
@@ -119,6 +122,23 @@ requirement() {
     linux_docker)
       if [ "$os" != linux ] || ! has_commands go task docker; then
         echo 'needs Linux + docker'
+      fi
+      ;;
+    linux_docker_dpkg)
+      if [ "$os" != linux ] || ! has_commands docker dpkg-deb; then
+        echo 'needs Linux + docker + dpkg-deb'
+      fi
+      ;;
+    linux_docker_openssl)
+      if [ "$os" != linux ] || ! has_commands docker openssl; then
+        echo 'needs Linux + docker + openssl'
+      fi
+      ;;
+    linux_systemd_openssl_disposable)
+      if ! disposable_allowed; then
+        disposable_skip_reason
+      elif [ "$os" != linux ] || [ ! -d /run/systemd/system ] || ! has_commands sudo systemctl systemd-analyze openssl dpkg; then
+        echo 'needs Linux + systemd + openssl + dpkg + sudo on a disposable runner'
       fi
       ;;
     linux_systemd_disposable)

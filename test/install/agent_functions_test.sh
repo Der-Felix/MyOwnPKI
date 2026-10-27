@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Non-root checks of deploy/install-agent.sh; the agent CI job runs them.
+# Non-root checks of the deprecated install-agent.sh compatibility wrapper.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # shellcheck source=deploy/install-agent.sh
@@ -8,85 +8,35 @@ source deploy/install-agent.sh
 fail() { printf 'agent_functions_test: %s\n' "$*" >&2; exit 1; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-install-functions.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/work" "$tmp/www"
-printf 'root test fixture\n' >"$tmp/root.pem"
-printf 'join token test fixture\n' >"$tmp/token"
-printf 'archive test fixture\n' >"$tmp/myownpki-agent_0.3.0_linux_amd64.tar.gz"
-(cd "$tmp" && sha256sum myownpki-agent_0.3.0_linux_amd64.tar.gz >checksums.txt)
-verify_checksum "$tmp/myownpki-agent_0.3.0_linux_amd64.tar.gz" "$tmp/checksums.txt" || fail "valid checksum refused"
-printf 'changed archive\n' >>"$tmp/myownpki-agent_0.3.0_linux_amd64.tar.gz"
-if (verify_checksum "$tmp/myownpki-agent_0.3.0_linux_amd64.tar.gz" "$tmp/checksums.txt"); then
+printf 'archive test fixture\n' >"$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz"
+(cd "$tmp" && sha256sum myownpki-agent_0.3.1_linux_amd64.tar.gz >checksums.txt)
+verify_checksum "$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz" "$tmp/checksums.txt" || fail "valid checksum refused"
+printf 'changed archive\n' >>"$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz"
+if (verify_checksum "$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz" "$tmp/checksums.txt"); then
 	fail "changed archive accepted"
 fi
 
-parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" --token-file "$tmp/token" --webroot "$tmp/www"
-work=$tmp/work
-ROOT=/etc/myownpki-agent/root.pem
-DATA=/var/lib/myownpki-agent
-render_config proxy1.homelab.lan
-for expected in 'server: "https://pki.homelab.lan:8444"' 'hostname: "proxy1.homelab.lan"' 'challenge: webroot' "webroot: \"$tmp/www\"" "paths: [\"$tmp/www\"]"; do
-	grep -Fq -- "$expected" "$work/agent.yaml" || fail "webroot config lacks $expected"
-done
-[ -f "$token_file" ] || fail "parse_args removed the token"
-
-webroot=
-render_config proxy1.homelab.lan
-grep -Fq 'challenge: standalone' "$work/agent.yaml" || fail "standalone challenge missing"
-grep -Fqx 'paths: []' "$work/agent.yaml" || fail "standalone paths are not empty"
-if (parse_args --server http://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem"); then
-	fail "plain HTTP server accepted"
-fi
-if (parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/missing.pem"); then
-	fail "missing CA bundle accepted"
-fi
-
-cat >"$tmp/agent-fails" <<'EOF'
+[ "$DEFAULT_VERSION" = 0.3.1 ] || fail "wrong default version: $DEFAULT_VERSION"
+parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" \
+	--root-sha256 AA:BB --token-file "$tmp/token" --webroot /var/www/html --low-ports
+cat >"$tmp/agent" <<'EOF'
 #!/usr/bin/env bash
-exit 1
+printf '%s\n' "$@" >"$CAPTURE"
 EOF
-chmod 0755 "$tmp/agent-fails"
-BIN=$tmp/agent-fails
-CONF=$tmp/agent.yaml
-DATA=$tmp/state
-mkdir "$DATA"
-token_file=
-if message=$(enroll 2>&1); then
-	fail "failing enrollment without a token succeeded"
+chmod 0755 "$tmp/agent"
+BIN=$tmp/agent
+CAPTURE=$tmp/forwarded
+export CAPTURE
+forward_setup
+mapfile -t forwarded <"$CAPTURE"
+expected=(setup --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" --root-sha256 AA:BB --token-file "$tmp/token" --webroot /var/www/html --low-ports)
+[ "${forwarded[*]}" = "${expected[*]}" ] || fail "wrong setup forwarding: ${forwarded[*]}"
+if (root_sha256=; parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem"); then
+	fail "missing root fingerprint accepted"
 fi
-[ "$message" = "install-agent.sh: enrollment failed – see the message above; run the script again after fixing it" ] ||
-	fail "wrong tokenless enrollment error: $message"
-token_file=$tmp/token
-if message=$(enroll 2>&1); then
-	fail "failing enrollment with a token succeeded"
-fi
-[ "$message" = "install-agent.sh: enrollment failed; the token file was kept" ] ||
-	fail "wrong enrollment error with a token: $message"
-
-work=$tmp/units
-mkdir -p "$work/x/deploy/systemd"
-touch "$work/x/deploy/systemd/myownpki-agent.service" "$work/x/deploy/systemd/agent-low-ports.conf"
-UNIT=$tmp/myownpki-agent.service
-PATHS=$tmp/10-paths.conf
-LOWPORTS=$tmp/20-low-ports.conf
-installed=$tmp/installed-units
-put() { put_changed=true; printf '%s\n' "$2" >>"$installed"; }
-systemctl() { return 0; }
-created_config=true
-webroot=$tmp/www
-low_ports=false
-: >"$installed"
-install_units
-if grep -Fqx "$LOWPORTS" "$installed"; then
-	fail "webroot installs low-ports without --low-ports"
-fi
-parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" --webroot "$tmp/www" --low-ports
-: >"$installed"
-install_units
-grep -Fqx "$LOWPORTS" "$installed" || fail "--low-ports was not installed in webroot mode"
-grep -Fqx "$PATHS" "$installed" || fail "webroot paths are missing with --low-ports"
-webroot=
-low_ports=false
-: >"$installed"
-install_units
-grep -Fqx "$LOWPORTS" "$installed" || fail "standalone no longer installs low-ports"
-printf 'install-agent.sh function tests passed\n'
+for removed in render_config ensure_config install_units enroll ensure_dirs put; do
+	if declare -F "$removed" >/dev/null; then
+		fail "legacy setup implementation remains in wrapper: $removed"
+	fi
+done
+printf 'install-agent.sh wrapper function tests passed\n'

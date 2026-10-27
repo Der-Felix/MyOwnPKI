@@ -127,6 +127,43 @@ archives:
           mode: 0o755
           mtime: "{{ .CommitDate }}"
 
+nfpms:
+  - id: myownpki-agent
+    ids: [myownpki-agent]
+    package_name: myownpki-agent
+    bindir: /usr/local/bin
+    formats: [deb, rpm]
+    file_name_template: "myownpki-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    mtime: "{{ .CommitDate }}"
+    vendor: MyOwnPKI
+    homepage: https://github.com/Der-Felix/MyOwnPKI
+    maintainer: MyOwnPKI maintainers
+    description: Certificate deployment agent for the self-hosted MyOwnPKI CA
+    license: Apache-2.0
+    section: utils
+    priority: optional
+    contents:
+      - src: deploy/agent.example.yaml
+        dst: /etc/myownpki-agent/agent.yaml
+        type: config|noreplace
+        file_info:
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: deploy/agent.example.yaml
+        dst: /usr/share/myownpki-agent/examples/agent.yaml
+        file_info: &agent_package_file
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: deploy/systemd/myownpki-agent.service
+        dst: /usr/share/myownpki-agent/examples/myownpki-agent.service
+        file_info: *agent_package_file
+      - src: deploy/systemd/agent-low-ports.conf
+        dst: /usr/share/myownpki-agent/examples/agent-low-ports.conf
+        file_info: *agent_package_file
+      - src: LICENSE
+        dst: /usr/share/doc/myownpki-agent/LICENSE
+        file_info: *agent_package_file
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256

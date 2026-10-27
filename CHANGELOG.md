@@ -9,6 +9,13 @@ change the API, the configuration and the database schema; the release notes say
 
 ### Added
 
+- **Guided Linux agent setup and packages:** GoReleaser nFPM builds `.deb` and `.rpm` for Linux
+  amd64/arm64 with a `noreplace` conffile, example systemd files and no maintainer scripts or
+  autostart. The shared `myownpki-agent setup` verifies the independent root SHA-256, securely reads
+  optional join-token files, writes configuration/units atomically, preserves custom configuration,
+  polls pending enrollments and enables or restarts only enrolled agents. Tarballs and packages use
+  the same implementation. `install-agent.sh` is now a deprecated verified-download forwarding
+  wrapper with default version 0.3.1.
 - **Configurable predecessor handling on renewal:** choose immediate, delayed (1–30 days) or no
   revocation, always with reason `superseded`. Tenant defaults are independent for agent deployments
   and other certificates, with agent-wide, per-deployment and one-operation overrides. Current

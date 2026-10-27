@@ -915,41 +915,67 @@ agent may order. Agents use the same root as trust anchor for the agent and ACME
 
 ### 12.2 Join token and verified installation
 
-In *Agents → Join tokens → Create token*, enter the host's exact name and, if needed, patterns such
-as `*.apps.homelab.lan`. Store the one-time token in a root-only file on the host, for example
-`/root/myownpki-join-token` with mode 0600. Do not put it in `agent.yaml` or on a command line.
+In *Agents → Join tokens → Create token*, enter the host's exact fully qualified name and, if needed,
+patterns such as `*.apps.homelab.lan`. Store the one-time token in a regular root-only file on the
+host, for example `/root/myownpki-join-token` with mode exactly 0600. Do not put it in `agent.yaml`
+or on a command line.
 
-Download the installer and checksum file, verify, and only then execute. Never pipe a download
-into a shell:
+Download the root PEM independently and compare its fingerprint with the authenticated admin UI.
+`setup` requires this expected value and checks SHA-256 over the certificate DER, not the PEM text.
+The root file must contain exactly one self-signed CA certificate:
 
 ```bash
-v=0.3.0
-curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install-agent.sh"
+openssl x509 -in root.pem -outform DER | sha256sum
+```
+
+Download the matching Linux amd64/arm64 `.deb`, `.rpm` or agent tarball together with `checksums.txt`
+and its signature. Verify `checksums.txt` with cosign as described in the README, then check the
+selected artifact before installing it. Never pipe a download into a shell:
+
+```bash
+v=0.3.1
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
+# Also download myownpki-agent_0.3.1_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Verify `checksums.txt` with cosign as described in the README when available. The installer checks
-the archive against `checksums.txt` again after downloading it; with cosign installed it also checks
-the release-workflow signature. For an offline host, put the agent archive and checksum files in one
-directory and use `--archive` instead.
+Install a package with `sudo dpkg -i myownpki-agent_0.3.1_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.1_linux_amd64.rpm`. Packages contain the binary, the pristine
+`/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
+`/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
+service. For a tarball, verify and unpack it, then install `myownpki-agent` as
+`/usr/local/bin/myownpki-agent`; its `deploy/` tree contains the same example sources. Packages and
+tarballs run exactly the same setup code.
 
-Webroot enrollment (recommended when nginx already answers port 80):
+Run setup as root. Webroot enrollment is recommended when nginx already answers port 80:
 
 ```bash
-sudo bash install-agent.sh \
+sudo myownpki-agent setup \
   --server https://pki.homelab.lan:8444 \
   --ca-bundle root.pem \
+  --root-sha256 AA:BB:CC:... \
   --token-file /root/myownpki-join-token \
   --webroot /var/www/html
 ```
 
-Without `--webroot`, enrollment uses standalone http-01 on port 80 and the installer adds the
-`20-low-ports.conf` capability drop-in. The token file is deleted only after successful admission;
-a pending or failed enrollment keeps it. The initial `agent.yaml` has no deployments. It is never
-overwritten on later runs. Re-run the script with a newer release to update the binary and restart
-the service; there is no agent self-update.
+Without `--webroot`, enrollment uses standalone http-01 on port 80 and setup installs the
+`20-low-ports.conf` capability drop-in. `--low-ports` installs it explicitly in webroot mode too.
+Setup validates Linux/root, systemctl, all files, the FQDN and configuration before changing the host.
+It writes files atomically with their required modes, installs the unit and writable-path drop-in,
+and enrolls before enabling or starting anything. A pending enrollment leaves the service disabled
+and prints `systemctl enable --now myownpki-agent` for use after approval; rerunning setup polls the
+pending request. Admission enables and starts the service. An already-enrolled update keeps local
+configuration and restarts it.
+
+The token file is deleted only when that invocation newly obtains admission; pending, failed, polled
+and already-enrolled runs keep it. The initial `agent.yaml` has no deployments. Setup preserves every
+customized existing file. The byte-identical pristine example shipped by a package may be replaced
+exactly once with the host-specific configuration. There is no agent self-update.
+
+`deploy/install-agent.sh` remains a deprecated v0.3.1 compatibility wrapper. It only downloads or
+accepts a verified archive, checks its checksum/signature, installs the binary and forwards to
+`setup`; it has no separate installation or enrollment logic and will be removed in v0.3.2.
 
 ### 12.3 agent.yaml and deployment profiles
 
@@ -1040,8 +1066,8 @@ not write secrets to stderr**, even with this filtering.
 
 The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
 `ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
-`@system-service` system calls. Its base writable path is only the state directory. The installer
-adds the enrollment webroot to `10-paths.conf`. Whenever you add or change `paths`, update that
+`@system-service` system calls. Its base writable path is only the state directory. Setup
+adds the configured paths to `10-paths.conf`. Whenever you add or change `paths`, update that
 drop-in to contain **exactly the state, webroot and deployment parent directories**, then run
 `systemctl daemon-reload` and restart. When a hook runs nginx, also add `/var/log/nginx`, because
 `nginx -t` opens its log files:
@@ -1073,7 +1099,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart myownpki-agent
 ```
 
-For a new installation, `install-agent.sh --low-ports` installs the same drop-in explicitly.
+For a new installation, `myownpki-agent setup --low-ports` installs the same drop-in explicitly.
 Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
 with `NoNewPrivileges=yes`.
 
