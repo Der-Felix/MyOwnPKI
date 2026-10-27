@@ -1,3 +1,52 @@
+# Night log – v0.3.1 follow-up
+
+> Continuation on `release/v0.3.1` after Block A. Steps 15, 16 and 21 are implemented and committed
+> locally. Nothing was pushed. Every implementation commit had a complete `task ci:local` with exit
+> 0. This addendum is a separate documentation commit.
+
+## Commits and result
+
+- `fe1b35b` – step 15: shared verified `myownpki-agent setup`, nFPM deb/rpm packages and package CI.
+- `123a3a1` – step 16: exact-version artifact distribution, read-only manifest and guided installation.
+- `eea46f9` – step 21: independent SHA-256 authorization for Windows trust, display-only SHA-1.
+
+All three are complete. Package installation never enables or starts the agent before admission;
+configuration is preserved. Distribution contains every architecture/format and rolls back with the
+server. Guided commands use independent authenticated-UI hashes and never expose the one-time token
+in argv, URLs, summaries or logs. The Windows helper has no embedded expected fingerprint: an exact
+64-hex `-ExpectedSha256` or an explicit independent comparison is required; `/quiet` is no bypass.
+
+## Tests
+
+`task ci:local` finished with **19 PASS, 14 SKIP, 0 FAIL** on the final implementation run. Full Go
+tests, generation, lint, OpenAPI lint, protocol compatibility, registry self-test and actual Windows
+`cmd.exe`/PowerShell helper tests passed. Instrumented import-path tests never opened a real store.
+The previous fake-clock mismatch in the unseal test was fixed by using one clock for setup and server.
+
+Linux/systemd/Docker-only verification remains for CI, not claimed as locally executed:
+
+```text
+race         | tests with race detector                     | SKIP | 0s | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | 0s | needs macOS + Homebrew
+shellcheck   | legacy smoke test                            | SKIP | 0s | needs Linux
+conformance  | real-client conformance                      | SKIP | 0s | needs Linux + docker
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | 0s | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | 0s | needs Linux + goreleaser
+install      | agent package formats and architectures      | SKIP | 0s | needs Linux + docker + dpkg-deb
+install      | agent packages in pinned distributions       | SKIP | 0s | needs Linux + docker + openssl
+install      | agent package real setup and systemd         | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | install.sh functions                         | SKIP | 0s | needs Linux + goreleaser
+install      | second build for update                      | SKIP | 0s | needs Linux
+install      | install start update as root                 | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+```
+
+The owner question about provisional predecessor factory defaults from Block A remains open. No new
+open questions and no unfinished work were added by this follow-up.
+
+---
+
 # Night log – v0.3.1 Block A
 
 > Autonomous implementation on `release/v0.3.1`, rebased onto `origin/main` `642ddda` before the
