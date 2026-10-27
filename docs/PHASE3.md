@@ -819,9 +819,9 @@ commits, pushes, switches the main checkout or deletes the Wiki checkout.
    The UI never suggests a downgrade; protobuf compatibility checks remain mandatory.
 5. Pending-action summaries show only the action and non-secret target. Sensitive parameters stay
    in memory and are never logged, as inventoried below.
-6. **Open – factory defaults for predecessor handling.** Proposal: agent deployments use `revoke now`
-   after the confirmed deployment; other certificates use `revoke after 7 days`. The owner must
-   choose both defaults before implementation.
+6. **Decided – factory defaults for predecessor handling.** Agent deployments use `revoke now`
+   after the confirmed deployment; other certificates use `revoke after 7 days`. The owner confirmed
+   both defaults on 2026-10-26.
 
 | Action | Parameters held in the pending entry | What the summary shows |
 |---|---|---|

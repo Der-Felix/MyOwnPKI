@@ -42,8 +42,9 @@ install      | second build for update                      | SKIP | 0s | needs 
 install      | install start update as root                 | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
 ```
 
-The owner question about provisional predecessor factory defaults from Block A remains open. No new
-open questions and no unfinished work were added by this follow-up.
+The owner confirmed the predecessor factory defaults from Block A: agent deployments revoke
+immediately after confirmed deployment, other certificates revoke after seven days. No new open
+questions and no unfinished work were added by this follow-up.
 
 ---
 
@@ -79,12 +80,12 @@ host and are not claimed as locally verified; their complete SKIP lines appear b
   attribute. Consumption uses the POSTed ID, not the cookie.
 - **Pending memory is bounded.** One open action per session; a newer one invalidates the older ID.
   Globally at most 64 entries and 64 MiB of legacy archives. Expiry is swept on put, get and consume.
-- **No planning without a TLS fingerprint.** Agent deployments without a nonempty served fingerprint
-  matching the reported certificate cause no predecessor revocation or schedule. This is the safe
-  behavior for deployments without a real TLS check, not an assumption that file writes prove TLS.
-- **Provisional factory defaults.** Agent deployments default to immediate revocation only after
-  confirmed deployment; other certificates default to revocation after seven days. The owner
-  question about these factory defaults remains open below.
+- **Deployment proof is explicit.** With a TLS check only a matching served fingerprint counts.
+  Check-less deployments instead prove the leaf read back after the atomic write; a written
+  fingerprint never replaces a missing or wrong TLS fingerprint, and legacy agents without either
+  field cause no action.
+- **Confirmed factory defaults.** Agent deployments revoke immediately after confirmed deployment;
+  other certificates revoke after seven days. The owner confirmed these defaults on 2026-10-26.
 - **Legacy REST remains tri-state.** Explicit `revoke_previous:false` means never, true means now,
   omission uses the tenant default. The new predecessor object takes precedence when both are sent.
 - **Restrictive planning bounds and storage.** Explicit plans require a future time no more than 30
@@ -147,11 +148,10 @@ install      | install start update as root                 | SKIP | 0s       | 
 Local CI finished: no failures
 ```
 
-### Open owner question
+### Owner decision
 
-Should the provisional factory defaults stay as implemented: **agent = revoke immediately after
-confirmed deployment**, **other certificates = revoke after 7 days**? PHASE3 keeps this question
-open; no claim of an owner decision is made here.
+The owner confirmed the factory defaults on 2026-10-26: **agent = revoke immediately after
+confirmed deployment**, **other certificates = revoke after 7 days**. PHASE3 records the decision.
 
 ### Not finished
 

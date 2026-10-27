@@ -39,8 +39,8 @@ change the API, the configuration and the database schema; the release notes say
 - **Configurable predecessor handling on renewal:** choose immediate, delayed (1–30 days) or no
   revocation, always with reason `superseded`. Tenant defaults are independent for agent deployments
   and other certificates, with agent-wide, per-deployment and one-operation overrides. Current
-  migration defaults follow the proposal (agent: immediately after confirmed deployment; other
-  certificates: after seven days); the owner decision remains open in `docs/PHASE3.md` §8.4.
+  migration defaults are owner-confirmed (agent: immediately after confirmed deployment; other
+  certificates: after seven days), recorded in `docs/PHASE3.md` §8.4.
   Non-agent ACME renewals require the same account and exact normalized name set, with an optional
   admin-audited per-account override in UI and REST; shared accounts should use one per host or
   `never`. Agent actions
