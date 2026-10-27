@@ -1091,8 +1091,12 @@ and audited. The separate *Other certificates* default applies to UI, REST and n
 renewals. REST renewal bodies accept the same optional `predecessor` object (`choice`, `days`).
 
 An agent predecessor is revoked or scheduled only after an accepted `deployed` report with a real
-serial transition and a nonempty served fingerprint matching the stored certificate. The account,
-exact normalized order/deployment name sets and server-recorded certificate age must all match.
+serial transition and exact deployment proof. With a configured TLS `check`, only a nonempty
+`served_fingerprint` matching the stored certificate counts. Without `check`, the agent instead reads
+the leaf back after its atomic write and reports `written_fingerprint`; the server accepts that only
+for this check-less case. A written fingerprint never substitutes for a missing or wrong TLS
+fingerprint, and legacy agents with neither field cause no predecessor action. The account, exact
+normalized order/deployment name sets and server-recorded certificate age must all match.
 Older never-deployed or discarded certificates of that exact deployment are included; every serial
 currently served by any deployment of the agent is excluded. `failed` and `rolled_back` do nothing.
 Missing, tied, duplicated or foreign-account mappings revoke and schedule nothing and are logged for

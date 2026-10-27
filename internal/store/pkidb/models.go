@@ -133,6 +133,8 @@ type AgentDeployment struct {
 	PredecessorDays        sql.NullInt64
 	RenewPredecessorChoice sql.NullString
 	RenewPredecessorDays   sql.NullInt64
+	WrittenFingerprint     sql.NullString
+	CheckConfigured        int64
 }
 
 type AgentDeploymentCertificate struct {

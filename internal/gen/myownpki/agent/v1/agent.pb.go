@@ -654,8 +654,12 @@ type DeploymentReport struct {
 	LastError         string `protobuf:"bytes,10,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
 	// Echo the version only after handling this deployment's renew request.
 	HandledRenewalVersion int64 `protobuf:"varint,11,opt,name=handled_renewal_version,json=handledRenewalVersion,proto3" json:"handled_renewal_version,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Leaf read back after the atomic write, used only when no TLS check exists.
+	WrittenFingerprint string `protobuf:"bytes,12,opt,name=written_fingerprint,json=writtenFingerprint,proto3" json:"written_fingerprint,omitempty"`
+	// When true, only served_fingerprint is accepted as deployment proof.
+	CheckConfigured bool `protobuf:"varint,13,opt,name=check_configured,json=checkConfigured,proto3" json:"check_configured,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *DeploymentReport) Reset() {
@@ -763,6 +767,20 @@ func (x *DeploymentReport) GetHandledRenewalVersion() int64 {
 		return x.HandledRenewalVersion
 	}
 	return 0
+}
+
+func (x *DeploymentReport) GetWrittenFingerprint() string {
+	if x != nil {
+		return x.WrittenFingerprint
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetCheckConfigured() bool {
+	if x != nil {
+		return x.CheckConfigured
+	}
+	return false
 }
 
 type ReportRequest struct {
@@ -1090,7 +1108,7 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\tchain_der\x18\x02 \x03(\fR\bchainDer\"C\n" +
 	"\x1aRegisterACMEAccountRequest\x12%\n" +
 	"\x0ekey_thumbprint\x18\x01 \x01(\tR\rkeyThumbprint\"\x1d\n" +
-	"\x1bRegisterACMEAccountResponse\"\xfd\x02\n" +
+	"\x1bRegisterACMEAccountResponse\"\xd9\x03\n" +
 	"\x10DeploymentReport\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x14\n" +
@@ -1105,7 +1123,9 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"last_error\x18\n" +
 	" \x01(\tR\tlastError\x126\n" +
-	"\x17handled_renewal_version\x18\v \x01(\x03R\x15handledRenewalVersion\"\xc6\x01\n" +
+	"\x17handled_renewal_version\x18\v \x01(\x03R\x15handledRenewalVersion\x12/\n" +
+	"\x13written_fingerprint\x18\f \x01(\tR\x12writtenFingerprint\x12)\n" +
+	"\x10check_configured\x18\r \x01(\bR\x0fcheckConfigured\"\xc6\x01\n" +
 	"\rReportRequest\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +

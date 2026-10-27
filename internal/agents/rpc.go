@@ -137,6 +137,7 @@ func (r *rpc) Report(ctx context.Context, req *connect.Request[agentv1.ReportReq
 		}
 		in.Deployments = append(in.Deployments, DeploymentReport{Name: d.Name, Profile: d.Profile, Names: d.Names,
 			Challenge: d.Challenge, State: d.State, Serial: d.CertificateSerial, NotAfter: d.NotAfter, Fingerprint: d.ServedFingerprint,
+			WrittenFingerprint: d.WrittenFingerprint, CheckConfigured: d.CheckConfigured,
 			DeployedAt: d.DeployedAt, LastError: d.LastError, HandledRenewalVersion: d.HandledRenewalVersion})
 	}
 	if err := r.s.Report(ctx, c, in); err != nil {

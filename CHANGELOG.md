@@ -42,10 +42,12 @@ change the API, the configuration and the database schema; the release notes say
   migration defaults follow the proposal (agent: immediately after confirmed deployment; other
   certificates: after seven days); the owner decision remains open in `docs/PHASE3.md` §8.4.
   Non-agent ACME renewals require the same account and exact normalized name set. Agent actions
-  start only at an accepted deployed report with a matching served fingerprint, exact account/order/
-  name mapping and a real serial transition; failed, rolled-back, currently serving, foreign-account
-  and ambiguous certificates are protected. Delayed agent plans start at server-recorded deployment
-  time and repeated reports never duplicate or move plans.
+  start only at an accepted deployed report with exact proof: TLS served fingerprint when a check is
+  configured, otherwise the leaf fingerprint read back after the atomic write. A written fingerprint
+  never replaces a missing TLS proof and legacy agents without either field cause no action. Exact
+  account/order/name mapping and a real serial transition are required; failed, rolled-back,
+  currently serving, foreign-account and ambiguous certificates are protected. Delayed agent plans
+  start at server-recorded deployment time and repeated reports never duplicate or move plans.
 - **Planned revocations:** certificate lists/details and agent deployments show `Revocation planned`,
   the certificate filter and dashboard cover plans due within seven days, and authorized users can
   plan, cancel or revoke now with step-up and audit. The scheduler executes due plans idempotently,

@@ -121,7 +121,14 @@ func nullInt64(v int) sql.NullInt64 {
 //nolint:nilerr // Ambiguous untrusted mappings skip predecessor action without failing the report.
 func (s *Service) applyDeployed(ctx context.Context, q *pkidb.Queries, tx *sql.Tx, a pkidb.Agent, old pkidb.AgentDeployment,
 	d DeploymentReport, policy predecessor.Policy, now time.Time) ([]*ca.RevokeResult, error) {
-	if d.State != "deployed" || d.Serial == "" || d.Fingerprint == "" {
+	if d.State != "deployed" || d.Serial == "" {
+		return nil, nil
+	}
+	proof := d.Fingerprint
+	if !d.CheckConfigured {
+		proof = d.WrittenFingerprint
+	}
+	if proof == "" {
 		return nil, nil
 	}
 	ids, err := q.AgentCertificatesBySerial(ctx, pkidb.AgentCertificatesBySerialParams{AgentID: nullString(a.ID), SerialHex: strings.ToUpper(d.Serial)})
@@ -136,8 +143,8 @@ func (s *Service) applyDeployed(ctx context.Context, q *pkidb.Queries, tx *sql.T
 	if err != nil {
 		return nil, err
 	}
-	if len(orders) != 1 || !strings.EqualFold(orders[0].FingerprintSha256, d.Fingerprint) {
-		s.ambiguous(a, d, "certificate order or served fingerprint is not unique and exact")
+	if len(orders) != 1 || !strings.EqualFold(orders[0].FingerprintSha256, proof) {
+		s.ambiguous(a, d, "certificate order or deployment fingerprint is not unique and exact")
 		return nil, nil
 	}
 	account, err := q.GetACMEAccountByAgentID(ctx, nullString(a.ID))

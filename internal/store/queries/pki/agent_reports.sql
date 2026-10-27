@@ -14,11 +14,12 @@ UPDATE agent_deployments SET reported = FALSE WHERE agent_id = ?;
 
 -- name: UpsertAgentDeployment :exec
 INSERT INTO agent_deployments (agent_id, name, profile, names, challenge, state, certificate_serial,
-    not_after, served_fingerprint, deployed_at, last_error, last_report_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    not_after, served_fingerprint, written_fingerprint, check_configured, deployed_at, last_error, last_report_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (agent_id, name) DO UPDATE SET profile = excluded.profile, names = excluded.names,
     challenge = excluded.challenge, state = excluded.state, certificate_serial = excluded.certificate_serial,
     not_after = excluded.not_after, served_fingerprint = excluded.served_fingerprint,
+    written_fingerprint = excluded.written_fingerprint, check_configured = excluded.check_configured,
     deployed_at = excluded.deployed_at, last_error = excluded.last_error, last_report_at = excluded.last_report_at,
     reported = TRUE;
 

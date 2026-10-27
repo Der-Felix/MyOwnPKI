@@ -71,7 +71,7 @@ func predecessorLink(t *testing.T, e *env, account string, issued *ca.Issued, na
 }
 
 func deploymentResult(cert *ca.Issued, state string, names ...string) DeploymentReport {
-	return DeploymentReport{Name: "proxy", Names: names, State: state, Serial: cert.SerialHex, Fingerprint: cert.Fingerprint}
+	return DeploymentReport{Name: "proxy", Names: names, State: state, Serial: cert.SerialHex, Fingerprint: cert.Fingerprint, CheckConfigured: true}
 }
 
 func revokedReason(t *testing.T, e *env, id string) string {
@@ -317,5 +317,74 @@ func TestAgentPolicyOverridesAndOneOperationSnapshot(t *testing.T) {
 	row, err = q.GetAgentDeployment(t.Context(), pkidb.GetAgentDeploymentParams{AgentID: caller.Agent.ID, Name: "proxy"})
 	if err != nil || row.RenewPredecessorChoice.String != predecessor.After || row.RenewPredecessorDays.Int64 != 3 {
 		t.Fatalf("one-operation snapshot %+v: %v", row, err)
+	}
+}
+
+func TestWrittenFingerprintOnlyWithoutCheck(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, tenant.EnrollAuto)
+	caller := agentCaller(t, e, "proxy1.homelab.lan")
+	account := predecessorAccount(t, e, caller.Agent.ID)
+	serving := predecessorCertificate(t, e, account, "www.homelab.lan")
+	discarded := predecessorCertificate(t, e, account, "www.homelab.lan")
+	current := predecessorCertificate(t, e, account, "www.homelab.lan")
+	other := deploymentResult(serving, "deployed", "www.homelab.lan")
+	other.Name = "other"
+	other.CheckConfigured = false
+	other.Fingerprint = ""
+	other.WrittenFingerprint = serving.Fingerprint
+	result := deploymentResult(current, "deployed", "www.homelab.lan")
+	result.CheckConfigured = false
+	result.Fingerprint = ""
+	result.WrittenFingerprint = current.Fingerprint
+	if err := e.s.Report(t.Context(), caller, ReportInput{Deployments: []DeploymentReport{other, result}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := revokedReason(t, e, serving.ID); got != "" {
+		t.Errorf("check-less serving certificate revoked: %q", got)
+	}
+	if got := revokedReason(t, e, discarded.ID); got != ca.ReasonSuperseded {
+		t.Errorf("check-less discarded certificate not revoked: %q", got)
+	}
+
+	withCheck := deploymentResult(current, "deployed", "www.homelab.lan")
+	withCheck.Fingerprint = ""
+	withCheck.WrittenFingerprint = current.Fingerprint
+	if err := e.s.Report(t.Context(), caller, ReportInput{Deployments: []DeploymentReport{withCheck}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := revokedReason(t, e, current.ID); got != "" {
+		t.Errorf("written fingerprint replaced a missing TLS fingerprint: %q", got)
+	}
+	oldAgent := deploymentResult(current, "deployed", "www.homelab.lan")
+	oldAgent.CheckConfigured = false
+	oldAgent.Fingerprint = ""
+	if err := e.s.Report(t.Context(), caller, ReportInput{Deployments: []DeploymentReport{oldAgent}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := revokedReason(t, e, current.ID); got != "" {
+		t.Errorf("legacy agent without proof fields revoked: %q", got)
+	}
+}
+
+func TestWrittenFingerprintCanBePlanned(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, tenant.EnrollAuto)
+	e.s.AgentPredecessor = func(context.Context) (predecessor.Policy, error) {
+		return predecessor.Policy{Choice: predecessor.After, Days: 2}, nil
+	}
+	caller := agentCaller(t, e, "proxy1.homelab.lan")
+	account := predecessorAccount(t, e, caller.Agent.ID)
+	old := predecessorCertificate(t, e, account, "www.homelab.lan")
+	current := predecessorCertificate(t, e, account, "www.homelab.lan")
+	result := deploymentResult(current, "deployed", "www.homelab.lan")
+	result.CheckConfigured = false
+	result.Fingerprint = ""
+	result.WrittenFingerprint = current.Fingerprint
+	if err := e.s.Report(t.Context(), caller, ReportInput{Deployments: []DeploymentReport{result}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := plannedTime(t, e, old.ID); got.IsZero() {
+		t.Fatal("check-less deployment did not plan the predecessor")
 	}
 }

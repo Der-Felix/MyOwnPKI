@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -98,6 +100,36 @@ func (a *Agent) checkServed(ctx context.Context, d Deployment, want string) (str
 	return got, fmt.Errorf("TLS check for deployment %q failed: %w", d.Name, last)
 }
 
+// writtenLeafFingerprint proves only the leaf read back after the atomic write.
+// A deployment with a TLS check never uses this alternative proof.
+func (a *Agent) writtenLeafFingerprint(d Deployment, want string) (string, error) {
+	if d.Check != "" {
+		return "", nil
+	}
+	files := deploymentPaths(d)
+	certPath := files.Fullchain
+	if certPath == "" {
+		certPath = files.Certificate
+	}
+	data, _, err := a.readTarget(certPath)
+	if err != nil {
+		return "", fmt.Errorf("read back certificate for deployment %q: %w", d.Name, err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", errors.New("read back certificate: leaf is not PEM CERTIFICATE")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("read back certificate: %w", err)
+	}
+	got := fingerprint(leaf.Raw)
+	if got != want {
+		return "", errors.New("read back certificate: the leaf changed after the atomic write")
+	}
+	return got, nil
+}
+
 func (a *Agent) deployGroup(ctx context.Context, group reloadGroup, materials map[string]*Material) ([]DeploymentResult, error) {
 	j, err := a.stageGroup(group, materials)
 	if err != nil {
@@ -128,8 +160,12 @@ func (a *Agent) deployGroup(ctx context.Context, group reloadGroup, materials ma
 		if err != nil {
 			return a.rollback(ctx, group, j, true, err)
 		}
+		written, err := a.writtenLeafFingerprint(d, fingerprint(m.Leaf.Raw))
+		if err != nil {
+			return a.rollback(ctx, group, j, true, err)
+		}
 		results = append(results, DeploymentResult{Name: d.Name, State: "deployed", Serial: certificateSerial(m.Leaf),
-			NotAfter: m.Leaf.NotAfter.UTC(), Fingerprint: fp, DeployedAt: a.Now().UTC()})
+			NotAfter: m.Leaf.NotAfter.UTC(), Fingerprint: fp, WrittenFingerprint: written, CheckConfigured: d.Check != "", DeployedAt: a.Now().UTC()})
 	}
 	if err := a.completeJournal(j, results); err != nil {
 		return a.rollback(ctx, group, j, true, fmt.Errorf("complete deployment journal: %w", err))

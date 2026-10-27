@@ -114,7 +114,8 @@ func (a *Agent) report(ctx context.Context) error {
 
 func reportDeployment(d Deployment, r DeploymentResult) *agentv1.DeploymentReport {
 	out := &agentv1.DeploymentReport{Name: d.Name, Profile: d.Profile, Names: d.Names, Challenge: d.Challenge,
-		State: r.State, CertificateSerial: r.Serial, ServedFingerprint: r.Fingerprint, LastError: r.LastError,
+		State: r.State, CertificateSerial: r.Serial, ServedFingerprint: r.Fingerprint,
+		WrittenFingerprint: r.WrittenFingerprint, CheckConfigured: r.CheckConfigured, LastError: r.LastError,
 		HandledRenewalVersion: r.HandledRenewalVersion}
 	if !r.NotAfter.IsZero() {
 		out.NotAfter = r.NotAfter.UTC().Format(time.RFC3339)

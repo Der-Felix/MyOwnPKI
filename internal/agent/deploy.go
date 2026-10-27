@@ -25,6 +25,8 @@ type DeploymentResult struct {
 	Serial                string    `json:"serial,omitempty"`
 	NotAfter              time.Time `json:"not_after,omitempty"`
 	Fingerprint           string    `json:"fingerprint,omitempty"`
+	WrittenFingerprint    string    `json:"written_fingerprint,omitempty"`
+	CheckConfigured       bool      `json:"check_configured"`
 	DeployedAt            time.Time `json:"deployed_at,omitempty"`
 	LastError             string    `json:"last_error,omitempty"`
 	AttemptedAt           time.Time `json:"attempted_at,omitempty"`

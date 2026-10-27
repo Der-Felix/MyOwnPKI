@@ -41,6 +41,8 @@ type DeploymentReport struct {
 	Name, Profile                                                          string
 	Names                                                                  []string
 	Challenge, State, Serial, NotAfter, Fingerprint, DeployedAt, LastError string
+	WrittenFingerprint                                                     string
+	CheckConfigured                                                        bool
 	HandledRenewalVersion                                                  int64
 }
 
@@ -101,7 +103,7 @@ func validReport(in ReportInput) error {
 				}
 			}
 		}
-		for _, value := range []string{d.Serial, d.Fingerprint} {
+		for _, value := range []string{d.Serial, d.Fingerprint, d.WrittenFingerprint} {
 			if len(value) > 64 || len(value)%2 != 0 {
 				return bad
 			}
@@ -109,8 +111,10 @@ func validReport(in ReportInput) error {
 				return bad
 			}
 		}
-		if d.Fingerprint != "" && len(d.Fingerprint) != 64 {
-			return bad
+		for _, value := range []string{d.Fingerprint, d.WrittenFingerprint} {
+			if value != "" && len(value) != 64 {
+				return bad
+			}
 		}
 	}
 	return nil
@@ -163,7 +167,8 @@ func (s *Service) Report(ctx context.Context, caller *Caller, in ReportInput) er
 			nj, _ := json.Marshal(d.Names)
 			if uerr := q.UpsertAgentDeployment(ctx, pkidb.UpsertAgentDeploymentParams{AgentID: a.ID, Name: d.Name, Profile: d.Profile,
 				Names: string(nj), Challenge: d.Challenge, State: d.State, CertificateSerial: nullString(strings.ToUpper(d.Serial)),
-				NotAfter: nullString(reportTime(d.NotAfter)), ServedFingerprint: nullString(strings.ToLower(d.Fingerprint)), DeployedAt: nullString(reportTime(d.DeployedAt)),
+				NotAfter: nullString(reportTime(d.NotAfter)), ServedFingerprint: nullString(strings.ToLower(d.Fingerprint)),
+				WrittenFingerprint: nullString(strings.ToLower(d.WrittenFingerprint)), CheckConfigured: boolInt(d.CheckConfigured), DeployedAt: nullString(reportTime(d.DeployedAt)),
 				LastError: nullString(d.LastError), LastReportAt: dbTime(now)}); uerr != nil {
 				return uerr
 			}
