@@ -133,10 +133,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-os-openssl-version.sh
       - run: bash scripts/ci/test-os-test.sh
-      # The Windows helpers of the trust page (v0.2.2) for real: cmd.exe runs
-      # each with /check (no import) – the fingerprint passes, a changed copy
-      # and an unknown switch stop before anything is imported. Part of the
-      # run above too; its own step so the log shows it.
+      # The Windows helpers of the trust page for real: cmd.exe runs each with
+      # /check (no import), displays both fingerprints, and rejects changed or
+      # unknown input. Instrumented test copies cover authorization without a
+      # real store change. Part of the run above too; separate for a clear log.
       - name: Windows helper of the trust page (cmd.exe, /check)
         if: runner.os == 'Windows'
         run: bash scripts/ci/test-os-windows-helper.sh

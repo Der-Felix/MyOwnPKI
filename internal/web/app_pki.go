@@ -574,11 +574,20 @@ func (a *app) authorityDetail(c *rc) {
 			{Key: "Key algorithm", Value: g.KeyAlgorithm},
 			{Key: "Key storage", Value: keyStorage(info.KeyMode)},
 			{Key: "Serial number", Value: g.Serial, Mono: true},
-			{Key: "SHA-256 fingerprint", Value: view.Fingerprint(g.Fingerprint), Mono: true},
 			{Key: "Valid from", Value: view.DateTime(genTime(g.NotBefore))},
 			{Key: "Valid until", Value: view.DateTime(genTime(g.NotAfter)) + " (" + view.Relative(a.now(), genTime(g.NotAfter)) + ")"},
 			{Key: "Public base URL", Value: info.BaseURL + " – in every certificate it issues, can't change"},
 		},
+	}
+	if !g.Pending && g.Fingerprint != "" && g.FingerprintSHA1 != "" {
+		fingerprints := []view.KV{
+			{Key: "SHA-256 fingerprint (authoritative)", Value: view.Fingerprint(g.Fingerprint), Mono: true},
+			{Key: "SHA-1 fingerprint (Windows certificate dialog comparison only)", Value: view.Fingerprint(g.FingerprintSHA1), Mono: true},
+		}
+		if info.Kind == ca.KindRoot {
+			fingerprints = append(fingerprints, view.KV{Key: "Root SHA-256 for automation (exact 64 hex)", Value: strings.ReplaceAll(strings.ToLower(g.Fingerprint), ":", ""), Mono: true})
+		}
+		d.Properties = slices.Insert(d.Properties, 6, fingerprints...)
 	}
 	if info.Kind == ca.KindRoot {
 		d.IssuedEmpty = "A root CA issues no end-entity certificates – it signs intermediate CAs and CRLs."

@@ -9,6 +9,13 @@ change the API, the configuration and the database schema; the release notes say
 
 ### Added
 
+- **Independent root trust verification:** the public trust page, authenticated CA details and guided
+  agent installation show authoritative SHA-256 and display-only SHA-1 for Windows certificate dialog
+  comparison. Root CA details expose an exact 64-hex SHA-256 automation value; pending CAs show no
+  empty fingerprints. Windows helpers no longer embed an expected hash: they compute both values and
+  import only after a matching independent `-ExpectedSha256` or explicit interactive SHA-256
+  confirmation. Strict argument validation, changed/mismatched certificate refusal, quiet-mode fail
+  closed behavior and elevated-child reauthorization prevent accidental or self-confirmed imports.
 - **Guided Linux agent setup and packages:** GoReleaser nFPM builds `.deb` and `.rpm` for Linux
   amd64/arm64 with a `noreplace` conffile, example systemd files and no maintainer scripts or
   autostart. The shared `myownpki-agent setup` verifies the independent root SHA-256, securely reads

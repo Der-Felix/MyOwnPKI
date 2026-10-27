@@ -847,8 +847,9 @@ curl --cacert root.pem https://pki.homelab.lan/acme/directory
 Since v0.2.2 the public listener serves a page at `/` – `http://pki.homelab.lan/` behind port 80 –
 that everybody may open without signing in. Send people there instead of mailing root files:
 
-- every active CA, **roots first**: name, common name, validity and the **SHA-256 fingerprint**
-  in large type; after a root renewal also the older generation while it is valid;
+- every active CA, **roots first**: name, common name, validity, authoritative **SHA-256 fingerprint**
+  and **SHA-1 only for comparison with the Windows certificate dialog**; after a root renewal also
+  the older generation while it is valid;
 - downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
   and PEM (`/ca/<name>/<generation>.pem`, new);
 - per root two **Windows helpers** (`.cmd`): *this computer* (LocalMachine, asks for administrator
@@ -871,26 +872,32 @@ the CA certificates, their PEM copies and the CRLs stay – certificates point t
 
 ### 11.1 The Windows helpers
 
-Each `.cmd` is one file that is both a batch file and a PowerShell script. Double-clicked, it:
+Each `.cmd` is one file that is both a batch file and a PowerShell script. It contains no expected
+fingerprint. Double-clicked, it:
 
-1. shows the SHA-256 fingerprint of the root it carries, computed from the embedded certificate;
-2. compares it with the fingerprint written into the file and **stops** (exit code 2, nothing
-   imported) if they differ – a file changed on the way;
-3. *this computer*: asks for administrator rights (UAC) and runs again elevated;
-4. imports the root into *Trusted Root Certification Authorities* of the computer or the user
-   (Windows asks once to confirm the user variant) and waits for Enter.
+1. computes SHA-256 and SHA-1 from the embedded certificate's DER and shows both; SHA-1 is only for
+   the Windows dialog and never authorizes import;
+2. requires either `-ExpectedSha256 <value>` matching the exact 64-hex **Root SHA-256 for automation**
+   on the authenticated root CA page, or an interactive `YES` after your independent SHA-256 comparison;
+3. stops before the store on a malformed value, mismatch, changed certificate, missing/negative answer,
+   EOF, or any other input (argument error 64, mismatch 2, missing authorization 3);
+4. *this computer*: asks for administrator rights (UAC), forwards the validated expected value and
+   `/quiet`, and recomputes/reauthorizes in the elevated child;
+5. only then imports the root into *Trusted Root Certification Authorities* of the computer or user.
 
-Switches: `/check` only checks (exit 0 when the fingerprint fits), `/quiet` doesn't wait for
-Enter. Any other argument stops it with exit code 64 – a typo never becomes an import. The file is
-ASCII with CRLF line ends. Check a downloaded helper without importing:
+`/check` displays both values and performs any supplied expected-value check but never imports.
+`/quiet` suppresses the final pause; it never replaces independent authorization. A matching expected
+value imports noninteractively. Any unknown argument or missing parameter value stops with exit 64.
+The file is ASCII with CRLF line ends. Check a downloaded helper without importing:
 
 ```bat
 cmd /c root-trust-computer.cmd /check
+cmd /c root-trust-computer.cmd /check -ExpectedSha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
-normal for scripts from the network. The fingerprint check proves that the file is intact; that it
-is **your** root, only the comparison with a fingerprint from another way proves.
+normal for scripts from the network. Use only the SHA-256 value from the authenticated admin UI or
+another independent channel; never copy an expectation from the download page or helper itself.
 
 ## 12. Agent
 
@@ -939,8 +946,9 @@ The root SHA-256 and package SHA-256 shown in that authenticated response are in
 values. The downloaded certificate and `checksums.txt` never supply their own authorization values:
 the root arrives over HTTP and is accepted only when its DER SHA-256 matches the UI literal; package
 downloads then use HTTPS with that verified root and are checked against the independent package
-literal before installation. Do not substitute a value from a download page or an unauthenticated
-source.
+literal before installation. The response also shows root SHA-1 solely for Windows dialog comparison;
+it is never used by a command or authorization check. Do not substitute a value from a download page
+or an unauthenticated source.
 
 The optional guided join token is scoped to exactly that hostname, works once and expires after 15
 minutes. It appears only in the one-time, `no-store` response. Write it with the displayed here-doc

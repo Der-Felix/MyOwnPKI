@@ -13,8 +13,8 @@ import (
 func TestOverdueRevocationRunsAtUnsealOnce(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig(t)
-	pass := initialized(t, cfg)
 	clk := clock.NewFake(time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC))
+	pass := initialized(t, cfg, clk)
 	srv, openErr := Open(t.Context(), Options{Config: cfg, Clock: clk, Log: slog.New(slog.DiscardHandler), Hostname: "pki01", Version: "test"})
 	if openErr != nil {
 		t.Fatal(openErr)

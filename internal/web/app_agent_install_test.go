@@ -1,8 +1,10 @@
 package web
 
 import (
+	"crypto/sha1" // #nosec G505 -- verifies the display-only Windows dialog value
 	"crypto/sha256"
 	"encoding/hex"
+	stdhtml "html"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,17 +66,24 @@ func TestGuidedAgentInstallTrustStepUpAndOneTimeToken(t *testing.T) {
 	}
 	rootSum := sha256.Sum256(chain[len(chain)-1])
 	rootHex := hex.EncodeToString(rootSum[:])
+	rootSHA1 := sha1.Sum(chain[len(chain)-1]) // #nosec G401 -- expected display-only value
+	rootSHA1Hex := strings.ToUpper(hex.EncodeToString(rootSHA1[:]))
 	packageName := "myownpki-agent_0.3.1_linux_amd64.deb"
 	packageSum := sha256.Sum256([]byte(packageName))
 	for _, want := range []string{
-		rootHex, hex.EncodeToString(packageSum[:]), "http://pki.homelab.lan/ca/root/1.pem",
+		rootHex, rootSHA1Hex, hex.EncodeToString(packageSum[:]), "http://pki.homelab.lan/ca/root/1.pem",
 		"https://pki.homelab.lan:8444/agent-packages/" + packageName,
+		"Root SHA-256 (DER, authoritative)", "Root SHA-1 (Windows dialog comparison only)", "Only SHA-256 authorizes installation",
 		"--root-sha256", "--token-file /root/myownpki-join-token", "--hostname", "proxy1.homelab.lan",
 		"--package-format deb", "--cacert /root/myownpki-root.pem", "openssl x509", "sha256sum --check",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("guided output lacks %q", want)
 		}
+	}
+	command := "test \"$(" + `openssl x509 -in /root/myownpki-root.pem -outform DER | sha256sum | awk '{print $1}'` + ")\" = '" + rootHex + "'"
+	if strings.Count(html, rootSHA1Hex) != 1 || !strings.Contains(html, stdhtml.EscapeString(command)) {
+		t.Error("SHA-1 entered a command or the independent root SHA-256 literal changed")
 	}
 	if strings.Contains(html, "other.homelab.lan") || strings.Contains(r.location(), secret) || strings.Contains(v.logs.String(), secret) {
 		t.Error("wrong trust chain or token leaked to URL/log")

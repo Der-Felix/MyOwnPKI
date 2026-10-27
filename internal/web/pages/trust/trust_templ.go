@@ -29,9 +29,9 @@ type CA struct {
 	Current    bool
 	CommonName string
 	Valid      string // "2026-10-22 – 2046-10-17"
-	// Fingerprint is the SHA-256, colon-separated, in two lines.
-	Fingerprint string
-	DER, PEM    string // download paths
+	// Fingerprint is authoritative SHA-256; SHA1 is only for the Windows dialog.
+	Fingerprint, SHA1 string
+	DER, PEM          string // download paths
 	// FileDER and FilePEM are the names the browser saves them as.
 	FileDER, FilePEM string
 	// WinMachine and WinUser are the Windows helpers (roots only).
@@ -183,7 +183,7 @@ func Page(p view.Page, d Data) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<h3>SHA-256 fingerprint</h3><pre class=\"fingerprint\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<h3>SHA-256 fingerprint (authoritative)</h3><pre class=\"fingerprint\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -196,126 +196,139 @@ func Page(p view.Page, d Data) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</pre><div class=\"btn-row\"><a class=\"btn\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</pre><h3>SHA-1 fingerprint (Windows certificate dialog comparison only)</h3><pre class=\"fingerprint\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var9 templ.SafeURL
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.DER))
+				var templ_7745c5c3_Var9 string
+				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(c.SHA1)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 64, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 64, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" download=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</pre><div class=\"btn-row\"><a class=\"btn\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.FileDER)
+				var templ_7745c5c3_Var10 templ.SafeURL
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.DER))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 64, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 66, Col: 47}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\">Download ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" download=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
-				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(c.FileDER)
+				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.FileDER)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 64, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 66, Col: 70}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " (DER)</a> <a class=\"btn\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\">Download ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var12 templ.SafeURL
-				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.PEM))
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(c.FileDER)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 65, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 66, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" download=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " (DER)</a> <a class=\"btn\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var13 string
-				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.FilePEM)
+				var templ_7745c5c3_Var13 templ.SafeURL
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.PEM))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 65, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 67, Col: 47}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\">Download ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" download=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
-				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(c.FilePEM)
+				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.FilePEM)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 65, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 67, Col: 70}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " (PEM)</a> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\">Download ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var15 string
+				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(c.FilePEM)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 67, Col: 93}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, " (PEM)</a> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if c.Root {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<a class=\"btn\" href=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var15 templ.SafeURL
-					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.WinMachine))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 67, Col: 55}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\">Windows helper: this computer</a> <a class=\"btn\" href=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<a class=\"btn\" href=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var16 templ.SafeURL
-					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.WinUser))
+					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.WinMachine))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 68, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 69, Col: 55}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\">Windows helper: my user only</a>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\">Windows helper: this computer</a> <a class=\"btn\" href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var17 templ.SafeURL
+					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(c.WinUser))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 70, Col: 52}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\">Windows helper: my user only</a>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</div></section>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</div></section>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -351,142 +364,142 @@ func guides(r CA) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var17 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var17 == nil {
-			templ_7745c5c3_Var17 = templ.NopComponent
+		templ_7745c5c3_Var18 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var18 == nil {
+			templ_7745c5c3_Var18 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<section class=\"section\" aria-labelledby=\"h-windows\"><div class=\"section-head\"><h2 id=\"h-windows\">Windows</h2></div><p>The <strong>Windows helper</strong> does it in one double-click: it shows the SHA-256 of the root it carries. Compare that fingerprint with a value you got another way – from the admin UI or your administrator – before you trust it. It then imports the root into <em>Trusted Root Certification Authorities</em>. <em>This computer</em> asks for administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to confirm). Run it with <code>/check</code> to only check. Edge and Chrome use this store.</p><p>By hand, in a command prompt as administrator – for your user only, add <code>-user</code> after <code>certutil</code>:</p><pre class=\"pem\">certutil -addstore -f Root ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 90, Col: 57}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</pre></section><section class=\"section\" aria-labelledby=\"h-macos\"><div class=\"section-head\"><h2 id=\"h-macos\">macOS</h2></div><ol><li>Download <code>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<section class=\"section\" aria-labelledby=\"h-windows\"><div class=\"section-head\"><h2 id=\"h-windows\">Windows</h2></div><p>The <strong>Windows helper</strong> shows the root's SHA-256 and SHA-1. Only SHA-256 authorizes trust; SHA-1 is display-only for comparison with the Windows certificate dialog. Compare SHA-256 with the exact value from the authenticated admin UI or your administrator, then type YES, or pass that exact 64-hex value as <code>-ExpectedSha256</code> to import noninteractively. <em>This computer</em> asks for administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to confirm). <code>/check</code> only displays and checks; <code>/quiet</code> never bypasses authorization.</p><p>By hand, in a command prompt as administrator – for your user only, add <code>-user</code> after <code>certutil</code>:</p><pre class=\"pem\">certutil -addstore -f Root ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 95, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 93, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</code> and double-click it; Keychain Access opens. Add it to the <em>System</em> keychain.</li><li>Double-click the certificate in Keychain Access, open <em>Trust</em>, set <em>When using this certificate</em> to <em>Always Trust</em>, close the window and confirm with your password.</li></ol><p>Or in Terminal:</p><pre class=\"pem\">sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</pre></section><section class=\"section\" aria-labelledby=\"h-macos\"><div class=\"section-head\"><h2 id=\"h-macos\">macOS</h2></div><ol><li>Download <code>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 99, Col: 115}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 98, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</pre><p>Safari, Chrome and Edge use the keychain.</p></section><section class=\"section\" aria-labelledby=\"h-ios\"><div class=\"section-head\"><h2 id=\"h-ios\">iPhone and iPad</h2></div><ol><li>Open this page in <strong>Safari</strong> and tap <a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</code> and double-click it; Keychain Access opens. Add it to the <em>System</em> keychain.</li><li>Double-click the certificate in Keychain Access, open <em>Trust</em>, set <em>When using this certificate</em> to <em>Always Trust</em>, close the window and confirm with your password.</li></ol><p>Or in Terminal:</p><pre class=\"pem\">sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var21 templ.SafeURL
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(r.DER))
+		var templ_7745c5c3_Var21 string
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 105, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 102, Col: 115}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</pre><p>Safari, Chrome and Edge use the keychain.</p></section><section class=\"section\" aria-labelledby=\"h-ios\"><div class=\"section-head\"><h2 id=\"h-ios\">iPhone and iPad</h2></div><ol><li>Open this page in <strong>Safari</strong> and tap <a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name + " for iPhone and iPad")
+		var templ_7745c5c3_Var22 templ.SafeURL
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(r.DER))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 105, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 108, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</a>; allow the download of the configuration profile.</li><li>Open <em>Settings</em> – <em>Profile Downloaded</em> at the top (or <em>General → VPN &amp; Device Management</em>), choose the profile, tap <em>Install</em> and enter your passcode.</li><li>Open <em>Settings → General → About → Certificate Trust Settings</em> and switch on full trust for <em>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(r.CommonName)
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name + " for iPhone and iPad")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 109, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 108, Col: 123}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</em>. <strong>Without this step</strong> the root is installed but not trusted for websites.</li></ol></section><section class=\"section\" aria-labelledby=\"h-android\"><div class=\"section-head\"><h2 id=\"h-android\">Android</h2></div><ol><li>Download <code>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</a>; allow the download of the configuration profile.</li><li>Open <em>Settings</em> – <em>Profile Downloaded</em> at the top (or <em>General → VPN &amp; Device Management</em>), choose the profile, tap <em>Install</em> and enter your passcode.</li><li>Open <em>Settings → General → About → Certificate Trust Settings</em> and switch on full trust for <em>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(r.CommonName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 117, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 112, Col: 22}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</code>.</li><li>Open <em>Settings → Security and privacy → More security settings → Encryption and credentials → Install a certificate → CA certificate</em> (names differ between vendors), confirm the warning and choose the file.</li></ol><p class=\"muted\">Chrome trusts such a user CA; many apps don't. A device management (MDM) can install it for all apps.</p></section><section class=\"section\" aria-labelledby=\"h-linux\"><div class=\"section-head\"><h2 id=\"h-linux\">Linux</h2></div><p>Debian, Ubuntu – the file must be PEM and end in <code>.crt</code>:</p><pre class=\"pem\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</em>. <strong>Without this step</strong> the root is installed but not trusted for websites.</li></ol></section><section class=\"section\" aria-labelledby=\"h-android\"><div class=\"section-head\"><h2 id=\"h-android\">Android</h2></div><ol><li>Download <code>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs("sudo cp " + r.FilePEM + " /usr/local/share/ca-certificates/" + r.Name + ".crt\nsudo update-ca-certificates")
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 125, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 120, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</pre><p>Fedora, RHEL, Rocky, Alma:</p><pre class=\"pem\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</code>.</li><li>Open <em>Settings → Security and privacy → More security settings → Encryption and credentials → Install a certificate → CA certificate</em> (names differ between vendors), confirm the warning and choose the file.</li></ol><p class=\"muted\">Chrome trusts such a user CA; many apps don't. A device management (MDM) can install it for all apps.</p></section><section class=\"section\" aria-labelledby=\"h-linux\"><div class=\"section-head\"><h2 id=\"h-linux\">Linux</h2></div><p>Debian, Ubuntu – the file must be PEM and end in <code>.crt</code>:</p><pre class=\"pem\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs("sudo cp " + r.FilePEM + " /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust")
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs("sudo cp " + r.FilePEM + " /usr/local/share/ca-certificates/" + r.Name + ".crt\nsudo update-ca-certificates")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 127, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 128, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</pre><p class=\"muted\">curl, wget, Python and most programs use this store; Firefox and Chrome on Linux keep their own (see Firefox).</p></section><section class=\"section\" aria-labelledby=\"h-firefox\"><div class=\"section-head\"><h2 id=\"h-firefox\">Firefox</h2></div><ol><li>Open <em>Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities</em>.</li><li><em>Import</em> <code>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</pre><p>Fedora, RHEL, Rocky, Alma:</p><pre class=\"pem\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs("sudo cp " + r.FilePEM + " /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 134, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 130, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</code> and tick <em>Trust this CA to identify websites</em>.</li></ol><p class=\"muted\">On Windows and macOS Firefox can use the system store instead: <code>about:config</code>, <code>security.enterprise_roots.enabled</code> = true.</p></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</pre><p class=\"muted\">curl, wget, Python and most programs use this store; Firefox and Chrome on Linux keep their own (see Firefox).</p></section><section class=\"section\" aria-labelledby=\"h-firefox\"><div class=\"section-head\"><h2 id=\"h-firefox\">Firefox</h2></div><ol><li>Open <em>Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities</em>.</li><li><em>Import</em> <code>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var28 string
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(r.FileDER)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `pages/trust/trust.templ`, Line: 137, Col: 40}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</code> and tick <em>Trust this CA to identify websites</em>.</li></ol><p class=\"muted\">On Windows and macOS Firefox can use the system store instead: <code>about:config</code>, <code>security.enterprise_roots.enabled</code> = true.</p></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

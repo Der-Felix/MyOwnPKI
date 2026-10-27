@@ -18,9 +18,9 @@ type CA struct {
 	Current    bool
 	CommonName string
 	Valid      string // "2026-10-22 – 2046-10-17"
-	// Fingerprint is the SHA-256, colon-separated, in two lines.
-	Fingerprint string
-	DER, PEM    string // download paths
+	// Fingerprint is authoritative SHA-256; SHA1 is only for the Windows dialog.
+	Fingerprint, SHA1 string
+	DER, PEM          string // download paths
 	// FileDER and FilePEM are the names the browser saves them as.
 	FileDER, FilePEM string
 	// WinMachine and WinUser are the Windows helpers (roots only).
@@ -58,8 +58,10 @@ templ Page(p view.Page, d Data) {
 					{Key: "Common name", Value: c.CommonName},
 					{Key: "Valid", Value: c.Valid},
 				})
-				<h3>SHA-256 fingerprint</h3>
+				<h3>SHA-256 fingerprint (authoritative)</h3>
 				<pre class="fingerprint">{ c.Fingerprint }</pre>
+				<h3>SHA-1 fingerprint (Windows certificate dialog comparison only)</h3>
+				<pre class="fingerprint">{ c.SHA1 }</pre>
 				<div class="btn-row">
 					<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileDER }>Download { c.FileDER } (DER)</a>
 					<a class="btn" href={ templ.SafeURL(c.PEM) } download={ c.FilePEM }>Download { c.FilePEM } (PEM)</a>
@@ -80,11 +82,12 @@ templ guides(r CA) {
 	<section class="section" aria-labelledby="h-windows">
 		<div class="section-head"><h2 id="h-windows">Windows</h2></div>
 		<p>
-			The <strong>Windows helper</strong> does it in one double-click: it shows the SHA-256 of the root it
-			carries. Compare that fingerprint with a value you got another way – from the admin UI or your
-			administrator – before you trust it. It then imports the root into <em>Trusted Root Certification Authorities</em>. <em>This computer</em> asks for
+			The <strong>Windows helper</strong> shows the root's SHA-256 and SHA-1. Only SHA-256 authorizes trust;
+			SHA-1 is display-only for comparison with the Windows certificate dialog. Compare SHA-256 with the
+			exact value from the authenticated admin UI or your administrator, then type YES, or pass that exact
+			64-hex value as <code>-ExpectedSha256</code> to import noninteractively. <em>This computer</em> asks for
 			administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to
-			confirm). Run it with <code>/check</code> to only check. Edge and Chrome use this store.
+			confirm). <code>/check</code> only displays and checks; <code>/quiet</code> never bypasses authorization.
 		</p>
 		<p>By hand, in a command prompt as administrator – for your user only, add <code>-user</code> after <code>certutil</code>:</p>
 		<pre class="pem">certutil -addstore -f Root { r.FileDER }</pre>

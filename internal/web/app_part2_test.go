@@ -4,7 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha1" // #nosec G505 -- verifies the display-only Windows dialog value
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"io/fs"
 	"maps"
 	"net/http"
@@ -20,6 +23,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
 // Part 2 of the real UI (step 19): every action ends with 303 on a page
@@ -148,6 +152,41 @@ func TestViewerSeesNoCommands(t *testing.T) {
 	}
 }
 
+func TestCAFingerprintDisplay(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	chain, err := v.Engine.CAChain(t.Context(), testinstance.Console, v.CAIDs["issuing"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"root", "issuing"} {
+		der := chain[0]
+		if name == "root" {
+			der = chain[len(chain)-1]
+		}
+		sha256Sum := sha256.Sum256(der)
+		sha1Sum := sha1.Sum(der) // #nosec G401 -- expected display-only value
+		page := b.get(t, "/authorities/"+v.CAIDs[name]).html()
+		for _, want := range []string{
+			"SHA-256 fingerprint (authoritative)", view.Fingerprint(strings.ToUpper(hex.EncodeToString(sha256Sum[:]))),
+			"SHA-1 fingerprint (Windows certificate dialog comparison only)", view.Fingerprint(strings.ToUpper(hex.EncodeToString(sha1Sum[:]))),
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page lacks %q", name, want)
+			}
+		}
+		automation := strings.ToLower(hex.EncodeToString(sha256Sum[:]))
+		if name == "root" && (!strings.Contains(page, "Root SHA-256 for automation (exact 64 hex)") || !strings.Contains(page, ">"+automation+"<")) {
+			t.Errorf("root page has no exact 64-hex automation value: %s", page)
+		}
+		if name != "root" && strings.Contains(page, "Root SHA-256 for automation") {
+			t.Error("intermediate page exposes a root automation value")
+		}
+	}
+}
+
 func TestCAOfflineFlowInTheUI(t *testing.T) {
 	t.Parallel()
 	v := newUIEnv(t)
@@ -190,6 +229,10 @@ func TestCAOfflineFlowInTheUI(t *testing.T) {
 		t.Fatalf("offline page:\n%s", page)
 	}
 	belowID := strings.TrimSuffix(strings.TrimPrefix(r.location(), "/authorities/"), "/offline")
+	pending := b.get(t, "/authorities/"+belowID).html()
+	if strings.Contains(pending, "SHA-256 fingerprint") || strings.Contains(pending, "SHA-1 fingerprint") {
+		t.Error("pending CA generation displays an empty fingerprint")
+	}
 	b2, err := v.Engine.OfflineBundleFor(t.Context(), "below")
 	if err != nil {
 		t.Fatal(err)

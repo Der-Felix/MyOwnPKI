@@ -84,7 +84,9 @@ func TestTrustPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"root – Root CA", "issuing – Intermediate CA", rootCert.Subject.CommonName, view.Fingerprint(colonHex(root.body)),
+		"root – Root CA", "issuing – Intermediate CA", rootCert.Subject.CommonName,
+		"SHA-256 fingerprint (authoritative)", view.Fingerprint(colonHex(root.body)),
+		"SHA-1 fingerprint (Windows certificate dialog comparison only)", view.Fingerprint(sha1ColonHex(root.body)),
 		rootCert.NotAfter.UTC().Format("2006-01-02"),
 		`href="/ca/root/1.crt" download="root.crt"`, `href="/ca/root/1.pem" download="root.pem"`,
 		`href="/trust/root/1/machine.cmd"`, `href="/trust/root/1/user.cmd"`, `href="/ca/issuing/1.crt"`,

@@ -68,10 +68,14 @@ func testConfig(t *testing.T) config.Config {
 }
 
 // initialized runs init --demo with a test CA and returns the passphrase.
-func initialized(t *testing.T, cfg config.Config) string {
+func initialized(t *testing.T, cfg config.Config, clocks ...clock.Clock) string {
 	t.Helper()
+	var clk clock.Clock
+	if len(clocks) > 0 {
+		clk = clocks[0]
+	}
 	res, err := setup.Run(t.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console, TestKDF: true,
+		Config: cfg, Mode: setup.Demo, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console, TestKDF: true, Clock: clk,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatal(err)

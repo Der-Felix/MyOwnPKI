@@ -2,12 +2,15 @@ package ca
 
 import (
 	"context"
+	"crypto/sha1" // #nosec G505 -- certificate dialog comparison only; SHA-256 remains authoritative
 	"crypto/x509"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -29,11 +32,13 @@ type CAInfo struct {
 
 // GenerationInfo is one key and certificate of a CA.
 type GenerationInfo struct {
-	Generation          int64
-	Current, Pending    bool
-	KeyAlgorithm        string
-	Subject             string
+	Generation       int64
+	Current, Pending bool
+	KeyAlgorithm     string
+	Subject          string
+	// Fingerprint is authoritative SHA-256; FingerprintSHA1 is display-only.
 	Serial, Fingerprint string
+	FingerprintSHA1     string
 	NotBefore, NotAfter string
 	Issuer              string // "root/1"; "" for a root
 	CertURL, CRLURL     string // where MyOwnPKI publishes it
@@ -102,6 +107,10 @@ func ListCAs(ctx context.Context, q pkidb.DBTX) ([]CAInfo, error) {
 				Serial: g.SerialHex.String, Fingerprint: g.FingerprintSha256.String,
 				NotBefore: g.NotBefore.String, NotAfter: g.NotAfter.String,
 				CertURL: CertURL(c.PublicBaseUrl, c.Name, g.Generation), CRLURL: CRLURL(c.PublicBaseUrl, c.Name, g.Generation),
+			}
+			if g.CertDer != nil {
+				sum := sha1.Sum(g.CertDer) // #nosec G401 -- Windows dialog display only; never used for verification
+				gi.FingerprintSHA1 = strings.ToUpper(hex.EncodeToString(sum[:]))
 			}
 			if g.IssuerCaID.Valid {
 				gi.Issuer = names[g.IssuerCaID.String] + "/" + itoa(g.IssuerGeneration.Int64)

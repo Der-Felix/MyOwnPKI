@@ -27,7 +27,7 @@ type agentInstallInput struct {
 }
 
 type agentTrust struct {
-	rootSHA256, rootURL string
+	rootSHA256, rootSHA1, rootURL string
 }
 
 func (a *app) requireAgentInstallAdmin(c *rc) bool {
@@ -200,7 +200,7 @@ func (a *app) agentTLSTrust(c *rc) (agentTrust, error) {
 				if parseErr != nil || u.Scheme != "http" || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
 					return agentTrust{}, errors.New("agent TLS root has no exact public HTTP PEM URL")
 				}
-				return agentTrust{rootSHA256: fingerprint, rootURL: rootURL}, nil
+				return agentTrust{rootSHA256: fingerprint, rootSHA1: generation.FingerprintSHA1, rootURL: rootURL}, nil
 			}
 		}
 	}
@@ -248,8 +248,12 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	}
 	sections := []admin.Section{
 		{Title: "Independent values from this authenticated UI", Text: []string{
-			"Compare these literals yourself. Neither the downloaded root nor checksums.txt supplies the expected value used to authorize installation.",
-		}, KV: []view.KV{{Key: "Root SHA-256 (DER)", Value: trust.rootSHA256, Mono: true}, {Key: "Package SHA-256", Value: artifact.SHA256, Mono: true}}},
+			"Only SHA-256 authorizes installation. Compare these literals yourself; neither the downloaded root nor checksums.txt supplies an expected value. Root SHA-1 is display-only for the Windows certificate dialog.",
+		}, KV: []view.KV{
+			{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true},
+			{Key: "Root SHA-1 (Windows dialog comparison only)", Value: trust.rootSHA1, Mono: true},
+			{Key: "Package SHA-256", Value: artifact.SHA256, Mono: true},
+		}},
 	}
 	if secret != "" {
 		sections = append(sections, admin.Section{Title: "One-use join token — shown only now", Text: []string{

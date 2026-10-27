@@ -3,12 +3,14 @@ package publish
 import (
 	"bytes"
 	"context"
+	"crypto/sha1" // #nosec G505 -- certificate dialog comparison only; SHA-256 remains authoritative
 	"crypto/sha256"
 	"crypto/x509"
 	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
@@ -27,8 +29,8 @@ import (
 )
 
 // The trust page (v0.2.2, owner 2026-10-24) at / of the public listener:
-// every active CA (roots first) with name, common name, validity, SHA-256
-// fingerprint, DER and PEM downloads, the Windows helpers of the roots, and
+// every active CA (roots first) with name, common name, validity, authoritative
+// SHA-256 and display-only SHA-1 fingerprints, DER and PEM downloads, Windows helpers, and
 // install guides. No sign-in, only public data, no JavaScript; a tenant
 // setting switches it off (then / and the helpers are 404).
 //
@@ -211,6 +213,7 @@ func (h *Handler) trustData(ctx context.Context) (trust.Data, error) {
 			CommonName:  s.cert.Subject.CommonName,
 			Valid:       s.cert.NotBefore.UTC().Format(time.DateOnly) + " – " + s.cert.NotAfter.UTC().Format(time.DateOnly),
 			Fingerprint: view.Fingerprint(colonHex(s.cert.Raw)),
+			SHA1:        view.Fingerprint(sha1ColonHex(s.cert.Raw)),
 			DER:         "/ca/" + s.info.Name + "/" + gen + ".crt", PEM: "/ca/" + s.info.Name + "/" + gen + ".pem",
 			FileDER: file + ".crt", FilePEM: file + ".pem",
 		}
@@ -294,4 +297,15 @@ func assets(files fs.FS) http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// sha1ColonHex formats the legacy Windows dialog fingerprint. It is never an
+// authorization value; all trust decisions use SHA-256.
+func sha1ColonHex(der []byte) string {
+	sum := sha1.Sum(der) // #nosec G401 -- display-only Windows certificate dialog comparison
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":")
 }
