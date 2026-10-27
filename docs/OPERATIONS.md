@@ -489,13 +489,19 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
-From v0.3.0 to v0.3.1: system.db migration 0013 adds independent predecessor defaults and pki.db
-migration 0014 adds revocation plans, accepted agent deployment history and nullable policy/request
-fields. These migrations are additive: existing certificates and revocations are unchanged and an
-unchanged agent serial does not create a plan or revocation. The current factory values follow the
-proposal (agent: immediate after confirmed deployment; other certificates: after seven days); the
-owner question remains open in `docs/PHASE3.md` §8.4. Review both defaults under *Administration →
-Tenant settings* after upgrading.
+From v0.3.0 to v0.3.1: system.db migration 0013 adds independent predecessor defaults; pki.db
+migrations 0014–0017 add revocation plans and accepted deployment history (0014), the installed
+package format (0015), check-less written proof (0016) and optional per-account predecessor
+policies (0017). All are additive: existing certificates and revocations are unchanged and an
+unchanged agent serial creates no plan or revocation. The owner-confirmed factory values are agent:
+immediate after confirmed deployment; other certificates: after seven days. Review both defaults
+under *Administration → Tenant settings* after upgrading.
+
+**Update the server before the agents.** Mixed operation is supported: v0.3.0 agents keep sending
+valid TLS `served_fingerprint` values, which always take precedence even without the newer
+`check_configured` field. Newer agents add `written_fingerprint` only for check-less deployments;
+older agents with neither proof field cause no predecessor action. Do not revoke certificates merely
+because an older agent has not reported the new fields.
 
 ## 10. ACME server
 

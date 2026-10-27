@@ -5,7 +5,11 @@ All notable changes to MyOwnPKI are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor version may
 change the API, the configuration and the database schema; the release notes say how to upgrade.
 
-## [Unreleased]
+## [0.3.1]
+
+Guided agent installation and packages, independent Windows trust confirmation, configurable
+step-up and protected-action continuation, and safe predecessor handling for UI, REST, ACME and
+agent deployments.
 
 ### Added
 

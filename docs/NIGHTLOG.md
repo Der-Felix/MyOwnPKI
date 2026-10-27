@@ -1,3 +1,51 @@
+# Night log – v0.3.1 release close
+
+> Final review and release preparation on `release/v0.3.1`. No tag and no push. Every commit had a
+> complete `task ci:local` with exit 0. CHANGELOG names `[0.3.1]` without a release date.
+
+## Review commits
+
+- `edfbb95` – guided installation is a fail-closed subshell with noninteractive package installation
+  and a Linux execution test of the actual rendered command.
+- `aa7e26a` – additive `written_fingerprint` for check-less deployments.
+- `f1ed0e8` – per-account predecessor overrides in UI and REST, with admin, step-up and audit.
+- `500c77c` – mixed-operation fix: a valid served TLS fingerprint always wins over written proof.
+- `5cde0bf` – owner-confirmed factory defaults: agent immediate after confirmed deployment, other
+  certificates after seven days.
+
+The mixed rule is explicit: served fingerprint first; written fingerprint only when served is empty
+and `check_configured=false`. Legacy v0.3.0 reports therefore remain valid, a written fingerprint
+never replaces a missing TLS proof, and no proof means no predecessor action. Upgrade the server
+before the agents.
+
+## Final verification
+
+`task ci:local`: **19 PASS, 14 SKIP, 0 FAIL**. Full Go tests, generation, lint, OpenAPI lint,
+protocol compatibility and real Windows helper tests passed. These 14 steps remain for GitHub's
+Linux/systemd/Docker environments and are not claimed as locally executed:
+
+```text
+race         | tests with race detector                     | SKIP | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | needs macOS + Homebrew
+shellcheck   | legacy smoke test                            | SKIP | needs Linux
+conformance  | real-client conformance                      | SKIP | needs Linux + docker
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | needs Linux + goreleaser
+install      | agent package formats and architectures      | SKIP | needs Linux + docker + dpkg-deb
+install      | agent packages in pinned distributions       | SKIP | needs Linux + docker + openssl
+install      | agent package real setup and systemd         | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | install.sh functions                         | SKIP | needs Linux + goreleaser
+install      | second build for update                      | SKIP | needs Linux
+install      | install start update as root                 | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+```
+
+The owner has confirmed the factory defaults. No open implementation work remains; only the real
+CI runs above and the owner's release decision are outstanding.
+
+---
+
 # Night log – v0.3.1 follow-up
 
 > Continuation on `release/v0.3.1` after Block A. Steps 15, 16 and 21 are implemented and committed
