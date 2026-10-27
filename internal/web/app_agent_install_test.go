@@ -7,6 +7,10 @@ import (
 	stdhtml "html"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -213,5 +217,94 @@ func TestAgentOlderUsesSemverWithoutDowngrades(t *testing.T) {
 		if got := a.agentOlder(agents.Agent{Version: tt.version}); got != tt.older {
 			t.Errorf("agentOlder(%q) = %v, want %v", tt.version, got, tt.older)
 		}
+	}
+}
+
+func TestGuidedCommandFailClosed(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("executes the rendered POSIX shell command")
+	}
+	v, _ := newAgentsUIEnv(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	form := guidedForm(b.csrf(t), "proxy1.homelab.lan")
+	form.Del("token")
+	response := b.post(t, "/agents/install", form)
+	if response.Code != http.StatusOK {
+		t.Fatalf("render guided command: %d", response.Code)
+	}
+	chain, err := v.Engine.CAChain(t.Context(), testinstance.Console, v.CAIDs["issuing"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSum := sha256.Sum256(chain[len(chain)-1])
+	rootHash := hex.EncodeToString(rootSum[:])
+	var command string
+	for _, part := range strings.Split(response.html(), "<pre") {
+		if !strings.Contains(part, "myownpki-agent setup") {
+			continue
+		}
+		_, body, _ := strings.Cut(part, ">")
+		text, _, _ := strings.Cut(body, "</pre>")
+		command = stdhtml.UnescapeString(text)
+	}
+	if !strings.HasPrefix(command, "( set -euo pipefail\n") || !strings.Contains(command, "apt-get install -y") {
+		t.Fatalf("command is not a noninteractive fail-closed subshell:\n%s", command)
+	}
+
+	for _, tt := range []struct {
+		name, rootHash, sumStatus, wantMessage string
+		wantCurls                              int
+		wantInstall, wantSetup                 bool
+	}{
+		{name: "wrong root", rootHash: strings.Repeat("0", 64), sumStatus: "0", wantMessage: "root fingerprint does not match", wantCurls: 1},
+		{name: "wrong package", rootHash: rootHash, sumStatus: "1", wantMessage: "package checksum does not match", wantCurls: 3},
+		{name: "success", rootHash: rootHash, sumStatus: "0", wantCurls: 3, wantInstall: true, wantSetup: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "bin")
+			if err := os.Mkdir(bin, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			logPath := filepath.Join(dir, "calls.log")
+			writeMock := func(name, body string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeMock("curl", "#!/usr/bin/env bash\nprintf 'curl %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
+			writeMock("openssl", "#!/usr/bin/env bash\nprintf '%s\\n' \"$MOCK_ROOT_HASH\"\n")
+			writeMock("sha256sum", "#!/usr/bin/env bash\nexit \"$MOCK_SUM_STATUS\"\n")
+			writeMock("apt-get", "#!/usr/bin/env bash\nprintf 'apt-get %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
+			writeMock("myownpki-agent", "#!/usr/bin/env bash\nprintf 'myownpki-agent %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
+			cmd := exec.CommandContext(t.Context(), "bash", "-c", command) // #nosec G204 -- actual rendered command with only mocked executables
+			cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "MOCK_LOG="+logPath, "MOCK_ROOT_HASH="+tt.rootHash, "MOCK_SUM_STATUS="+tt.sumStatus)
+			output, err := cmd.CombinedOutput()
+			if tt.name == "success" {
+				if err != nil {
+					t.Fatalf("rendered command failed: %v\n%s\n%s", err, output, command)
+				}
+			} else {
+				if err == nil || !strings.Contains(string(output), tt.wantMessage) {
+					t.Fatalf("failure did not stop with a clear message: %v\n%s", err, output)
+				}
+			}
+			log, readErr := os.ReadFile(logPath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			calls := string(log)
+			if got := strings.Count(calls, "curl "); got != tt.wantCurls {
+				t.Errorf("curl calls = %d, want %d\n%s", got, tt.wantCurls, calls)
+			}
+			if got := strings.Contains(calls, "apt-get install -y"); got != tt.wantInstall {
+				t.Errorf("install reached = %v, want %v\n%s", got, tt.wantInstall, calls)
+			}
+			if got := strings.Contains(calls, "myownpki-agent setup"); got != tt.wantSetup {
+				t.Errorf("setup reached = %v, want %v\n%s", got, tt.wantSetup, calls)
+			}
+		})
 	}
 }

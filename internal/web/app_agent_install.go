@@ -222,17 +222,18 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	packageURL := base + agentdist.BasePath + artifact.Name
 	sumsURL := base + agentdist.BasePath + agentdist.Checksums
 	var commands strings.Builder
+	commands.WriteString("( set -euo pipefail\n")
 	commands.WriteString("umask 077\n")
 	fmt.Fprintf(&commands, "curl --fail --silent --show-error --output %s %s\n", rootPath, shellQuote(trust.rootURL))
-	fmt.Fprintf(&commands, "test \"$(openssl x509 -in %s -outform DER | sha256sum | awk '{print $1}')\" = %s\n", rootPath, shellQuote(trust.rootSHA256))
+	fmt.Fprintf(&commands, "test \"$(openssl x509 -in %s -outform DER | sha256sum | awk '{print $1}')\" = %s || { echo \"root fingerprint does not match the UI value – nothing installed\" >&2; exit 1; }\n", rootPath, shellQuote(trust.rootSHA256))
 	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output %s %s\n", rootPath, packagePath, shellQuote(packageURL))
 	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output /root/checksums.txt %s\n", rootPath, shellQuote(sumsURL))
-	fmt.Fprintf(&commands, "printf '%%s  %%s\\n' %s %s | sha256sum --check -\n", shellQuote(artifact.SHA256), packagePath)
+	fmt.Fprintf(&commands, "printf '%%s  %%s\\n' %s %s | sha256sum --check - || { echo \"package checksum does not match the UI value – nothing installed\" >&2; exit 1; }\n", shellQuote(artifact.SHA256), packagePath)
 	switch in.format {
 	case "deb":
-		fmt.Fprintf(&commands, "apt-get install %s\n", packagePath)
+		fmt.Fprintf(&commands, "apt-get install -y %s\n", packagePath)
 	case "rpm":
-		fmt.Fprintf(&commands, "dnf install %s\n", packagePath)
+		fmt.Fprintf(&commands, "dnf install -y %s\n", packagePath)
 	case "tarball":
 		commands.WriteString("install -d -m 0700 /root/myownpki-agent-package\n")
 		fmt.Fprintf(&commands, "tar -xzf %s -C /root/myownpki-agent-package\n", packagePath)
@@ -246,6 +247,7 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	if secret != "" {
 		commands.WriteString(" --token-file /root/myownpki-join-token")
 	}
+	commands.WriteString(" )\n")
 	sections := []admin.Section{
 		{Title: "Independent values from this authenticated UI", Text: []string{
 			"Only SHA-256 authorizes installation. Compare these literals yourself; neither the downloaded root nor checksums.txt supplies an expected value. Root SHA-1 is display-only for the Windows certificate dialog.",
@@ -258,7 +260,7 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	if secret != "" {
 		sections = append(sections, admin.Section{Title: "One-use join token — shown only now", Text: []string{
 			"This token is valid for 15 minutes and only for " + in.hostname + ". It is absent from URLs, process arguments, action summaries and later pages.",
-		}, Pre: []admin.Pre{{Title: "Write the root-only token file", Text: "umask 077\ncat > /root/myownpki-join-token <<'MYOWNPKI_TOKEN'\n" + secret + "\nMYOWNPKI_TOKEN\nchmod 0600 /root/myownpki-join-token"}}})
+		}, Pre: []admin.Pre{{Title: "Write the root-only token file", Text: "( set -euo pipefail\numask 077\ncat > /root/myownpki-join-token <<'MYOWNPKI_TOKEN'\n" + secret + "\nMYOWNPKI_TOKEN\nchmod 0600 /root/myownpki-join-token\n )"}}})
 	}
 	sections = append(sections, admin.Section{Title: "Verified download, installation and setup", Text: []string{
 		"Run as root on " + in.hostname + ". The root comes over HTTP but is accepted only after its DER fingerprint matches the independent UI literal. Packages and checksums then use HTTPS with that verified root.",
