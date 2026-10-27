@@ -78,6 +78,11 @@ func (a *API) table() []Route {
 		{OperationID: "verifyAuditChain", Method: http.MethodPost, Path: "/audit/verify", access: signedIn, body: true, handle: a.verifyAuditChain},
 		{OperationID: "importExternalCertificate", Method: http.MethodPost, Path: "/imports/external-certificate", access: signedIn, body: true, handle: a.importExternalCertificate},
 
+		{OperationID: "getACMEAccount", Method: http.MethodGet, Path: "/acme/accounts/{accountId}", access: signedIn, handle: a.getACMEAccount},
+		{OperationID: "getACMEPredecessorPolicy", Method: http.MethodGet, Path: "/acme/accounts/{accountId}/predecessor-policy", access: signedIn, handle: a.getACMEPredecessorPolicy},
+		{OperationID: "setACMEPredecessorPolicy", Method: http.MethodPut, Path: "/acme/accounts/{accountId}/predecessor-policy", access: signedIn, body: true, handle: a.setACMEPredecessorPolicy},
+		{OperationID: "clearACMEPredecessorPolicy", Method: http.MethodDelete, Path: "/acme/accounts/{accountId}/predecessor-policy", access: signedIn, handle: a.clearACMEPredecessorPolicy},
+
 		{OperationID: "listAgents", Method: http.MethodGet, Path: "/agents", access: signedIn, handle: a.listAgents},
 		{OperationID: "getAgent", Method: http.MethodGet, Path: "/agents/{agentId}", access: signedIn, handle: a.getAgent},
 		{OperationID: "renewAgentDeployment", Method: http.MethodPost, Path: "/agents/{agentId}/deployments/{deploymentName}/renew", access: signedIn, body: true, handle: a.renewAgentDeployment},

@@ -3,6 +3,7 @@ package acme
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,36 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
+
+func TestAccountNeverPredecessorOverride(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	client := v.client(t)
+	client.register()
+	client.issue("never-override.homelab.lan")
+	q := pkidb.New(v.PKIDB.Write)
+	orders, err := q.ListACMEOrders(t.Context(), 1)
+	if err != nil || len(orders) != 1 || !orders[0].CertificateID.Valid {
+		t.Fatalf("first order: %+v, %v", orders, err)
+	}
+	oldID := orders[0].CertificateID.String
+	never := predecessor.Policy{Choice: predecessor.Never}
+	if err := v.s.SetAccountPredecessor(t.Context(), orders[0].AccountID, &never, testinstance.Console); err != nil {
+		t.Fatal(err)
+	}
+	v.Clock.Advance(time.Second)
+	client.issue("never-override.homelab.lan")
+	if _, err := q.GetRevocation(t.Context(), oldID); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("account never override revoked: %v", err)
+	}
+	if _, err := q.GetRevocationPlan(t.Context(), oldID); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("account never override planned: %v", err)
+	}
+	v.Deliver(t)
+	if entries := testinstance.Audit(t, v.TenantAudit); !strings.Contains(strings.Join(entries, "\n"), "acme.account.predecessor") {
+		t.Error("account policy change is not audited")
+	}
+}
 
 func TestFinalizeAppliesOtherPredecessorPolicy(t *testing.T) {
 	t.Parallel()

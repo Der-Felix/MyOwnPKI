@@ -741,7 +741,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk, Log: s.log,
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, Tenant: store.DefaultTenant,
-		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(),
+		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(), ACME: s.acme,
 	})
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,

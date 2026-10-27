@@ -105,6 +105,12 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		summary = a.agentActionSummary(c, entry, verb, "")
 	case "POST /acme/accounts/approve":
 		summary = "Approve ACME account " + short(entry.form["id"])
+	case "POST /acme/accounts/{id}/predecessor-policy":
+		detail := "inherit the tenant default"
+		if !yes(entry.form["inherit"]) {
+			detail = predecessorText(predecessorFromForm(func(name string) string { return entry.form[name] }, "predecessor", "predecessor_days"))
+		}
+		summary = "Change predecessor policy for ACME account " + short(entry.path["id"]) + ": " + detail
 	case "POST /acme/names/decide":
 		summary = "ACME name " + entry.form["name"] + ": " + entry.form["decision"]
 	case "POST /acme/eab":

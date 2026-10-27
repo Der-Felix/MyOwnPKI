@@ -9,18 +9,20 @@ import (
 )
 
 type AcmeAccount struct {
-	ID            string
-	KeyThumbprint string
-	Jwk           string
-	Status        string
-	Contact       string
-	EabKeyID      sql.NullString
-	ApprovedAt    sql.NullString
-	ApprovedBy    sql.NullString
-	CreatedAt     string
-	CreatedIp     string
-	UpdatedAt     string
-	AgentID       sql.NullString
+	ID                string
+	KeyThumbprint     string
+	Jwk               string
+	Status            string
+	Contact           string
+	EabKeyID          sql.NullString
+	ApprovedAt        sql.NullString
+	ApprovedBy        sql.NullString
+	CreatedAt         string
+	CreatedIp         string
+	UpdatedAt         string
+	AgentID           sql.NullString
+	PredecessorChoice sql.NullString
+	PredecessorDays   sql.NullInt64
 }
 
 type AcmeAuthz struct {

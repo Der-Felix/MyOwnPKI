@@ -164,3 +164,6 @@ SELECT * FROM acme_names ORDER BY status = 'pending' DESC, requested_at DESC LIM
 
 -- name: CountACMENamesWaiting :one
 SELECT count(*) FROM acme_names WHERE status = 'pending';
+
+-- name: SetACMEPredecessorPolicy :execrows
+UPDATE acme_accounts SET predecessor_choice = ?, predecessor_days = ?, updated_at = ? WHERE id = ?;

@@ -831,6 +831,43 @@ func TestContract(t *testing.T) {
 		run(cc)
 	}
 
+	// ACME accounts and their predecessor overrides.
+	accountID := "acc_contract"
+	stamp := v.clk.Now().Format(time.RFC3339)
+	if accountErr := pkidb.New(v.in.PKIDB.Write).InsertACMEAccount(t.Context(), pkidb.InsertACMEAccountParams{
+		ID: accountID, KeyThumbprint: accountID, Jwk: "{}", Status: "valid", Contact: "[]", CreatedAt: stamp, UpdatedAt: stamp,
+	}); accountErr != nil {
+		t.Fatal(accountErr)
+	}
+	accountPath := "/acme/accounts/" + accountID
+	admin.stepUp(t, "demo")
+	for _, cc := range []contractCase{
+		{op: "getACMEAccount", as: viewer, path: accountPath, want: 200},
+		{op: "getACMEAccount", as: anon, path: accountPath, want: 401, note: "no-session"},
+		{op: "getACMEAccount", as: rootview, path: accountPath, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "getACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", want: 200},
+		{op: "getACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", want: 401, note: "no-session"},
+		{op: "getACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "no-read"},
+		{op: "setACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "setACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "setACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 401, note: "no-session"},
+		{op: "clearACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "clearACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "no-read"},
+		{op: "clearACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", want: 401, note: "no-session"},
+	} {
+		run(cc)
+	}
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	for _, cc := range []contractCase{
+		{op: "setACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "clearACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", want: 403, kind: "step-up-required", note: "step-up"},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	run(contractCase{op: "setACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 200})
+	run(contractCase{op: "clearACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", want: 200})
+
 	// Agents (v0.3): the agent CA, an admitted agent (join token and check,
 	// verified), two enrollments in the queue, and join tokens.
 	admin.stepUp(t, "demo")

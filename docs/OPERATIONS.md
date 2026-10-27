@@ -753,9 +753,12 @@ their own rule (certbot: 30 days before expiry) – also fine.
 For a non-agent ACME account, a completed order is a predecessor renewal only when an older valid
 order of **the same account** has the identical normalized, sorted, duplicate-free DNS/IP name set.
 The tenant's *Other certificates* predecessor policy applies at issuance: immediate, after 1–30 days,
-or never, always with reason `superseded`. No ACME extension or client setting is needed. A similar
-name, a subset/superset or another account never selects a predecessor. Agent-linked accounts wait
-for the deployed report instead (chapter 12).
+or never, always with reason `superseded`. An admin can override it per non-agent account on the
+account page or with `GET`/`PUT`/`DELETE /api/v1/acme/accounts/{id}/predecessor-policy`, audited and
+with step-up. **Use one account per host:** multiple hosts sharing an account and exact name set
+schedule or revoke each other's predecessors; choose `never` when that is not intended. No ACME
+extension or client setting is needed. A similar name, a subset/superset or another account never
+selects a predecessor. Agent-linked accounts wait for the deployed report instead (chapter 12).
 
 **Revocation** from the client – `certbot revoke --cert-path …`, `lego certificates revoke …` – signs
 the CRL at once. The certificate's own key can revoke it too (a leaked key, without the account).

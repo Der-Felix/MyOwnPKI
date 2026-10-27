@@ -16,6 +16,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -131,6 +132,8 @@ type AccountInfo struct {
 	Contacts                                     []string
 	Approved                                     bool
 	ApprovedBy, ApprovedAt, EABKey               string
+	Predecessor                                  *predecessor.Policy
+	EffectivePredecessor                         predecessor.Policy
 }
 
 func accountInfo(a *pkidb.AcmeAccount) AccountInfo {
@@ -171,7 +174,73 @@ func (s *Server) Account(ctx context.Context, who keys.Who, id string) (*Account
 		return nil, err
 	}
 	info := accountInfo(&a)
+	if a.PredecessorChoice.Valid {
+		policy := predecessor.Policy{Choice: a.PredecessorChoice.String, Days: int(a.PredecessorDays.Int64)}.Normalize()
+		info.Predecessor = &policy
+	}
+	info.EffectivePredecessor, err = s.engine.EffectiveOtherPredecessor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if info.Predecessor != nil {
+		info.EffectivePredecessor = *info.Predecessor
+	}
 	return &info, nil
+}
+
+// SetAccountPredecessor changes the non-agent account override. Nil restores
+// the tenant default. It needs the same admin+step-up as other ACME admin actions.
+func (s *Server) SetAccountPredecessor(ctx context.Context, id string, policy *predecessor.Policy, who keys.Who) error {
+	if err := s.authorize(who); err != nil {
+		return err
+	}
+	if policy != nil {
+		normalized := policy.Normalize()
+		if err := normalized.Validate(); err != nil {
+			return &ca.DeniedError{Reasons: []string{err.Error()}, Cause: err}
+		}
+		policy = &normalized
+	}
+	now := s.now()
+	return s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		account, err := q.GetACMEAccount(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if account.AgentID.Valid {
+			return &ca.DeniedError{Reasons: []string{"agent-linked accounts use the agent/deployment predecessor settings"}}
+		}
+		choice, days := sql.NullString{}, sql.NullInt64{}
+		if policy != nil {
+			choice = sql.NullString{String: policy.Choice, Valid: true}
+			if policy.Choice == predecessor.After {
+				days = sql.NullInt64{Int64: int64(policy.Days), Valid: true}
+			}
+		}
+		n, err := q.SetACMEPredecessorPolicy(ctx, pkidb.SetACMEPredecessorPolicyParams{
+			PredecessorChoice: choice, PredecessorDays: days, UpdatedAt: dbTime(now), ID: id,
+		})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
+		}
+		details := map[string]any{"inherit": policy == nil}
+		if policy != nil {
+			details["choice"] = policy.Choice
+			if policy.Choice == predecessor.After {
+				details["days"] = policy.Days
+			}
+		}
+		return audit.Enqueue(ctx, tx, now, audit.Entry{
+			Time: now, Actor: who.Actor, Action: "acme.account.predecessor", Target: audit.Target{Type: "acme_account", ID: id},
+			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
+		})
+	})
 }
 
 // NameInfo is a name under the approval level "new_name".

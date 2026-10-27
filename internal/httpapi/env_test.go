@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -41,6 +42,7 @@ type env struct {
 	demoPass    string // password of the init user "demo"
 	caIDs       map[string]string
 	agents      *agents.Service
+	acme        *acme.Server
 	logs        bytes.Buffer
 }
 
@@ -58,10 +60,16 @@ func newEnv(t *testing.T) *env {
 			return (&tenant.Store{DB: in.SystemDB.Read, Clock: in.Clock}).AgentEnrollment(ctx, store.DefaultTenant)
 		},
 	}
+	acmeServer, err := acme.New(acme.Options{Engine: in.Engine, BaseURL: "https://pki.homelab.lan/acme", Clock: in.Clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(acmeServer.Close)
+	v.acme = acmeServer
 	v.api = New(Deps{
 		Auth: in.Auth, Engine: in.Engine, Keys: in.Ring, Presets: in.Presets, Clock: in.Clock,
 		Log: slog.New(slog.NewJSONHandler(&v.logs, nil)), Version: "test", Demo: true,
-		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents,
+		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents, ACME: acmeServer,
 	})
 	return v
 }

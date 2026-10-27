@@ -26,6 +26,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -83,6 +84,7 @@ type ACMEAdmin interface {
 	Pending(ctx context.Context) (accounts, names int64, err error)
 	Accounts(ctx context.Context, who keys.Who) ([]acme.AccountInfo, error)
 	Account(ctx context.Context, who keys.Who, id string) (*acme.AccountInfo, error)
+	SetAccountPredecessor(ctx context.Context, id string, policy *predecessor.Policy, who keys.Who) error
 	ApproveAccount(ctx context.Context, id string, who keys.Who) error
 	Names(ctx context.Context, who keys.Who) ([]acme.NameInfo, error)
 	DecideName(ctx context.Context, name string, approve bool, who keys.Who) error
@@ -180,6 +182,7 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /agents/{id}/{action}", a.agentAction)
 	mux.HandleFunc("GET /acme/accounts", a.signedIn(a.acmeAccounts))
 	mux.HandleFunc("GET /acme/accounts/{id}", a.signedIn(a.acmeAccount))
+	a.protected(mux, "POST /acme/accounts/{id}/predecessor-policy", a.acmePredecessorPolicy, "predecessor", "predecessor_days", "inherit")
 	a.protected(mux, "POST /acme/accounts/approve", a.acmeApprove, "id")
 	mux.HandleFunc("GET /acme/names", a.signedIn(a.acmeNames))
 	a.protected(mux, "POST /acme/names/decide", a.acmeDecide, "name", "decision")

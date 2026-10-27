@@ -53,7 +53,7 @@ func (q *Queries) CountAgentDeploymentHistory(ctx context.Context, arg CountAgen
 }
 
 const getACMEAccountByAgentID = `-- name: GetACMEAccountByAgentID :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE agent_id = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id, predecessor_choice, predecessor_days FROM acme_accounts WHERE agent_id = ?
 `
 
 func (q *Queries) GetACMEAccountByAgentID(ctx context.Context, agentID sql.NullString) (AcmeAccount, error) {
@@ -72,6 +72,8 @@ func (q *Queries) GetACMEAccountByAgentID(ctx context.Context, agentID sql.NullS
 		&i.CreatedIp,
 		&i.UpdatedAt,
 		&i.AgentID,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }

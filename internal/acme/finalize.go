@@ -19,6 +19,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -208,6 +209,13 @@ func (s *Server) issue(ctx context.Context, orderID string) {
 	if err != nil {
 		s.log.Error("acme predecessor policy", slog.String("order", o.ID), slog.Any("error", err))
 		return
+	}
+	if !account.AgentID.Valid && account.PredecessorChoice.Valid {
+		policy = predecessor.Policy{Choice: account.PredecessorChoice.String, Days: int(account.PredecessorDays.Int64)}.Normalize()
+		if policyErr := policy.Validate(); policyErr != nil {
+			s.log.Error("stored ACME predecessor policy is invalid", slog.String("order", o.ID), slog.Any("error", policyErr))
+			return
+		}
 	}
 	names := make(map[string]struct{}, len(idents))
 	for _, id := range idents {

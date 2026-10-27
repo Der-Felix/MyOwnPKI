@@ -64,6 +64,8 @@ tags:
     description: Tenant settings (server key generation, subject defaults)
   - name: domains
     description: Name spaces ACME issues for (CA, challenges, approval level)
+  - name: acme
+    description: ACME accounts and their predecessor policies
   - name: presets
     description: Certificate presets (read-only, built in)
   - name: cas
@@ -992,6 +994,80 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /acme/accounts/{accountId}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [acme]
+      operationId: getACMEAccount
+      summary: Read an ACME account and its effective predecessor policy
+      x-required-role: viewer
+      responses:
+        "200":
+          description: ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /acme/accounts/{accountId}/predecessor-policy:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [acme]
+      operationId: getACMEPredecessorPolicy
+      summary: Read the predecessor policy of an ACME account
+      x-required-role: viewer
+      responses:
+        "200":
+          description: ACME account with override and effective policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [acme]
+      operationId: setACMEPredecessorPolicy
+      summary: Override predecessor handling for an ACME account without an agent
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: Account predecessor override
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PredecessorPolicy" }
+      responses:
+        "200":
+          description: Stored ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [acme]
+      operationId: clearACMEPredecessorPolicy
+      summary: Inherit the tenant predecessor policy for an ACME account
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Stored ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /agents/{agentId}/predecessor-policy:
     parameters:
@@ -2256,6 +2332,13 @@ components:
       required: true
       schema: { $ref: "#/components/schemas/ID" }
 
+    AccountId:
+      description: "ID of the ACME account"
+      name: accountId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
     EnrollmentId:
       description: "ID of the enrollment"
       name: enrollmentId
@@ -2682,6 +2765,27 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: [string, "null"], format: date-time }
         secret: { type: string, pattern: "^mop_[a-z2-7]+$" }
+
+    ACMEAccount:
+      description: "An ACME account and its predecessor policy"
+      type: object
+      required: [id, status, key_thumbprint, approved, contact, created_at, created_ip, predecessor_policy, effective_predecessor]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        status: { type: string }
+        key_thumbprint: { type: string, description: "RFC 7638 JWK thumbprint" }
+        approved: { type: boolean }
+        approved_by: { type: string }
+        approved_at: { type: string }
+        eab_key_id: { type: string }
+        contact:
+          type: array
+          items: { type: string }
+        created_at: { type: string }
+        created_ip: { type: string }
+        predecessor_policy: { $ref: "#/components/schemas/NullablePredecessorPolicy" }
+        effective_predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
 
     Agent:
       description: "An admitted agent (v0.3)"

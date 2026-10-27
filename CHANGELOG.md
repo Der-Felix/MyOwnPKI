@@ -41,7 +41,9 @@ change the API, the configuration and the database schema; the release notes say
   and other certificates, with agent-wide, per-deployment and one-operation overrides. Current
   migration defaults follow the proposal (agent: immediately after confirmed deployment; other
   certificates: after seven days); the owner decision remains open in `docs/PHASE3.md` §8.4.
-  Non-agent ACME renewals require the same account and exact normalized name set. Agent actions
+  Non-agent ACME renewals require the same account and exact normalized name set, with an optional
+  admin-audited per-account override in UI and REST; shared accounts should use one per host or
+  `never`. Agent actions
   start only at an accepted deployed report with exact proof: TLS served fingerprint when a check is
   configured, otherwise the leaf fingerprint read back after the atomic write. A written fingerprint
   never replaces a missing TLS proof and legacy agents without either field cause no action. Exact
