@@ -13,10 +13,10 @@ WHERE agent_id = ? AND deployment = ? AND certificate_id = ?;
 SELECT c.id FROM agent_deployments d
 JOIN certificates c ON c.serial_hex = d.certificate_serial
 WHERE d.agent_id = ? AND d.state = 'deployed' AND d.reported = 1
-  AND ((d.check_configured = 1 AND d.served_fingerprint IS NOT NULL AND d.served_fingerprint <> ''
+  AND ((d.served_fingerprint IS NOT NULL AND d.served_fingerprint <> ''
     AND lower(d.served_fingerprint) = lower(c.fingerprint_sha256))
-    OR (d.check_configured = 0 AND d.written_fingerprint IS NOT NULL AND d.written_fingerprint <> ''
-    AND lower(d.written_fingerprint) = lower(c.fingerprint_sha256)));
+    OR (d.check_configured = 0 AND (d.served_fingerprint IS NULL OR d.served_fingerprint = '') AND d.written_fingerprint IS NOT NULL
+    AND d.written_fingerprint <> '' AND lower(d.written_fingerprint) = lower(c.fingerprint_sha256)));
 
 -- name: GetACMEAccountByAgentID :one
 SELECT * FROM acme_accounts WHERE agent_id = ?;

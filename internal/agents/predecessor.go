@@ -125,7 +125,7 @@ func (s *Service) applyDeployed(ctx context.Context, q *pkidb.Queries, tx *sql.T
 		return nil, nil
 	}
 	proof := d.Fingerprint
-	if !d.CheckConfigured {
+	if proof == "" && !d.CheckConfigured {
 		proof = d.WrittenFingerprint
 	}
 	if proof == "" {

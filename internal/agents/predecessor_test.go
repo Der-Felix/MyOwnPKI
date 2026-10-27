@@ -388,3 +388,29 @@ func TestWrittenFingerprintCanBePlanned(t *testing.T) {
 		t.Fatal("check-less deployment did not plan the predecessor")
 	}
 }
+
+func TestLegacyServedFingerprintPrecedence(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, tenant.EnrollAuto)
+	caller := agentCaller(t, e, "proxy1.homelab.lan")
+	account := predecessorAccount(t, e, caller.Agent.ID)
+	serving := predecessorCertificate(t, e, account, "www.homelab.lan")
+	discarded := predecessorCertificate(t, e, account, "www.homelab.lan")
+	current := predecessorCertificate(t, e, account, "www.homelab.lan")
+	other := deploymentResult(serving, "deployed", "www.homelab.lan")
+	other.Name = "other"
+	other.CheckConfigured = false // v0.3.0: no field, but valid TLS proof
+	other.WrittenFingerprint = ""
+	result := deploymentResult(current, "deployed", "www.homelab.lan")
+	result.CheckConfigured = false
+	result.WrittenFingerprint = serving.Fingerprint // conflicting value must be ignored
+	if err := e.s.Report(t.Context(), caller, ReportInput{Deployments: []DeploymentReport{other, result}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := revokedReason(t, e, serving.ID); got != "" {
+		t.Errorf("legacy TLS-serving certificate revoked: %q", got)
+	}
+	if got := revokedReason(t, e, discarded.ID); got != ca.ReasonSuperseded {
+		t.Errorf("legacy predecessor not revoked: %q", got)
+	}
+}
