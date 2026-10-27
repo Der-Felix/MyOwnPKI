@@ -76,6 +76,8 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		summary = verb + " for " + a.enrollmentName(c, entry.form["id"])
 	case "POST /agents/tokens":
 		summary = "Create join token " + orDash(entry.form["label"]) + " for " + strings.Join(strings.Fields(entry.form["names"]), ", ") + "; valid for " + entry.form["hours"] + " hours"
+	case "POST /agents/install":
+		summary = "Prepare guided agent installation for exact host " + entry.form["hostname"]
 	case "POST /agents/tokens/delete":
 		summary = "Withdraw join token " + a.joinTokenName(c, entry.form["id"])
 	case "POST /agents/{id}/names":

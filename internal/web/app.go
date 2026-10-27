@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
@@ -58,6 +59,11 @@ type AppDeps struct {
 	TenantAudit, InstanceAudit *sql.DB
 	// Agents is the agent service (v0.3); nil while agent.base_url is empty.
 	Agents *agents.Service
+	// AgentDist, AgentBaseURL and AgentTLSIssuer drive guided installation.
+	AgentDist      *agentdist.Store
+	AgentBaseURL   string
+	AgentTLSIssuer string
+	ServerVersion  string
 	// ACME is the ACME server (PHASE2); nil while ACME is off.
 	ACME ACMEAdmin
 	// ACMEDirectory is the directory URL clients use (shown with EAB keys).
@@ -154,6 +160,9 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /domains/{id}", a.domainUpdate, "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
 	a.protected(mux, "POST /domains/{id}/delete", a.domainDelete)
 	mux.HandleFunc("GET /agents", a.signedIn(a.agentList))
+	mux.HandleFunc("GET /agents/install", a.signedIn(a.agentInstallPage))
+	a.protected(mux, "POST /agents/install", a.agentInstall, "hostname", "arch", "format", "mode", "webroot", "token")
+	mux.HandleFunc("GET /agents/{id}/update", a.signedIn(a.agentUpdatePage))
 	mux.HandleFunc("GET /agents/enrollments", a.signedIn(a.enrollmentList))
 	a.protected(mux, "POST /agents/enrollments/approve", a.enrollmentDecide, "id")
 	a.protected(mux, "POST /agents/enrollments/deny", a.enrollmentDecide, "id")

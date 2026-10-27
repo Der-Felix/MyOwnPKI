@@ -56,12 +56,26 @@ func (a *app) agentList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Enrollment requests and Join tokens.",
+	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Enrollment requests, Join tokens and Install agent.",
 		Columns: []admin.Column{{Label: "Host"}, {Label: "Status"}, {Label: "Last seen"}, {Label: "Version"}, {Label: "System"}, {Label: "Admitted"}}}
+	if c.may(authz.ManageAgents, "") {
+		d.Commands = []admin.Command{{Label: "Install agent", Href: "/agents/install", Primary: true}}
+	}
 	for _, ag := range list {
+		versionCell := admin.Cell{Text: orDash(ag.Version), Mono: true}
+		if a.agentOlder(ag) {
+			versionCell.Rel = "update available"
+			if c.may(authz.ManageAgents, "") {
+				versionCell.Href = "/agents/" + ag.ID + "/update"
+			}
+		}
+		format := ag.PackageFormat
+		if format == "" {
+			format = "tarball"
+		}
 		d.Rows = append(d.Rows, []admin.Cell{
 			{Text: ag.Hostname, Href: "/agents/" + ag.ID, Mono: true}, a.agentStatus(ag), {Text: dateTime(ag.LastSeenAt), NoWrap: true},
-			{Text: orDash(ag.Version), Mono: true}, {Text: ag.OS + "/" + ag.Arch, Mono: true}, {Text: dateTime(ag.ApprovedAt) + " (" + ag.ApprovedBy + ")"},
+			versionCell, {Text: ag.OS + "/" + ag.Arch + ", " + format, Mono: true}, {Text: dateTime(ag.ApprovedAt) + " (" + ag.ApprovedBy + ")"},
 		})
 	}
 	p := c.page("Agents", "agents")
@@ -85,7 +99,7 @@ func (a *app) agentDetail(c *rc) {
 	st := a.agentStatus(*ag)
 	sections := []admin.Section{{Text: []string{"The agent certificate is valid for 7 days and renewed by the agent at 2/3 of its lifetime."}, KV: []view.KV{
 		{Key: "Host", Value: ag.Hostname}, {Key: "Status", Value: st.Text}, {Key: "Agent", Value: ag.ID},
-		{Key: "System", Value: ag.OS + "/" + ag.Arch + ", agent " + orDash(ag.Version)}, {Key: "Last seen", Value: dateTime(ag.LastSeenAt)},
+		{Key: "System", Value: ag.OS + "/" + ag.Arch + ", agent " + orDash(ag.Version) + ", " + orDash(ag.PackageFormat)}, {Key: "Last seen", Value: dateTime(ag.LastSeenAt)},
 		{Key: "Admitted", Value: dateTime(ag.ApprovedAt) + " by " + ag.ApprovedBy},
 		{Key: "Agent certificate (serial)", Value: cert, Mono: true},
 	}}}

@@ -130,7 +130,7 @@ func (r *rpc) Report(ctx context.Context, req *connect.Request[agentv1.ReportReq
 	if err != nil {
 		return nil, err
 	}
-	in := ReportInput{Version: req.Msg.AgentVersion, OS: req.Msg.Os, Arch: req.Msg.Arch}
+	in := ReportInput{Version: req.Msg.AgentVersion, OS: req.Msg.Os, Arch: req.Msg.Arch, PackageFormat: req.Msg.PackageFormat}
 	for _, d := range req.Msg.Deployments {
 		if d == nil {
 			return nil, r.s.rpcError("Report", ErrInvalid)

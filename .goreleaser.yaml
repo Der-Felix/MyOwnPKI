@@ -195,6 +195,8 @@ dockers_v2:
   - id: myownpki
     ids: [myownpki]
     dockerfile: deploy/docker/Dockerfile
+    extra_files:
+      - "{{ .Dist }}"
     images:
       - ghcr.io/der-felix/myownpki
     # No "latest" before 1.0: an upgrade is a deliberate choice of a version.

@@ -109,6 +109,7 @@ type Agent struct {
 	UpdatedAt         string
 	PredecessorChoice sql.NullString
 	PredecessorDays   sql.NullInt64
+	PackageFormat     string
 }
 
 type AgentDeployment struct {

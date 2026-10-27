@@ -21,6 +21,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -144,6 +145,9 @@ type Agent struct {
 	// only. It signs the agents' 7-day certificates, and only certificates
 	// from it pass the listener's client authentication.
 	CA string `yaml:"ca"`
+	// PackageDir is the immutable release-artifact directory exposed by the
+	// agent listener. The host installer stages it; the container uses /opt.
+	PackageDir string `yaml:"package_dir"`
 }
 
 // Enabled reports whether the agent listener runs.
@@ -164,7 +168,7 @@ func Default() Config {
 		Admin:  Admin{Listen: "127.0.0.1:9443"},
 		Public: Public{Listen: ":8080"},
 		ACME:   ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
-		Agent:  Agent{Listen: ":8444"},
+		Agent:  Agent{Listen: ":8444", PackageDir: "/var/lib/myownpki/agent-dist"},
 	}
 }
 
@@ -523,6 +527,11 @@ func (c Config) validateACME(admin listenAddr, add func(string, ...any)) {
 // are required and the listener needs a port of its own.
 func (c Config) validateAgent(add func(string, ...any)) {
 	a := c.Agent
+	if a.PackageDir == "" {
+		add("agent.package_dir: required")
+	} else if !absoluteConfigPath(a.PackageDir) || !cleanConfigPath(a.PackageDir) {
+		add("agent.package_dir: must be a clean absolute path, got %q", a.PackageDir)
+	}
 	if !a.Enabled() {
 		for _, kv := range [][2]string{{"agent.tls_issuer", a.TLSIssuer}, {"agent.ca", a.CA}} {
 			if kv[1] != "" {
@@ -557,6 +566,19 @@ func (c Config) validateAgent(add func(string, ...any)) {
 			add("agent.listen: %q collides with %s %q – the agent listener needs a port of its own", a.Listen, kv[0], kv[1])
 		}
 	}
+}
+
+// absoluteConfigPath accepts native absolute paths and the POSIX paths used by
+// Linux host and container examples, regardless of the OS checking the file.
+func absoluteConfigPath(path string) bool {
+	return filepath.IsAbs(path) || strings.HasPrefix(path, "/")
+}
+
+func cleanConfigPath(path string) bool {
+	if strings.HasPrefix(path, "/") {
+		return pathpkg.Clean(path) == path
+	}
+	return filepath.Clean(path) == path
 }
 
 // AgentBaseURL checks agent.base_url: https://host[:port], no path.

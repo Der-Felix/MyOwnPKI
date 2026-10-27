@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.0
+v=0.3.1
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -67,6 +67,11 @@ What it does:
   next to it), checks its SHA-256 against `checksums.txt` and, when cosign is installed, the
   signature of `checksums.txt` (it must come from the release workflow at that tag). A mismatch
   stops it before anything is installed.
+- It also downloads the exact release's agent `.deb`, `.rpm` and tarball for both Linux amd64 and
+  arm64, verifies every one against the same `checksums.txt`, and publishes the complete set at
+  `/var/lib/myownpki/agent-dist`. A missing, wrong-version or changed artifact stops installation.
+  During a server update the previous complete set is retained and restored if the update rolls
+  back; the installer never installs or enrolls an agent on the PKI server itself.
 - It creates the system user `myownpki` and `/var/lib/myownpki` (0700), and installs
   `/usr/local/bin/myownpki` and the unit `/etc/systemd/system/myownpki.service`.
 - It installs the daily backup – `myownpki-backup.service` and `.timer`, backups in
@@ -123,8 +128,10 @@ never removed. With a `data_dir` other than `/var/lib/myownpki`, change `StateDi
 
 ### 2.2 With Docker, or by hand
 
-The container image and `deploy/docker-compose.yml` are in the README. By hand – another init
-system, FreeBSD, macOS, Windows:
+The container image and `deploy/docker-compose.yml` are in the README. The image already contains
+the same exact-version agent artifacts and `checksums.txt` under `/opt/myownpki/agent-dist`, with
+`agent.package_dir` pointing there. They are read-only to the non-root server and need no runtime
+download. By hand – another init system, FreeBSD, macOS, Windows:
 
 1. Install the binary from a release archive and create a system user, for example `myownpki`, that
    owns the data directory (mode 0700).
@@ -907,18 +914,41 @@ agent:
   listen: ":8444"
   tls_issuer: issuing   # issues the listener's server certificate
   ca: agent-ca          # signs and authenticates agent client certificates
+  package_dir: /var/lib/myownpki/agent-dist  # exact-version downloads staged by install.sh
 ```
 
 Unseal the server so it can issue both certificates. `myownpki config check` and startup check the
 agent CA and its EKU limit. Also configure ACME (chapter 10) and a domain covering every name the
 agent may order. Agents use the same root as trust anchor for the agent and ACME listeners.
 
-### 12.2 Join token and verified installation
+The agent listener anonymously serves only `GET` and `HEAD` for the six exact-version artifacts and
+`checksums.txt` below `/agent-packages/`. There is no directory listing, arbitrary path, redirect,
+upload or symlink following; missing or incomplete development directories return 404. These public
+reads do not change enrollment or any other RPC's existing mTLS authentication. Package sizes are
+bounded. Set `MYOWNPKI_AGENT_PACKAGE_DIR` instead of editing YAML when using environment overrides.
 
-In *Agents → Join tokens → Create token*, enter the host's exact fully qualified name and, if needed,
-patterns such as `*.apps.homelab.lan`. Store the one-time token in a regular root-only file on the
-host, for example `/root/myownpki-join-token` with mode exactly 0600. Do not put it in `agent.yaml`
-or on a command line.
+### 12.2 Guided and verified installation
+
+The default is *Agents → Install agent*. An admin chooses the exact host FQDN, Linux architecture,
+package format and standalone/webroot enrollment, then confirms with a fresh second factor. The
+result contains the complete root download/fingerprint check, verified package and `checksums.txt`
+downloads, package-manager or tarball installation, and `myownpki-agent setup` commands. Run them as
+root on the target host, not on the PKI server.
+
+The root SHA-256 and package SHA-256 shown in that authenticated response are independent expected
+values. The downloaded certificate and `checksums.txt` never supply their own authorization values:
+the root arrives over HTTP and is accepted only when its DER SHA-256 matches the UI literal; package
+downloads then use HTTPS with that verified root and are checked against the independent package
+literal before installation. Do not substitute a value from a download page or an unauthenticated
+source.
+
+The optional guided join token is scoped to exactly that hostname, works once and expires after 15
+minutes. It appears only in the one-time, `no-store` response. Write it with the displayed here-doc
+to `/root/myownpki-join-token`, mode 0600; setup receives only `--token-file`. The token never goes
+into an argument, URL, action summary, report or access log, and later pages cannot show it again.
+Tokenless guided commands still require fresh step-up. The alternative *Agents → Join tokens →
+Create token* flow remains available for exact names or patterns such as `*.apps.homelab.lan`; store
+its secret the same way and never put it in `agent.yaml` or on a command line.
 
 Download the root PEM independently and compare its fingerprint with the authenticated admin UI.
 `setup` requires this expected value and checks SHA-256 over the certificate DER, not the PEM text.
@@ -971,7 +1001,16 @@ configuration and restarts it.
 The token file is deleted only when that invocation newly obtains admission; pending, failed, polled
 and already-enrolled runs keep it. The initial `agent.yaml` has no deployments. Setup preserves every
 customized existing file. The byte-identical pristine example shipped by a package may be replaced
-exactly once with the host-specific configuration. There is no agent self-update.
+exactly once with the host-specific configuration. There is no agent self-update. Setup records the
+selected `--package-format` (`deb`, `rpm` or the default `tarball`) in the root-only state directory
+and reports it through the additive agent protocol. Existing agents and old reporters are treated as
+legacy tarballs; pki.db migration 0015 adds this metadata without changing enrollment state.
+
+The agent list compares strict semantic versions, including prerelease ordering. It marks only an
+older agent; equal or newer agents get no downgrade suggestion. An admin's update link generates the
+same verified commands for the reported installed format and architecture, without a join token.
+Update preserves `agent.yaml` and restarts an already enrolled service. There is no automatic update
+or remote command.
 
 `deploy/install-agent.sh` remains a deprecated v0.3.1 compatibility wrapper. It only downloads or
 accepts a verified archive, checks its checksum/signature, installs the binary and forwards to
@@ -1106,7 +1145,9 @@ with `NoNewPrivileges=yes`.
 CI first proves that `nginx -t` on port 443 fails without the low-port drop-in, then proves that it
 succeeds with it. It also runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full report and
 measured overall exposure are documented in the **agent end-to-end** job summary for each run;
-values can differ between systemd releases. No unmeasured local value is claimed here.
+values can differ between systemd releases. No unmeasured local value is claimed here. The
+**install** job separately downloads the served `.deb` from a real server, checks independent root
+and package hashes, enrolls through `setup`, and updates an older enrolled agent on real systemd.
 
 ### 12.4 Firewall
 

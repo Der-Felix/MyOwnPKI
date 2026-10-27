@@ -187,7 +187,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
-		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}, Agent: Agent{"marker", "marker", "marker", "marker"}}
+		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}, Agent: Agent{"marker", "marker", "marker", "marker", "marker"}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -446,6 +446,9 @@ func TestAgentConfig(t *testing.T) {
 		mod  func(*Config)
 		want string
 	}{
+		"no package dir":          {func(c *Config) { c.Agent.PackageDir = "" }, "agent.package_dir: required"},
+		"relative package dir":    {func(c *Config) { c.Agent.PackageDir = "agent-dist" }, "agent.package_dir: must be a clean absolute path"},
+		"unclean package dir":     {func(c *Config) { c.Agent.PackageDir = "/var/lib/myownpki/../agent-dist" }, "agent.package_dir: must be a clean absolute path"},
 		"ca without base URL":     {func(c *Config) { c.Agent.CA = "agent-ca" }, "agent.ca needs agent.base_url"},
 		"issuer without base URL": {func(c *Config) { c.Agent.TLSIssuer = "issuing" }, "agent.tls_issuer needs agent.base_url"},
 		"no issuer":               {func(c *Config) { on(c); c.Agent.TLSIssuer = "" }, "agent.tls_issuer: required"},

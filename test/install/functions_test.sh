@@ -249,6 +249,9 @@ update_run() { # STARTS HEALTHY [bad-copy]
 		BIN=$upd/myownpki BACKUPS=$upd/backups CONF=$upd/config.yaml
 		as_service() { :; }
 		install_units() { unit_changed=false; }
+		publish_agent_dist() { printf 'publish\n' >>"$upd/dist-events"; }
+		finish_agent_dist() { printf 'finish\n' >>"$upd/dist-events"; }
+		rollback_agent_dist() { printf 'rollback\n' >>"$upd/dist-events"; }
 		systemctl() { if [ "$1" = restart ] && [ "$starts" = new ]; then cp "$BIN" "$upd/running"; fi; }
 		healthy() { [ "$health" = yes ]; }
 		running_version() { "$upd/running" --version | awk '{ print $2 }'; }
@@ -264,15 +267,141 @@ said() { if grep -qF "$1" "$upd.out"; then echo yes; else echo "no: $(tr '\n' ' 
 update_run new yes
 check "update: healthy and runs the new version" "$rc $(installed)" "0 $new_version"
 check "update: says so" "$(said "Healthy, running $new_version")" "yes"
+check "update: commits the matching agent distribution" "$(tr '\n' ' ' <"$upd/dist-events")" "publish finish "
 update_run stale yes
 check "update: healthy, but the old binary runs → rolled back, error" "$rc $(installed)" "1 $old_version"
 check "update: names the version that runs" "$(said "the service runs $old_version, not $new_version")" "yes"
 check "update: rolled back, healthy again" "$(said "rolled back to $old_version, which is healthy again")" "yes"
+check "update: rolls back the agent distribution too" "$(tr '\n' ' ' <"$upd/dist-events")" "publish rollback "
 update_run new no
 check "update: not healthy → rolled back, error, restore commands" "$rc $(installed) $(said "restore $upd/backups/")" "1 $old_version yes"
 update_run new yes bad-copy
 check "update: the copy is not the new binary → rolled back, error" "$rc $(installed)" "1 $old_version"
 check "update: says why" "$(said "the new binary was not installed")" "yes"
+
+# Exact-release agent distribution: all six packages and checksums are verified
+# before publication; replacement is idempotent and rolls back as one directory.
+version=0.3.1
+release=$tmp/agent-release
+mkdir -p "$release"
+archive=$release/myownpki_0.3.1_linux_amd64.tar.gz
+printf 'server archive' >"$archive"
+: >"$release/checksums.txt"
+for da in amd64 arm64; do
+	for df in deb rpm tar.gz; do
+		dn=myownpki-agent_0.3.1_linux_${da}.${df}
+		printf 'release %s\n' "$dn" >"$release/$dn"
+		sha256sum "$release/$dn" | sed "s|$release/||" >>"$release/checksums.txt"
+	done
+done
+work=$tmp/agent-work
+mkdir "$work"
+cp "$release/checksums.txt" "$work/checksums.txt"
+fetch_agent_artifacts
+check "all exact agent artifacts staged" "$(find "$work/agent-dist" -type f | wc -l | tr -d ' ')" "7"
+refused verify_agent_distribution "$work/agent-dist-missing"
+DATA=$tmp/agent-data
+mkdir "$DATA"
+changes=()
+publish_agent_dist
+publish_agent_dist
+check "agent distribution publication is idempotent" "$agent_dist_text ${#changes[@]}" "already staged at $DATA/agent-dist 1"
+finish_agent_dist
+
+missing_release=$tmp/missing-release
+cp -a "$release" "$missing_release"
+rm "$missing_release/myownpki-agent_0.3.1_linux_arm64.rpm"
+(
+	archive=$missing_release/myownpki_0.3.1_linux_amd64.tar.gz
+	work=$tmp/missing-work
+	mkdir "$work"
+	cp "$missing_release/checksums.txt" "$work/checksums.txt"
+	fetch_agent_artifacts
+) >/dev/null 2>&1 && fail=1 || echo "ok   refused missing agent artifact"
+[ ! -e "$DATA/agent-dist/myownpki-agent_0.3.1_linux_arm64.rpm" ] && { echo "FAIL published distribution lost a file"; fail=1; }
+changed_release=$tmp/changed-release
+cp -a "$release" "$changed_release"
+printf changed >>"$changed_release/myownpki-agent_0.3.1_linux_amd64.deb"
+(
+	archive=$changed_release/myownpki_0.3.1_linux_amd64.tar.gz
+	work=$tmp/changed-work
+	mkdir "$work"
+	cp "$changed_release/checksums.txt" "$work/checksums.txt"
+	fetch_agent_artifacts
+) >/dev/null 2>&1 && fail=1 || echo "ok   refused changed agent artifact"
+duplicate_release=$tmp/duplicate-release
+cp -a "$release" "$duplicate_release"
+grep 'myownpki-agent_0.3.1_linux_amd64.deb' "$release/checksums.txt" >>"$duplicate_release/checksums.txt"
+(
+	archive=$duplicate_release/myownpki_0.3.1_linux_amd64.tar.gz
+	work=$tmp/duplicate-work
+	mkdir "$work"
+	cp "$duplicate_release/checksums.txt" "$work/checksums.txt"
+	fetch_agent_artifacts
+) >/dev/null 2>&1 && fail=1 || echo "ok   refused duplicate agent checksum"
+rm -rf "$DATA/agent-dist"
+work=$tmp/agent-work
+(
+	DATA=$DATA
+	mv() {
+		command mv "$@" || return
+		if [ "$1" = "$DATA/.agent-dist.new" ] && [ "$2" = "$DATA/agent-dist" ]; then
+			printf corrupt >>"$DATA/agent-dist/myownpki-agent_0.3.1_linux_amd64.deb"
+		fi
+	}
+	publish_agent_dist
+) >/dev/null 2>&1 && { echo "FAIL accepted corrupted published distribution"; fail=1; } || echo "ok   refused corrupted published distribution"
+[ ! -e "$DATA/agent-dist" ] || { echo "FAIL corrupt distribution remains without a previous one"; fail=1; }
+
+work=$tmp/agent-work
+DATA=$tmp/agent-data
+publish_agent_dist
+finish_agent_dist
+old_sum=$(sha256sum "$DATA/agent-dist/myownpki-agent_0.3.1_linux_amd64.deb" | awk '{print $1}')
+rollback_release=$tmp/rollback-release
+cp -a "$release" "$rollback_release"
+printf newer >"$rollback_release/myownpki-agent_0.3.1_linux_amd64.deb"
+sha256sum "$rollback_release/myownpki-agent_0.3.1_linux_amd64.deb" | sed "s|$rollback_release/||" >"$tmp/new-sum"
+grep -v 'myownpki-agent_0.3.1_linux_amd64.deb' "$release/checksums.txt" >"$rollback_release/checksums.txt"
+cat "$tmp/new-sum" >>"$rollback_release/checksums.txt"
+archive=$rollback_release/myownpki_0.3.1_linux_amd64.tar.gz
+work=$tmp/rollback-work
+mkdir "$work"
+cp "$rollback_release/checksums.txt" "$work/checksums.txt"
+fetch_agent_artifacts
+(
+	DATA=$DATA
+	mv() {
+		command mv "$@" || return
+		if [ "$1" = "$DATA/.agent-dist.new" ] && [ "$2" = "$DATA/agent-dist" ]; then
+			printf corrupt >>"$DATA/agent-dist/myownpki-agent_0.3.1_linux_arm64.rpm"
+		fi
+	}
+	publish_agent_dist
+) >/dev/null 2>&1 && { echo "FAIL accepted corrupted update"; fail=1; } || echo "ok   refused corrupted update"
+new_sum=$(sha256sum "$DATA/agent-dist/myownpki-agent_0.3.1_linux_amd64.deb" | awk '{print $1}')
+check "rollback restores previous complete distribution" "$new_sum" "$old_sum"
+publish_agent_dist
+rollback_agent_dist
+new_sum=$(sha256sum "$DATA/agent-dist/myownpki-agent_0.3.1_linux_amd64.deb" | awk '{print $1}')
+check "server update rollback restores the previous agent distribution" "$new_sum" "$old_sum"
+
+# A binary whose filename says one release but whose version says another stops.
+wrong=$tmp/wrong-release
+mkdir -p "$wrong/x/deploy/systemd"
+printf '#!/bin/sh\necho "myownpki v0.3.0 (commit test)"\n' >"$wrong/x/myownpki"
+chmod 0755 "$wrong/x/myownpki"
+for required in deploy/config.example.yaml deploy/systemd/myownpki.service deploy/systemd/low-ports.conf deploy/systemd/myownpki-backup.service deploy/systemd/myownpki-backup.timer; do
+	printf 'fixture\n' >"$wrong/x/$required"
+done
+tar -czf "$wrong/myownpki_0.3.1_linux_amd64.tar.gz" -C "$wrong/x" .
+(
+	archive_file=$wrong/myownpki_0.3.1_linux_amd64.tar.gz
+	version=0.3.1
+	work=$tmp/wrong-work
+	mkdir "$work"
+	unpack
+) >/dev/null 2>&1 && { echo "FAIL accepted wrong server version"; fail=1; } || echo "ok   refused wrong server version"
 
 # Options that must not reach the config.
 refused parse_args --tls-names 'a"b'

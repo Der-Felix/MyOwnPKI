@@ -16,6 +16,19 @@ change the API, the configuration and the database schema; the release notes say
   polls pending enrollments and enables or restarts only enrolled agents. Tarballs and packages use
   the same implementation. `install-agent.sh` is now a deprecated verified-download forwarding
   wrapper with default version 0.3.1.
+- **Verified agent distribution and guided installation:** `install.sh` stages the exact release's
+  `.deb`, `.rpm` and tarballs for both Linux architectures after checking every artifact against
+  `checksums.txt`, and restores the previous complete distribution when a server update rolls back.
+  Docker contains the same immutable files under `/opt/myownpki/agent-dist`; `agent.package_dir`
+  selects the host/container directory. The agent listener allows anonymous `GET`/`HEAD` only for
+  the manifest-listed artifacts and checksums, with exact-name, size, method, traversal and symlink
+  protections; RPC authentication is unchanged. *Agents → Install agent* requires admin and fresh
+  step-up and generates the full verified download/install/setup flow from independent UI root and
+  package hashes. Its optional exact-host token is one-use, expires after 15 minutes, appears only
+  in the one-time response and is consumed through a 0600 file, never argv, URLs or logs. Agent
+  reports additively carry the installed format (pki.db migration 0015 and protobuf field 5), and
+  strict SemVer update hints cover only older agents, including correct prerelease ordering and no
+  suggested downgrade.
 - **Configurable predecessor handling on renewal:** choose immediate, delayed (1–30 days) or no
   revocation, always with reason `superseded`. Tenant defaults are independent for agent deployments
   and other certificates, with agent-wide, per-deployment and one-operation overrides. Current

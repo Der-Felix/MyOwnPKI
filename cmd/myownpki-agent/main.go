@@ -101,7 +101,9 @@ func cmdSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&opts.CABundle, "ca-bundle", "", "verified root certificate in PEM form")
 	fs.StringVar(&opts.RootSHA256, "root-sha256", "", "expected SHA-256 of the root certificate DER")
 	fs.StringVar(&opts.TokenFile, "token-file", "", "regular 0600 file with the join token")
+	fs.StringVar(&opts.PackageFormat, "package-format", "tarball", "installed package format: deb, rpm or tarball")
 	fs.StringVar(&opts.Webroot, "webroot", "", "existing webroot for enrollment http-01; default standalone")
+	fs.StringVar(&opts.Hostname, "hostname", "", "exact FQDN to prove at enrollment (default: host FQDN)")
 	fs.BoolVar(&opts.LowPorts, "low-ports", false, "allow the service to bind ports below 1024")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2

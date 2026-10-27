@@ -205,15 +205,16 @@ func (q *Queries) RequestDeploymentRenewal(ctx context.Context, arg RequestDeplo
 }
 
 const updateAgentReport = `-- name: UpdateAgentReport :exec
-UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ? WHERE id = ?
+UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ?, package_format = ? WHERE id = ?
 `
 
 type UpdateAgentReportParams struct {
-	LastSeenAt   sql.NullString
-	Os           string
-	Arch         string
-	AgentVersion string
-	ID           string
+	LastSeenAt    sql.NullString
+	Os            string
+	Arch          string
+	AgentVersion  string
+	PackageFormat string
+	ID            string
 }
 
 func (q *Queries) UpdateAgentReport(ctx context.Context, arg UpdateAgentReportParams) error {
@@ -222,6 +223,7 @@ func (q *Queries) UpdateAgentReport(ctx context.Context, arg UpdateAgentReportPa
 		arg.Os,
 		arg.Arch,
 		arg.AgentVersion,
+		arg.PackageFormat,
 		arg.ID,
 	)
 	return err

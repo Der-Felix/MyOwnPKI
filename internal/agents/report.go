@@ -33,6 +33,7 @@ var deploymentName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 // ReportInput is display data, with identity supplied only by mTLS.
 type ReportInput struct {
 	Version, OS, Arch string
+	PackageFormat     string
 	Deployments       []DeploymentReport
 }
 
@@ -72,6 +73,9 @@ func reportTime(s string) string {
 func validReport(in ReportInput) error {
 	bad := fmt.Errorf("%w: report fields exceed their limits or contain invalid data", ErrInvalid)
 	if !bounded(in.Version, 64) || !bounded(in.OS, 32) || !bounded(in.Arch, 32) || len(in.Deployments) > MaxReportDeployments {
+		return bad
+	}
+	if in.PackageFormat != "" && !slices.Contains([]string{"deb", "rpm", "tarball"}, in.PackageFormat) {
 		return bad
 	}
 	seen := map[string]bool{}
@@ -136,8 +140,12 @@ func (s *Service) Report(ctx context.Context, caller *Caller, in ReportInput) er
 			return ErrUnknownAgent
 		}
 		now := s.now()
+		format := in.PackageFormat
+		if format == "" {
+			format = "tarball"
+		}
 		if uerr := q.UpdateAgentReport(ctx, pkidb.UpdateAgentReportParams{ID: a.ID, LastSeenAt: nullString(dbTime(now)),
-			Os: in.OS, Arch: in.Arch, AgentVersion: in.Version}); uerr != nil {
+			Os: in.OS, Arch: in.Arch, AgentVersion: in.Version, PackageFormat: format}); uerr != nil {
 			return uerr
 		}
 		if merr := q.MarkAgentDeploymentsUnreported(ctx, a.ID); merr != nil {

@@ -13,6 +13,13 @@ ARG TARGETPLATFORM
 
 COPY ${TARGETPLATFORM}/myownpki /usr/local/bin/myownpki
 
+# The exact release's immutable agent packages for both architectures. The
+# nonroot server only reads this directory; no runtime download is needed.
+COPY dist/checksums.txt /opt/myownpki/agent-dist/checksums.txt
+COPY dist/myownpki-agent_*.deb /opt/myownpki/agent-dist/
+COPY dist/myownpki-agent_*.rpm /opt/myownpki/agent-dist/
+COPY dist/myownpki-agent_*.tar.gz /opt/myownpki/agent-dist/
+
 # The data directory (data_dir), empty and owned by nonroot. There is no
 # shell for mkdir/chown, so the base image's own empty, 0700 nonroot home
 # is copied; a new named volume takes over this owner and mode.

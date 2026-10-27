@@ -16,7 +16,10 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,8 +57,9 @@ type Agent struct {
 	// Random returns a value in [0,1); tests inject stable independent streams.
 	Random func() float64
 
-	// Version, OS and Arch are reported at enrollment.
+	// Version, OS, Arch and PackageFormat are reported to the server.
 	Version, OS, Arch string
+	PackageFormat     string
 	// StandaloneAddr is where challenge: standalone listens (":80").
 	StandaloneAddr string
 	// Now and Sleep: the clock and the wait; tests replace them.
@@ -83,6 +87,17 @@ func New(cfg *Config, log *slog.Logger, version string) (*Agent, error) {
 	}
 	if err := a.st.ensure(); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
+	}
+	a.PackageFormat = "tarball"
+	// #nosec G703 -- StateDir is validated local configuration and the filename is constant.
+	if data, readErr := os.ReadFile(filepath.Join(cfg.StateDir, packageFormatFile)); readErr == nil {
+		format := strings.TrimSpace(string(data))
+		if !slices.Contains([]string{"deb", "rpm", "tarball"}, format) {
+			return nil, errors.New("state directory: invalid package format")
+		}
+		a.PackageFormat = format
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("state directory: read package format: %w", readErr)
 	}
 	if id, err := a.st.identity(); err == nil {
 		ch.use(id)

@@ -7,7 +7,7 @@ SELECT * FROM agent_deployments WHERE agent_id = ? ORDER BY name;
 SELECT * FROM agent_deployments WHERE agent_id = ? AND name = ?;
 
 -- name: UpdateAgentReport :exec
-UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ? WHERE id = ?;
+UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ?, package_format = ? WHERE id = ?;
 
 -- name: MarkAgentDeploymentsUnreported :exec
 UPDATE agent_deployments SET reported = FALSE WHERE agent_id = ?;

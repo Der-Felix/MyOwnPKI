@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -31,6 +34,11 @@ func (passChecker) Check(context.Context, string, string, string, string) error 
 
 // newAgentsUIEnv is the UI with the agent service on (and ACME off).
 func newAgentsUIEnv(t *testing.T) (*uiEnv, *agents.Service) {
+	t.Helper()
+	return newAgentsUIEnvVersion(t, "v0.3.1")
+}
+
+func newAgentsUIEnvVersion(t *testing.T, version string) (*uiEnv, *agents.Service) {
 	t.Helper()
 	v := &uiEnv{Instance: testinstance.New(t, testinstance.Options{})}
 	v.Unseal(t)
@@ -51,9 +59,23 @@ func newAgentsUIEnv(t *testing.T) (*uiEnv, *agents.Service) {
 		Log:  slog.New(slog.DiscardHandler),
 		Mode: func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
 	}
+	packageDir := t.TempDir()
+	dist := agentdist.New(packageDir, version)
+	for _, arch := range agentdist.Arches {
+		for _, format := range agentdist.Formats {
+			name, _ := dist.Name(format, arch)
+			if err := os.WriteFile(filepath.Join(packageDir, name), []byte(name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, agentdist.Checksums), []byte("checksums\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: settings, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read, Agents: svc,
+		AgentDist: dist, AgentBaseURL: "https://pki.homelab.lan:8444", AgentTLSIssuer: "issuing", ServerVersion: version,
 	}})
 	if err != nil {
 		t.Fatal(err)

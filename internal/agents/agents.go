@@ -121,6 +121,7 @@ type Agent struct {
 	CertSerial      string
 	OS, Arch        string
 	Version         string
+	PackageFormat   string
 	LastSeenAt      time.Time
 	CreatedAt       time.Time
 	ApprovedAt      time.Time

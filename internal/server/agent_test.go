@@ -11,12 +11,15 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -310,6 +313,60 @@ func TestAgentCAProblemAtStart(t *testing.T) {
 	}
 	if got := kinds(srv.attention(true)); !strings.Contains(got, "crit: Agents can't enroll: there is no CA named") {
 		t.Errorf("dashboard: %q", got)
+	}
+}
+
+func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
+	t.Parallel()
+	dist := t.TempDir()
+	for _, arch := range []string{"amd64", "arm64"} {
+		for _, ext := range []string{"deb", "rpm", "tar.gz"} {
+			name := fmt.Sprintf("myownpki-agent_0.3.1_linux_%s.%s", arch, ext)
+			if err := os.WriteFile(filepath.Join(dist, name), []byte(name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dist, "checksums.txt"), []byte("checksums\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := newAgentEnv(t, func(opt *Options) {
+		opt.Version = "v0.3.1"
+		opt.Config.Agent.PackageDir = dist
+	})
+	client := e.httpClient(nil, nil)
+	base := "https://" + e.srv.AgentAddr() + "/agent-packages/"
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req, _ := http.NewRequestWithContext(t.Context(), method, base+"myownpki-agent_0.3.1_linux_amd64.deb", nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s: %d %v", method, resp.StatusCode, resp.Header)
+		}
+		if method == http.MethodHead && len(body) != 0 {
+			t.Error("HEAD has a body")
+		}
+		if method == http.MethodGet && string(body) != "myownpki-agent_0.3.1_linux_amd64.deb" {
+			t.Errorf("GET body %q", body)
+		}
+	}
+	for _, path := range []string{"", "../checksums.txt", "%2e%2e/checksums.txt", "missing.deb", "myownpki-agent_0.3.0_linux_amd64.deb"} {
+		resp, err := get(t, client, base+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("path %q: %d", path, resp.StatusCode)
+		}
+	}
+	_, csr := agentCSR(t)
+	if _, err := e.client(nil, nil).RenewCertificate(t.Context(), connect.NewRequest(&agentv1.RenewCertificateRequest{CsrDer: csr})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("anonymous artifacts changed RPC authentication: %v", err)
 	}
 }
 

@@ -10,10 +10,12 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
@@ -33,6 +35,7 @@ const (
 // agentSide is what the server keeps for the agent listener.
 type agentSide struct {
 	svc     *agents.Service
+	dist    *agentdist.Store
 	tls     *issuedTLS
 	pool    atomic.Pointer[x509.CertPool]
 	problem atomic.Pointer[string] // what is wrong with agent.ca; nil = nothing
@@ -59,7 +62,7 @@ func (s *Server) buildAgents() error {
 		return fmt.Errorf("acme.resolver: %w", err)
 	}
 	settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
-	s.agent = &agentSide{svc: &agents.Service{
+	s.agent = &agentSide{dist: agentdist.New(cfg.Agent.PackageDir, s.opt.Version), svc: &agents.Service{
 		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, CA: cfg.Agent.CA,
 		Mode: func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
 		AgentPredecessor: func(ctx context.Context) (predecessor.Policy, error) {
@@ -141,8 +144,16 @@ func (s *Server) listenAgents(ctx context.Context, lc *net.ListenConfig) error {
 		return c, nil
 	}
 	a.ln = tls.NewListener(raw, cfg)
+	rpcHandler := a.svc.Handler()
+	artifactHandler := a.dist.Handler()
 	a.hs = &http.Server{
-		Handler: a.svc.Handler(),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, agentdist.BasePath) {
+				artifactHandler.ServeHTTP(w, r)
+				return
+			}
+			rpcHandler.ServeHTTP(w, r)
+		}),
 		// WriteTimeout leaves room for the http-01 check inside a call and
 		// for the long-poll of the desired state (at most 50 s, step 8a).
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 120 * time.Second,

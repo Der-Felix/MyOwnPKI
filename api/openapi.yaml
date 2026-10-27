@@ -2686,7 +2686,7 @@ components:
     Agent:
       description: "An admitted agent (v0.3)"
       type: object
-      required: [id, hostname, status, enrollment_mode, os, arch, version, created_at, approved_at, approved_by, last_seen_at, certificate_id, names, silent, deployments]
+      required: [id, hostname, status, enrollment_mode, os, arch, version, package_format, created_at, approved_at, approved_by, last_seen_at, certificate_id, names, silent, deployments]
       additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
@@ -2696,6 +2696,7 @@ components:
         os: { type: string }
         arch: { type: string }
         version: { type: string, description: "As the agent reported it" }
+        package_format: { type: string, enum: [deb, rpm, tarball], description: "Installed format; older agents report as legacy tarball" }
         created_at: { type: string, format: date-time }
         approved_at: { type: string, format: date-time }
         approved_by: { type: string, description: "An admin, or the mode" }

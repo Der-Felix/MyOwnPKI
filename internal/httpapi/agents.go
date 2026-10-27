@@ -26,6 +26,7 @@ type agentJSON struct {
 	OS             string                 `json:"os"`
 	Arch           string                 `json:"arch"`
 	Version        string                 `json:"version"`
+	PackageFormat  string                 `json:"package_format"`
 	CreatedAt      time.Time              `json:"created_at"`
 	ApprovedAt     time.Time              `json:"approved_at"`
 	ApprovedBy     string                 `json:"approved_by"`
@@ -69,7 +70,7 @@ func timeOrNil(t time.Time) *time.Time {
 func toAgentJSON(a *agents.Agent) agentJSON {
 	out := agentJSON{
 		ID: a.ID, Hostname: a.Hostname, Status: a.Status, EnrollmentMode: a.EnrollmentMode, OS: a.OS, Arch: a.Arch,
-		Version: a.Version, CreatedAt: a.CreatedAt, ApprovedAt: a.ApprovedAt, ApprovedBy: a.ApprovedBy, Names: []agentNameJSON{}, Deployments: []agentDeploymentJSON{},
+		Version: a.Version, PackageFormat: a.PackageFormat, CreatedAt: a.CreatedAt, ApprovedAt: a.ApprovedAt, ApprovedBy: a.ApprovedBy, Names: []agentNameJSON{}, Deployments: []agentDeploymentJSON{},
 		Effective: toPredecessorPolicyJSON(a.EffectivePolicy),
 	}
 	if a.Predecessor != nil {

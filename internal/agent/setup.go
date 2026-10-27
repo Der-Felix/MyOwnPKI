@@ -31,21 +31,22 @@ const (
 
 // SetupOptions are the local inputs of myownpki-agent setup.
 type SetupOptions struct {
-	Server     string
-	CABundle   string
-	RootSHA256 string
-	TokenFile  string
-	Webroot    string
-	LowPorts   bool
-	Hostname   string
-	ConfigPath string
-	StateDir   string
-	UnitPath   string
-	DropinDir  string
-	ExampleDir string
-	Version    string
-	Stdout     io.Writer
-	Stderr     io.Writer
+	Server        string
+	CABundle      string
+	RootSHA256    string
+	TokenFile     string
+	Webroot       string
+	LowPorts      bool
+	Hostname      string
+	ConfigPath    string
+	StateDir      string
+	UnitPath      string
+	DropinDir     string
+	ExampleDir    string
+	Version       string
+	PackageFormat string
+	Stdout        io.Writer
+	Stderr        io.Writer
 }
 
 type setupAgent interface {
@@ -105,6 +106,12 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 	if opts.Stderr == nil {
 		opts.Stderr = io.Discard
 	}
+	if opts.PackageFormat == "" {
+		opts.PackageFormat = "tarball"
+	}
+	if opts.PackageFormat != "deb" && opts.PackageFormat != "rpm" && opts.PackageFormat != "tarball" {
+		return errors.New("--package-format must be deb, rpm or tarball")
+	}
 	plan, err := prepareSetup(opts)
 	if err != nil {
 		return err
@@ -129,6 +136,9 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 	// #nosec G302 G703 -- the validated private state directory is intentionally owner-only.
 	if err = os.Chmod(stateDir, 0o700); err != nil {
 		return fmt.Errorf("set state directory mode: %w", err)
+	}
+	if err = atomicSetupFile(filepath.Join(stateDir, packageFormatFile), []byte(opts.PackageFormat+"\n"), 0o600); err != nil {
+		return err
 	}
 	if err = atomicSetupFile(plan.cfg.CABundle, plan.rootData, 0o600); err != nil {
 		return err

@@ -19,6 +19,15 @@ import (
 	agentv1 "github.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1"
 )
 
+const packageFormatFile = "package-format"
+
+func (a *Agent) packageFormat() string {
+	if a.PackageFormat == "" {
+		return "tarball"
+	}
+	return a.PackageFormat
+}
+
 func (a *Agent) fraction() float64 {
 	if a.Random != nil {
 		return a.Random()
@@ -68,7 +77,7 @@ func (a *Agent) report(ctx context.Context) error {
 	if len(a.cfg.Deployments) > 100 {
 		return errors.New("report: more than 100 configured deployments")
 	}
-	in := &agentv1.ReportRequest{AgentVersion: a.Version, Os: a.OS, Arch: a.Arch}
+	in := &agentv1.ReportRequest{AgentVersion: a.Version, Os: a.OS, Arch: a.Arch, PackageFormat: a.packageFormat()}
 	for _, d := range a.cfg.Deployments {
 		result := DeploymentResult{Name: d.Name, State: "pending"}
 		for _, r := range stored {

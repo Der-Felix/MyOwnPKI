@@ -138,6 +138,8 @@ message ReportRequest {
   string os = 2;
   string arch = 3;
   repeated DeploymentReport deployments = 4;
+  // Installed package format: deb, rpm or tarball. Empty means a legacy tarball.
+  string package_format = 5;
 }
 
 message ReportResponse {}
