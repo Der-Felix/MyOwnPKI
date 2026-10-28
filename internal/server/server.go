@@ -77,7 +77,13 @@ type Options struct {
 	Log      *slog.Logger
 	Clock    clock.Clock // nil = clock.System
 	Hostname string      // "" = os.Hostname
-	Version  string
+	// Version is the full version line ("myownpki v0.3.2 (commit …)") for the
+	// start log and the API status.
+	Version string
+	// Release is the bare release version ("v0.3.2"): it names the agent
+	// packages the agent listener serves and the version agents are compared
+	// with. Version would never match a package name.
+	Release string
 }
 
 // Server is one running MyOwnPKI.
@@ -748,8 +754,8 @@ func (s *Server) buildHTTP(demo bool) error {
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
 		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
-		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Version),
-		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Version,
+		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Release),
+		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Release,
 	}})
 	if err != nil {
 		return err

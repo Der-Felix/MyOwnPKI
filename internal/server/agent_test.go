@@ -331,7 +331,10 @@ func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := newAgentEnv(t, func(opt *Options) {
-		opt.Version = "v0.3.1"
+		// As cmd/myownpki sets them: v0.3.1 named the packages after the full
+		// version line and served none of them.
+		opt.Version = "myownpki v0.3.1 (commit 94ef08d737c5, 2026-10-28T23:02:18Z, go1.27.3, linux/amd64)"
+		opt.Release = "v0.3.1"
 		opt.Config.Agent.PackageDir = dist
 	})
 	client := e.httpClient(nil, nil)
