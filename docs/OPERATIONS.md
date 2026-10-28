@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.1
+v=0.3.2
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -488,6 +488,10 @@ From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`)
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+From v0.3.1 to v0.3.2: no migrations and no configuration change. Update the server first, as
+always: until then the agent listener of a v0.3.1 server serves no agent packages, so guided
+installation and package updates of agents need the server at v0.3.2.
 
 From v0.3.0 to v0.3.1: system.db migration 0013 adds independent predecessor defaults; pki.db
 migrations 0014–0017 add revocation plans and accepted deployment history (0014), the installed
@@ -980,15 +984,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.1
+v=0.3.2
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.1_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.2_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.1_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.1_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.2_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.2_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1031,7 +1035,8 @@ or remote command.
 
 `deploy/install-agent.sh` remains a deprecated v0.3.1 compatibility wrapper. It only downloads or
 accepts a verified archive, checks its checksum/signature, installs the binary and forwards to
-`setup`; it has no separate installation or enrollment logic and will be removed in v0.3.2.
+`setup`; it has no separate installation or enrollment logic and will be removed in a later
+release.
 
 ### 12.3 agent.yaml and deployment profiles
 

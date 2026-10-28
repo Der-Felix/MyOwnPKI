@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-DEFAULT_VERSION=0.3.1
+DEFAULT_VERSION=0.3.2
 REPO=Der-Felix/MyOwnPKI
 SIGNER="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/v"
 ISSUER=https://token.actions.githubusercontent.com

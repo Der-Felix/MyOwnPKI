@@ -7,6 +7,17 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-29
+
+A fix release: the server now serves the agent packages it installs.
+
+### Fixed
+
+- **Agent packages on the agent listener:** a v0.3.1 server answered every `/agent-packages/`
+  download with 404, because it named the packages after its full version line instead of the
+  release version. Guided agent installation therefore found no package, and the agent list did
+  not mark older agents for update. No migrations; update the server, then the agents.
+
 ## [0.3.1] - 2026-10-28
 
 Guided agent installation and packages, independent Windows trust confirmation, configurable
@@ -388,7 +399,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...v0.2.2
