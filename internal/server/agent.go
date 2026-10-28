@@ -62,7 +62,7 @@ func (s *Server) buildAgents() error {
 		return fmt.Errorf("acme.resolver: %w", err)
 	}
 	settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk} // only read here
-	s.agent = &agentSide{dist: agentdist.New(cfg.Agent.PackageDir, s.opt.Version), svc: &agents.Service{
+	s.agent = &agentSide{dist: agentdist.New(cfg.Agent.PackageDir, s.opt.Release), svc: &agents.Service{
 		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, CA: cfg.Agent.CA,
 		Mode: func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
 		AgentPredecessor: func(ctx context.Context) (predecessor.Policy, error) {

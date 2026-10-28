@@ -32,7 +32,7 @@ func runServer(ctx context.Context, path string, unseal bool, environ []string, 
 		return exitProblem
 	}
 	log := newLogger(cfg, stderr)
-	srv, err := server.Open(ctx, server.Options{Config: cfg, Log: log, Version: version.Get().String(binary)})
+	srv, err := server.Open(ctx, serverOptions(cfg, log))
 	if err != nil {
 		log.Error("start", slog.Any("error", err))
 		return exitProblem
@@ -104,4 +104,12 @@ func printAdminBanner(w io.Writer, srv *server.Server) {
   ==============================================================
 
 `, srv.AdminAddr(), ci.Source, ci.Fingerprint, srv.PublicAddr())
+}
+
+// serverOptions are the options of the real server: the full version line for
+// the log and the API status, and the bare release version for the agent
+// packages (a package name never contains the version line).
+func serverOptions(cfg config.Config, log *slog.Logger) server.Options {
+	info := version.Get()
+	return server.Options{Config: cfg, Log: log, Version: info.String(binary), Release: info.Version}
 }

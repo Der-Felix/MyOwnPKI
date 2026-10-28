@@ -8,15 +8,15 @@ source deploy/install-agent.sh
 fail() { printf 'agent_functions_test: %s\n' "$*" >&2; exit 1; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-install-functions.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
-printf 'archive test fixture\n' >"$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz"
-(cd "$tmp" && sha256sum myownpki-agent_0.3.1_linux_amd64.tar.gz >checksums.txt)
-verify_checksum "$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz" "$tmp/checksums.txt" || fail "valid checksum refused"
-printf 'changed archive\n' >>"$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz"
-if (verify_checksum "$tmp/myownpki-agent_0.3.1_linux_amd64.tar.gz" "$tmp/checksums.txt"); then
+printf 'archive test fixture\n' >"$tmp/myownpki-agent_0.3.2_linux_amd64.tar.gz"
+(cd "$tmp" && sha256sum myownpki-agent_0.3.2_linux_amd64.tar.gz >checksums.txt)
+verify_checksum "$tmp/myownpki-agent_0.3.2_linux_amd64.tar.gz" "$tmp/checksums.txt" || fail "valid checksum refused"
+printf 'changed archive\n' >>"$tmp/myownpki-agent_0.3.2_linux_amd64.tar.gz"
+if (verify_checksum "$tmp/myownpki-agent_0.3.2_linux_amd64.tar.gz" "$tmp/checksums.txt"); then
 	fail "changed archive accepted"
 fi
 
-[ "$DEFAULT_VERSION" = 0.3.1 ] || fail "wrong default version: $DEFAULT_VERSION"
+[ "$DEFAULT_VERSION" = 0.3.2 ] || fail "wrong default version: $DEFAULT_VERSION"
 parse_args --server https://pki.homelab.lan:8444 --ca-bundle "$tmp/root.pem" \
 	--root-sha256 AA:BB --token-file "$tmp/token" --webroot /var/www/html --low-ports
 cat >"$tmp/agent" <<'EOF'

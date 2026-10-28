@@ -24,7 +24,7 @@ func TestAgentPackageDistributionE2E(t *testing.T) {
 		t.Skip("only the disposable served-package systemd check supplies a release")
 	}
 	e := newAgentEnv(t, func(opt *Options) {
-		opt.Version = "v" + version
+		opt.Release = "v" + version
 		opt.Config.Agent.PackageDir = distDir
 		opt.Config.Agent.Listen = "127.0.0.1:8444"
 		opt.Config.ACME.Listen = "127.0.0.1:443"

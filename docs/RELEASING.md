@@ -15,11 +15,11 @@ PowerShell 5.1: the commands write `"${VERSION}"` in double quotes, which both s
 Commands that differ between the shells are marked. Set the version once per shell window:
 
 ```bash
-VERSION=0.3.0
+VERSION=0.3.2
 ```
 
 ```powershell
-$VERSION = "0.3.0"
+$VERSION = "0.3.2"
 ```
 
 The sections "Check the draft" and "Remove a draft" are used twice – for the release candidate
