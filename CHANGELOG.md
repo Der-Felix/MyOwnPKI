@@ -5,7 +5,9 @@ All notable changes to MyOwnPKI are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor version may
 change the API, the configuration and the database schema; the release notes say how to upgrade.
 
-## [0.3.1]
+## [Unreleased]
+
+## [0.3.1] - 2026-10-28
 
 Guided agent installation and packages, independent Windows trust confirmation, configurable
 step-up and protected-action continuation, and safe predecessor handling for UI, REST, ACME and
@@ -386,7 +388,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...v0.2.1
