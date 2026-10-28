@@ -10,11 +10,15 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=MyOwnPKI-package-tes
 package=$(compgen -G 'dist/myownpki-agent_*_linux_amd64.deb')
 archive=$(compgen -G 'dist/myownpki-agent_*_linux_amd64.tar.gz')
 [ -f "$package" ] && [ -f "$archive" ]
+# Unpack on the runner, not in the containers: minimal images such as
+# rockylinux:9 have no cmp (diffutils); sha256sum (coreutils) is everywhere.
+rm -rf "$fixtures/tarball"
+mkdir "$fixtures/tarball"
+tar -xzf "$archive" -C "$fixtures/tarball"
 
 deb_test='
 set -euo pipefail
 package=$1
-archive=$2
 export DEBIAN_FRONTEND=noninteractive
 dpkg -i "$package" >/dev/null
 [ ! -e /etc/systemd/system/myownpki-agent.service ]
@@ -22,12 +26,11 @@ dpkg -i "$package" >/dev/null
 printf "# local administrator change\n" >>/etc/myownpki-agent/agent.yaml
 dpkg -i "$package" >/dev/null
 grep -Fqx "# local administrator change" /etc/myownpki-agent/agent.yaml
-mkdir /tarball
-tar -xzf "$archive" -C /tarball
-cmp /usr/local/bin/myownpki-agent /tarball/myownpki-agent
-cmp /usr/share/myownpki-agent/examples/agent.yaml /tarball/deploy/agent.example.yaml
-cmp /usr/share/myownpki-agent/examples/myownpki-agent.service /tarball/deploy/systemd/myownpki-agent.service
-cmp /usr/share/myownpki-agent/examples/agent-low-ports.conf /tarball/deploy/systemd/agent-low-ports.conf
+same() { [ "$(sha256sum <"$1")" = "$(sha256sum <"$2")" ] || { echo "$1 differs from the archive" >&2; exit 1; }; }
+same /usr/local/bin/myownpki-agent /fixtures/tarball/myownpki-agent
+same /usr/share/myownpki-agent/examples/agent.yaml /fixtures/tarball/deploy/agent.example.yaml
+same /usr/share/myownpki-agent/examples/myownpki-agent.service /fixtures/tarball/deploy/systemd/myownpki-agent.service
+same /usr/share/myownpki-agent/examples/agent-low-ports.conf /fixtures/tarball/deploy/systemd/agent-low-ports.conf
 if /usr/local/bin/myownpki-agent setup --server https://pki.homelab.lan:8444 --ca-bundle /fixtures/root.pem --root-sha256 0000000000000000000000000000000000000000000000000000000000000000; then
   echo wrong root fingerprint accepted >&2
   exit 1
@@ -37,19 +40,17 @@ fi
 rpm_test='
 set -euo pipefail
 package=$1
-archive=$2
 rpm -Uvh "$package" >/dev/null
 [ ! -e /etc/systemd/system/myownpki-agent.service ]
 [ ! -e /etc/systemd/system/multi-user.target.wants/myownpki-agent.service ]
 printf "# local administrator change\n" >>/etc/myownpki-agent/agent.yaml
 rpm -Uvh --replacepkgs "$package" >/dev/null
 grep -Fqx "# local administrator change" /etc/myownpki-agent/agent.yaml
-mkdir /tarball
-tar -xzf "$archive" -C /tarball
-cmp /usr/local/bin/myownpki-agent /tarball/myownpki-agent
-cmp /usr/share/myownpki-agent/examples/agent.yaml /tarball/deploy/agent.example.yaml
-cmp /usr/share/myownpki-agent/examples/myownpki-agent.service /tarball/deploy/systemd/myownpki-agent.service
-cmp /usr/share/myownpki-agent/examples/agent-low-ports.conf /tarball/deploy/systemd/agent-low-ports.conf
+same() { [ "$(sha256sum <"$1")" = "$(sha256sum <"$2")" ] || { echo "$1 differs from the archive" >&2; exit 1; }; }
+same /usr/local/bin/myownpki-agent /fixtures/tarball/myownpki-agent
+same /usr/share/myownpki-agent/examples/agent.yaml /fixtures/tarball/deploy/agent.example.yaml
+same /usr/share/myownpki-agent/examples/myownpki-agent.service /fixtures/tarball/deploy/systemd/myownpki-agent.service
+same /usr/share/myownpki-agent/examples/agent-low-ports.conf /fixtures/tarball/deploy/systemd/agent-low-ports.conf
 if /usr/local/bin/myownpki-agent setup --server https://pki.homelab.lan:8444 --ca-bundle /fixtures/root.pem --root-sha256 0000000000000000000000000000000000000000000000000000000000000000; then
   echo wrong root fingerprint accepted >&2
   exit 1
@@ -74,5 +75,5 @@ for entry in "${images[@]}"; do
   script=$deb_test
   [ "$family" = deb ] || script=$rpm_test
   docker run --rm --volume "$PWD/dist:/work:ro" --volume "$fixtures:/fixtures:ro" \
-    "$image" bash -c "$script" bash "/work/$(basename "$package")" "/work/$(basename "$archive")"
+    "$image" bash -c "$script" bash "/work/$(basename "$package")"
 done
