@@ -270,13 +270,17 @@ func TestGuidedCommandFailClosed(t *testing.T) {
 			logPath := filepath.Join(dir, "calls.log")
 			writeMock := func(name, body string) {
 				t.Helper()
-				if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o600); err != nil {
+				// Executable, or Linux bash skips the mock and runs the real tool
+				// from /usr/bin (Git Bash on Windows ignores the mode).
+				if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o700); err != nil { // #nosec G306 -- test mock in t.TempDir must be executable
 					t.Fatal(err)
 				}
 			}
 			writeMock("curl", "#!/usr/bin/env bash\nprintf 'curl %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
 			writeMock("openssl", "#!/usr/bin/env bash\nprintf '%s\\n' \"$MOCK_ROOT_HASH\"\n")
-			writeMock("sha256sum", "#!/usr/bin/env bash\nexit \"$MOCK_SUM_STATUS\"\n")
+			// --check is the package checksum; otherwise pass openssl's mocked
+			// root hash through to awk.
+			writeMock("sha256sum", "#!/usr/bin/env bash\nif [ \"${1:-}\" = --check ]; then cat >/dev/null; exit \"$MOCK_SUM_STATUS\"; fi\ncat\n")
 			writeMock("apt-get", "#!/usr/bin/env bash\nprintf 'apt-get %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
 			writeMock("myownpki-agent", "#!/usr/bin/env bash\nprintf 'myownpki-agent %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
 			cmd := exec.CommandContext(t.Context(), "bash", "-c", command) // #nosec G204 -- actual rendered command with only mocked executables
