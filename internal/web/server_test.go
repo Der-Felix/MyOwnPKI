@@ -20,6 +20,7 @@ import (
 
 	assets "github.com/Der-Felix/MyOwnPKI/web"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/web/fixture"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
@@ -496,6 +497,29 @@ func TestStrictGrid(t *testing.T) {
 		if n, _ := strconv.Atoi(value); n%4 != 0 {
 			t.Errorf("token %s: %spx is not a multiple of 4", name, value)
 		}
+	}
+}
+
+func TestCAPrototypeFingerprints(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(t, true)
+	ca, ok := fixture.CAByID("homelab-root")
+	if !ok {
+		t.Fatal("root fixture missing")
+	}
+	page := get(t, h, "/authorities/homelab-root").Body.String()
+	for _, want := range []string{
+		"SHA-256 fingerprint (authoritative)", view.Fingerprint(ca.Fingerprint()),
+		"SHA-1 fingerprint (Windows certificate dialog comparison only)", view.Fingerprint(ca.FingerprintSHA1()),
+		"Root SHA-256 for automation (exact 64 hex)", ">" + strings.ToLower(ca.Fingerprint()) + "<",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("prototype root page lacks %q", want)
+		}
+	}
+	sha1Value := ca.FingerprintSHA1()
+	if again := ca.FingerprintSHA1(); sha1Value != again || len(sha1Value) != 40 {
+		t.Error("prototype SHA-1 is not stable and 40 hex characters")
 	}
 }
 

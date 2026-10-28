@@ -59,6 +59,11 @@ func (s *Service) GetAgent(ctx context.Context, who keys.Who, id string) (*Agent
 		return nil, err
 	}
 	a := toAgent(r)
+	tenantPolicy, err := s.tenantPredecessor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	a.EffectivePolicy = effectivePolicy(r, pkidb.AgentDeployment{}, tenantPolicy)
 	names, err := q.ListAgentNames(ctx, id)
 	if err != nil {
 		return nil, err
@@ -316,8 +321,9 @@ func (s *Service) changeName(ctx context.Context, who keys.Who, id, pattern stri
 func toAgent(r pkidb.Agent) Agent {
 	return Agent{
 		ID: r.ID, Hostname: r.Hostname, Status: r.Status, EnrollmentMode: r.EnrollmentMode, Proof: r.Proof,
-		CertificateID: r.CertID.String, CertSerial: r.CertSerial.String, OS: r.Os, Arch: r.Arch, Version: r.AgentVersion,
+		CertificateID: r.CertID.String, CertSerial: r.CertSerial.String, OS: r.Os, Arch: r.Arch, Version: r.AgentVersion, PackageFormat: r.PackageFormat,
 		LastSeenAt: nullTime(r.LastSeenAt), CreatedAt: parseTime(r.CreatedAt), ApprovedAt: parseTime(r.ApprovedAt), ApprovedBy: r.ApprovedBy,
+		Predecessor: policyFromRow(r.PredecessorChoice, r.PredecessorDays),
 	}
 }
 

@@ -24,8 +24,9 @@ SELECT type, value FROM certificate_sans WHERE certificate_id = ? ORDER BY type,
 -- percent and underscore match only themselves (sqlc does not parse LIKE ...
 -- ESCAPE); the caller passes search in lower case.
 -- name: ListCertificates :many
-SELECT sqlc.embed(c), r.reason AS revocation_reason, r.revoked_at, r.invalidity_date
+SELECT sqlc.embed(c), r.reason AS revocation_reason, r.revoked_at, r.invalidity_date, p.planned_at AS revocation_planned_at
 FROM certificates c LEFT JOIN revocations r ON r.certificate_id = c.id
+LEFT JOIN certificate_revocation_plans p ON p.certificate_id = c.id
 WHERE (CAST(sqlc.arg(all_cas) AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM json_each(CAST(sqlc.arg(allowed_cas) AS TEXT))))
   AND (CAST(sqlc.arg(hide_agents) AS INTEGER) = 0 OR NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by)))
   AND (CAST(sqlc.arg(ca_id) AS TEXT) = '' OR c.ca_id = CAST(sqlc.arg(ca_id) AS TEXT))
@@ -33,7 +34,8 @@ WHERE (CAST(sqlc.arg(all_cas) AS INTEGER) = 1 OR c.ca_id IN (SELECT value FROM j
   AND (CAST(sqlc.arg(status) AS TEXT) = ''
        OR (CAST(sqlc.arg(status) AS TEXT) = 'revoked' AND r.certificate_id IS NOT NULL)
        OR (CAST(sqlc.arg(status) AS TEXT) = 'valid' AND r.certificate_id IS NULL AND c.not_after > sqlc.arg(now))
-       OR (CAST(sqlc.arg(status) AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= sqlc.arg(now)))
+       OR (CAST(sqlc.arg(status) AS TEXT) = 'expired' AND r.certificate_id IS NULL AND c.not_after <= sqlc.arg(now))
+       OR (CAST(sqlc.arg(status) AS TEXT) = 'planned' AND r.certificate_id IS NULL AND p.certificate_id IS NOT NULL))
   AND (CAST(sqlc.arg(expires_before) AS TEXT) = '' OR c.not_after < CAST(sqlc.arg(expires_before) AS TEXT))
   AND (CAST(sqlc.arg(search) AS TEXT) = ''
        OR instr(lower(c.common_name), CAST(sqlc.arg(search) AS TEXT)) > 0

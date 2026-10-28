@@ -27,6 +27,7 @@ type channel struct {
 
 // rootPool reads ca_bundle.
 func rootPool(path string) (*x509.CertPool, error) {
+	// #nosec G703 -- ca_bundle is an absolute path from the local root-owned configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("ca_bundle: %w", err)

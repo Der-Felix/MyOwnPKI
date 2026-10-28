@@ -4,7 +4,7 @@
 # Guide: docs/OPERATIONS.md §2. Download it, check it, then run it – never
 # pipe it into a shell:
 #
-#   v=0.3.0
+#   v=0.3.1
 #   curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 #   curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 #   sha256sum --check --ignore-missing checksums.txt
@@ -36,7 +36,7 @@
 set -euo pipefail
 
 # The release this script belongs to; release.yml refuses a tag that differs.
-DEFAULT_VERSION=0.3.0
+DEFAULT_VERSION=0.3.1
 
 REPO=Der-Felix/MyOwnPKI
 SIGNER="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/v"
@@ -364,6 +364,107 @@ unpack() {
 	new_version=$("$work/x/myownpki" --version 2>/dev/null | awk '{ print $2 }' || true)
 	[ -n "$new_version" ] ||
 		die "the new binary does not run here – is $work on a noexec mount? Set TMPDIR to a directory that allows running programs"
+	[ "$new_version" = "v$version" ] ||
+		die "the server binary reports $new_version, not the exact requested v$version – nothing installed"
+}
+
+# fetch_agent_artifacts stages both architectures in every supported format.
+# Every byte is verified before anything is published; a partial release never
+# becomes visible on the agent listener.
+fetch_agent_artifacts() {
+	local arch format name source
+	agent_files=()
+	rm -rf "$work/agent-dist"
+	mkdir "$work/agent-dist"
+	for arch in amd64 arm64; do
+		for format in deb rpm tar.gz; do
+			name=myownpki-agent_${version}_linux_${arch}.${format}
+			agent_files+=("$name")
+			if [ -n "$archive" ]; then
+				source=$(dirname "$archive")/$name
+				[ -f "$source" ] || die "the exact release is missing $name – nothing installed"
+				cp "$source" "$work/agent-dist/$name"
+			else
+				download "https://github.com/${REPO}/releases/download/v${version}/$name" "$work/agent-dist/$name"
+			fi
+		done
+	done
+	cp "$work/checksums.txt" "$work/agent-dist/checksums.txt"
+	for name in "${agent_files[@]}" checksums.txt; do
+		[ -f "$work/agent-dist/$name" ] && [ ! -L "$work/agent-dist/$name" ] || die "agent artifact $name is not a regular file – nothing installed"
+	done
+	for name in "${agent_files[@]}"; do
+		verify_checksum "$work/agent-dist/$name" "$work/agent-dist/checksums.txt"
+	done
+}
+
+verify_agent_distribution() {
+	local dir=$1 name arch format want
+	[ -f "$dir/checksums.txt" ] || return 1
+	for arch in amd64 arm64; do
+		for format in deb rpm tar.gz; do
+			name=myownpki-agent_${version}_linux_${arch}.${format}
+			[ -f "$dir/$name" ] && [ ! -L "$dir/$name" ] || return 1
+			want=$(awk -v f="$name" '$2 == f || $2 == "*" f { print $1 }' "$dir/checksums.txt")
+			[ -n "$want" ] && [ "$(printf '%s\n' "$want" | wc -l)" -eq 1 ] || return 1
+			[ "$want" = "$(sha256sum "$dir/$name" | awk '{ print $1 }')" ] || return 1
+		done
+	done
+}
+
+# publish_agent_dist atomically swaps the complete directory. If post-publish
+# verification fails, the previous complete distribution goes back. Otherwise
+# it stays available until the server update succeeds or rolls back.
+publish_agent_dist() {
+	local target=$DATA/agent-dist staged=$DATA/.agent-dist.new previous=$DATA/.agent-dist.previous name same=true
+	agent_dist_pending=false
+	if [ -d "$target" ] && verify_agent_distribution "$target"; then
+		for name in "${agent_files[@]}" checksums.txt; do
+			cmp -s "$work/agent-dist/$name" "$target/$name" || same=false
+		done
+		if $same; then
+			agent_dist_text="already staged at $target"
+			return 0
+		fi
+	fi
+	rm -rf "$staged" "$previous"
+	cp -a "$work/agent-dist" "$staged"
+	chmod 0755 "$staged"
+	chmod 0644 "$staged"/*
+	if [ -e "$target" ] && ! mv "$target" "$previous"; then
+		rm -rf "$staged"
+		die "cannot preserve the previous agent distribution – nothing installed"
+	fi
+	if ! mv "$staged" "$target"; then
+		[ ! -e "$previous" ] || mv "$previous" "$target" || true
+		rm -rf "$staged"
+		die "cannot publish the agent distribution – nothing installed"
+	fi
+	if ! verify_agent_distribution "$target"; then
+		rm -rf "$target"
+		if [ -e "$previous" ]; then
+			mv "$previous" "$target" || die "agent distribution verification failed and rollback failed"
+		fi
+		die "agent distribution verification failed after publication; the previous distribution was restored"
+	fi
+	agent_dist_pending=true
+	changed "$target (exact v$version, both architectures, deb/rpm/tarball)"
+	agent_dist_text="$target (exact v$version)"
+}
+
+finish_agent_dist() {
+	rm -rf "$DATA/.agent-dist.previous"
+	agent_dist_pending=false
+}
+
+rollback_agent_dist() {
+	[ "${agent_dist_pending:-false}" = true ] || return 0
+	local target=$DATA/agent-dist previous=$DATA/.agent-dist.previous
+	rm -rf "$target"
+	if [ -e "$previous" ]; then
+		mv "$previous" "$target" || return 1
+	fi
+	agent_dist_pending=false
 }
 
 # --- installing ------------------------------------------------------------------
@@ -553,6 +654,7 @@ update() {
 	as_service "$BIN" backup "$backup" --config "$CONF" >/dev/null || die "backup failed – nothing changed"
 	as_service "$BIN" backup verify "$backup" >/dev/null || die "backup verify failed for $backup – nothing changed"
 	changed "backup $backup"
+	publish_agent_dist
 	install -m 0755 "$BIN" "$BIN.previous"
 	if ! swap_binary; then rollback "the new binary was not installed"; fi
 	install_units
@@ -563,15 +665,17 @@ update() {
 	if [ "$running" != "$new_version" ]; then
 		rollback "the service runs ${running:-an unknown version}, not $new_version"
 	fi
+	finish_agent_dist
 	say "Healthy, running $new_version. The server starts sealed – unseal it in the browser."
 	say "Backup: $backup (the previous binary: $BIN.previous)"
 }
 
-# rollback REASON: after a failed update, the previous binary back and a
-# restart; it always ends install.sh with an error. Uses update's
-# old_version, stamp and backup.
+# rollback REASON: after a failed update, the previous binary and agent
+# distribution go back and the service restarts; it always ends with an error.
+# Uses update's old_version, stamp and backup.
 rollback() {
 	warn "$1 – putting $old_version back"
+	rollback_agent_dist || warn "could not restore the previous agent distribution; downloads remain disabled at $DATA/agent-dist"
 	if ! install -m 0755 "$BIN.previous" "$BIN.new" || ! mv -f "$BIN.new" "$BIN"; then
 		die "could not put $BIN.previous back as $BIN – do it by hand, then systemctl restart $SVC. Backup: $backup"
 	fi
@@ -638,6 +742,7 @@ main() {
 
 	fetch
 	unpack
+	fetch_agent_artifacts
 	ensure_user
 	ensure_dirs
 	ensure_config
@@ -655,6 +760,8 @@ main() {
 		if $initialized && $unit_changed && systemctl is-active --quiet "$SVC.service"; then
 			warn "the unit changed – restart when convenient: systemctl restart $SVC (the server starts sealed)"
 		fi
+		publish_agent_dist
+		finish_agent_dist
 	fi
 
 	say ""
@@ -662,6 +769,7 @@ main() {
 	say "  SHA-256:   ok (checksums.txt)"
 	say "  Signature: $signature"
 	say "  Config:    $config_text"
+	say "  Agent dist: $agent_dist_text"
 	say "  Backups:   $(backup_text)"
 	for t in "$LOWPORTS" "$OLD_LOWPORTS"; do
 		if [ -f "$t" ]; then say "  Low ports: drop-in $t (CAP_NET_BIND_SERVICE)"; fi

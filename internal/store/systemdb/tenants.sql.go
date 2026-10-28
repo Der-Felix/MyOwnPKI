@@ -44,6 +44,18 @@ func (q *Queries) GetAgentEnrollment(ctx context.Context, id string) (string, er
 	return agent_enrollment, err
 }
 
+const getStepUpMinutes = `-- name: GetStepUpMinutes :one
+SELECT step_up_minutes FROM tenants WHERE id = ?
+`
+
+// Authentication snapshots this whenever it records a new second-factor proof.
+func (q *Queries) GetStepUpMinutes(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getStepUpMinutes, id)
+	var step_up_minutes int64
+	err := row.Scan(&step_up_minutes)
+	return step_up_minutes, err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT id, name, allow_server_keygen, created_at
 FROM tenants
@@ -71,24 +83,30 @@ func (q *Queries) GetTenant(ctx context.Context, id string) (GetTenantRow, error
 
 const getTenantSettings = `-- name: GetTenantSettings :one
 SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c,
-       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment
+       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment, step_up_minutes,
+       agent_predecessor_choice, agent_predecessor_days, other_predecessor_choice, other_predecessor_days
 FROM tenants
 WHERE id = ?
 `
 
 type GetTenantSettingsRow struct {
-	ID                string
-	AllowServerKeygen int64
-	SubjectO          string
-	SubjectOu         string
-	SubjectL          string
-	SubjectSt         string
-	SubjectC          string
-	AcmeOrdersPerHour int64
-	AcmeFailedPerName int64
-	AcmeAccountsPerIp int64
-	TrustPage         int64
-	AgentEnrollment   string
+	ID                     string
+	AllowServerKeygen      int64
+	SubjectO               string
+	SubjectOu              string
+	SubjectL               string
+	SubjectSt              string
+	SubjectC               string
+	AcmeOrdersPerHour      int64
+	AcmeFailedPerName      int64
+	AcmeAccountsPerIp      int64
+	TrustPage              int64
+	AgentEnrollment        string
+	StepUpMinutes          int64
+	AgentPredecessorChoice string
+	AgentPredecessorDays   int64
+	OtherPredecessorChoice string
+	OtherPredecessorDays   int64
 }
 
 // Settings of a tenant (step 18): server key generation and subject defaults.
@@ -108,6 +126,11 @@ func (q *Queries) GetTenantSettings(ctx context.Context, id string) (GetTenantSe
 		&i.AcmeAccountsPerIp,
 		&i.TrustPage,
 		&i.AgentEnrollment,
+		&i.StepUpMinutes,
+		&i.AgentPredecessorChoice,
+		&i.AgentPredecessorDays,
+		&i.OtherPredecessorChoice,
+		&i.OtherPredecessorDays,
 	)
 	return i, err
 }
@@ -168,23 +191,30 @@ func (q *Queries) ListTenants(ctx context.Context) ([]ListTenantsRow, error) {
 const setTenantSettings = `-- name: SetTenantSettings :execrows
 UPDATE tenants
 SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?,
-    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?
+    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?,
+    step_up_minutes = ?, agent_predecessor_choice = ?, agent_predecessor_days = ?,
+    other_predecessor_choice = ?, other_predecessor_days = ?
 WHERE id = ?
 `
 
 type SetTenantSettingsParams struct {
-	AllowServerKeygen int64
-	SubjectO          string
-	SubjectOu         string
-	SubjectL          string
-	SubjectSt         string
-	SubjectC          string
-	AcmeOrdersPerHour int64
-	AcmeFailedPerName int64
-	AcmeAccountsPerIp int64
-	TrustPage         int64
-	AgentEnrollment   string
-	ID                string
+	AllowServerKeygen      int64
+	SubjectO               string
+	SubjectOu              string
+	SubjectL               string
+	SubjectSt              string
+	SubjectC               string
+	AcmeOrdersPerHour      int64
+	AcmeFailedPerName      int64
+	AcmeAccountsPerIp      int64
+	TrustPage              int64
+	AgentEnrollment        string
+	StepUpMinutes          int64
+	AgentPredecessorChoice string
+	AgentPredecessorDays   int64
+	OtherPredecessorChoice string
+	OtherPredecessorDays   int64
+	ID                     string
 }
 
 func (q *Queries) SetTenantSettings(ctx context.Context, arg SetTenantSettingsParams) (int64, error) {
@@ -200,6 +230,11 @@ func (q *Queries) SetTenantSettings(ctx context.Context, arg SetTenantSettingsPa
 		arg.AcmeAccountsPerIp,
 		arg.TrustPage,
 		arg.AgentEnrollment,
+		arg.StepUpMinutes,
+		arg.AgentPredecessorChoice,
+		arg.AgentPredecessorDays,
+		arg.OtherPredecessorChoice,
+		arg.OtherPredecessorDays,
 		arg.ID,
 	)
 	if err != nil {

@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 )
 
@@ -54,10 +56,11 @@ func (a *API) renewCertificate(c *call) error {
 		return ca.ErrNotFound
 	}
 	var req struct {
-		CSRPEM         *string `json:"csr_pem"`
-		KeyAlgorithm   string  `json:"key_algorithm"`
-		ValidityDays   *int    `json:"validity_days"`
-		RevokePrevious bool    `json:"revoke_previous"`
+		CSRPEM         *string                `json:"csr_pem"`
+		KeyAlgorithm   string                 `json:"key_algorithm"`
+		ValidityDays   *int                   `json:"validity_days"`
+		RevokePrevious *bool                  `json:"revoke_previous"`
+		Predecessor    *predecessorPolicyJSON `json:"predecessor"`
 	}
 	if c.r.ContentLength != 0 {
 		if err := c.decode(&req); err != nil {
@@ -71,6 +74,13 @@ func (a *API) renewCertificate(c *call) error {
 		return badRequest("/validity_days", "at least 1")
 	}
 	r := ca.RenewCertRequest{ID: id, KeyAlgorithm: req.KeyAlgorithm, RevokePrevious: req.RevokePrevious, Who: c.who()}
+	if req.Predecessor != nil {
+		policy := req.Predecessor.value()
+		if err := policy.Validate(); err != nil {
+			return badRequest("/predecessor", "%s", err)
+		}
+		r.Predecessor = &policy
+	}
 	if req.CSRPEM != nil {
 		r.CSR = []byte(*req.CSRPEM)
 	}
@@ -144,4 +154,46 @@ func (a *API) importExternalCertificate(c *call) error {
 	}
 	c.w.Header().Set("Location", BasePath+"/certificates/"+info.ID)
 	return c.reply(http.StatusCreated, toCertificateJSON(info))
+}
+
+func (a *API) planCertificateRevocation(c *call) error {
+	id := c.r.PathValue("certificateId")
+	if !idPattern.MatchString(id) {
+		return ca.ErrNotFound
+	}
+	var req struct {
+		PlannedAt time.Time `json:"planned_at"`
+	}
+	if err := c.decode(&req); err != nil {
+		return err
+	}
+	if req.PlannedAt.IsZero() || !req.PlannedAt.After(a.d.Clock.Now()) {
+		return badRequest("/planned_at", "a present or future RFC 3339 time is required")
+	}
+	if req.PlannedAt.After(a.d.Clock.Now().Add(30 * 24 * time.Hour)) {
+		return badRequest("/planned_at", "at most 30 days ahead")
+	}
+	if err := a.d.Engine.PlanRevocation(c.ctx(), ca.PlanRevocationRequest{CertificateID: id, PlannedAt: req.PlannedAt, Who: c.who()}); err != nil {
+		var denied *ca.DeniedError
+		if errors.As(err, &denied) && !errors.Is(err, authz.ErrDenied) && !errors.Is(err, authz.ErrStepUpRequired) {
+			return c.problem(http.StatusConflict, "conflict", err.Error(), nil)
+		}
+		return err
+	}
+	return a.getCertificate(c)
+}
+
+func (a *API) cancelCertificateRevocation(c *call) error {
+	id := c.r.PathValue("certificateId")
+	if !idPattern.MatchString(id) {
+		return ca.ErrNotFound
+	}
+	if err := a.d.Engine.CancelRevocationPlan(c.ctx(), c.who(), id); err != nil {
+		var denied *ca.DeniedError
+		if errors.As(err, &denied) && !errors.Is(err, authz.ErrDenied) && !errors.Is(err, authz.ErrStepUpRequired) {
+			return c.problem(http.StatusConflict, "conflict", err.Error(), nil)
+		}
+		return err
+	}
+	return a.getCertificate(c)
 }

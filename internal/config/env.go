@@ -38,6 +38,7 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "AGENT_LISTEN":           &c.Agent.Listen,
 		EnvPrefix + "AGENT_TLS_ISSUER":       &c.Agent.TLSIssuer,
 		EnvPrefix + "AGENT_CA":               &c.Agent.CA,
+		EnvPrefix + "AGENT_PACKAGE_DIR":      &c.Agent.PackageDir,
 	}
 }
 

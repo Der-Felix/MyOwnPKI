@@ -271,26 +271,27 @@ type revocationJSON struct {
 }
 
 type certificateJSON struct {
-	ID           string          `json:"id"`
-	CAID         *string         `json:"ca_id"`
-	CAName       *string         `json:"ca_name"`
-	CAGeneration *int64          `json:"ca_generation"`
-	Preset       *string         `json:"preset"`
-	Status       string          `json:"status"`
-	Source       string          `json:"source"`
-	Subject      string          `json:"subject"`
-	CommonName   string          `json:"common_name"`
-	SANs         sansJSON        `json:"sans"`
-	Serial       string          `json:"serial"`
-	NotBefore    time.Time       `json:"not_before"`
-	NotAfter     time.Time       `json:"not_after"`
-	KeyAlgorithm string          `json:"key_algorithm"`
-	KeyStored    bool            `json:"key_stored"`
-	Fingerprint  string          `json:"fingerprint_sha256"`
-	Revocation   *revocationJSON `json:"revocation"`
-	RenewalOf    *string         `json:"renewal_of"`
-	IssuedBy     *string         `json:"issued_by"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID                  string          `json:"id"`
+	CAID                *string         `json:"ca_id"`
+	CAName              *string         `json:"ca_name"`
+	CAGeneration        *int64          `json:"ca_generation"`
+	Preset              *string         `json:"preset"`
+	Status              string          `json:"status"`
+	Source              string          `json:"source"`
+	Subject             string          `json:"subject"`
+	CommonName          string          `json:"common_name"`
+	SANs                sansJSON        `json:"sans"`
+	Serial              string          `json:"serial"`
+	NotBefore           time.Time       `json:"not_before"`
+	NotAfter            time.Time       `json:"not_after"`
+	KeyAlgorithm        string          `json:"key_algorithm"`
+	KeyStored           bool            `json:"key_stored"`
+	Fingerprint         string          `json:"fingerprint_sha256"`
+	Revocation          *revocationJSON `json:"revocation"`
+	RevocationPlannedAt *time.Time      `json:"revocation_planned_at"`
+	RenewalOf           *string         `json:"renewal_of"`
+	IssuedBy            *string         `json:"issued_by"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 func toCertificateJSON(i *ca.CertificateInfo) certificateJSON {
@@ -299,7 +300,8 @@ func toCertificateJSON(i *ca.CertificateInfo) certificateJSON {
 		Source: i.Source, Subject: i.Subject, CommonName: i.CommonName,
 		SANs:   sansJSON{DNS: nonNil(i.DNSNames), IP: nonNil(i.IPs), Email: nonNil(i.Emails), URI: nonNil(i.URIs)},
 		Serial: i.Serial, NotBefore: i.NotBefore, NotAfter: i.NotAfter, KeyAlgorithm: i.KeyAlgorithm, KeyStored: i.KeyStored,
-		Fingerprint: i.Fingerprint, RenewalOf: optString(i.RenewalOf), IssuedBy: optString(i.RequestedBy), CreatedAt: i.CreatedAt,
+		Fingerprint: i.Fingerprint, RevocationPlannedAt: i.RevocationPlannedAt,
+		RenewalOf: optString(i.RenewalOf), IssuedBy: optString(i.RequestedBy), CreatedAt: i.CreatedAt,
 	}
 	if i.CAGeneration > 0 {
 		g := i.CAGeneration

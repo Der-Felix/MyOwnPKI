@@ -1,3 +1,213 @@
+# Night log – v0.3.1 release close
+
+> Final review and release preparation on `release/v0.3.1`. No tag and no push. Every commit had a
+> complete `task ci:local` with exit 0. CHANGELOG names `[0.3.1]` without a release date.
+
+## Review commits
+
+- `edfbb95` – guided installation is a fail-closed subshell with noninteractive package installation
+  and a Linux execution test of the actual rendered command.
+- `aa7e26a` – additive `written_fingerprint` for check-less deployments.
+- `f1ed0e8` – per-account predecessor overrides in UI and REST, with admin, step-up and audit.
+- `500c77c` – mixed-operation fix: a valid served TLS fingerprint always wins over written proof.
+- `5cde0bf` – owner-confirmed factory defaults: agent immediate after confirmed deployment, other
+  certificates after seven days.
+
+The mixed rule is explicit: served fingerprint first; written fingerprint only when served is empty
+and `check_configured=false`. Legacy v0.3.0 reports therefore remain valid, a written fingerprint
+never replaces a missing TLS proof, and no proof means no predecessor action. Upgrade the server
+before the agents.
+
+## Final verification
+
+`task ci:local`: **19 PASS, 14 SKIP, 0 FAIL**. Full Go tests, generation, lint, OpenAPI lint,
+protocol compatibility and real Windows helper tests passed. These 14 steps remain for GitHub's
+Linux/systemd/Docker environments and are not claimed as locally executed:
+
+```text
+race         | tests with race detector                     | SKIP | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | needs macOS + Homebrew
+shellcheck   | legacy smoke test                            | SKIP | needs Linux
+conformance  | real-client conformance                      | SKIP | needs Linux + docker
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | needs Linux + goreleaser
+install      | agent package formats and architectures      | SKIP | needs Linux + docker + dpkg-deb
+install      | agent packages in pinned distributions       | SKIP | needs Linux + docker + openssl
+install      | agent package real setup and systemd         | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | install.sh functions                         | SKIP | needs Linux + goreleaser
+install      | second build for update                      | SKIP | needs Linux
+install      | install start update as root                 | SKIP | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+```
+
+The owner has confirmed the factory defaults. No open implementation work remains; only the real
+CI runs above and the owner's release decision are outstanding.
+
+---
+
+# Night log – v0.3.1 follow-up
+
+> Continuation on `release/v0.3.1` after Block A. Steps 15, 16 and 21 are implemented and committed
+> locally. Nothing was pushed. Every implementation commit had a complete `task ci:local` with exit
+> 0. This addendum is a separate documentation commit.
+
+## Commits and result
+
+- `fe1b35b` – step 15: shared verified `myownpki-agent setup`, nFPM deb/rpm packages and package CI.
+- `123a3a1` – step 16: exact-version artifact distribution, read-only manifest and guided installation.
+- `eea46f9` – step 21: independent SHA-256 authorization for Windows trust, display-only SHA-1.
+
+All three are complete. Package installation never enables or starts the agent before admission;
+configuration is preserved. Distribution contains every architecture/format and rolls back with the
+server. Guided commands use independent authenticated-UI hashes and never expose the one-time token
+in argv, URLs, summaries or logs. The Windows helper has no embedded expected fingerprint: an exact
+64-hex `-ExpectedSha256` or an explicit independent comparison is required; `/quiet` is no bypass.
+
+## Tests
+
+`task ci:local` finished with **19 PASS, 14 SKIP, 0 FAIL** on the final implementation run. Full Go
+tests, generation, lint, OpenAPI lint, protocol compatibility, registry self-test and actual Windows
+`cmd.exe`/PowerShell helper tests passed. Instrumented import-path tests never opened a real store.
+The previous fake-clock mismatch in the unseal test was fixed by using one clock for setup and server.
+
+Linux/systemd/Docker-only verification remains for CI, not claimed as locally executed:
+
+```text
+race         | tests with race detector                     | SKIP | 0s | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | 0s | needs macOS + Homebrew
+shellcheck   | legacy smoke test                            | SKIP | 0s | needs Linux
+conformance  | real-client conformance                      | SKIP | 0s | needs Linux + docker
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | 0s | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | 0s | needs Linux + goreleaser
+install      | agent package formats and architectures      | SKIP | 0s | needs Linux + docker + dpkg-deb
+install      | agent packages in pinned distributions       | SKIP | 0s | needs Linux + docker + openssl
+install      | agent package real setup and systemd         | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | install.sh functions                         | SKIP | 0s | needs Linux + goreleaser
+install      | second build for update                      | SKIP | 0s | needs Linux
+install      | install start update as root                 | SKIP | 0s | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+```
+
+The owner confirmed the predecessor factory defaults from Block A: agent deployments revoke
+immediately after confirmed deployment, other certificates revoke after seven days. No new open
+questions and no unfinished work were added by this follow-up.
+
+---
+
+# Night log – v0.3.1 Block A
+
+> Autonomous implementation on `release/v0.3.1`, rebased onto `origin/main` `642ddda` before the
+> work. Steps 18, 19 and 17/17b of PHASE3 §8 are implemented and committed locally. Nothing was
+> pushed, merged, tagged or published. Every code commit below had a complete `task ci:local` run
+> with exit 0. This report is a separate documentation commit.
+
+## Report for the owner
+
+### Result
+
+All three requested steps and the pending-action review fix are complete. There is no unfinished
+code in the worktree. Linux/systemd/Docker-only checks remain explicitly SKIPPED on this Windows
+host and are not claimed as locally verified; their complete SKIP lines appear below.
+
+| Commit | Content |
+|---|---|
+| `fbca59b` | Step 18: per-tenant step-up lifetime, 5/10/15/30/60 minutes, default 5, admin+audit |
+| `90c8db4` | Step 19: single-use in-memory continuation of protected web actions after step-up |
+| `b6b363a` | Review fix: one pending action per session plus global entry/archive limits |
+| `9c56c8e` | Steps 17/17b: immediate/delayed/never predecessor handling, ACME/agent/UI/REST/scheduler |
+
+### Decisions made during implementation
+
+- **Proof lifetime is a snapshot.** Every new proof stores the tenant setting effective at its
+  creation. Existing sessions and proofs never gain or lose lifetime retroactively.
+- **Selector in a cookie in addition to the POST field.** Step-up continuation uses a short-lived
+  `HttpOnly; Secure; SameSite=Strict` cookie scoped to `/step-up` to select the summary after PRG.
+  The pending ID also appears in the hidden POST field, never in a URL, access log or other HTML
+  attribute. Consumption uses the POSTed ID, not the cookie.
+- **Pending memory is bounded.** One open action per session; a newer one invalidates the older ID.
+  Globally at most 64 entries and 64 MiB of legacy archives. Expiry is swept on put, get and consume.
+- **Deployment proof is explicit.** With a TLS check only a matching served fingerprint counts.
+  Check-less deployments instead prove the leaf read back after the atomic write; a written
+  fingerprint never replaces a missing or wrong TLS fingerprint, and legacy agents without either
+  field cause no action.
+- **Confirmed factory defaults.** Agent deployments revoke immediately after confirmed deployment;
+  other certificates revoke after seven days. The owner confirmed these defaults on 2026-10-26.
+- **Legacy REST remains tri-state.** Explicit `revoke_previous:false` means never, true means now,
+  omission uses the tenant default. The new predecessor object takes precedence when both are sent.
+- **Restrictive planning bounds and storage.** Explicit plans require a future time no more than 30
+  days ahead. Plans live outside the immutable certificates table; upgrades do not backfill history
+  or cause mass revocation. Exact account/order/name mapping and current-serving exclusions remain
+  mandatory. Existing plans are never duplicated or silently moved.
+
+### Tests and evidence
+
+- `task ci:local` before every commit: exit 0 each time; `task check`, generated-code check,
+  `go test ./...`, lint, actionlint, registry self-test, API lint, ShellCheck, vuln, cross-build,
+  ACME lego, Windows helper and Linux test-binary cross-compiles all PASS.
+- Step-specific fake-clock tests cover exact proof expiry, non-retroactivity, pending replay,
+  concurrent consumption, foreign sessions, credentials epochs, restart, CSRF, business failure,
+  global limits, archive bytes, predecessor delays, scheduler restart and real `OnUnseal` catch-up.
+- Renewal tests cover all choices, tenant/agent/deployment/one-operation overrides, actual ACME
+  finalize with exact name sets, failed/rolled-back deployments, discarded certificates, missing
+  or duplicate orders, timestamp ties, cross-account input, missing TLS fingerprints, plan/cancel,
+  revoke-now, audit-once and CRL reason `superseded`.
+- Migration tests start before the additive predecessor migrations and prove existing certificates
+  and revocations stay untouched with no mass revocation or planning. `task generate` produced no
+  remaining diff. `task lint:api` passed with 18 informational notices and no errors or warnings.
+
+Final `task ci:local` table (same 19 PASS / 11 SKIP pattern as every implementation commit):
+
+```text
+Job          | Step                                         | Status | Duration | Skip reason
+-------------+----------------------------------------------+--------+----------+------------
+check        | check                                        | PASS | 71s      |
+check        | generate:check                               | PASS | 14s      |
+check        | agent protocol compatibility                 | PASS | 4s       |
+check        | fuzz ACME JWS parser                         | PASS | 34s      |
+check        | upgrade from previous release                | PASS | 8s       |
+race         | tests with race detector                     | SKIP | 0s       | needs Linux + CGO C compiler + free
+test-os      | OpenSSL 3 from Homebrew                      | SKIP | 0s       | needs macOS + Homebrew
+test-os      | OpenSSL used by the tests                    | PASS | 0s       |
+test-os      | go test                                      | PASS | 14s      |
+test-os      | Windows trust-page helper                    | PASS | 5s       |
+cross        | cross-compile release platforms              | PASS | 27s      |
+vuln         | govulncheck                                  | PASS | 4s       |
+lint-meta    | actionlint                                   | PASS | 2s       |
+lint-meta    | registry coverage                            | PASS | 2s       |
+lint-meta    | vacuum OpenAPI                               | PASS | 1s       |
+shellcheck   | ShellCheck sources                           | PASS | 11s      |
+shellcheck   | legacy smoke test                            | SKIP | 0s       | needs Linux
+conformance  | lego walking skeleton EAB ARI                | PASS | 18s      |
+conformance  | real-client conformance                      | SKIP | 0s       | needs Linux + docker
+agent-e2e    | download pinned Go modules                   | PASS | 1s       |
+agent-e2e    | cross-compile Linux agent test binary        | PASS | 5s       |
+agent-e2e    | cross-compile Linux server test binary       | PASS | 3s       |
+agent-e2e    | install-agent functions                      | PASS | 1s       |
+agent-e2e    | real server agent ACME nginx rollback        | SKIP | 0s       | needs Linux + docker
+agent-e2e    | systemd verify and security                  | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+agent-e2e    | nginx port 443 systemd controls              | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+install      | GoReleaser snapshot                          | SKIP | 0s       | needs Linux + goreleaser
+install      | install.sh functions                         | SKIP | 0s       | needs Linux + goreleaser
+install      | second build for update                      | SKIP | 0s       | needs Linux
+install      | install start update as root                 | SKIP | 0s       | changes /etc/systemd and /usr/local as root – only on a disposable runner (MYOWNPKI_CI_DISPOSABLE=1)
+
+Local CI finished: no failures
+```
+
+### Owner decision
+
+The owner confirmed the factory defaults on 2026-10-26: **agent = revoke immediately after
+confirmed deployment**, **other certificates = revoke after 7 days**. PHASE3 records the decision.
+
+### Not finished
+
+Nothing in the requested Block A scope. The Linux/systemd/Docker rows above still need their real
+CI environments; they were not simulated or counted as local passes.
+
+---
+
 # Night log – v0.2.2
 
 > Autonomous run, night of 2026-10-24, branch `night/v0.2.2` (from `origin/main` 123ba9b, no

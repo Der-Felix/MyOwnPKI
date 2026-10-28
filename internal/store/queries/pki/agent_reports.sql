@@ -7,27 +7,30 @@ SELECT * FROM agent_deployments WHERE agent_id = ? ORDER BY name;
 SELECT * FROM agent_deployments WHERE agent_id = ? AND name = ?;
 
 -- name: UpdateAgentReport :exec
-UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ? WHERE id = ?;
+UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ?, package_format = ? WHERE id = ?;
 
 -- name: MarkAgentDeploymentsUnreported :exec
 UPDATE agent_deployments SET reported = FALSE WHERE agent_id = ?;
 
 -- name: UpsertAgentDeployment :exec
 INSERT INTO agent_deployments (agent_id, name, profile, names, challenge, state, certificate_serial,
-    not_after, served_fingerprint, deployed_at, last_error, last_report_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    not_after, served_fingerprint, written_fingerprint, check_configured, deployed_at, last_error, last_report_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (agent_id, name) DO UPDATE SET profile = excluded.profile, names = excluded.names,
     challenge = excluded.challenge, state = excluded.state, certificate_serial = excluded.certificate_serial,
     not_after = excluded.not_after, served_fingerprint = excluded.served_fingerprint,
+    written_fingerprint = excluded.written_fingerprint, check_configured = excluded.check_configured,
     deployed_at = excluded.deployed_at, last_error = excluded.last_error, last_report_at = excluded.last_report_at,
     reported = TRUE;
 
 -- name: ClearDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL
+UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL,
+    renew_predecessor_choice = NULL, renew_predecessor_days = NULL
 WHERE agent_id = ? AND name = ? AND renew_requested_version = ?;
 
 -- name: RequestDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?
+UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?,
+    renew_predecessor_choice = ?, renew_predecessor_days = ?
 WHERE agent_id = ? AND name = ? AND renew_requested_at IS NULL;
 
 -- name: WithdrawDeploymentRenewal :execrows

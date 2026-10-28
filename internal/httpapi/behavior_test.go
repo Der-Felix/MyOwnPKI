@@ -15,6 +15,9 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
 )
 
@@ -548,6 +551,47 @@ func TestAPITokens(t *testing.T) {
 	}
 	if r := bot.do(t, http.MethodGet, "/certificates", nil, "Authorization", "Bearer mop_wrong"); r.Code != 401 {
 		t.Errorf("unknown token: %d", r.Code)
+	}
+}
+
+func TestSessionStepUpValidUntilUsesSnapshot(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	c := v.client("192.0.2.1")
+	c.signIn(t, "demo", v.demoPass)
+	settings := &tenant.Store{DB: v.in.SystemDB.Write, Clock: v.clk}
+	set := func(minutes int) {
+		t.Helper()
+		current, err := settings.Get(t.Context(), store.DefaultTenant, testinstance.Console)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.StepUpMinutes = &minutes
+		if err := settings.Set(t.Context(), store.DefaultTenant, *current, testinstance.Console); err != nil {
+			t.Fatal(err)
+		}
+	}
+	validUntil := func(want time.Time) string {
+		t.Helper()
+		r := c.do(t, http.MethodGet, "/auth/session", nil)
+		if r.Code != http.StatusOK {
+			t.Fatalf("session: %d %s", r.Code, r.Body.String())
+		}
+		text, _ := r.body["step_up_valid_until"].(string)
+		got, err := time.Parse(time.RFC3339, text)
+		if err != nil || !got.Equal(want.UTC()) {
+			t.Errorf("step_up_valid_until = %q (%v), want %s", text, err, want.UTC().Format(time.RFC3339))
+		}
+		return text
+	}
+	validUntil(v.clk.Now().Add(authz.StepUpWindow))
+	set(30)
+	c.stepUp(t, "demo")
+	want := v.clk.Now().Add(30 * time.Minute)
+	before := validUntil(want)
+	set(5)
+	if after := validUntil(want); after != before {
+		t.Errorf("existing proof changed from %s to %s", before, after)
 	}
 }
 

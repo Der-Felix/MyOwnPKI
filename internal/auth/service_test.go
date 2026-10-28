@@ -271,9 +271,12 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	v.create(t, "alice", false)
 	code := v.recovery["alice"][3]
 	typed := strings.ToLower(strings.ReplaceAll(code, "-", " "))
+	if _, err := v.sys.ExecContext(t.Context(), `UPDATE tenants SET step_up_minutes = 30 WHERE id = ?`, store.DefaultTenant); err != nil {
+		t.Fatal(err)
+	}
 	res, _ := v.s.Login(t.Context(), "alice", password, ip)
 	full, err := v.s.LoginRecoveryCode(t.Context(), res.Token, typed, ip)
-	if err != nil || full.RecoveryCodesLeft != 9 {
+	if err != nil || full.RecoveryCodesLeft != 9 || full.Session.StepUpDuration != 30*time.Minute {
 		t.Fatalf("recovery login: %+v %v", full, err)
 	}
 	res, _ = v.s.Login(t.Context(), "alice", password, ip)
@@ -343,6 +346,46 @@ func TestStepUp(t *testing.T) {
 	}
 	if err := sess.Principal.Check(authz.RevokeCert, res, v.clk.Now()); err != nil {
 		t.Errorf("after step-up: %v", err)
+	}
+}
+
+func TestStepUpLifetimeSnapshot(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.create(t, "alice", false, authz.Admin)
+	token := v.login(t, "alice")
+	res := authz.Resource{Tenant: store.DefaultTenant}
+	sess, err := v.s.Authenticate(t.Context(), token)
+	if err != nil || sess.StepUpDuration != authz.StepUpWindow || sess.Principal.StepUpDuration != authz.StepUpWindow {
+		t.Fatalf("default proof: %+v %v", sess, err)
+	}
+	set := func(minutes int) {
+		t.Helper()
+		if _, execErr := v.sys.ExecContext(t.Context(), `UPDATE tenants SET step_up_minutes = ? WHERE id = ?`, minutes, store.DefaultTenant); execErr != nil {
+			t.Fatal(execErr)
+		}
+	}
+	set(30)
+	v.clk.Advance(authz.StepUpWindow)
+	if checkErr := sess.Principal.Check(authz.RevokeCert, res, v.clk.Now()); checkErr != nil {
+		t.Errorf("old proof at its exact expiry: %v", checkErr)
+	}
+	v.clk.Advance(time.Second)
+	if checkErr := sess.Principal.Check(authz.RevokeCert, res, v.clk.Now()); !errors.Is(checkErr, authz.ErrStepUpRequired) {
+		t.Errorf("old proof changed retroactively: %v", checkErr)
+	}
+	sess, err = v.s.StepUp(t.Context(), token, v.code("alice"), ip)
+	if err != nil || sess.StepUpDuration != 30*time.Minute {
+		t.Fatalf("new 30-minute proof: %+v %v", sess, err)
+	}
+	set(5)
+	v.clk.Advance(30 * time.Minute)
+	if checkErr := sess.Principal.Check(authz.RevokeCert, res, v.clk.Now()); checkErr != nil {
+		t.Errorf("30-minute proof at exact expiry: %v", checkErr)
+	}
+	v.clk.Advance(time.Second)
+	if checkErr := sess.Principal.Check(authz.RevokeCert, res, v.clk.Now()); !errors.Is(checkErr, authz.ErrStepUpRequired) {
+		t.Errorf("30-minute proof after exact expiry: %v", checkErr)
 	}
 }
 

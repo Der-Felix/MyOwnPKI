@@ -95,15 +95,22 @@ func TestPasskeyRegistrationAndLogin(t *testing.T) {
 		t.Errorf("replayed answer: %v", rerr)
 	}
 
-	// Step-up with the passkey while signed in.
+	if full.Session.StepUpDuration != 5*time.Minute {
+		t.Errorf("passkey sign-in lifetime: %v", full.Session.StepUpDuration)
+	}
+
+	// Step-up with the passkey while signed in snapshots the current setting.
 	v.clk.Advance(10 * time.Minute)
+	if _, execErr := v.sys.ExecContext(t.Context(), `UPDATE tenants SET step_up_minutes = 30 WHERE id = 'default'`); execErr != nil {
+		t.Fatal(execErr)
+	}
 	options, err = v.s.BeginPasskeyLogin(t.Context(), full.Token, Client{IP: ip})
 	if err != nil {
 		t.Fatal(err)
 	}
 	answer, _ = authn.Get(options)
 	stepped, err := v.s.FinishPasskeyLogin(t.Context(), full.Token, answer, Client{IP: ip})
-	if err != nil || stepped.Session.StepUpAt.IsZero() || stepped.Token != full.Token {
+	if err != nil || stepped.Session.StepUpAt.IsZero() || stepped.Token != full.Token || stepped.Session.StepUpDuration != 30*time.Minute {
 		t.Fatalf("passkey step-up: %v %+v", err, stepped)
 	}
 

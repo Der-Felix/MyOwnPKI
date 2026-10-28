@@ -133,10 +133,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-os-openssl-version.sh
       - run: bash scripts/ci/test-os-test.sh
-      # The Windows helpers of the trust page (v0.2.2) for real: cmd.exe runs
-      # each with /check (no import) – the fingerprint passes, a changed copy
-      # and an unknown switch stop before anything is imported. Part of the
-      # run above too; its own step so the log shows it.
+      # The Windows helpers of the trust page for real: cmd.exe runs each with
+      # /check (no import), displays both fingerprints, and rejects changed or
+      # unknown input. Instrumented test copies cover authorization without a
+      # real store change. Part of the run above too; separate for a clear log.
       - name: Windows helper of the trust page (cmd.exe, /check)
         if: runner.os == 'Windows'
         run: bash scripts/ci/test-os-windows-helper.sh
@@ -278,6 +278,12 @@ jobs:
           goreleaser: "true"
       - name: Snapshot build (no SBOMs, no signatures, no image)
         run: bash scripts/ci/install-snapshot.sh
+      - name: Inspect agent packages (both formats and architectures)
+        run: bash scripts/ci/agent-package-inspect.sh
+      - name: Install agent packages in pinned distributions
+        run: bash scripts/ci/agent-package-distros.sh
+      - name: Real agent package setup and systemd
+        run: bash scripts/ci/agent-package-systemd.sh
       - name: install.sh functions (no root)
         run: bash scripts/ci/install-functions.sh
       # A second binary with another version for the update path.

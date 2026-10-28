@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
@@ -59,6 +60,8 @@ type Deps struct {
 	TenantAudit, InstanceAudit *sql.DB
 	// Agents is the agent service (v0.3); nil while agent.base_url is empty.
 	Agents *agents.Service
+	// ACME is nil while the ACME server is disabled.
+	ACME *acme.Server
 }
 
 // access says who may call a route.

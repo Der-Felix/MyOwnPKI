@@ -151,6 +151,7 @@ type CertificateInfo struct {
 	RenewalOf, RequestedBy         string
 	RevocationReason               string
 	RevokedAt, InvalidityDate      *time.Time
+	RevocationPlannedAt            *time.Time
 	certDER                        []byte
 	keyID                          string
 }
@@ -220,7 +221,8 @@ func (e *Engine) Certificates(ctx context.Context, who keys.Who, f CertificateFi
 			page.NextCursor = page.Items[limit-1].ID
 			break
 		}
-		info, err := certificateInfo(ctx, q, certRow{r.Certificate, r.RevocationReason, r.RevokedAt, r.InvalidityDate}, names, now)
+		info, err := certificateInfo(ctx, q, certRow{c: r.Certificate, reason: r.RevocationReason, revokedAt: r.RevokedAt,
+			invalidityDate: r.InvalidityDate, plannedAt: r.RevocationPlannedAt}, names, now)
 		if err != nil {
 			return nil, err
 		}
@@ -233,6 +235,7 @@ func (e *Engine) Certificates(ctx context.Context, who keys.Who, f CertificateFi
 type certRow struct {
 	c                                 pkidb.Certificate
 	reason, revokedAt, invalidityDate sql.NullString
+	plannedAt                         sql.NullString
 }
 
 // Certificate returns one certificate by ID.
@@ -265,6 +268,11 @@ func (e *Engine) Certificate(ctx context.Context, who keys.Who, id string) (*Cer
 	} else if !errors.Is(rerr, sql.ErrNoRows) {
 		return nil, rerr
 	}
+	if p, perr := q.GetRevocationPlan(ctx, id); perr == nil {
+		row.plannedAt = sql.NullString{String: p.PlannedAt, Valid: true}
+	} else if !errors.Is(perr, sql.ErrNoRows) {
+		return nil, perr
+	}
 	return certificateInfo(ctx, q, row, map[string]string{c.CaID.String: name}, now)
 }
 
@@ -277,6 +285,10 @@ func certificateInfo(ctx context.Context, q *pkidb.Queries, r certRow, names map
 		KeyAlgorithm: c.KeyAlgorithm, Fingerprint: c.FingerprintSha256, KeyStored: c.KeyID.Valid,
 		RenewalOf: c.RenewalOf.String, RequestedBy: c.RequestedBy, certDER: c.CertDer, keyID: c.KeyID.String,
 		DNSNames: []string{}, IPs: []string{}, Emails: []string{}, URIs: []string{},
+	}
+	if r.plannedAt.Valid && !r.reason.Valid {
+		t := parseDBTime(r.plannedAt.String)
+		info.RevocationPlannedAt = &t
 	}
 	switch {
 	case r.reason.Valid:

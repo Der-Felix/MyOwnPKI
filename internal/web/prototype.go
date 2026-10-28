@@ -498,7 +498,8 @@ func (p *prototype) authorityDetail(w http.ResponseWriter, r *http.Request) {
 			{Key: "Key algorithm", Value: ca.KeyAlgorithm},
 			{Key: "Key storage", Value: ca.KeyMode},
 			{Key: "Serial number", Value: ca.Serial(), Mono: true},
-			{Key: "SHA-256 fingerprint", Value: view.Fingerprint(ca.Fingerprint()), Mono: true},
+			{Key: "SHA-256 fingerprint (authoritative)", Value: view.Fingerprint(ca.Fingerprint()), Mono: true},
+			{Key: "SHA-1 fingerprint (Windows certificate dialog comparison only)", Value: view.Fingerprint(ca.FingerprintSHA1()), Mono: true},
 			{Key: "Valid from", Value: view.DateTime(ca.NotBefore)},
 			{Key: "Valid until", Value: view.DateTime(ca.NotAfter) + " (" + view.Relative(fixture.Now, ca.NotAfter) + ")"},
 			{Key: "Path length", Value: ca.PathLen},
@@ -511,6 +512,9 @@ func (p *prototype) authorityDetail(w http.ResponseWriter, r *http.Request) {
 			{Key: "Next update", Value: view.DateTime(ca.CRLNextUpdate) + " (" + view.Relative(fixture.Now, ca.CRLNextUpdate) + ")"},
 			{Key: "Distribution point", Value: ca.PublicBaseURL + "/crl/" + ca.ID + ".crl"},
 		},
+	}
+	if ca.Kind == "root" {
+		d.Properties = slices.Insert(d.Properties, 8, view.KV{Key: "Root SHA-256 for automation (exact 64 hex)", Value: strings.ToLower(ca.Fingerprint()), Mono: true})
 	}
 	if len(ca.PermittedDNS) > 0 {
 		d.Constraints = append(d.Constraints, view.KV{Key: "Permitted DNS names", Value: strings.Join(ca.PermittedDNS, ", ")})

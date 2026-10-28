@@ -117,6 +117,15 @@ func (a *app) acmeAccount(c *rc) {
 			Fields: []admin.Field{{ID: "id", Type: "hidden", Value: acc.ID}},
 		})}})
 	}
+	if c.may(authz.ManageCA, "") {
+		fields := predecessorFields("predecessor", "predecessor_days", acc.EffectivePredecessor)
+		fields = append(fields, admin.Field{ID: "inherit", Label: "Inherit the tenant default for other certificates", Type: "checkbox", Checked: acc.Predecessor == nil})
+		sections = append(sections, admin.Section{Forms: []admin.FormData{c.form(admin.FormData{
+			Title: "Predecessor policy for this ACME account", Action: "/acme/accounts/" + acc.ID + "/predecessor-policy", Submit: "Save predecessor policy",
+			Intro:  []string{"Multiple hosts sharing this account and name set schedule or revoke each other's predecessors. Use one account per host, or choose never revoke."},
+			Fields: fields,
+		})}})
+	}
 	crumbs := []view.Crumb{{Label: "ACME accounts", Href: "/acme/accounts"}}
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(c.page(short(acc.ID), "acme-accounts", crumbs...), admin.DetailData{Messages: c.messages(), Sections: sections}))
 }
@@ -131,6 +140,26 @@ func (a *app) acmeApprove(c *rc) {
 		return
 	}
 	c.done("/acme/accounts", "Account "+short(id)+" approved.")
+}
+
+func (a *app) acmePredecessorPolicy(c *rc) {
+	if a.acmeOff(c, "ACME account", "acme-accounts") {
+		return
+	}
+	id := c.r.PathValue("id")
+	if yes(c.r.PostFormValue("inherit")) {
+		if err := a.d.ACME.SetAccountPredecessor(c.r.Context(), id, nil, c.who()); err != nil {
+			c.refused(acmeErr(err), "/acme/accounts/"+id)
+			return
+		}
+	} else {
+		policy := predecessorFromForm(c.r.PostFormValue, "predecessor", "predecessor_days")
+		if err := a.d.ACME.SetAccountPredecessor(c.r.Context(), id, &policy, c.who()); err != nil {
+			c.refused(acmeErr(err), "/acme/accounts/"+id)
+			return
+		}
+	}
+	c.done("/acme/accounts/"+id, "Predecessor policy saved.")
 }
 
 func (a *app) acmeNames(c *rc) {

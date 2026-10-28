@@ -131,6 +131,10 @@ message DeploymentReport {
   string last_error = 10;
   // Echo the version only after handling this deployment's renew request.
   int64 handled_renewal_version = 11;
+  // Leaf read back after the atomic write, used only when no TLS check exists.
+  string written_fingerprint = 12;
+  // When true, only served_fingerprint is accepted as deployment proof.
+  bool check_configured = 13;
 }
 
 message ReportRequest {
@@ -138,6 +142,8 @@ message ReportRequest {
   string os = 2;
   string arch = 3;
   repeated DeploymentReport deployments = 4;
+  // Installed package format: deb, rpm or tarball. Empty means a legacy tarball.
+  string package_format = 5;
 }
 
 message ReportResponse {}

@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -31,6 +34,11 @@ func (passChecker) Check(context.Context, string, string, string, string) error 
 
 // newAgentsUIEnv is the UI with the agent service on (and ACME off).
 func newAgentsUIEnv(t *testing.T) (*uiEnv, *agents.Service) {
+	t.Helper()
+	return newAgentsUIEnvVersion(t, "v0.3.1")
+}
+
+func newAgentsUIEnvVersion(t *testing.T, version string) (*uiEnv, *agents.Service) {
 	t.Helper()
 	v := &uiEnv{Instance: testinstance.New(t, testinstance.Options{})}
 	v.Unseal(t)
@@ -51,9 +59,23 @@ func newAgentsUIEnv(t *testing.T) (*uiEnv, *agents.Service) {
 		Log:  slog.New(slog.DiscardHandler),
 		Mode: func(ctx context.Context) (string, error) { return settings.AgentEnrollment(ctx, store.DefaultTenant) },
 	}
+	packageDir := t.TempDir()
+	dist := agentdist.New(packageDir, version)
+	for _, arch := range agentdist.Arches {
+		for _, format := range agentdist.Formats {
+			name, _ := dist.Name(format, arch)
+			if err := os.WriteFile(filepath.Join(packageDir, name), []byte(name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, agentdist.Checksums), []byte("checksums\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: settings, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read, Agents: svc,
+		AgentDist: dist, AgentBaseURL: "https://pki.homelab.lan:8444", AgentTLSIssuer: "issuing", ServerVersion: version,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +196,7 @@ func TestAgentPages(t *testing.T) {
 	if !strings.Contains(detail, `action="/agents/`+id+`/deployments/removed/withdraw"`) || !strings.Contains(detail, `name="csrf_token" value="`+token+`"`) {
 		t.Error("withdraw has no form with the session's CSRF token")
 	}
-	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}}); r.Code != http.StatusSeeOther {
+	if r := b.post(t, "/agents/"+id+"/deployments/proxy/renew", url.Values{"csrf_token": {token}, "predecessor": {"now"}}); r.Code != http.StatusSeeOther {
 		t.Fatalf("renew: %d", r.Code)
 	}
 	if page := b.get(t, "/agents/"+id).html(); !strings.Contains(page, "Renewal requested") || !strings.Contains(page, "Withdraw") {
@@ -203,14 +225,14 @@ func TestAgentPages(t *testing.T) {
 	ob := v.browser("192.0.2.3")
 	ob.signIn(t, "operator", testinstance.Password)
 	operatorPage := ob.get(t, "/agents/"+id).html()
-	if strings.Contains(operatorPage, "disabled>Renew now") || strings.Contains(operatorPage, "disabled>Withdraw") {
+	if !strings.Contains(operatorPage, `href="/agents/`+id+`/deployments/proxy/renew"`) || strings.Contains(operatorPage, "disabled>Withdraw") {
 		t.Error("operator does not get enabled renew/withdraw actions")
 	}
 	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
 	vb := v.browser("192.0.2.2")
 	vb.signIn(t, "viewer", testinstance.Password)
 	viewerPage := vb.get(t, "/agents/"+id).html()
-	if !strings.Contains(viewerPage, "disabled>Renew now") || !strings.Contains(viewerPage, "disabled>Withdraw") {
+	if strings.Contains(viewerPage, `href="/agents/`+id+`/deployments/proxy/renew"`) || !strings.Contains(viewerPage, "disabled>Withdraw") {
 		t.Error("viewer actions are not disabled")
 	}
 	viewerToken := vb.csrf(t)
@@ -232,7 +254,8 @@ func TestAgentPages(t *testing.T) {
 	}
 
 	// The tenant setting.
-	b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "agent_enrollment": {"manual"}, "acme_orders": {"300"}, "acme_failed": {"5"}, "acme_accounts": {"10"}})
+	b.post(t, "/admin/settings", url.Values{"csrf_token": {token}, "agent_enrollment": {"manual"}, "acme_orders": {"300"}, "acme_failed": {"5"}, "acme_accounts": {"10"},
+		"agent_predecessor": {"now"}, "other_predecessor": {"after"}, "other_predecessor_days": {"7"}})
 	if mode, _ := (&tenant.Store{DB: v.SystemDB.Read, Clock: v.Clock}).AgentEnrollment(t.Context(), store.DefaultTenant); mode != "manual" {
 		t.Errorf("mode %q", mode)
 	}

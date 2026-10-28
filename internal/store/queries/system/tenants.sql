@@ -22,15 +22,22 @@ ORDER BY id;
 -- Settings of a tenant (step 18): server key generation and subject defaults.
 -- name: GetTenantSettings :one
 SELECT id, allow_server_keygen, subject_o, subject_ou, subject_l, subject_st, subject_c,
-       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment
+       acme_orders_per_hour, acme_failed_per_name, acme_accounts_per_ip, trust_page, agent_enrollment, step_up_minutes,
+       agent_predecessor_choice, agent_predecessor_days, other_predecessor_choice, other_predecessor_days
 FROM tenants
 WHERE id = ?;
 
 -- name: SetTenantSettings :execrows
 UPDATE tenants
 SET allow_server_keygen = ?, subject_o = ?, subject_ou = ?, subject_l = ?, subject_st = ?, subject_c = ?,
-    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?
+    acme_orders_per_hour = ?, acme_failed_per_name = ?, acme_accounts_per_ip = ?, trust_page = ?, agent_enrollment = ?,
+    step_up_minutes = ?, agent_predecessor_choice = ?, agent_predecessor_days = ?,
+    other_predecessor_choice = ?, other_predecessor_days = ?
 WHERE id = ?;
+
+-- Authentication snapshots this whenever it records a new second-factor proof.
+-- name: GetStepUpMinutes :one
+SELECT step_up_minutes FROM tenants WHERE id = ?;
 
 -- The public listener asks this for every request to / (v0.2.2).
 -- name: GetTrustPage :one

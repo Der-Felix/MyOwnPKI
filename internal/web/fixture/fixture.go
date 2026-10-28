@@ -44,6 +44,9 @@ func (c CA) Serial() string { return fakeHex("ca-serial:"+c.Name, 16) }
 // Fingerprint is a stable, fake SHA-256 fingerprint.
 func (c CA) Fingerprint() string { return fakeHex("ca-fp:"+c.Name, 32) }
 
+// FingerprintSHA1 is a stable, fake display-only SHA-1 fingerprint.
+func (c CA) FingerprintSHA1() string { return fakeHex("ca-sha1:"+c.Name, 20) }
+
 // Event is one entry of a certificate's history.
 type Event struct {
 	Time   time.Time

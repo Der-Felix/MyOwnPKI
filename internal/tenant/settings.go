@@ -16,6 +16,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
 
@@ -41,7 +42,20 @@ type Settings struct {
 	// verified (default) or manual. Get always fills it; in Set, nil keeps
 	// the stored value.
 	AgentEnrollment *string
+	// StepUpMinutes is the lifetime of new second-factor proofs (v0.3.1).
+	// Get always fills it; in Set, nil keeps the stored value.
+	StepUpMinutes *int
+	// Separate predecessor defaults for agent deployments and other renewals.
+	// In Set, nil keeps the corresponding stored policy.
+	AgentPredecessor *predecessor.Policy
+	OtherPredecessor *predecessor.Policy
 }
+
+// DefaultStepUpMinutes preserves the lifetime used before v0.3.1.
+const DefaultStepUpMinutes = 5
+
+// StepUpMinuteValues lists the allowed proof lifetimes in minutes.
+var StepUpMinuteValues = []int{5, 10, 15, 30, 60}
 
 // Agent enrollment modes (docs/PHASE3.md §6.1).
 const (
@@ -119,10 +133,14 @@ func (s *Store) read(ctx context.Context, tenant string) (*Settings, error) {
 	}
 	trust := r.TrustPage == 1
 	mode := r.AgentEnrollment
+	stepUp := int(r.StepUpMinutes)
+	agentPolicy := predecessor.Policy{Choice: r.AgentPredecessorChoice, Days: int(r.AgentPredecessorDays)}
+	otherPolicy := predecessor.Policy{Choice: r.OtherPredecessorChoice, Days: int(r.OtherPredecessorDays)}
 	return &Settings{AllowServerKeygen: r.AllowServerKeygen == 1, Organization: r.SubjectO, OrganizationalUnit: r.SubjectOu,
 		Locality: r.SubjectL, State: r.SubjectSt, Country: r.SubjectC,
 		ACME:      &ACMELimits{OrdersPerAccount: int(r.AcmeOrdersPerHour), FailedPerName: int(r.AcmeFailedPerName), AccountsPerIP: int(r.AcmeAccountsPerIp)},
-		TrustPage: &trust, AgentEnrollment: &mode}, nil
+		TrustPage: &trust, AgentEnrollment: &mode, StepUpMinutes: &stepUp,
+		AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}, nil
 }
 
 // AgentEnrollment returns how agents are admitted, without a permission
@@ -170,6 +188,19 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if v.AgentEnrollment != nil && !slices.Contains(EnrollmentModes, *v.AgentEnrollment) {
 		problems = append(problems, "agent_enrollment: auto, verified or manual")
 	}
+	if v.StepUpMinutes != nil && !slices.Contains(StepUpMinuteValues, *v.StepUpMinutes) {
+		problems = append(problems, "step_up_minutes: 5, 10, 15, 30 or 60")
+	}
+	for _, p := range []struct {
+		name   string
+		policy *predecessor.Policy
+	}{{"agent_predecessor", v.AgentPredecessor}, {"other_predecessor", v.OtherPredecessor}} {
+		if p.policy != nil {
+			if err := p.policy.Validate(); err != nil {
+				problems = append(problems, p.name+": "+err.Error())
+			}
+		}
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s", ErrInvalid, strings.Join(problems, "; "))
 	}
@@ -193,6 +224,22 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if v.AgentEnrollment != nil {
 		mode = *v.AgentEnrollment
 	}
+	stepUp := *before.StepUpMinutes
+	if v.StepUpMinutes != nil {
+		stepUp = *v.StepUpMinutes
+	}
+	agentPolicy, otherPolicy := *before.AgentPredecessor, *before.OtherPredecessor
+	if v.AgentPredecessor != nil {
+		agentPolicy = *v.AgentPredecessor
+	}
+	if v.OtherPredecessor != nil {
+		otherPolicy = *v.OtherPredecessor
+	}
+	for _, p := range []*predecessor.Policy{&agentPolicy, &otherPolicy} {
+		if p.Choice != predecessor.After {
+			p.Days = 7
+		}
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -206,7 +253,9 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 		AllowServerKeygen: keygen, SubjectO: v.Organization, SubjectOu: v.OrganizationalUnit, SubjectL: v.Locality,
 		SubjectSt: v.State, SubjectC: v.Country,
 		AcmeOrdersPerHour: int64(limits.OrdersPerAccount), AcmeFailedPerName: int64(limits.FailedPerName), AcmeAccountsPerIp: int64(limits.AccountsPerIP),
-		TrustPage: trustInt, AgentEnrollment: mode, ID: tenant,
+		TrustPage: trustInt, AgentEnrollment: mode, StepUpMinutes: int64(stepUp), ID: tenant,
+		AgentPredecessorChoice: agentPolicy.Choice, AgentPredecessorDays: int64(agentPolicy.Days),
+		OtherPredecessorChoice: otherPolicy.Choice, OtherPredecessorDays: int64(otherPolicy.Days),
 	})
 	if err != nil {
 		return err
@@ -222,6 +271,9 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 			"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
 			"trust_page": trust, "was_trust_page": *before.TrustPage,
 			"agent_enrollment": mode, "was_agent_enrollment": *before.AgentEnrollment,
+			"step_up_minutes": stepUp, "was_step_up_minutes": *before.StepUpMinutes,
+			"agent_predecessor": agentPolicy, "was_agent_predecessor": *before.AgentPredecessor,
+			"other_predecessor": otherPolicy, "was_other_predecessor": *before.OtherPredecessor,
 		},
 	}); err != nil {
 		return err

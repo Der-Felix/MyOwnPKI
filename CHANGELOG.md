@@ -7,6 +7,78 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-28
+
+Guided agent installation and packages, independent Windows trust confirmation, configurable
+step-up and protected-action continuation, and safe predecessor handling for UI, REST, ACME and
+agent deployments.
+
+### Added
+
+- **Independent root trust verification:** the public trust page, authenticated CA details and guided
+  agent installation show authoritative SHA-256 and display-only SHA-1 for Windows certificate dialog
+  comparison. Root CA details expose an exact 64-hex SHA-256 automation value; pending CAs show no
+  empty fingerprints. Windows helpers no longer embed an expected hash: they compute both values and
+  import only after a matching independent `-ExpectedSha256` or explicit interactive SHA-256
+  confirmation. Strict argument validation, changed/mismatched certificate refusal, quiet-mode fail
+  closed behavior and elevated-child reauthorization prevent accidental or self-confirmed imports.
+- **Guided Linux agent setup and packages:** GoReleaser nFPM builds `.deb` and `.rpm` for Linux
+  amd64/arm64 with a `noreplace` conffile, example systemd files and no maintainer scripts or
+  autostart. The shared `myownpki-agent setup` verifies the independent root SHA-256, securely reads
+  optional join-token files, writes configuration/units atomically, preserves custom configuration,
+  polls pending enrollments and enables or restarts only enrolled agents. Tarballs and packages use
+  the same implementation. `install-agent.sh` is now a deprecated verified-download forwarding
+  wrapper with default version 0.3.1.
+- **Verified agent distribution and guided installation:** `install.sh` stages the exact release's
+  `.deb`, `.rpm` and tarballs for both Linux architectures after checking every artifact against
+  `checksums.txt`, and restores the previous complete distribution when a server update rolls back.
+  Docker contains the same immutable files under `/opt/myownpki/agent-dist`; `agent.package_dir`
+  selects the host/container directory. The agent listener allows anonymous `GET`/`HEAD` only for
+  the manifest-listed artifacts and checksums, with exact-name, size, method, traversal and symlink
+  protections; RPC authentication is unchanged. *Agents → Install agent* requires admin and fresh
+  step-up and generates the full verified download/install/setup flow from independent UI root and
+  package hashes. Its optional exact-host token is one-use, expires after 15 minutes, appears only
+  in the one-time response and is consumed through a 0600 file, never argv, URLs or logs. Agent
+  reports additively carry the installed format (pki.db migration 0015 and protobuf field 5), and
+  strict SemVer update hints cover only older agents, including correct prerelease ordering and no
+  suggested downgrade.
+- **Configurable predecessor handling on renewal:** choose immediate, delayed (1–30 days) or no
+  revocation, always with reason `superseded`. Tenant defaults are independent for agent deployments
+  and other certificates, with agent-wide, per-deployment and one-operation overrides. Current
+  migration defaults are owner-confirmed (agent: immediately after confirmed deployment; other
+  certificates: after seven days), recorded in `docs/PHASE3.md` §8.4.
+  Non-agent ACME renewals require the same account and exact normalized name set, with an optional
+  admin-audited per-account override in UI and REST; shared accounts should use one per host or
+  `never`. Agent actions
+  start only at an accepted deployed report with exact proof: a served TLS fingerprint always wins,
+  with the leaf fingerprint read back after the atomic write as the check-less fallback. A written
+  fingerprint never replaces a missing TLS proof and legacy agents without either field cause no action. Exact
+  account/order/name mapping and a real serial transition are required; failed, rolled-back,
+  currently serving, foreign-account and ambiguous certificates are protected. Delayed agent plans
+  start at server-recorded deployment time and repeated reports never duplicate or move plans.
+- **Planned revocations:** certificate lists/details and agent deployments show `Revocation planned`,
+  the certificate filter and dashboard cover plans due within seven days, and authorized users can
+  plan, cancel or revoke now with step-up and audit. The scheduler executes due plans idempotently,
+  including restart/unseal catch-up; CRL publication follows the committed transaction through the
+  existing CRL jobs. Additive system.db migration 0013 and pki.db migration 0014 create no revocations
+  or schedules on upgrade with unchanged serials. REST adds renewal policy fields, plan/cancel
+  endpoints, planned timestamps and agent/deployment policy endpoints; legacy `revoke_previous`
+  remains supported.
+- **Web action continuation after step-up:** protected forms show a safe action summary and run once
+  after the second factor, without asking for their inputs again. In-memory pending actions use
+  256-bit IDs in POST fields only, are bound to the session, user and credentials epoch, expire after
+  five minutes independently of the configured proof lifetime, and are consumed atomically before
+  the existing authorized handler. Replay, concurrent clicks, restart and business failure cannot
+  repeat the action; downloads, one-time secrets and multipart legacy imports keep their response
+  behavior. A new confirmation replaces the session's previous one, global entry/archive budgets
+  reject unbounded growth, and every store operation reclaims expired state. REST step-up responses
+  and the OpenAPI contract are unchanged.
+- **Tenant-configurable step-up lifetime:** tenant admins can choose 5, 10, 15, 30 or 60 minutes
+  (default 5) in *Tenant settings* or through the additive `step_up_minutes` REST field. Changes
+  are audited and apply only to new TOTP, recovery-code and passkey proofs; each session snapshots
+  the lifetime, so existing proofs are unchanged. system.db migration 0012 adds the setting and
+  per-session snapshots, with five minutes retained for existing sessions.
+
 ## [0.3.0] - 2026-10-25
 
 The Linux agent: trusted enrollment, ACME issuance, atomic deployment with rollback, scheduled
@@ -316,7 +388,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.0...v0.2.1

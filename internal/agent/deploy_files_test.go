@@ -39,6 +39,24 @@ func TestDeploymentProfileFiles(t *testing.T) {
 					}
 				}
 			}
+			material := testMaterial(t, "proxy.homelab.lan", 3)
+			files, err := targets(d, material)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range files {
+				if writeErr := a.atomicTarget(file); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+			}
+			written, err := a.writtenLeafFingerprint(d, fingerprint(material.Leaf.Raw))
+			if err != nil || written != fingerprint(material.Leaf.Raw) {
+				t.Errorf("written fingerprint = %q, %v", written, err)
+			}
+			d.Check = "127.0.0.1:443"
+			if ignored, err := a.writtenLeafFingerprint(d, fingerprint(material.Leaf.Raw)); err != nil || ignored != "" {
+				t.Errorf("check deployment used written proof: %q, %v", ignored, err)
+			}
 			outside := filepath.Join(t.TempDir(), "keep.pem")
 			if err := a.atomicTarget(targetFile{path: outside, data: []byte("refused"), mode: 0o600, uid: -1, gid: -1}); err == nil {
 				t.Fatal("profile writer accepted a path outside paths")

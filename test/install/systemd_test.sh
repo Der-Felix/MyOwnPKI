@@ -216,7 +216,22 @@ new_version=$(version_of "$update_bin")
 install -m 0755 "$update_bin" "$tmp/old/myownpki"
 update_archive=$tmp/update/myownpki_${new_version#v}_linux_$(dpkg --print-architecture).tar.gz
 tar -czf "$update_archive" -C "$tmp/old" .
-(cd "$tmp/update" && sha256sum "$(basename "$update_archive")" >checksums.txt)
+# install.sh also stages the agent packages of exactly the update's version
+# (both architectures, deb/rpm/tar.gz) and checks only names and checksums:
+# the snapshot's packages under the update's version will do.
+first_version=$(basename "$archive")
+first_version=${first_version#myownpki_}
+first_version=${first_version%_linux_*}
+update_files=("$(basename "$update_archive")")
+for agent_arch in amd64 arm64; do
+	for agent_format in deb rpm tar.gz; do
+		agent_name=myownpki-agent_${new_version#v}_linux_${agent_arch}.${agent_format}
+		cp "$(dirname "$archive")/myownpki-agent_${first_version}_linux_${agent_arch}.${agent_format}" "$tmp/update/$agent_name" ||
+			fail "the snapshot has no agent package for $agent_arch $agent_format"
+		update_files+=("$agent_name")
+	done
+done
+(cd "$tmp/update" && sha256sum -- "${update_files[@]}" >checksums.txt)
 stale=/etc/systemd/system/myownpki.service.d/zz-ci-stale.conf
 printf '[Service]\nExecStart=\nExecStart=%s.previous serve --config %s\n' "$bin" "$conf" >"$stale"
 systemctl daemon-reload

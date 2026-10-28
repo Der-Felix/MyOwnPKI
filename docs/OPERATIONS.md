@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.0
+v=0.3.1
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -67,6 +67,11 @@ What it does:
   next to it), checks its SHA-256 against `checksums.txt` and, when cosign is installed, the
   signature of `checksums.txt` (it must come from the release workflow at that tag). A mismatch
   stops it before anything is installed.
+- It also downloads the exact release's agent `.deb`, `.rpm` and tarball for both Linux amd64 and
+  arm64, verifies every one against the same `checksums.txt`, and publishes the complete set at
+  `/var/lib/myownpki/agent-dist`. A missing, wrong-version or changed artifact stops installation.
+  During a server update the previous complete set is retained and restored if the update rolls
+  back; the installer never installs or enrolls an agent on the PKI server itself.
 - It creates the system user `myownpki` and `/var/lib/myownpki` (0700), and installs
   `/usr/local/bin/myownpki` and the unit `/etc/systemd/system/myownpki.service`.
 - It installs the daily backup – `myownpki-backup.service` and `.timer`, backups in
@@ -123,8 +128,10 @@ never removed. With a `data_dir` other than `/var/lib/myownpki`, change `StateDi
 
 ### 2.2 With Docker, or by hand
 
-The container image and `deploy/docker-compose.yml` are in the README. By hand – another init
-system, FreeBSD, macOS, Windows:
+The container image and `deploy/docker-compose.yml` are in the README. The image already contains
+the same exact-version agent artifacts and `checksums.txt` under `/opt/myownpki/agent-dist`, with
+`agent.package_dir` pointing there. They are read-only to the non-root server and need no runtime
+download. By hand – another init system, FreeBSD, macOS, Windows:
 
 1. Install the binary from a release archive and create a system user, for example `myownpki`, that
    owns the data directory (mode 0700).
@@ -244,6 +251,34 @@ myownpki serve --config /etc/myownpki/config.yaml
 - Database migrations run at start like `myownpki db migrate`; back up before an upgrade.
 - Stop the server with SIGTERM or Ctrl+C: it finishes requests, seals and writes a last audit
   checkpoint (within 8 seconds). With systemd, use `KillSignal=SIGTERM` and `TimeoutStopSec=30`.
+
+### Step-up confirmation lifetime
+
+Sensitive actions need a fresh second factor. A tenant admin chooses how long that confirmation
+stays valid in *Administration → Tenant settings*: **5, 10, 15, 30 or 60 minutes**, default **5**.
+The same value is available as `step_up_minutes` in `GET` and `PUT /api/v1/settings`; viewers and
+operators can read settings but cannot change them. Every change is audited as `tenant.settings`
+with the old and new values.
+
+The lifetime is snapshotted with each TOTP, recovery-code or passkey proof. Changing the setting
+affects only proofs created afterwards: an existing confirmation neither gains nor loses time, and
+`step_up_valid_until` in the session API shows its actual expiry. Existing sessions upgraded from an
+older release keep the previous five-minute lifetime.
+
+In the web UI, a protected form that needs a fresh proof opens a confirmation page naming the action
+and its non-secret target. A correct code runs that action once; there is no need to fill in the form
+again. Downloads and one-time secrets appear in the continuation response as before. The pending
+action is bound to the session, user and credentials generation, is protected by CSRF, and expires
+after **5 minutes regardless of the longer proof lifetime above**. It exists only in server memory:
+a restart, expiry, changed credentials or another session requires starting the action again. A
+failed business action is consumed too, so retrying cannot repeat it accidentally. REST behavior is
+unchanged: API clients repeat the original operation with a fresh proof.
+
+A session has at most one open confirmation: starting another invalidates the previous pending ID.
+The server keeps at most **64** pending actions and **64 MiB** of pending legacy archives in total;
+when either budget is full, the form reports “too many open confirmations – try again later” without
+replacing existing state. Expired entries and their archive bytes are reclaimed whenever an action
+is created, read or consumed.
 
 ### Health checks and monitoring
 
@@ -453,6 +488,20 @@ From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`)
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+From v0.3.0 to v0.3.1: system.db migration 0013 adds independent predecessor defaults; pki.db
+migrations 0014–0017 add revocation plans and accepted deployment history (0014), the installed
+package format (0015), check-less written proof (0016) and optional per-account predecessor
+policies (0017). All are additive: existing certificates and revocations are unchanged and an
+unchanged agent serial creates no plan or revocation. The owner-confirmed factory values are agent:
+immediate after confirmed deployment; other certificates: after seven days. Review both defaults
+under *Administration → Tenant settings* after upgrading.
+
+**Update the server before the agents.** Mixed operation is supported: v0.3.0 agents keep sending
+valid TLS `served_fingerprint` values, which always take precedence even without the newer
+`check_configured` field. Newer agents add `written_fingerprint` only for check-less deployments;
+older agents with neither proof field cause no predecessor action. Do not revoke certificates merely
+because an older agent has not reported the new fields.
 
 ## 10. ACME server
 
@@ -707,6 +756,16 @@ renew; the window opens at about 2/3 of the lifetime (day 60–63 of 90) and las
 certificate gets a window in the past, so its client renews at once. Clients without ARI renew by
 their own rule (certbot: 30 days before expiry) – also fine.
 
+For a non-agent ACME account, a completed order is a predecessor renewal only when an older valid
+order of **the same account** has the identical normalized, sorted, duplicate-free DNS/IP name set.
+The tenant's *Other certificates* predecessor policy applies at issuance: immediate, after 1–30 days,
+or never, always with reason `superseded`. An admin can override it per non-agent account on the
+account page or with `GET`/`PUT`/`DELETE /api/v1/acme/accounts/{id}/predecessor-policy`, audited and
+with step-up. **Use one account per host:** multiple hosts sharing an account and exact name set
+schedule or revoke each other's predecessors; choose `never` when that is not intended. No ACME
+extension or client setting is needed. A similar name, a subset/superset or another account never
+selects a predecessor. Agent-linked accounts wait for the deployed report instead (chapter 12).
+
 **Revocation** from the client – `certbot revoke --cert-path …`, `lego certificates revoke …` – signs
 the CRL at once. The certificate's own key can revoke it too (a leaked key, without the account).
 
@@ -797,8 +856,9 @@ curl --cacert root.pem https://pki.homelab.lan/acme/directory
 Since v0.2.2 the public listener serves a page at `/` – `http://pki.homelab.lan/` behind port 80 –
 that everybody may open without signing in. Send people there instead of mailing root files:
 
-- every active CA, **roots first**: name, common name, validity and the **SHA-256 fingerprint**
-  in large type; after a root renewal also the older generation while it is valid;
+- every active CA, **roots first**: name, common name, validity, authoritative **SHA-256 fingerprint**
+  and **SHA-1 only for comparison with the Windows certificate dialog**; after a root renewal also
+  the older generation while it is valid;
 - downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
   and PEM (`/ca/<name>/<generation>.pem`, new);
 - per root two **Windows helpers** (`.cmd`): *this computer* (LocalMachine, asks for administrator
@@ -821,26 +881,32 @@ the CA certificates, their PEM copies and the CRLs stay – certificates point t
 
 ### 11.1 The Windows helpers
 
-Each `.cmd` is one file that is both a batch file and a PowerShell script. Double-clicked, it:
+Each `.cmd` is one file that is both a batch file and a PowerShell script. It contains no expected
+fingerprint. Double-clicked, it:
 
-1. shows the SHA-256 fingerprint of the root it carries, computed from the embedded certificate;
-2. compares it with the fingerprint written into the file and **stops** (exit code 2, nothing
-   imported) if they differ – a file changed on the way;
-3. *this computer*: asks for administrator rights (UAC) and runs again elevated;
-4. imports the root into *Trusted Root Certification Authorities* of the computer or the user
-   (Windows asks once to confirm the user variant) and waits for Enter.
+1. computes SHA-256 and SHA-1 from the embedded certificate's DER and shows both; SHA-1 is only for
+   the Windows dialog and never authorizes import;
+2. requires either `-ExpectedSha256 <value>` matching the exact 64-hex **Root SHA-256 for automation**
+   on the authenticated root CA page, or an interactive `YES` after your independent SHA-256 comparison;
+3. stops before the store on a malformed value, mismatch, changed certificate, missing/negative answer,
+   EOF, or any other input (argument error 64, mismatch 2, missing authorization 3);
+4. *this computer*: asks for administrator rights (UAC), forwards the validated expected value and
+   `/quiet`, and recomputes/reauthorizes in the elevated child;
+5. only then imports the root into *Trusted Root Certification Authorities* of the computer or user.
 
-Switches: `/check` only checks (exit 0 when the fingerprint fits), `/quiet` doesn't wait for
-Enter. Any other argument stops it with exit code 64 – a typo never becomes an import. The file is
-ASCII with CRLF line ends. Check a downloaded helper without importing:
+`/check` displays both values and performs any supplied expected-value check but never imports.
+`/quiet` suppresses the final pause; it never replaces independent authorization. A matching expected
+value imports noninteractively. Any unknown argument or missing parameter value stops with exit 64.
+The file is ASCII with CRLF line ends. Check a downloaded helper without importing:
 
 ```bat
 cmd /c root-trust-computer.cmd /check
+cmd /c root-trust-computer.cmd /check -ExpectedSha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
-normal for scripts from the network. The fingerprint check proves that the file is intact; that it
-is **your** root, only the comparison with a fingerprint from another way proves.
+normal for scripts from the network. Use only the SHA-256 value from the authenticated admin UI or
+another independent channel; never copy an expectation from the download page or helper itself.
 
 ## 12. Agent
 
@@ -864,49 +930,108 @@ agent:
   listen: ":8444"
   tls_issuer: issuing   # issues the listener's server certificate
   ca: agent-ca          # signs and authenticates agent client certificates
+  package_dir: /var/lib/myownpki/agent-dist  # exact-version downloads staged by install.sh
 ```
 
 Unseal the server so it can issue both certificates. `myownpki config check` and startup check the
 agent CA and its EKU limit. Also configure ACME (chapter 10) and a domain covering every name the
 agent may order. Agents use the same root as trust anchor for the agent and ACME listeners.
 
-### 12.2 Join token and verified installation
+The agent listener anonymously serves only `GET` and `HEAD` for the six exact-version artifacts and
+`checksums.txt` below `/agent-packages/`. There is no directory listing, arbitrary path, redirect,
+upload or symlink following; missing or incomplete development directories return 404. These public
+reads do not change enrollment or any other RPC's existing mTLS authentication. Package sizes are
+bounded. Set `MYOWNPKI_AGENT_PACKAGE_DIR` instead of editing YAML when using environment overrides.
 
-In *Agents → Join tokens → Create token*, enter the host's exact name and, if needed, patterns such
-as `*.apps.homelab.lan`. Store the one-time token in a root-only file on the host, for example
-`/root/myownpki-join-token` with mode 0600. Do not put it in `agent.yaml` or on a command line.
+### 12.2 Guided and verified installation
 
-Download the installer and checksum file, verify, and only then execute. Never pipe a download
-into a shell:
+The default is *Agents → Install agent*. An admin chooses the exact host FQDN, Linux architecture,
+package format and standalone/webroot enrollment, then confirms with a fresh second factor. The
+result contains the complete root download/fingerprint check, verified package and `checksums.txt`
+downloads, package-manager or tarball installation, and `myownpki-agent setup` commands. Run them as
+root on the target host, not on the PKI server.
+
+The root SHA-256 and package SHA-256 shown in that authenticated response are independent expected
+values. The downloaded certificate and `checksums.txt` never supply their own authorization values:
+the root arrives over HTTP and is accepted only when its DER SHA-256 matches the UI literal; package
+downloads then use HTTPS with that verified root and are checked against the independent package
+literal before installation. The response also shows root SHA-1 solely for Windows dialog comparison;
+it is never used by a command or authorization check. Do not substitute a value from a download page
+or an unauthenticated source.
+
+The optional guided join token is scoped to exactly that hostname, works once and expires after 15
+minutes. It appears only in the one-time, `no-store` response. Write it with the displayed here-doc
+to `/root/myownpki-join-token`, mode 0600; setup receives only `--token-file`. The token never goes
+into an argument, URL, action summary, report or access log, and later pages cannot show it again.
+Tokenless guided commands still require fresh step-up. The alternative *Agents → Join tokens →
+Create token* flow remains available for exact names or patterns such as `*.apps.homelab.lan`; store
+its secret the same way and never put it in `agent.yaml` or on a command line.
+
+Download the root PEM independently and compare its fingerprint with the authenticated admin UI.
+`setup` requires this expected value and checks SHA-256 over the certificate DER, not the PEM text.
+The root file must contain exactly one self-signed CA certificate:
 
 ```bash
-v=0.3.0
-curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install-agent.sh"
+openssl x509 -in root.pem -outform DER | sha256sum
+```
+
+Download the matching Linux amd64/arm64 `.deb`, `.rpm` or agent tarball together with `checksums.txt`
+and its signature. Verify `checksums.txt` with cosign as described in the README, then check the
+selected artifact before installing it. Never pipe a download into a shell:
+
+```bash
+v=0.3.1
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
+# Also download myownpki-agent_0.3.1_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Verify `checksums.txt` with cosign as described in the README when available. The installer checks
-the archive against `checksums.txt` again after downloading it; with cosign installed it also checks
-the release-workflow signature. For an offline host, put the agent archive and checksum files in one
-directory and use `--archive` instead.
+Install a package with `sudo dpkg -i myownpki-agent_0.3.1_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.1_linux_amd64.rpm`. Packages contain the binary, the pristine
+`/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
+`/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
+service. For a tarball, verify and unpack it, then install `myownpki-agent` as
+`/usr/local/bin/myownpki-agent`; its `deploy/` tree contains the same example sources. Packages and
+tarballs run exactly the same setup code.
 
-Webroot enrollment (recommended when nginx already answers port 80):
+Run setup as root. Webroot enrollment is recommended when nginx already answers port 80:
 
 ```bash
-sudo bash install-agent.sh \
+sudo myownpki-agent setup \
   --server https://pki.homelab.lan:8444 \
   --ca-bundle root.pem \
+  --root-sha256 AA:BB:CC:... \
   --token-file /root/myownpki-join-token \
   --webroot /var/www/html
 ```
 
-Without `--webroot`, enrollment uses standalone http-01 on port 80 and the installer adds the
-`20-low-ports.conf` capability drop-in. The token file is deleted only after successful admission;
-a pending or failed enrollment keeps it. The initial `agent.yaml` has no deployments. It is never
-overwritten on later runs. Re-run the script with a newer release to update the binary and restart
-the service; there is no agent self-update.
+Without `--webroot`, enrollment uses standalone http-01 on port 80 and setup installs the
+`20-low-ports.conf` capability drop-in. `--low-ports` installs it explicitly in webroot mode too.
+Setup validates Linux/root, systemctl, all files, the FQDN and configuration before changing the host.
+It writes files atomically with their required modes, installs the unit and writable-path drop-in,
+and enrolls before enabling or starting anything. A pending enrollment leaves the service disabled
+and prints `systemctl enable --now myownpki-agent` for use after approval; rerunning setup polls the
+pending request. Admission enables and starts the service. An already-enrolled update keeps local
+configuration and restarts it.
+
+The token file is deleted only when that invocation newly obtains admission; pending, failed, polled
+and already-enrolled runs keep it. The initial `agent.yaml` has no deployments. Setup preserves every
+customized existing file. The byte-identical pristine example shipped by a package may be replaced
+exactly once with the host-specific configuration. There is no agent self-update. Setup records the
+selected `--package-format` (`deb`, `rpm` or the default `tarball`) in the root-only state directory
+and reports it through the additive agent protocol. Existing agents and old reporters are treated as
+legacy tarballs; pki.db migration 0015 adds this metadata without changing enrollment state.
+
+The agent list compares strict semantic versions, including prerelease ordering. It marks only an
+older agent; equal or newer agents get no downgrade suggestion. An admin's update link generates the
+same verified commands for the reported installed format and architecture, without a join token.
+Update preserves `agent.yaml` and restarts an already enrolled service. There is no automatic update
+or remote command.
+
+`deploy/install-agent.sh` remains a deprecated v0.3.1 compatibility wrapper. It only downloads or
+accepts a verified archive, checks its checksum/signature, installs the binary and forwards to
+`setup`; it has no separate installation or enrollment logic and will be removed in v0.3.2.
 
 ### 12.3 agent.yaml and deployment profiles
 
@@ -967,14 +1092,44 @@ tested, reloaded and, on failure, rolled back as one group. Automatic renewal ru
 lifetime or earlier when ARI requests it. *Renew now* uses the same path; failures back off rather
 than retrying continuously.
 
+**Predecessor handling.** The renewal confirmation offers *Revoke now*, *Revoke after N days*
+(1–30) and *Never revoke*, preselected from the deployment override, then the agent override, then
+the tenant agent default. The choice and day count are snapshotted for that one request and repeated
+in the step-up summary. Agent-wide and deployment defaults are changed by an admin on the agent page
+and audited. The separate *Other certificates* default applies to UI, REST and non-agent ACME
+renewals. REST renewal bodies accept the same optional `predecessor` object (`choice`, `days`).
+
+An agent predecessor is revoked or scheduled only after an accepted `deployed` report with a real
+serial transition and exact deployment proof. With a configured TLS `check`, only a nonempty
+`served_fingerprint` matching the stored certificate counts. Without `check`, the agent instead reads
+the leaf back after its atomic write and reports `written_fingerprint`; the server accepts that only
+for this check-less case. A served fingerprint always takes precedence when present, including a
+v0.3.0 report that does not know `check_configured`; written proof is only the check-less fallback.
+It never substitutes for a missing or wrong TLS fingerprint, and legacy agents with neither field
+cause no predecessor action. The account, exact normalized order/deployment name sets and
+server-recorded certificate age must all match.
+Older never-deployed or discarded certificates of that exact deployment are included; every serial
+currently served by any deployment of the agent is excluded. `failed` and `rolled_back` do nothing.
+Missing, tied, duplicated or foreign-account mappings revoke and schedule nothing and are logged for
+diagnosis. A delay starts at the accepted server deployment time, not at issuance or an agent-provided
+timestamp. Repeated reports neither duplicate nor move plans.
+
+A pending entry appears as **Revocation planned · date** on certificate lists/details and beside the
+deployment. Use certificate status `planned` or the dashboard's seven-day count to review them. An
+authorized operator can revoke now or cancel before execution; both need step-up and are audited.
+REST exposes `revocation_planned_at` and `PUT`/`DELETE
+/api/v1/certificates/{id}/revocation-plan`. Plans execute idempotently after restart and unseal;
+revocation is committed before CRL signing, and the normal CRL scheduler publishes it. No report
+fails merely because a CRL cannot yet be signed or a mapping is ambiguous.
+
 When a hook fails, the last stderr lines are included as `output` in the agent log and in the
 deployment's `last_error`, bounded to 1 KiB of valid UTF-8 without control characters. **Hooks must
 not write secrets to stderr**, even with this filtering.
 
 The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
 `ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
-`@system-service` system calls. Its base writable path is only the state directory. The installer
-adds the enrollment webroot to `10-paths.conf`. Whenever you add or change `paths`, update that
+`@system-service` system calls. Its base writable path is only the state directory. Setup
+adds the configured paths to `10-paths.conf`. Whenever you add or change `paths`, update that
 drop-in to contain **exactly the state, webroot and deployment parent directories**, then run
 `systemctl daemon-reload` and restart. When a hook runs nginx, also add `/var/log/nginx`, because
 `nginx -t` opens its log files:
@@ -1006,14 +1161,16 @@ sudo systemctl daemon-reload
 sudo systemctl restart myownpki-agent
 ```
 
-For a new installation, `install-agent.sh --low-ports` installs the same drop-in explicitly.
+For a new installation, `myownpki-agent setup --low-ports` installs the same drop-in explicitly.
 Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
 with `NoNewPrivileges=yes`.
 
 CI first proves that `nginx -t` on port 443 fails without the low-port drop-in, then proves that it
 succeeds with it. It also runs `systemd-analyze verify` and `systemd-analyze security myownpki-agent.service`. The full report and
 measured overall exposure are documented in the **agent end-to-end** job summary for each run;
-values can differ between systemd releases. No unmeasured local value is claimed here.
+values can differ between systemd releases. No unmeasured local value is claimed here. The
+**install** job separately downloads the served `.deb` from a real server, checks independent root
+and package hashes, enrolls through `setup`, and updates an older enrolled agent on real systemd.
 
 ### 12.4 Firewall
 

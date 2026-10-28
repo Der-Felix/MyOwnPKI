@@ -24,6 +24,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -92,13 +93,15 @@ type Service struct {
 	// CA is agent.ca: the CA that signs the agents' certificates.
 	CA string
 	// Mode returns the tenant's enrollment mode (tenant.Store).
-	Mode    func(ctx context.Context) (string, error)
-	Checker Checker
-	Clock   clock.Clock
-	Log     *slog.Logger
-	Wake    func()
-	Rand    io.Reader                                  // nil = crypto/rand
-	Sleep   func(context.Context, time.Duration) error // nil = clock.Sleep
+	Mode func(ctx context.Context) (string, error)
+	// AgentPredecessor returns the tenant default for agent deployments.
+	AgentPredecessor func(ctx context.Context) (predecessor.Policy, error)
+	Checker          Checker
+	Clock            clock.Clock
+	Log              *slog.Logger
+	Wake             func()
+	Rand             io.Reader                                  // nil = crypto/rand
+	Sleep            func(context.Context, time.Duration) error // nil = clock.Sleep
 
 	limitOnce     sync.Once
 	limits        *limiter
@@ -109,21 +112,24 @@ type Service struct {
 
 // Agent is an admitted agent.
 type Agent struct {
-	ID             string
-	Hostname       string
-	Status         string // active | disabled | revoked
-	EnrollmentMode string
-	Proof          string // JSON
-	CertificateID  string
-	CertSerial     string
-	OS, Arch       string
-	Version        string
-	LastSeenAt     time.Time
-	CreatedAt      time.Time
-	ApprovedAt     time.Time
-	ApprovedBy     string
-	Names          []Name
-	Deployments    []Deployment
+	ID              string
+	Hostname        string
+	Status          string // active | disabled | revoked
+	EnrollmentMode  string
+	Proof           string // JSON
+	CertificateID   string
+	CertSerial      string
+	OS, Arch        string
+	Version         string
+	PackageFormat   string
+	LastSeenAt      time.Time
+	CreatedAt       time.Time
+	ApprovedAt      time.Time
+	ApprovedBy      string
+	Predecessor     *predecessor.Policy
+	EffectivePolicy predecessor.Policy
+	Names           []Name
+	Deployments     []Deployment
 }
 
 // Name is one entry of an agent's name list.

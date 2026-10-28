@@ -24,6 +24,7 @@ ci_refuse_existing_agent() {
     /etc/systemd/system/myownpki-agent.service \
     /etc/systemd/system/myownpki-agent.service.d \
     /usr/local/bin/myownpki-agent \
+    /etc/myownpki-agent \
     /var/lib/myownpki-agent
 }
 

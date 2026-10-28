@@ -26,8 +26,10 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
 
 // Console is the console operator of the tests.
@@ -159,6 +161,13 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 	v.Engine = &ca.Engine{
 		PKI: pki.Write, Audit: v.TenantAudit.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: v.Ring, Presets: v.Presets,
 		Clock: v.Clock, ServerKeygen: func(context.Context) (bool, error) { return true, nil },
+		OtherPredecessor: func(ctx context.Context) (predecessor.Policy, error) {
+			settings, settingsErr := systemdb.New(v.SystemDB.Read).GetTenantSettings(ctx, store.DefaultTenant)
+			if settingsErr != nil {
+				return predecessor.Policy{}, settingsErr
+			}
+			return predecessor.Policy{Choice: settings.OtherPredecessorChoice, Days: int(settings.OtherPredecessorDays)}, nil
+		},
 	}
 	v.Auth = auth.NewService(v.SystemDB.Write, v.InstanceAudit.Write, key, v.Clock)
 	v.Auth.Hasher = auth.NewHasher(auth.TestParams(), 4, time.Second)

@@ -51,8 +51,9 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
   `user unlock` void it. Client IPs from `X-Forwarded-For` only behind `auth.trusted_proxies`.
 - The last active instance admin and the last active admin of a tenant can't be disabled or lose
   the role.
-- **Step-up auth** (fresh 2FA within 5 minutes) for: private key download, revocation, CA
-  create/renew/retire/revoke, CRL upload, user/role changes, 2FA reset, API token creation (step 18).
+- **Step-up auth** (fresh 2FA within the tenant's configured 5/10/15/30/60-minute lifetime, default
+  5; snapshotted per proof) for: private key download, revocation, CA create/renew/retire/revoke,
+  CRL upload, user/role changes, 2FA reset, API token creation (step 18).
 - **Unseal = a signed-in instance admin + the passphrase** – the passphrase is the stronger proof,
   no extra step-up. Wrong passphrases are slowed down per instance and per client address. Changing your own password, authenticator or recovery codes needs the current
   password.

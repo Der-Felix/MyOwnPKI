@@ -284,8 +284,14 @@ func (a *app) settingsPage(c *rc) {
 			{ID: "trust_page", Label: "Public trust page at / of the public listener (CA certificates, fingerprints, install guides)", Type: "checkbox", Checked: s.TrustPage != nil && *s.TrustPage},
 			{ID: "agent_enrollment", Label: "Agents: how an enrollment is admitted", Type: "select", Options: enrollmentOptions(s.AgentEnrollment),
 				Hint: "verified: join token and passed check (one alone waits for an admin); auto: either one; manual: an admin decides every enrollment"},
+			{ID: "step_up_minutes", Label: "Second-factor confirmation: valid for", Type: "select", Options: stepUpOptions(s.StepUpMinutes),
+				Hint: "Applies to new confirmations only; an existing confirmation keeps its original lifetime"},
 		},
 	})
+	d.Fields = append(d.Fields, predecessorFields("agent_predecessor", "agent_predecessor_days", *s.AgentPredecessor)...)
+	d.Fields[len(d.Fields)-2].Label = "Agent deployments: predecessor default"
+	d.Fields = append(d.Fields, predecessorFields("other_predecessor", "other_predecessor_days", *s.OtherPredecessor)...)
+	d.Fields[len(d.Fields)-2].Label = "Other certificates: predecessor default"
 	if !c.may(authz.ManageTenant, "") {
 		d.Intro = append(d.Intro, "Only a tenant admin can change these.")
 	}
@@ -305,10 +311,17 @@ func (a *app) saveSettings(c *rc) {
 	if m := f("agent_enrollment"); m != "" {
 		mode = &m
 	}
+	var stepUp *int // absent: the stored lifetime stays
+	if f("step_up_minutes") != "" {
+		n := num("step_up_minutes")
+		stepUp = &n
+	}
+	agentPolicy := predecessorFromForm(f, "agent_predecessor", "agent_predecessor_days")
+	otherPolicy := predecessorFromForm(f, "other_predecessor", "other_predecessor_days")
 	err := a.d.Settings.Set(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
 		OrganizationalUnit: strings.TrimSpace(f("ou")), Locality: strings.TrimSpace(f("l")), State: strings.TrimSpace(f("st")), Country: strings.TrimSpace(f("c")),
 		ACME:      &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")},
-		TrustPage: &trust, AgentEnrollment: mode}, c.who())
+		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}, c.who())
 	if err != nil {
 		c.refused(err, "/admin/settings")
 		return
@@ -432,17 +445,21 @@ func (a *app) importPage(c *rc) {
 }
 
 func (a *app) runImport(c *rc) {
-	file, _, err := c.r.FormFile("archive")
-	if err != nil {
-		c.setFlash(view.Message{Kind: view.MessageError, Text: "Choose the archive (.tar.gz)."})
-		c.redirect("/admin/import")
-		return
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, legacy.MaxArchive+1))
-	if err != nil {
-		c.refused(err, "/admin/import")
-		return
+	data := c.actionArchive
+	if !c.continuing {
+		file, _, err := c.r.FormFile("archive")
+		if err != nil {
+			c.setFlash(view.Message{Kind: view.MessageError, Text: "Choose the archive (.tar.gz)."})
+			c.redirect("/admin/import")
+			return
+		}
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, legacy.MaxArchive+1))
+		if err != nil {
+			c.refused(err, "/admin/import")
+			return
+		}
+		c.actionArchive = append([]byte(nil), data...)
 	}
 	fsys, err := legacy.FromArchive(data)
 	if err != nil {
@@ -523,6 +540,22 @@ func enrollmentOptions(current *string) []admin.Option {
 		{tenant.EnrollManual, "manual – an admin decides"},
 	} {
 		out = append(out, admin.Option{Value: m.v, Label: m.label, Selected: m.v == cur})
+	}
+	return out
+}
+
+func stepUpOptions(current *int) []admin.Option {
+	cur := tenant.DefaultStepUpMinutes
+	if current != nil {
+		cur = *current
+	}
+	out := make([]admin.Option, 0, len(tenant.StepUpMinuteValues))
+	for _, minutes := range tenant.StepUpMinuteValues {
+		label := strconv.Itoa(minutes) + " minutes"
+		if minutes == tenant.DefaultStepUpMinutes {
+			label += " (default)"
+		}
+		out = append(out, admin.Option{Value: strconv.Itoa(minutes), Label: label, Selected: minutes == cur})
 	}
 	return out
 }

@@ -8,18 +8,17 @@ import (
 	"strings"
 )
 
-// Windows helpers of the trust page (v0.2.2, owner 2026-10-24): one .cmd
-// per root generation and store – LocalMachine (asks for administrator
-// rights itself) or CurrentUser (no administrator needed). Double-click it,
-// or run it in cmd.exe.
+// Windows helpers of the trust page: one .cmd per root generation and store –
+// LocalMachine (asks for administrator rights itself) or CurrentUser (no
+// administrator needed). Double-click it, or run it in cmd.exe.
 //
 // The file is a Batch/PowerShell polyglot: cmd.exe reads the first line
 // "<# :" as a label and runs the batch lines up to "exit /b"; PowerShell
 // reads everything from "<#" to "#>" as a comment and runs the rest. The
 // batch part starts PowerShell on the file itself. The root is embedded as
-// PEM; before anything is imported, its SHA-256 is computed and compared
-// with the fingerprint written into the file – a changed certificate stops
-// the import. "/check" only checks (the CI runs it so) and imports nothing.
+// PEM. The helper computes its SHA-256 and SHA-1, but contains no expected
+// fingerprint: only an independent SHA-256 argument or an explicit user
+// confirmation authorizes an import. "/check" imports nothing.
 //
 // The file is ASCII only (CA names are ASCII; the common name, which may
 // not be, stays out) and has CRLF line ends – cmd.exe misreads labels and
@@ -42,8 +41,8 @@ func windowsHelper(caName string, generation int64, der []byte, scope string) []
 		fmt.Sprintf("<# : MyOwnPKI trust helper - root CA %s, generation %d, for %s", caName, generation, what),
 		"@echo off",
 		"setlocal",
-		"rem Imports the root certificate below into Trusted Root Certification",
-		"rem Authorities after it checked its SHA-256. \"/check\" only checks.",
+		"rem Imports the root certificate below only after independent SHA-256 authorization.",
+		"rem \"/check\" computes and displays fingerprints without importing.",
 		"set \"MYOWNPKI_SELF=%~f0\"",
 		"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& ([ScriptBlock]::Create([IO.File]::ReadAllText($env:MYOWNPKI_SELF))) %*\"",
 		"exit /b %errorlevel%",
@@ -52,42 +51,83 @@ func windowsHelper(caName string, generation int64, der []byte, scope string) []
 		"$name = '" + caName + "'",
 		fmt.Sprintf("$generation = %d", generation),
 		"$store = '" + store + "'",
-		"$expected = '" + colonHex(der) + "'",
 		"$pem = @'",
 	}
 	lines = append(lines, strings.Split(certPEM, "\n")...)
 	lines = append(lines, []string{
 		"'@",
-		"foreach ($a in $args) {",
-		"    if ($a -ne '/check' -and $a -ne '/quiet') {",
-		"        Write-Host \"Unknown argument '$a' - nothing was imported. Use /check (check only) or /quiet (no prompt at the end).\"",
+		"$check = $false",
+		"$quiet = $false",
+		"$expected = ''",
+		"for ($i = 0; $i -lt $args.Count; $i++) {",
+		"    $a = [string]$args[$i]",
+		"    if ($a -eq '/check') {",
+		"        $check = $true",
+		"    } elseif ($a -eq '/quiet') {",
+		"        $quiet = $true",
+		"    } elseif ($a -eq '-ExpectedSha256') {",
+		"        if ($expected -ne '' -or $i + 1 -ge $args.Count) {",
+		"            Write-Host 'Missing or duplicate -ExpectedSha256 value - nothing was imported.'",
+		"            exit 64",
+		"        }",
+		"        $i++",
+		"        $expected = [string]$args[$i]",
+		"        if ($expected -notmatch '^[0-9A-Fa-f]{64}$') {",
+		"            Write-Host 'STOP: -ExpectedSha256 must be exactly 64 hexadecimal characters with no colons or whitespace. Nothing was imported.'",
+		"            exit 64",
+		"        }",
+		"        $expected = $expected.ToUpperInvariant()",
+		"    } else {",
+		"        Write-Host \"Unknown argument '$a' - nothing was imported. Use /check, /quiet, or -ExpectedSha256 <64-hex-value>.\"",
 		"        exit 64",
 		"    }",
 		"}",
-		"$check = $args -contains '/check'",
-		"$quiet = $check -or ($args -contains '/quiet')",
+		"$quiet = $check -or $quiet",
 		"function Done([int]$code) {",
-		"    if (-not $quiet) { try { [void](Read-Host 'Press Enter to close') } catch { } }",
+		"    if (-not $quiet -and $expected -eq '') { try { [void](Read-Host 'Press Enter to close') } catch { } }",
 		"    exit $code",
 		"}",
 		"$b64 = (($pem -split \"`n\") | Where-Object { $_ -notmatch '-----' }) -join ''",
 		"$der = [Convert]::FromBase64String(($b64 -replace '\\s', ''))",
-		"$sha = [Security.Cryptography.SHA256]::Create()",
-		"$got = (($sha.ComputeHash($der) | ForEach-Object { $_.ToString('X2') }) -join ':')",
-		"Write-Host \"Root CA $name (generation $generation), SHA-256 of the certificate in this file:\"",
+		"$sha256 = [Security.Cryptography.SHA256]::Create()",
+		"$sha1 = [Security.Cryptography.SHA1]::Create()",
+		"$sha256Bytes = $sha256.ComputeHash($der)",
+		"$sha1Bytes = $sha1.ComputeHash($der)",
+		"$gotHex = (($sha256Bytes | ForEach-Object { $_.ToString('X2') }) -join '')",
+		"$got = (($sha256Bytes | ForEach-Object { $_.ToString('X2') }) -join ':')",
+		"$gotSHA1 = (($sha1Bytes | ForEach-Object { $_.ToString('X2') }) -join ':')",
+		"Write-Host \"Root CA $name (generation $generation), certificate SHA-256 (authoritative):\"",
 		"Write-Host \"  $got\"",
-		"if ($got -ne $expected) {",
-		"    Write-Host 'STOP: the certificate in this file does not match its fingerprint - the file was changed. Nothing was imported.'",
-		"    Done 2",
+		"Write-Host 'Certificate SHA-1 (display only, for the Windows certificate dialog):'",
+		"Write-Host \"  $gotSHA1\"",
+		"if ($expected -ne '') {",
+		"    if ($gotHex -cne $expected) {",
+		"        Write-Host 'STOP: the certificate SHA-256 does not match -ExpectedSha256. The certificate may have changed. Nothing was imported.'",
+		"        Done 2",
+		"    }",
+		"    Write-Host 'SHA-256 matches the independently supplied expected value.'",
 		"}",
-		"Write-Host 'Fingerprint ok. Compare it with the fingerprint on the trust page, or one you got from your administrator.'",
 		"if ($check) { exit 0 }",
 		"if ($store -eq 'LocalMachine') {",
 		"    $me = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()",
 		"    if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {",
 		"        Write-Host 'Asking for administrator rights ...'",
-		"        $p = Start-Process -FilePath $env:ComSpec -ArgumentList '/c', ('\"' + $env:MYOWNPKI_SELF + '\"') -Verb RunAs -Wait -PassThru",
+		"        $child = '\"' + $env:MYOWNPKI_SELF + '\"'",
+		"        if ($expected -ne '') { $child += ' -ExpectedSha256 ' + $expected }",
+		"        if ($quiet) { $child += ' /quiet' }",
+		"        $p = Start-Process -FilePath $env:ComSpec -ArgumentList '/c', $child -Verb RunAs -Wait -PassThru",
 		"        exit $p.ExitCode",
+		"    }",
+		"}",
+		"if ($expected -eq '') {",
+		"    if ($quiet) {",
+		"        Write-Host 'STOP: /quiet cannot replace independent SHA-256 authorization. Supply -ExpectedSha256 or run interactively. Nothing was imported.'",
+		"        Done 3",
+		"    }",
+		"    $answer = Read-Host 'Type YES only after independently comparing the authoritative SHA-256 above'",
+		"    if ($answer -cne 'YES') {",
+		"        Write-Host 'STOP: independent SHA-256 comparison was not confirmed. Nothing was imported.'",
+		"        Done 3",
 		"    }",
 		"}",
 		"$cert = New-Object Security.Cryptography.X509Certificates.X509Certificate2 (, $der)",

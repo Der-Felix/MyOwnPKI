@@ -48,6 +48,7 @@ type Service struct {
 	Hasher   *Hasher
 	Throttle *Throttle
 	Clock    clock.Clock
+	Tenant   string    // tenant whose step-up setting new proofs snapshot
 	Rand     io.Reader // nil = crypto/rand
 	// Issuer is the name authenticator apps show; "" = "MyOwnPKI".
 	Issuer string
@@ -60,7 +61,7 @@ type Service struct {
 // NewService returns a service with the production hasher and throttle.
 func NewService(system, auditLog *sql.DB, key *Key, clk clock.Clock) *Service {
 	return &Service{
-		System: system, Audit: auditLog, Key: key, Clock: clk,
+		System: system, Audit: auditLog, Key: key, Clock: clk, Tenant: store.DefaultTenant,
 		Hasher: NewHasher(DefaultParams, MaxParallelHashes, HashWait), Throttle: NewThrottle(),
 	}
 }
@@ -322,7 +323,7 @@ func (s *Service) keepLock(u systemdb.User, device string, now time.Time) sql.Nu
 }
 
 // StepUp confirms a sensitive action with a fresh TOTP code (security.md):
-// the session's step-up time is set, authz accepts it for StepUpWindow.
+// the session snapshots the proof time and the tenant's current lifetime.
 func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session, error) {
 	return s.StepUpFrom(ctx, token, code, Client{IP: ip})
 }
@@ -343,10 +344,16 @@ func (s *Service) StepUpFrom(ctx context.Context, token, code string, c Client) 
 		return nil, s.failedFrom(ctx, u, c, device, "user.step_up", "wrong code", ErrInvalidCode)
 	}
 	// Fail-closed: no step-up without its audit entry.
-	if err := s.direct(ctx, &u, c.IP, "user.step_up", audit.ResultSuccess, nil); err != nil {
-		return nil, fmt.Errorf("step-up refused – the audit entry can't be written: %w", err)
+	if auditErr := s.direct(ctx, &u, c.IP, "user.step_up", audit.ResultSuccess, nil); auditErr != nil {
+		return nil, fmt.Errorf("step-up refused – the audit entry can't be written: %w", auditErr)
 	}
-	if err := q.SetStepUp(ctx, systemdb.SetStepUpParams{StepupAt: sql.NullString{String: formatTime(now), Valid: true}, IDHash: sess.idHash}); err != nil {
+	stepUpMinutes, err := q.GetStepUpMinutes(ctx, s.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	if err := q.SetStepUp(ctx, systemdb.SetStepUpParams{
+		StepupAt: sql.NullString{String: formatTime(now), Valid: true}, StepupMinutes: stepUpMinutes, IDHash: sess.idHash,
+	}); err != nil {
 		return nil, err
 	}
 	if err := q.SetLoginFailures(ctx, systemdb.SetLoginFailuresParams{FailedLogins: 0, LockedUntil: s.keepLock(u, device, now), UpdatedAt: formatTime(now), ID: u.ID}); err != nil {

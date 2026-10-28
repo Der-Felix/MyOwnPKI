@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
@@ -25,6 +26,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -58,6 +60,11 @@ type AppDeps struct {
 	TenantAudit, InstanceAudit *sql.DB
 	// Agents is the agent service (v0.3); nil while agent.base_url is empty.
 	Agents *agents.Service
+	// AgentDist, AgentBaseURL and AgentTLSIssuer drive guided installation.
+	AgentDist      *agentdist.Store
+	AgentBaseURL   string
+	AgentTLSIssuer string
+	ServerVersion  string
 	// ACME is the ACME server (PHASE2); nil while ACME is off.
 	ACME ACMEAdmin
 	// ACMEDirectory is the directory URL clients use (shown with EAB keys).
@@ -77,6 +84,7 @@ type ACMEAdmin interface {
 	Pending(ctx context.Context) (accounts, names int64, err error)
 	Accounts(ctx context.Context, who keys.Who) ([]acme.AccountInfo, error)
 	Account(ctx context.Context, who keys.Who, id string) (*acme.AccountInfo, error)
+	SetAccountPredecessor(ctx context.Context, id string, policy *predecessor.Policy, who keys.Who) error
 	ApproveAccount(ctx context.Context, id string, who keys.Who) error
 	Names(ctx context.Context, who keys.Who) ([]acme.NameInfo, error)
 	DecideName(ctx context.Context, name string, approve bool, who keys.Who) error
@@ -92,15 +100,17 @@ const (
 )
 
 type app struct {
-	d   AppDeps
-	log *slog.Logger
+	d       AppDeps
+	log     *slog.Logger
+	actions map[string]actionSpec
+	pending *pendingActions
 }
 
 func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	if d.Clock == nil {
 		d.Clock = clock.System{}
 	}
-	a := &app{d: d, log: log}
+	a := &app{d: d, log: log, actions: map[string]actionSpec{}, pending: newPendingActions()}
 	mux.HandleFunc("GET /login", a.anon(a.loginPage))
 	mux.HandleFunc("POST /login", a.anon(a.login))
 	mux.HandleFunc("GET /login/code", a.anon(a.codePage))
@@ -119,81 +129,91 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /certificates/{id}", a.signedIn(a.certificateDetail))
 	mux.HandleFunc("GET /certificates/{id}/{tab}", a.signedIn(a.certificateDetail))
 	mux.HandleFunc("GET /certificates/{id}/download/{format}", a.signedIn(a.certificateDownload))
-	mux.HandleFunc("POST /certificates/{id}/key", a.signedIn(a.keyDownload))
+	a.protected(mux, "POST /certificates/{id}/key", a.keyDownload)
 	mux.HandleFunc("GET /certificates/{id}/revoke", a.signedIn(a.revokePage))
-	mux.HandleFunc("POST /certificates/{id}/revoke", a.signedIn(a.revoke))
+	a.protected(mux, "POST /certificates/{id}/revoke", a.revoke, "reason", "invalidity", "confirm")
+	mux.HandleFunc("GET /certificates/{id}/revocation-plan", a.signedIn(a.planRevocationPage))
+	a.protected(mux, "POST /certificates/{id}/revocation-plan", a.planRevocation, "days")
+	a.protected(mux, "POST /certificates/{id}/revocation-cancel", a.cancelRevocationPlan)
 	mux.HandleFunc("GET /certificates/{id}/renew", a.signedIn(a.renewPage))
-	mux.HandleFunc("POST /certificates/{id}/renew", a.signedIn(a.renew))
+	a.protected(mux, "POST /certificates/{id}/renew", a.renew, "alg", "csr", "predecessor", "predecessor_days")
 	mux.HandleFunc("GET /certificates/{id}/export", a.signedIn(a.exportPage))
-	mux.HandleFunc("POST /certificates/{id}/export", a.signedIn(a.export))
+	a.protected(mux, "POST /certificates/{id}/export", a.export, "format", "password", "password2", "delete")
 	mux.HandleFunc("GET /authorities", a.signedIn(a.authorityList))
 	mux.HandleFunc("GET /authorities/{id}", a.signedIn(a.authorityDetail))
 	mux.HandleFunc("GET /authorities/new", a.signedIn(a.newCAPage))
-	mux.HandleFunc("POST /authorities/new", a.signedIn(a.newCA))
+	a.protected(mux, "POST /authorities/new", a.newCA, "parent", "name", "cn", "o", "c", "alg", "days", "pathlen", "dns", "ip", "eku", "base", "crl_days", "max_days")
 	mux.HandleFunc("GET /authorities/import", a.signedIn(a.importRootPage))
-	mux.HandleFunc("POST /authorities/import", a.signedIn(a.importRoot))
+	a.protected(mux, "POST /authorities/import", a.importRoot, "name", "cert", "base", "crl_days")
 	mux.HandleFunc("GET /authorities/{id}/certificate", a.signedIn(a.authorityCertificate))
-	mux.HandleFunc("POST /authorities/{id}/certificate", a.signedIn(a.installCertificate))
+	a.protected(mux, "POST /authorities/{id}/certificate", a.installCertificate, "cert")
 	mux.HandleFunc("GET /authorities/{id}/offline", a.signedIn(a.offlinePage))
 	mux.HandleFunc("GET /authorities/{id}/manage", a.signedIn(a.managePage))
-	mux.HandleFunc("POST /authorities/{id}/limits", a.signedIn(a.caLimits))
-	mux.HandleFunc("POST /authorities/{id}/crl", a.signedIn(a.caSignCRL))
-	mux.HandleFunc("POST /authorities/{id}/crl-upload", a.signedIn(a.caUploadCRL))
-	mux.HandleFunc("POST /authorities/{id}/renew", a.signedIn(a.caRenew))
-	mux.HandleFunc("POST /authorities/{id}/retire", a.signedIn(a.caRetire))
-	mux.HandleFunc("POST /authorities/{id}/revoke", a.signedIn(a.caRevoke))
+	a.protected(mux, "POST /authorities/{id}/limits", a.caLimits, "crl_days", "max_days")
+	a.protected(mux, "POST /authorities/{id}/crl", a.caSignCRL)
+	a.protected(mux, "POST /authorities/{id}/crl-upload", a.caUploadCRL, "crl")
+	a.protected(mux, "POST /authorities/{id}/renew", a.caRenew, "alg", "days")
+	a.protected(mux, "POST /authorities/{id}/retire", a.caRetire, "confirm")
+	a.protected(mux, "POST /authorities/{id}/revoke", a.caRevoke, "reason", "confirm")
 	mux.HandleFunc("GET /domains", a.signedIn(a.domainList))
 	mux.HandleFunc("GET /domains/new", a.signedIn(a.domainNew))
-	mux.HandleFunc("POST /domains", a.signedIn(a.domainCreate))
+	a.protected(mux, "POST /domains", a.domainCreate, "name", "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
 	mux.HandleFunc("GET /domains/{id}", a.signedIn(a.domainDetail))
-	mux.HandleFunc("POST /domains/{id}", a.signedIn(a.domainUpdate))
-	mux.HandleFunc("POST /domains/{id}/delete", a.signedIn(a.domainDelete))
+	a.protected(mux, "POST /domains/{id}", a.domainUpdate, "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
+	a.protected(mux, "POST /domains/{id}/delete", a.domainDelete)
 	mux.HandleFunc("GET /agents", a.signedIn(a.agentList))
+	mux.HandleFunc("GET /agents/install", a.signedIn(a.agentInstallPage))
+	a.protected(mux, "POST /agents/install", a.agentInstall, "hostname", "arch", "format", "mode", "webroot", "token")
+	mux.HandleFunc("GET /agents/{id}/update", a.signedIn(a.agentUpdatePage))
 	mux.HandleFunc("GET /agents/enrollments", a.signedIn(a.enrollmentList))
-	mux.HandleFunc("POST /agents/enrollments/approve", a.signedIn(a.enrollmentDecide))
-	mux.HandleFunc("POST /agents/enrollments/deny", a.signedIn(a.enrollmentDecide))
+	a.protected(mux, "POST /agents/enrollments/approve", a.enrollmentDecide, "id")
+	a.protected(mux, "POST /agents/enrollments/deny", a.enrollmentDecide, "id")
 	mux.HandleFunc("GET /agents/tokens", a.signedIn(a.joinTokens))
-	mux.HandleFunc("POST /agents/tokens", a.signedIn(a.joinTokenCreate))
-	mux.HandleFunc("POST /agents/tokens/delete", a.signedIn(a.joinTokenDelete))
+	a.protected(mux, "POST /agents/tokens", a.joinTokenCreate, "label", "names", "hours")
+	a.protected(mux, "POST /agents/tokens/delete", a.joinTokenDelete, "id")
 	mux.HandleFunc("GET /agents/{id}", a.signedIn(a.agentDetail))
 	mux.HandleFunc("GET /agents/{id}/deployments", a.session(a.agentDeployments, true))
-	mux.HandleFunc("POST /agents/{id}/deployments/{name}/renew", a.signedIn(a.agentRenew))
+	mux.HandleFunc("GET /agents/{id}/deployments/{name}/renew", a.signedIn(a.agentRenewPage))
+	a.protected(mux, "POST /agents/{id}/deployments/{name}/renew", a.agentRenew, "predecessor", "predecessor_days")
 	mux.HandleFunc("POST /agents/{id}/deployments/{name}/withdraw", a.signedIn(a.agentWithdraw))
-	mux.HandleFunc("POST /agents/{id}/names", a.signedIn(a.agentNames))
-	mux.HandleFunc("POST /agents/{id}/{action}", a.signedIn(a.agentAction))
+	a.protected(mux, "POST /agents/{id}/predecessor-policy", a.agentPredecessorPolicy, "predecessor", "predecessor_days", "inherit")
+	a.protected(mux, "POST /agents/{id}/deployments/{name}/predecessor-policy", a.agentPredecessorPolicy, "predecessor", "predecessor_days", "inherit")
+	a.protected(mux, "POST /agents/{id}/names", a.agentNames, "action", "name")
+	a.protected(mux, "POST /agents/{id}/{action}", a.agentAction)
 	mux.HandleFunc("GET /acme/accounts", a.signedIn(a.acmeAccounts))
 	mux.HandleFunc("GET /acme/accounts/{id}", a.signedIn(a.acmeAccount))
-	mux.HandleFunc("POST /acme/accounts/approve", a.signedIn(a.acmeApprove))
+	a.protected(mux, "POST /acme/accounts/{id}/predecessor-policy", a.acmePredecessorPolicy, "predecessor", "predecessor_days", "inherit")
+	a.protected(mux, "POST /acme/accounts/approve", a.acmeApprove, "id")
 	mux.HandleFunc("GET /acme/names", a.signedIn(a.acmeNames))
-	mux.HandleFunc("POST /acme/names/decide", a.signedIn(a.acmeDecide))
+	a.protected(mux, "POST /acme/names/decide", a.acmeDecide, "name", "decision")
 	mux.HandleFunc("GET /acme/eab", a.signedIn(a.acmeEAB))
-	mux.HandleFunc("POST /acme/eab", a.signedIn(a.acmeEABCreate))
+	a.protected(mux, "POST /acme/eab", a.acmeEABCreate, "label", "days")
 	mux.HandleFunc("GET /acme/orders", a.signedIn(a.acmeOrders))
 	mux.HandleFunc("GET /presets", a.signedIn(a.presetList))
 	mux.HandleFunc("GET /presets/{name}", a.signedIn(a.presetDetail))
 	mux.HandleFunc("GET /admin/users", a.signedIn(a.userList))
 	mux.HandleFunc("GET /admin/users/new", a.signedIn(a.newUserPage))
-	mux.HandleFunc("POST /admin/users/new", a.signedIn(a.newUser))
+	a.protected(mux, "POST /admin/users/new", a.newUser, "username", "password", "role", "scope", "instance_admin")
 	mux.HandleFunc("GET /admin/users/{id}", a.signedIn(a.userDetail))
-	mux.HandleFunc("POST /admin/users/{id}/roles", a.signedIn(a.userGiveRole))
-	mux.HandleFunc("POST /admin/users/{id}/roles/remove", a.signedIn(a.userRemoveRole))
-	mux.HandleFunc("POST /admin/users/{id}/disable", a.signedIn(a.userDisable))
-	mux.HandleFunc("POST /admin/users/{id}/enable", a.signedIn(a.userEnable))
-	mux.HandleFunc("POST /admin/users/{id}/unlock", a.signedIn(a.userUnlock))
+	a.protected(mux, "POST /admin/users/{id}/roles", a.userGiveRole, "role", "scope")
+	a.protected(mux, "POST /admin/users/{id}/roles/remove", a.userRemoveRole, "scope")
+	a.protected(mux, "POST /admin/users/{id}/disable", a.userDisable)
+	a.protected(mux, "POST /admin/users/{id}/enable", a.userEnable)
+	a.protected(mux, "POST /admin/users/{id}/unlock", a.userUnlock)
 	mux.HandleFunc("GET /admin/settings", a.signedIn(a.settingsPage))
 	mux.HandleFunc("POST /admin/settings", a.signedIn(a.saveSettings))
 	mux.HandleFunc("GET /admin/audit", a.signedIn(a.auditLog))
 	mux.HandleFunc("GET /admin/import", a.signedIn(a.importPage))
-	mux.HandleFunc("POST /admin/import", a.signedIn(a.runImport))
+	a.protected(mux, "POST /admin/import", a.runImport, "dry_run", "base", "root_key", "ca_pass", "key_pass")
 	mux.HandleFunc("GET /admin/import/{id}", a.signedIn(a.importReport))
 	mux.HandleFunc("GET /account", a.signedIn(a.accountPage))
-	mux.HandleFunc("POST /account/password", a.signedIn(a.changePassword))
-	mux.HandleFunc("POST /account/totp", a.signedIn(a.startTOTP))
-	mux.HandleFunc("POST /account/totp/confirm", a.signedIn(a.confirmTOTP))
-	mux.HandleFunc("POST /account/recovery-codes", a.signedIn(a.newCodes))
-	mux.HandleFunc("POST /account/tokens", a.signedIn(a.createToken))
-	mux.HandleFunc("POST /account/tokens/{id}/revoke", a.signedIn(a.revokeToken))
-	mux.HandleFunc("POST /account/passkeys/{id}/remove", a.signedIn(a.removePasskey))
+	a.protected(mux, "POST /account/password", a.changePassword, "current", "new", "new2")
+	a.protected(mux, "POST /account/totp", a.startTOTP, "password")
+	a.protected(mux, "POST /account/totp/confirm", a.confirmTOTP, "code")
+	a.protected(mux, "POST /account/recovery-codes", a.newCodes, "password")
+	a.protected(mux, "POST /account/tokens", a.createToken, "name", "role", "scope", "days")
+	a.protected(mux, "POST /account/tokens/{id}/revoke", a.revokeToken)
+	a.protected(mux, "POST /account/passkeys/{id}/remove", a.removePasskey, "password")
 	mux.HandleFunc("GET /admin/appearance", a.signedIn(a.appearance))
 	mux.HandleFunc("POST /admin/appearance", a.signedIn(a.saveAppearance))
 	mux.HandleFunc("GET /design", a.signedIn(a.design))
@@ -201,13 +221,16 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 
 // rc is one request of the real UI.
 type rc struct {
-	w      http.ResponseWriter
-	r      *http.Request
-	a      *app
-	client auth.Client
-	token  string        // the session cookie value
-	sess   *auth.Session // nil before sign-in
-	flash  []view.Message
+	w             http.ResponseWriter
+	r             *http.Request
+	a             *app
+	client        auth.Client
+	token         string        // the session cookie value
+	sess          *auth.Session // nil before sign-in
+	flash         []view.Message
+	actionPattern string
+	actionArchive []byte
+	continuing    bool
 }
 
 func (a *app) newRC(w http.ResponseWriter, r *http.Request) *rc {

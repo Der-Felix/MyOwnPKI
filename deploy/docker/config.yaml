@@ -43,3 +43,7 @@ acme:
   # The Docker network the proxy container is in (and loopback).
   trusted_proxies: "127.0.0.1, ::1, 172.16.0.0/12"
   resolver: ""
+
+agent:
+  # Immutable agent packages and checksums built into the server image.
+  package_dir: /opt/myownpki/agent-dist

@@ -267,7 +267,7 @@ func (q *Queries) FinishACMEChallenge(ctx context.Context, arg FinishACMEChallen
 }
 
 const getACMEAccount = `-- name: GetACMEAccount :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE id = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id, predecessor_choice, predecessor_days FROM acme_accounts WHERE id = ?
 `
 
 func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, error) {
@@ -286,12 +286,14 @@ func (q *Queries) GetACMEAccount(ctx context.Context, id string) (AcmeAccount, e
 		&i.CreatedIp,
 		&i.UpdatedAt,
 		&i.AgentID,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }
 
 const getACMEAccountByThumbprint = `-- name: GetACMEAccountByThumbprint :one
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts WHERE key_thumbprint = ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id, predecessor_choice, predecessor_days FROM acme_accounts WHERE key_thumbprint = ?
 `
 
 func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint string) (AcmeAccount, error) {
@@ -310,6 +312,8 @@ func (q *Queries) GetACMEAccountByThumbprint(ctx context.Context, keyThumbprint 
 		&i.CreatedIp,
 		&i.UpdatedAt,
 		&i.AgentID,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
 	)
 	return i, err
 }
@@ -649,7 +653,7 @@ func (q *Queries) LinkACMEOrderAuthz(ctx context.Context, arg LinkACMEOrderAuthz
 }
 
 const listACMEAccounts = `-- name: ListACMEAccounts :many
-SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id FROM acme_accounts ORDER BY created_at DESC LIMIT ?
+SELECT id, key_thumbprint, jwk, status, contact, eab_key_id, approved_at, approved_by, created_at, created_ip, updated_at, agent_id, predecessor_choice, predecessor_days FROM acme_accounts ORDER BY created_at DESC LIMIT ?
 `
 
 func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAccount, error) {
@@ -674,6 +678,8 @@ func (q *Queries) ListACMEAccounts(ctx context.Context, limit int64) ([]AcmeAcco
 			&i.CreatedIp,
 			&i.UpdatedAt,
 			&i.AgentID,
+			&i.PredecessorChoice,
+			&i.PredecessorDays,
 		); err != nil {
 			return nil, err
 		}
@@ -1033,6 +1039,30 @@ type SetACMEOrderValidParams struct {
 
 func (q *Queries) SetACMEOrderValid(ctx context.Context, arg SetACMEOrderValidParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setACMEOrderValid, arg.CertificateID, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setACMEPredecessorPolicy = `-- name: SetACMEPredecessorPolicy :execrows
+UPDATE acme_accounts SET predecessor_choice = ?, predecessor_days = ?, updated_at = ? WHERE id = ?
+`
+
+type SetACMEPredecessorPolicyParams struct {
+	PredecessorChoice sql.NullString
+	PredecessorDays   sql.NullInt64
+	UpdatedAt         string
+	ID                string
+}
+
+func (q *Queries) SetACMEPredecessorPolicy(ctx context.Context, arg SetACMEPredecessorPolicyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setACMEPredecessorPolicy,
+		arg.PredecessorChoice,
+		arg.PredecessorDays,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

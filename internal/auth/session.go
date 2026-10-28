@@ -62,21 +62,35 @@ func parseNullTime(s sql.NullString) time.Time {
 
 // Session is a signed-in user (or one between password and second factor).
 type Session struct {
-	UserID    string
-	Username  string
-	CSRFToken string
-	CreatedAt time.Time
-	ExpiresAt time.Time // absolute end (a pending session: PendingTTL)
-	LastSeen  time.Time // last activity; the idle timeout counts from here
-	StepUpAt  time.Time
+	UserID         string
+	Username       string
+	CSRFToken      string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time // absolute end (a pending session: PendingTTL)
+	LastSeen       time.Time // last activity; the idle timeout counts from here
+	StepUpAt       time.Time
+	StepUpDuration time.Duration
 	// Principal is what the session may do; nil for a pending session.
 	Principal *authz.Principal
 	// TokenID and TokenName are set when an API token signed the request in
 	// (no cookie, no CSRF token, never a step-up).
 	TokenID, TokenName string
 
-	idHash  string
-	pending bool
+	idHash           string
+	credentialsEpoch int64
+	pending          bool
+}
+
+// SessionBinding identifies the server-side session and the user's credentials
+// generation without exposing either as mutable Session fields.
+type SessionBinding struct {
+	SessionIDHash    string
+	CredentialsEpoch int64
+}
+
+// Binding returns the immutable binding of this authenticated session.
+func (s *Session) Binding() SessionBinding {
+	return SessionBinding{SessionIDHash: s.idHash, CredentialsEpoch: s.credentialsEpoch}
 }
 
 // IdleExpiresAt is when the session ends without further activity.
@@ -124,15 +138,21 @@ func (s *Service) insertSession(ctx context.Context, q *systemdb.Queries, userID
 	}
 	expires := now.Add(AbsoluteTimeout)
 	var stepUp sql.NullString
+	stepUpMinutes := int64(authz.StepUpWindow / time.Minute)
 	if state == statePassword {
 		expires = now.Add(PendingTTL)
 	} else {
-		// The second factor was just entered: that counts as a step-up.
+		// The second factor was just entered: that counts as a step-up. Keep
+		// its configured lifetime with the proof, not with the tenant.
 		stepUp = sql.NullString{String: formatTime(now), Valid: true}
+		stepUpMinutes, err = q.GetStepUpMinutes(ctx, s.Tenant)
+		if err != nil {
+			return "", err
+		}
 	}
 	err = q.InsertSession(ctx, systemdb.InsertSessionParams{
 		IDHash: hashToken(token), UserID: userID, State: state, CsrfToken: csrf,
-		CreatedAt: formatTime(now), LastSeenAt: formatTime(now), ExpiresAt: formatTime(expires), StepupAt: stepUp,
+		CreatedAt: formatTime(now), LastSeenAt: formatTime(now), ExpiresAt: formatTime(expires), StepupAt: stepUp, StepupMinutes: stepUpMinutes,
 	})
 	return token, err
 }
@@ -207,10 +227,12 @@ func (s *Service) authenticate(ctx context.Context, token string, touch bool) (*
 func sessionOf(row systemdb.Session, u systemdb.User, bindings []systemdb.RoleBinding) *Session {
 	sess := &Session{
 		UserID: u.ID, Username: u.Username, CSRFToken: row.CsrfToken, CreatedAt: parseTime(row.CreatedAt), LastSeen: parseTime(row.LastSeenAt),
-		ExpiresAt: parseTime(row.ExpiresAt), StepUpAt: parseNullTime(row.StepupAt), idHash: row.IDHash, pending: row.State == statePassword,
+		ExpiresAt: parseTime(row.ExpiresAt), StepUpAt: parseNullTime(row.StepupAt), StepUpDuration: time.Duration(row.StepupMinutes) * time.Minute,
+		idHash: row.IDHash, credentialsEpoch: u.CredentialsEpoch, pending: row.State == statePassword,
 	}
 	if !sess.pending {
-		p := &authz.Principal{Kind: authz.KindUser, UserID: u.ID, Username: u.Username, InstanceAdmin: u.InstanceAdmin == 1, StepUpAt: sess.StepUpAt}
+		p := &authz.Principal{Kind: authz.KindUser, UserID: u.ID, Username: u.Username, InstanceAdmin: u.InstanceAdmin == 1,
+			StepUpAt: sess.StepUpAt, StepUpDuration: sess.StepUpDuration}
 		for _, b := range bindings {
 			p.Bindings = append(p.Bindings, authz.Binding{Tenant: b.TenantID, CA: b.Ca, Role: authz.Role(b.Role)})
 		}

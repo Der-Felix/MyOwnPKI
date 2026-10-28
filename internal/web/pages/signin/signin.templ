@@ -82,19 +82,29 @@ templ Unseal(p view.Page, d UnsealData) {
 	}
 }
 
-// StepUp confirms a sensitive action with a fresh code; afterwards the user
-// is back on the page and starts the action again – it never runs on its own.
-templ StepUp(p view.Page, d FormData) {
+// StepUpData identifies the in-memory action without putting its ID in a URL.
+type StepUpData struct {
+	FormData
+	PendingID string
+	Summary   string
+}
+
+// StepUp confirms one sensitive action and continues it exactly once.
+templ StepUp(p view.Page, d StepUpData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
+		<section class="section" aria-labelledby="h-action">
+			<h2 id="h-action" class="section-head">Action</h2>
+			<p>{ d.Summary }</p>
+		</section>
 		<form class="form" action="/step-up" method="post">
 			<input type="hidden" name="csrf_token" value={ d.CSRF }/>
-			<input type="hidden" name="next" value={ d.Next }/>
-			@components.FormRow("code", "Code", "The 6-digit code of your authenticator app. It counts for 5 minutes.", "", true) {
+			<input type="hidden" name="pending_id" value={ d.PendingID }/>
+			@components.FormRow("code", "Code", "The 6-digit code of your authenticator app – or one of your recovery codes.", "", true) {
 				<input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required/>
 			}
 			<div class="form-actions">
-				<button type="submit" class="btn btn-primary">Confirm</button>
+				<button type="submit" class="btn btn-primary">Confirm and run once</button>
 				<a class="btn" href={ templ.SafeURL(d.Next) }>Cancel</a>
 			</div>
 		</form>

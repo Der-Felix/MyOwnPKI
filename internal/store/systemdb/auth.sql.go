@@ -266,7 +266,7 @@ func (q *Queries) DeleteUserTokens(ctx context.Context, userID string) (int64, e
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at FROM sessions WHERE id_hash = ?
+SELECT id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at, stepup_minutes FROM sessions WHERE id_hash = ?
 `
 
 func (q *Queries) GetSession(ctx context.Context, idHash string) (Session, error) {
@@ -281,6 +281,7 @@ func (q *Queries) GetSession(ctx context.Context, idHash string) (Session, error
 		&i.LastSeenAt,
 		&i.ExpiresAt,
 		&i.StepupAt,
+		&i.StepupMinutes,
 	)
 	return i, err
 }
@@ -405,19 +406,20 @@ func (q *Queries) InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCode
 }
 
 const insertSession = `-- name: InsertSession :exec
-INSERT INTO sessions (id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sessions (id_hash, user_id, state, csrf_token, created_at, last_seen_at, expires_at, stepup_at, stepup_minutes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
-	IDHash     string
-	UserID     string
-	State      string
-	CsrfToken  string
-	CreatedAt  string
-	LastSeenAt string
-	ExpiresAt  string
-	StepupAt   sql.NullString
+	IDHash        string
+	UserID        string
+	State         string
+	CsrfToken     string
+	CreatedAt     string
+	LastSeenAt    string
+	ExpiresAt     string
+	StepupAt      sql.NullString
+	StepupMinutes int64
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -430,6 +432,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.LastSeenAt,
 		arg.ExpiresAt,
 		arg.StepupAt,
+		arg.StepupMinutes,
 	)
 	return err
 }
@@ -763,16 +766,17 @@ func (q *Queries) SetRoleBinding(ctx context.Context, arg SetRoleBindingParams) 
 }
 
 const setStepUp = `-- name: SetStepUp :exec
-UPDATE sessions SET stepup_at = ? WHERE id_hash = ?
+UPDATE sessions SET stepup_at = ?, stepup_minutes = ? WHERE id_hash = ?
 `
 
 type SetStepUpParams struct {
-	StepupAt sql.NullString
-	IDHash   string
+	StepupAt      sql.NullString
+	StepupMinutes int64
+	IDHash        string
 }
 
 func (q *Queries) SetStepUp(ctx context.Context, arg SetStepUpParams) error {
-	_, err := q.db.ExecContext(ctx, setStepUp, arg.StepupAt, arg.IDHash)
+	_, err := q.db.ExecContext(ctx, setStepUp, arg.StepupAt, arg.StepupMinutes, arg.IDHash)
 	return err
 }
 

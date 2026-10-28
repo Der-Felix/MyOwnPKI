@@ -38,6 +38,8 @@ func (a *app) certStatus(i *ca.CertificateInfo) (view.Status, string) {
 	switch {
 	case i.Status == ca.CertRevoked:
 		return view.StatusCrit, "Revoked"
+	case i.RevocationPlannedAt != nil:
+		return view.StatusInfo, "Revocation planned · " + view.Date(*i.RevocationPlannedAt)
 	case i.Status == ca.CertExpired:
 		return view.StatusCrit, "Expired"
 	case i.NotAfter.Sub(a.now()) <= ca.ExpiringWindow:
@@ -151,6 +153,11 @@ func (a *app) dashboard(c *rc) {
 		c.fail(err)
 		return
 	}
+	planned, err := a.d.Engine.RevocationsDue(ctx, c.who())
+	if err != nil {
+		c.fail(err)
+		return
+	}
 	n := func(v int64) string { return strconv.FormatInt(v, 10) }
 	d := overview.Data{
 		Real:     true,
@@ -161,6 +168,7 @@ func (a *app) dashboard(c *rc) {
 			{Label: "Expire in 30 days", Value: n(endEntity.Expiring), Href: "/certificates?status=expiring", Status: alarm(endEntity.Expiring, view.StatusWarn)},
 			{Label: "Expired", Value: n(total.Expired), Href: "/certificates?status=expired", Status: alarm(total.Expired, view.StatusCrit)},
 			{Label: "Revoked", Value: n(total.Revoked), Href: "/certificates?status=revoked"},
+			{Label: "Revocations due in next 7 days", Value: n(planned), Href: "/certificates?status=planned", Status: alarm(planned, view.StatusInfo)},
 			{Label: "Certificate authorities", Value: strconv.Itoa(len(cas)), Href: "/authorities"},
 		},
 		Attention: []view.Message{},
@@ -244,7 +252,7 @@ func (a *app) dashboard(c *rc) {
 
 var realStatusFilters = []view.Option{
 	{Value: "", Label: "All"}, {Value: "valid", Label: "Valid"}, {Value: "expiring", Label: "Expires soon"},
-	{Value: "expired", Label: "Expired"}, {Value: "revoked", Label: "Revoked"},
+	{Value: "expired", Label: "Expired"}, {Value: "revoked", Label: "Revoked"}, {Value: "planned", Label: "Revocation planned"},
 }
 
 func (a *app) certificateList(c *rc) {
@@ -359,7 +367,8 @@ func (a *app) certificateDetail(c *rc) {
 		ID: info.ID, CommonName: cmp.Or(info.CommonName, info.Serial), Status: st, StatusText: text, Tab: tab,
 		KeyStored: info.KeyStored, Revoked: info.Status == ca.CertRevoked, Messages: c.messages(),
 		Real: &certificates.RealActions{CSRF: c.sess.CSRFToken, CanDownloadKey: info.KeyStored && c.may(authz.DownloadKey, info.CAName),
-			CanRenew: info.Source != "external" && info.Preset != "" && c.may(authz.IssueCert, info.CAName), CanRevoke: info.Source != "external" && c.may(authz.RevokeCert, info.CAName)},
+			CanRenew: info.Source != "external" && info.Preset != "" && c.may(authz.IssueCert, info.CAName), CanRevoke: info.Source != "external" && c.may(authz.RevokeCert, info.CAName),
+			RevocationPlanned: info.RevocationPlannedAt != nil},
 	}
 	for _, t := range realCertTabs {
 		d.Tabs = append(d.Tabs, view.Tab{Label: t.label, Href: "/certificates/" + info.ID + t.suffix, Active: t.key == tab})
@@ -382,6 +391,9 @@ func (a *app) certificateDetail(c *rc) {
 	}
 	if info.RevokedAt != nil {
 		d.Overview = append(d.Overview, view.KV{Key: "Revoked", Value: view.DateTime(*info.RevokedAt) + ", reason: " + info.RevocationReason})
+	}
+	if info.RevocationPlannedAt != nil {
+		d.Overview = append(d.Overview, view.KV{Key: "Revocation planned", Value: view.DateTime(*info.RevocationPlannedAt) + ", reason: superseded"})
 	}
 	for _, n := range info.DNSNames {
 		d.Names = append(d.Names, view.KV{Key: "DNS name", Value: n})
@@ -473,8 +485,7 @@ func (a *app) certificateDownload(c *rc) {
 }
 
 // keyDownload is the one POST that answers with content: the key itself.
-// Without a fresh second factor it goes to the step-up page and back to the
-// certificate – the download is then started again by hand.
+// Without a fresh second factor it continues from the step-up page.
 func (a *app) keyDownload(c *rc) {
 	ctx := c.r.Context()
 	id := c.r.PathValue("id")
@@ -482,7 +493,7 @@ func (a *app) keyDownload(c *rc) {
 	key, err := a.d.Engine.ExportKey(ctx, c.who(), id)
 	switch {
 	case errors.Is(err, authz.ErrStepUpRequired):
-		c.redirect(loginURL("/step-up", detail))
+		c.beginStepUp(detail)
 		return
 	case errors.Is(err, ca.ErrNoStoredKey):
 		c.setFlash(view.Message{Kind: view.MessageError, Text: ca.ErrNoStoredKey.Error() + "."})
@@ -563,11 +574,20 @@ func (a *app) authorityDetail(c *rc) {
 			{Key: "Key algorithm", Value: g.KeyAlgorithm},
 			{Key: "Key storage", Value: keyStorage(info.KeyMode)},
 			{Key: "Serial number", Value: g.Serial, Mono: true},
-			{Key: "SHA-256 fingerprint", Value: view.Fingerprint(g.Fingerprint), Mono: true},
 			{Key: "Valid from", Value: view.DateTime(genTime(g.NotBefore))},
 			{Key: "Valid until", Value: view.DateTime(genTime(g.NotAfter)) + " (" + view.Relative(a.now(), genTime(g.NotAfter)) + ")"},
 			{Key: "Public base URL", Value: info.BaseURL + " – in every certificate it issues, can't change"},
 		},
+	}
+	if !g.Pending && g.Fingerprint != "" && g.FingerprintSHA1 != "" {
+		fingerprints := []view.KV{
+			{Key: "SHA-256 fingerprint (authoritative)", Value: view.Fingerprint(g.Fingerprint), Mono: true},
+			{Key: "SHA-1 fingerprint (Windows certificate dialog comparison only)", Value: view.Fingerprint(g.FingerprintSHA1), Mono: true},
+		}
+		if info.Kind == ca.KindRoot {
+			fingerprints = append(fingerprints, view.KV{Key: "Root SHA-256 for automation (exact 64 hex)", Value: strings.ReplaceAll(strings.ToLower(g.Fingerprint), ":", ""), Mono: true})
+		}
+		d.Properties = slices.Insert(d.Properties, 6, fingerprints...)
 	}
 	if info.Kind == ca.KindRoot {
 		d.IssuedEmpty = "A root CA issues no end-entity certificates – it signs intermediate CAs and CRLs."

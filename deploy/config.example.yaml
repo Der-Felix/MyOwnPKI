@@ -112,3 +112,7 @@ agent:
   # signs the agents' 7-day certificates; only those pass the listener's
   # client authentication. Required with base_url.
   ca: ""
+  # Exact-version .deb, .rpm, tarball and checksums.txt staged by install.sh.
+  # The agent listener serves only these files; no runtime download is needed.
+  # Docker sets /opt/myownpki/agent-dist instead.
+  package_dir: /var/lib/myownpki/agent-dist

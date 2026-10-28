@@ -47,7 +47,8 @@ func (q *Queries) AgentCertificatesBySerial(ctx context.Context, arg AgentCertif
 }
 
 const clearDeploymentRenewal = `-- name: ClearDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL
+UPDATE agent_deployments SET renew_requested_at = NULL, renew_requested_by = NULL, renew_requested_version = NULL,
+    renew_predecessor_choice = NULL, renew_predecessor_days = NULL
 WHERE agent_id = ? AND name = ? AND renew_requested_version = ?
 `
 
@@ -76,7 +77,7 @@ func (q *Queries) DeleteUnreportedDeployments(ctx context.Context, agentID strin
 }
 
 const getAgentDeployment = `-- name: GetAgentDeployment :one
-SELECT agent_id, name, profile, names, challenge, state, certificate_serial, not_after, served_fingerprint, deployed_at, last_error, last_report_at, renew_requested_at, renew_requested_by, renew_requested_version, reported FROM agent_deployments WHERE agent_id = ? AND name = ?
+SELECT agent_id, name, profile, names, challenge, state, certificate_serial, not_after, served_fingerprint, deployed_at, last_error, last_report_at, renew_requested_at, renew_requested_by, renew_requested_version, reported, predecessor_choice, predecessor_days, renew_predecessor_choice, renew_predecessor_days, written_fingerprint, check_configured FROM agent_deployments WHERE agent_id = ? AND name = ?
 `
 
 type GetAgentDeploymentParams struct {
@@ -104,13 +105,19 @@ func (q *Queries) GetAgentDeployment(ctx context.Context, arg GetAgentDeployment
 		&i.RenewRequestedBy,
 		&i.RenewRequestedVersion,
 		&i.Reported,
+		&i.PredecessorChoice,
+		&i.PredecessorDays,
+		&i.RenewPredecessorChoice,
+		&i.RenewPredecessorDays,
+		&i.WrittenFingerprint,
+		&i.CheckConfigured,
 	)
 	return i, err
 }
 
 const listAgentDeployments = `-- name: ListAgentDeployments :many
 
-SELECT agent_id, name, profile, names, challenge, state, certificate_serial, not_after, served_fingerprint, deployed_at, last_error, last_report_at, renew_requested_at, renew_requested_by, renew_requested_version, reported FROM agent_deployments WHERE agent_id = ? ORDER BY name
+SELECT agent_id, name, profile, names, challenge, state, certificate_serial, not_after, served_fingerprint, deployed_at, last_error, last_report_at, renew_requested_at, renew_requested_by, renew_requested_version, reported, predecessor_choice, predecessor_days, renew_predecessor_choice, renew_predecessor_days, written_fingerprint, check_configured FROM agent_deployments WHERE agent_id = ? ORDER BY name
 `
 
 // Reported data is never executable configuration. All keys include agent_id.
@@ -140,6 +147,12 @@ func (q *Queries) ListAgentDeployments(ctx context.Context, agentID string) ([]A
 			&i.RenewRequestedBy,
 			&i.RenewRequestedVersion,
 			&i.Reported,
+			&i.PredecessorChoice,
+			&i.PredecessorDays,
+			&i.RenewPredecessorChoice,
+			&i.RenewPredecessorDays,
+			&i.WrittenFingerprint,
+			&i.CheckConfigured,
 		); err != nil {
 			return nil, err
 		}
@@ -164,16 +177,19 @@ func (q *Queries) MarkAgentDeploymentsUnreported(ctx context.Context, agentID st
 }
 
 const requestDeploymentRenewal = `-- name: RequestDeploymentRenewal :execrows
-UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?
+UPDATE agent_deployments SET renew_requested_at = ?, renew_requested_by = ?, renew_requested_version = ?,
+    renew_predecessor_choice = ?, renew_predecessor_days = ?
 WHERE agent_id = ? AND name = ? AND renew_requested_at IS NULL
 `
 
 type RequestDeploymentRenewalParams struct {
-	RenewRequestedAt      sql.NullString
-	RenewRequestedBy      sql.NullString
-	RenewRequestedVersion sql.NullInt64
-	AgentID               string
-	Name                  string
+	RenewRequestedAt       sql.NullString
+	RenewRequestedBy       sql.NullString
+	RenewRequestedVersion  sql.NullInt64
+	RenewPredecessorChoice sql.NullString
+	RenewPredecessorDays   sql.NullInt64
+	AgentID                string
+	Name                   string
 }
 
 func (q *Queries) RequestDeploymentRenewal(ctx context.Context, arg RequestDeploymentRenewalParams) (int64, error) {
@@ -181,6 +197,8 @@ func (q *Queries) RequestDeploymentRenewal(ctx context.Context, arg RequestDeplo
 		arg.RenewRequestedAt,
 		arg.RenewRequestedBy,
 		arg.RenewRequestedVersion,
+		arg.RenewPredecessorChoice,
+		arg.RenewPredecessorDays,
 		arg.AgentID,
 		arg.Name,
 	)
@@ -191,15 +209,16 @@ func (q *Queries) RequestDeploymentRenewal(ctx context.Context, arg RequestDeplo
 }
 
 const updateAgentReport = `-- name: UpdateAgentReport :exec
-UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ? WHERE id = ?
+UPDATE agents SET last_seen_at = ?, os = ?, arch = ?, agent_version = ?, package_format = ? WHERE id = ?
 `
 
 type UpdateAgentReportParams struct {
-	LastSeenAt   sql.NullString
-	Os           string
-	Arch         string
-	AgentVersion string
-	ID           string
+	LastSeenAt    sql.NullString
+	Os            string
+	Arch          string
+	AgentVersion  string
+	PackageFormat string
+	ID            string
 }
 
 func (q *Queries) UpdateAgentReport(ctx context.Context, arg UpdateAgentReportParams) error {
@@ -208,6 +227,7 @@ func (q *Queries) UpdateAgentReport(ctx context.Context, arg UpdateAgentReportPa
 		arg.Os,
 		arg.Arch,
 		arg.AgentVersion,
+		arg.PackageFormat,
 		arg.ID,
 	)
 	return err
@@ -215,28 +235,31 @@ func (q *Queries) UpdateAgentReport(ctx context.Context, arg UpdateAgentReportPa
 
 const upsertAgentDeployment = `-- name: UpsertAgentDeployment :exec
 INSERT INTO agent_deployments (agent_id, name, profile, names, challenge, state, certificate_serial,
-    not_after, served_fingerprint, deployed_at, last_error, last_report_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    not_after, served_fingerprint, written_fingerprint, check_configured, deployed_at, last_error, last_report_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (agent_id, name) DO UPDATE SET profile = excluded.profile, names = excluded.names,
     challenge = excluded.challenge, state = excluded.state, certificate_serial = excluded.certificate_serial,
     not_after = excluded.not_after, served_fingerprint = excluded.served_fingerprint,
+    written_fingerprint = excluded.written_fingerprint, check_configured = excluded.check_configured,
     deployed_at = excluded.deployed_at, last_error = excluded.last_error, last_report_at = excluded.last_report_at,
     reported = TRUE
 `
 
 type UpsertAgentDeploymentParams struct {
-	AgentID           string
-	Name              string
-	Profile           string
-	Names             string
-	Challenge         string
-	State             string
-	CertificateSerial sql.NullString
-	NotAfter          sql.NullString
-	ServedFingerprint sql.NullString
-	DeployedAt        sql.NullString
-	LastError         sql.NullString
-	LastReportAt      string
+	AgentID            string
+	Name               string
+	Profile            string
+	Names              string
+	Challenge          string
+	State              string
+	CertificateSerial  sql.NullString
+	NotAfter           sql.NullString
+	ServedFingerprint  sql.NullString
+	WrittenFingerprint sql.NullString
+	CheckConfigured    int64
+	DeployedAt         sql.NullString
+	LastError          sql.NullString
+	LastReportAt       string
 }
 
 func (q *Queries) UpsertAgentDeployment(ctx context.Context, arg UpsertAgentDeploymentParams) error {
@@ -250,6 +273,8 @@ func (q *Queries) UpsertAgentDeployment(ctx context.Context, arg UpsertAgentDepl
 		arg.CertificateSerial,
 		arg.NotAfter,
 		arg.ServedFingerprint,
+		arg.WrittenFingerprint,
+		arg.CheckConfigured,
 		arg.DeployedAt,
 		arg.LastError,
 		arg.LastReportAt,

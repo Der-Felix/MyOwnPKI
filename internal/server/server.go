@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -32,6 +33,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/httpapi"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/publish"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
@@ -56,6 +58,7 @@ const (
 	jobCheckpoint = "audit-checkpoint"
 	jobHeads      = "audit-heads"
 	jobCRL        = "crl-renew"
+	jobRevoke     = "revocation-plans"
 	jobSessions   = "sessions-prune"
 	jobOutbox     = "outbox-cleanup"
 	jobRefusals   = "admin-refusals"
@@ -228,6 +231,14 @@ func (s *Server) build(key *auth.Key) error {
 			t, err := systemdb.New(s.sys.Read).GetTenant(ctx, store.DefaultTenant)
 			return t.AllowServerKeygen == 1, err
 		},
+		OtherPredecessor: func(ctx context.Context) (predecessor.Policy, error) {
+			settings := &tenant.Store{DB: s.sys.Read, Clock: s.clk}
+			v, err := settings.Defaults(ctx, store.DefaultTenant)
+			if err != nil {
+				return predecessor.Policy{}, err
+			}
+			return *v.OtherPredecessor, nil
+		},
 	}
 	s.auth = auth.NewService(s.sys.Write, s.ia.Write, key, s.clk)
 	s.auth.Wake = s.wakeUp
@@ -243,6 +254,9 @@ func (s *Server) build(key *auth.Key) error {
 		s.deliver(ctx)
 		if err := s.cp.MakeAll(ctx, "unseal"); err != nil {
 			s.log.Error("checkpoint at unseal", slog.Any("error", err))
+		}
+		if err := s.engine.ExecuteDueRevocations(ctx); err != nil {
+			s.log.Warn("planned revocations at unseal", slog.Any("error", err))
 		}
 		if _, err := s.engine.RenewCRLs(ctx, "unseal"); err != nil {
 			s.log.Warn("CRL renewal at unseal", slog.Any("error", err))
@@ -272,6 +286,7 @@ func (s *Server) build(key *auth.Key) error {
 		}
 		return err
 	})
+	s.jobs.add(jobRevoke, time.Minute, 0, s.engine.ExecuteDueRevocations)
 	s.jobs.add(jobSessions, time.Hour, time.Hour, func(ctx context.Context) error {
 		_, err := s.auth.PruneSessions(ctx)
 		return err
@@ -726,14 +741,15 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk, Log: s.log,
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, Tenant: store.DefaultTenant,
-		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(),
+		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(), ACME: s.acme,
 	})
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
 		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
-		Agents: s.Agents(),
+		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Version),
+		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Version,
 	}})
 	if err != nil {
 		return err

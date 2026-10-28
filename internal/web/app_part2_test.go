@@ -4,7 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha1" // #nosec G505 -- verifies the display-only Windows dialog value
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"io/fs"
 	"maps"
 	"net/http"
@@ -20,6 +23,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 	"github.com/Der-Felix/MyOwnPKI/internal/testutil"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
 // Part 2 of the real UI (step 19): every action ends with 303 on a page
@@ -44,7 +48,7 @@ func TestCertificateActions(t *testing.T) {
 	detail := "/certificates/" + issued.ID
 
 	// Renew: 303 to the successor.
-	r := b.post(t, detail+"/renew", url.Values{"csrf_token": {token}, "alg": {"ecdsa-p256"}})
+	r := b.post(t, detail+"/renew", url.Values{"csrf_token": {token}, "alg": {"ecdsa-p256"}, "predecessor": {"never"}})
 	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/certificates/crt_") || r.location() == detail {
 		t.Fatalf("renew: %d %q", r.Code, r.location())
 	}
@@ -113,7 +117,7 @@ func TestCertificateActions(t *testing.T) {
 	other, _ := v.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"git.homelab.lan"}, Who: testinstance.Console})
 	v.Clock.Advance(authz.StepUpWindow + time.Second)
 	r = b.post(t, "/certificates/"+other.ID+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}})
-	if r.Code != http.StatusSeeOther || !strings.HasPrefix(r.location(), "/step-up?next=") {
+	if r.Code != http.StatusSeeOther || r.location() != "/step-up" {
 		t.Errorf("revoke without step-up: %d %q", r.Code, r.location())
 	}
 }
@@ -145,6 +149,41 @@ func TestViewerSeesNoCommands(t *testing.T) {
 	if rr := b.post(t, "/certificates/"+issued.ID+"/revoke", url.Values{"csrf_token": {token}, "reason": {"superseded"}, "confirm": {"yes"}}); rr.Code != http.StatusSeeOther ||
 		!strings.Contains(flashOf(t, b, rr.location()), "needs the role operator") {
 		t.Errorf("revoke by a viewer: %d %q", rr.Code, rr.location())
+	}
+}
+
+func TestCAFingerprintDisplay(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	chain, err := v.Engine.CAChain(t.Context(), testinstance.Console, v.CAIDs["issuing"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"root", "issuing"} {
+		der := chain[0]
+		if name == "root" {
+			der = chain[len(chain)-1]
+		}
+		sha256Sum := sha256.Sum256(der)
+		sha1Sum := sha1.Sum(der) // #nosec G401 -- expected display-only value
+		page := b.get(t, "/authorities/"+v.CAIDs[name]).html()
+		for _, want := range []string{
+			"SHA-256 fingerprint (authoritative)", view.Fingerprint(strings.ToUpper(hex.EncodeToString(sha256Sum[:]))),
+			"SHA-1 fingerprint (Windows certificate dialog comparison only)", view.Fingerprint(strings.ToUpper(hex.EncodeToString(sha1Sum[:]))),
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page lacks %q", name, want)
+			}
+		}
+		automation := strings.ToLower(hex.EncodeToString(sha256Sum[:]))
+		if name == "root" && (!strings.Contains(page, "Root SHA-256 for automation (exact 64 hex)") || !strings.Contains(page, ">"+automation+"<")) {
+			t.Errorf("root page has no exact 64-hex automation value: %s", page)
+		}
+		if name != "root" && strings.Contains(page, "Root SHA-256 for automation") {
+			t.Error("intermediate page exposes a root automation value")
+		}
 	}
 }
 
@@ -190,6 +229,10 @@ func TestCAOfflineFlowInTheUI(t *testing.T) {
 		t.Fatalf("offline page:\n%s", page)
 	}
 	belowID := strings.TrimSuffix(strings.TrimPrefix(r.location(), "/authorities/"), "/offline")
+	pending := b.get(t, "/authorities/"+belowID).html()
+	if strings.Contains(pending, "SHA-256 fingerprint") || strings.Contains(pending, "SHA-1 fingerprint") {
+		t.Error("pending CA generation displays an empty fingerprint")
+	}
 	b2, err := v.Engine.OfflineBundleFor(t.Context(), "below")
 	if err != nil {
 		t.Fatal(err)
@@ -219,20 +262,22 @@ func TestAdministrationPages(t *testing.T) {
 	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="300"`) || !strings.Contains(page, `value="5"`) || !strings.Contains(page, `value="10"`) {
 		t.Errorf("default limits not shown")
 	}
-	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"}}
+	limits := url.Values{"acme_orders": {"120"}, "acme_failed": {"4"}, "acme_accounts": {"8"},
+		"agent_predecessor": {"now"}, "other_predecessor": {"after"}, "other_predecessor_days": {"7"}}
 	form := func(extra url.Values) url.Values {
 		out := url.Values{"csrf_token": {token}}
 		maps.Copy(out, limits)
 		maps.Copy(out, extra)
 		return out
 	}
-	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}}))
+	r := b.post(t, "/admin/settings", form(url.Values{"keygen": {"yes"}, "o": {"Homelab"}, "c": {"DE"}, "step_up_minutes": {"30"}}))
 	if r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
 		t.Fatalf("settings: %d", r.Code)
 	}
-	// The ACME limits (PHASE2 step 11) are stored and shown.
-	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) {
-		t.Errorf("limits not shown: %s", page)
+	// The ACME limits (PHASE2 step 11) and step-up lifetime are stored and shown.
+	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="120"`) || !strings.Contains(page, `value="8"`) ||
+		!strings.Contains(page, `name="step_up_minutes"`) || !strings.Contains(page, `value="30" selected>30 minutes</option>`) {
+		t.Errorf("limits or step-up lifetime not shown: %s", page)
 	}
 	for _, bad := range []url.Values{{"acme_orders": {"0"}}, {"acme_failed": {"101"}}, {"acme_accounts": {"many"}}} {
 		if rr := b.post(t, "/admin/settings", form(bad)); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "per hour") {
@@ -381,6 +426,7 @@ func TestDomainPages(t *testing.T) {
 		t.Errorf("detail:\n%s", got)
 	}
 	// Wildcards without dns-01: refused, with the reason on the page.
+	form.Del("name")
 	form.Set("wildcards", "yes")
 	if rr := b.post(t, detail, form); rr.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, rr.location()), "dns-01") {
 		t.Errorf("refused change: %d", rr.Code)

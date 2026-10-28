@@ -64,6 +64,8 @@ tags:
     description: Tenant settings (server key generation, subject defaults)
   - name: domains
     description: Name spaces ACME issues for (CA, challenges, approval level)
+  - name: acme
+    description: ACME accounts and their predecessor policies
   - name: presets
     description: Certificate presets (read-only, built in)
   - name: cas
@@ -269,8 +271,9 @@ paths:
       operationId: stepUp
       summary: Confirm the second factor again for a sensitive action
       description: |
-        Refreshes `step_up_valid_until` of the current session (5 minutes). TOTP only – recovery
-        codes are for signing in. For WebAuthn, use `/auth/webauthn/begin` + `/auth/webauthn/finish`
+        Refreshes `step_up_valid_until` of the current session using the tenant's configured
+        lifetime (5 minutes by default). TOTP only – recovery codes are for signing in.
+        For WebAuthn, use `/auth/webauthn/begin` + `/auth/webauthn/finish`
         while signed in instead (step 17).
       x-required-role: signed-in
       requestBody:
@@ -953,16 +956,25 @@ paths:
         acknowledging this exact request clears it, including a failed deployment result.
         A pending request is refused with 409. No command, path or hook is sent to the host.
       x-required-role: operator
+      x-step-up: true
+      requestBody:
+        description: Optional one-operation predecessor policy; omission uses the effective deployment policy
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentRenewRequest" }
       responses:
         "202":
           description: Renewal requested
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
     delete:
       tags: [agents]
       operationId: withdrawAgentDeployment
@@ -982,6 +994,169 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /acme/accounts/{accountId}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [acme]
+      operationId: getACMEAccount
+      summary: Read an ACME account and its effective predecessor policy
+      x-required-role: viewer
+      responses:
+        "200":
+          description: ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /acme/accounts/{accountId}/predecessor-policy:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [acme]
+      operationId: getACMEPredecessorPolicy
+      summary: Read the predecessor policy of an ACME account
+      x-required-role: viewer
+      responses:
+        "200":
+          description: ACME account with override and effective policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [acme]
+      operationId: setACMEPredecessorPolicy
+      summary: Override predecessor handling for an ACME account without an agent
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: Account predecessor override
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PredecessorPolicy" }
+      responses:
+        "200":
+          description: Stored ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [acme]
+      operationId: clearACMEPredecessorPolicy
+      summary: Inherit the tenant predecessor policy for an ACME account
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Stored ACME account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ACMEAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /agents/{agentId}/predecessor-policy:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+    put:
+      tags: [agents]
+      operationId: setAgentPredecessorPolicy
+      summary: Override the tenant predecessor policy for this agent
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: Agent-wide predecessor override
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PredecessorPolicy" }
+      responses:
+        "200":
+          description: Stored agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [agents]
+      operationId: clearAgentPredecessorPolicy
+      summary: Inherit the tenant predecessor policy for this agent
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Stored agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /agents/{agentId}/deployments/{deploymentName}/predecessor-policy:
+    parameters:
+      - $ref: "#/components/parameters/AgentId"
+      - name: deploymentName
+        in: path
+        required: true
+        description: Deployment whose predecessor override changes
+        schema: { type: string, pattern: "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$" }
+    put:
+      tags: [agents]
+      operationId: setDeploymentPredecessorPolicy
+      summary: Override predecessor handling for one deployment
+      x-required-role: admin
+      x-step-up: true
+      requestBody:
+        description: Deployment-specific predecessor override
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PredecessorPolicy" }
+      responses:
+        "200":
+          description: Stored agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [agents]
+      operationId: clearDeploymentPredecessorPolicy
+      summary: Inherit predecessor handling for one deployment
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Stored agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /agents/{agentId}/disable:
     parameters:
@@ -1821,6 +1996,51 @@ paths:
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
 
+  /certificates/{certificateId}/revocation-plan:
+    parameters:
+      - $ref: "#/components/parameters/CertificateId"
+    put:
+      tags: [certificates]
+      operationId: planCertificateRevocation
+      summary: Plan a superseded revocation
+      description: The caller needs the same permission and fresh second factor as revocation. An existing plan is not moved.
+      x-required-role: operator
+      x-step-up: true
+      requestBody:
+        description: UTC execution time for the superseded revocation
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevocationPlanRequest" }
+      responses:
+        "200":
+          description: Certificate with its planned revocation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [certificates]
+      operationId: cancelCertificateRevocation
+      summary: Cancel a planned revocation without changing the certificate
+      x-required-role: operator
+      x-step-up: true
+      responses:
+        "200":
+          description: Certificate without a planned revocation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /certificates/{certificateId}/renew:
     parameters:
       - $ref: "#/components/parameters/CertificateId"
@@ -1830,8 +2050,9 @@ paths:
       summary: Issue a successor with the same names, preset and CA
       description: |
         The successor always gets a new key: a server-generated one when the original had one,
-        otherwise from `csr_pem` (required then). With `revoke_previous` the original is revoked
-        as superseded afterwards (needs the step-up of a revocation, checked first).
+        otherwise from `csr_pem` (required then). `predecessor` selects immediate, delayed or no
+        superseded revocation; omission uses the tenant policy for other certificates. The legacy
+        `revoke_previous` pointer remains supported and is equivalent to `predecessor.choice=now`.
       x-required-role: operator
       requestBody:
         description: "Options for the successor; an empty body is fine for server-generated keys"
@@ -2107,6 +2328,13 @@ components:
     AgentId:
       description: "ID of the agent"
       name: agentId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
+    AccountId:
+      description: "ID of the ACME account"
+      name: accountId
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
@@ -2538,10 +2766,31 @@ components:
         last_used_at: { type: [string, "null"], format: date-time }
         secret: { type: string, pattern: "^mop_[a-z2-7]+$" }
 
+    ACMEAccount:
+      description: "An ACME account and its predecessor policy"
+      type: object
+      required: [id, status, key_thumbprint, approved, contact, created_at, created_ip, predecessor_policy, effective_predecessor]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        status: { type: string }
+        key_thumbprint: { type: string, description: "RFC 7638 JWK thumbprint" }
+        approved: { type: boolean }
+        approved_by: { type: string }
+        approved_at: { type: string }
+        eab_key_id: { type: string }
+        contact:
+          type: array
+          items: { type: string }
+        created_at: { type: string }
+        created_ip: { type: string }
+        predecessor_policy: { $ref: "#/components/schemas/NullablePredecessorPolicy" }
+        effective_predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
+
     Agent:
       description: "An admitted agent (v0.3)"
       type: object
-      required: [id, hostname, status, enrollment_mode, os, arch, version, created_at, approved_at, approved_by, last_seen_at, certificate_id, names, silent, deployments]
+      required: [id, hostname, status, enrollment_mode, os, arch, version, package_format, created_at, approved_at, approved_by, last_seen_at, certificate_id, names, silent, deployments]
       additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
@@ -2551,12 +2800,15 @@ components:
         os: { type: string }
         arch: { type: string }
         version: { type: string, description: "As the agent reported it" }
+        package_format: { type: string, enum: [deb, rpm, tarball], description: "Installed format; older agents report as legacy tarball" }
         created_at: { type: string, format: date-time }
         approved_at: { type: string, format: date-time }
         approved_by: { type: string, description: "An admin, or the mode" }
         last_seen_at: { type: [string, "null"], format: date-time }
         certificate_id: { type: [string, "null"], description: "Its current agent certificate" }
         silent: { type: boolean, description: "Three missed five-minute reports" }
+        predecessor_policy: { $ref: "#/components/schemas/NullablePredecessorPolicy" }
+        effective_predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
         deployments:
           type: array
           items: { $ref: "#/components/schemas/AgentDeployment" }
@@ -2586,6 +2838,34 @@ components:
         renew_requested_at: { type: [string, "null"], format: date-time }
         renew_requested_by: { type: string }
         removed: { type: boolean, description: "Absent from the latest accepted report; retained only while a renewal request is open" }
+        predecessor_policy: { $ref: "#/components/schemas/NullablePredecessorPolicy" }
+        effective_predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
+        revocation_planned_at: { type: [string, "null"], format: date-time }
+
+    PredecessorPolicy:
+      description: "What a completed replacement does to its predecessor; reason is always superseded"
+      type: object
+      additionalProperties: false
+      required: [choice]
+      properties:
+        choice: { type: string, enum: [now, after, never] }
+        days: { type: integer, minimum: 1, maximum: 30, description: "Required for after; ignored only when omitted for another choice" }
+
+    NullablePredecessorPolicy:
+      description: "A local override, or null to inherit"
+      type: [object, "null"]
+      additionalProperties: false
+      required: [choice]
+      properties:
+        choice: { type: string, enum: [now, after, never] }
+        days: { type: integer, minimum: 1, maximum: 30 }
+
+    AgentRenewRequest:
+      description: "Optional one-operation predecessor policy for an agent renewal"
+      type: object
+      additionalProperties: false
+      properties:
+        predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
 
     AgentName:
       description: "One name or pattern an agent may order"
@@ -2727,6 +3007,18 @@ components:
             admin decides every enrollment. Always in the answer; optional in a change.
           type: string
           enum: [auto, verified, manual]
+        step_up_minutes:
+          description: |
+            Lifetime of a new second-factor proof for sensitive actions (since 0.3.1, default 5).
+            Always in the answer; optional in a change. Existing proofs keep their original lifetime.
+          type: integer
+          enum: [5, 10, 15, 30, 60]
+        agent_predecessor:
+          description: "Tenant default for agent deployments; initially immediate after confirmed deployment"
+          $ref: "#/components/schemas/PredecessorPolicy"
+        other_predecessor:
+          description: "Tenant default for UI, REST and non-agent ACME renewals; initially after 7 days"
+          $ref: "#/components/schemas/PredecessorPolicy"
 
     PasswordChange:
       description: "Password change of the logged-in user"
@@ -3152,9 +3444,9 @@ components:
           description: What an admin should know; absent when all is well
 
     CertificateStatus:
-      description: "Validity state of a certificate"
+      description: "Validity state, or planned to select certificates with a pending superseded revocation"
       type: string
-      enum: [valid, revoked, expired]
+      enum: [valid, revoked, expired, planned]
 
     RevocationReason:
       type: string
@@ -3194,6 +3486,10 @@ components:
             reason: { $ref: "#/components/schemas/RevocationReason" }
             revoked_at: { type: string, format: date-time }
             invalidity_date: { type: [string, "null"], format: date-time }
+        revocation_planned_at:
+          type: [string, "null"]
+          format: date-time
+          description: "Pending superseded revocation; null when none is planned"
         renewal_of: { type: [string, "null"] }
         issued_by: { type: [string, "null"], description: User or token that requested it }
         created_at: { type: string, format: date-time }
@@ -3276,6 +3572,17 @@ components:
           format: date-time
           description: When the key is known or suspected to have been compromised
 
+    RevocationPlanRequest:
+      description: "Time at which the scheduler revokes the certificate as superseded"
+      type: object
+      additionalProperties: false
+      required: [planned_at]
+      properties:
+        planned_at:
+          type: string
+          format: date-time
+          description: "UTC execution time after now through 30 days ahead; the stored reason is superseded"
+
     RenewRequest:
       description: "Options for renewing a certificate"
       type: object
@@ -3290,8 +3597,8 @@ components:
           description: New server key algorithm; default the original's
         revoke_previous:
           type: boolean
-          default: false
-          description: Revoke the old certificate with reason superseded (step-up as for a revocation)
+          description: "Legacy tri-state: true = now, false = never, omitted = tenant other-certificate default; predecessor wins when both are sent"
+        predecessor: { $ref: "#/components/schemas/PredecessorPolicy" }
         validity_days: { type: integer, minimum: 1 }
 
     RevocationResult:

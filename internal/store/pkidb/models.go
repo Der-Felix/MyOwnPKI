@@ -9,18 +9,20 @@ import (
 )
 
 type AcmeAccount struct {
-	ID            string
-	KeyThumbprint string
-	Jwk           string
-	Status        string
-	Contact       string
-	EabKeyID      sql.NullString
-	ApprovedAt    sql.NullString
-	ApprovedBy    sql.NullString
-	CreatedAt     string
-	CreatedIp     string
-	UpdatedAt     string
-	AgentID       sql.NullString
+	ID                string
+	KeyThumbprint     string
+	Jwk               string
+	Status            string
+	Contact           string
+	EabKeyID          sql.NullString
+	ApprovedAt        sql.NullString
+	ApprovedBy        sql.NullString
+	CreatedAt         string
+	CreatedIp         string
+	UpdatedAt         string
+	AgentID           sql.NullString
+	PredecessorChoice sql.NullString
+	PredecessorDays   sql.NullInt64
 }
 
 type AcmeAuthz struct {
@@ -107,25 +109,42 @@ type Agent struct {
 	ApprovedAt        string
 	ApprovedBy        string
 	UpdatedAt         string
+	PredecessorChoice sql.NullString
+	PredecessorDays   sql.NullInt64
+	PackageFormat     string
 }
 
 type AgentDeployment struct {
-	AgentID               string
-	Name                  string
-	Profile               string
-	Names                 string
-	Challenge             string
-	State                 string
-	CertificateSerial     sql.NullString
-	NotAfter              sql.NullString
-	ServedFingerprint     sql.NullString
-	DeployedAt            sql.NullString
-	LastError             sql.NullString
-	LastReportAt          string
-	RenewRequestedAt      sql.NullString
-	RenewRequestedBy      sql.NullString
-	RenewRequestedVersion sql.NullInt64
-	Reported              int64
+	AgentID                string
+	Name                   string
+	Profile                string
+	Names                  string
+	Challenge              string
+	State                  string
+	CertificateSerial      sql.NullString
+	NotAfter               sql.NullString
+	ServedFingerprint      sql.NullString
+	DeployedAt             sql.NullString
+	LastError              sql.NullString
+	LastReportAt           string
+	RenewRequestedAt       sql.NullString
+	RenewRequestedBy       sql.NullString
+	RenewRequestedVersion  sql.NullInt64
+	Reported               int64
+	PredecessorChoice      sql.NullString
+	PredecessorDays        sql.NullInt64
+	RenewPredecessorChoice sql.NullString
+	RenewPredecessorDays   sql.NullInt64
+	WrittenFingerprint     sql.NullString
+	CheckConfigured        int64
+}
+
+type AgentDeploymentCertificate struct {
+	AgentID         string
+	Deployment      string
+	CertificateID   string
+	FirstDeployedAt string
+	LastDeployedAt  string
 }
 
 type AgentEnrollment struct {
@@ -260,6 +279,15 @@ type Certificate struct {
 	CustomKu          sql.NullString
 	CustomEku         sql.NullString
 	CreatedAt         string
+}
+
+type CertificateRevocationPlan struct {
+	CertificateID string
+	SuccessorID   sql.NullString
+	PlannedAt     string
+	CreatedAt     string
+	CreatedBy     string
+	Source        string
 }
 
 type CertificateSan struct {

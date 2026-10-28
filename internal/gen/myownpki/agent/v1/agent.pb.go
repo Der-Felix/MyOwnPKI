@@ -654,8 +654,12 @@ type DeploymentReport struct {
 	LastError         string `protobuf:"bytes,10,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
 	// Echo the version only after handling this deployment's renew request.
 	HandledRenewalVersion int64 `protobuf:"varint,11,opt,name=handled_renewal_version,json=handledRenewalVersion,proto3" json:"handled_renewal_version,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Leaf read back after the atomic write, used only when no TLS check exists.
+	WrittenFingerprint string `protobuf:"bytes,12,opt,name=written_fingerprint,json=writtenFingerprint,proto3" json:"written_fingerprint,omitempty"`
+	// When true, only served_fingerprint is accepted as deployment proof.
+	CheckConfigured bool `protobuf:"varint,13,opt,name=check_configured,json=checkConfigured,proto3" json:"check_configured,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *DeploymentReport) Reset() {
@@ -765,12 +769,28 @@ func (x *DeploymentReport) GetHandledRenewalVersion() int64 {
 	return 0
 }
 
+func (x *DeploymentReport) GetWrittenFingerprint() string {
+	if x != nil {
+		return x.WrittenFingerprint
+	}
+	return ""
+}
+
+func (x *DeploymentReport) GetCheckConfigured() bool {
+	if x != nil {
+		return x.CheckConfigured
+	}
+	return false
+}
+
 type ReportRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentVersion  string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
-	Os            string                 `protobuf:"bytes,2,opt,name=os,proto3" json:"os,omitempty"`
-	Arch          string                 `protobuf:"bytes,3,opt,name=arch,proto3" json:"arch,omitempty"`
-	Deployments   []*DeploymentReport    `protobuf:"bytes,4,rep,name=deployments,proto3" json:"deployments,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	AgentVersion string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	Os           string                 `protobuf:"bytes,2,opt,name=os,proto3" json:"os,omitempty"`
+	Arch         string                 `protobuf:"bytes,3,opt,name=arch,proto3" json:"arch,omitempty"`
+	Deployments  []*DeploymentReport    `protobuf:"bytes,4,rep,name=deployments,proto3" json:"deployments,omitempty"`
+	// Installed package format: deb, rpm or tarball. Empty means a legacy tarball.
+	PackageFormat string `protobuf:"bytes,5,opt,name=package_format,json=packageFormat,proto3" json:"package_format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -831,6 +851,13 @@ func (x *ReportRequest) GetDeployments() []*DeploymentReport {
 		return x.Deployments
 	}
 	return nil
+}
+
+func (x *ReportRequest) GetPackageFormat() string {
+	if x != nil {
+		return x.PackageFormat
+	}
+	return ""
 }
 
 type ReportResponse struct {
@@ -1081,7 +1108,7 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\tchain_der\x18\x02 \x03(\fR\bchainDer\"C\n" +
 	"\x1aRegisterACMEAccountRequest\x12%\n" +
 	"\x0ekey_thumbprint\x18\x01 \x01(\tR\rkeyThumbprint\"\x1d\n" +
-	"\x1bRegisterACMEAccountResponse\"\xfd\x02\n" +
+	"\x1bRegisterACMEAccountResponse\"\xd9\x03\n" +
 	"\x10DeploymentReport\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x14\n" +
@@ -1096,12 +1123,15 @@ const file_myownpki_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"last_error\x18\n" +
 	" \x01(\tR\tlastError\x126\n" +
-	"\x17handled_renewal_version\x18\v \x01(\x03R\x15handledRenewalVersion\"\x9f\x01\n" +
+	"\x17handled_renewal_version\x18\v \x01(\x03R\x15handledRenewalVersion\x12/\n" +
+	"\x13written_fingerprint\x18\f \x01(\tR\x12writtenFingerprint\x12)\n" +
+	"\x10check_configured\x18\r \x01(\bR\x0fcheckConfigured\"\xc6\x01\n" +
 	"\rReportRequest\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x03 \x01(\tR\x04arch\x12E\n" +
-	"\vdeployments\x18\x04 \x03(\v2#.myownpki.agent.v1.DeploymentReportR\vdeployments\"\x10\n" +
+	"\vdeployments\x18\x04 \x03(\v2#.myownpki.agent.v1.DeploymentReportR\vdeployments\x12%\n" +
+	"\x0epackage_format\x18\x05 \x01(\tR\rpackageFormat\"\x10\n" +
 	"\x0eReportResponse\"?\n" +
 	"\x18WatchDesiredStateRequest\x12#\n" +
 	"\rknown_version\x18\x01 \x01(\x03R\fknownVersion\"~\n" +

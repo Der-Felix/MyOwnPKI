@@ -47,8 +47,8 @@ func embeddedDER(t *testing.T, cmd []byte) []byte {
 	return b.Bytes
 }
 
-// TestWindowsHelperFile: ASCII only, CRLF only, the polyglot head, the
-// root embedded unchanged with its fingerprint – on every OS.
+// TestWindowsHelperFile checks the portable file contract, including the lack
+// of an embedded expectation and forwarding of independently supplied values.
 func TestWindowsHelperFile(t *testing.T) {
 	t.Parallel()
 	der := testRoot(t)
@@ -69,40 +69,100 @@ func TestWindowsHelperFile(t *testing.T) {
 		if !bytes.Equal(embeddedDER(t, cmd), der) {
 			t.Errorf("%s: the embedded certificate is not the CA's", scope)
 		}
-		if !strings.Contains(text, "$expected = '"+colonHex(der)+"'") {
-			t.Errorf("%s: no fingerprint", scope)
+		if !strings.Contains(text, "$expected = ''") || strings.Contains(text, colonHex(der)) || strings.Contains(text, strings.ReplaceAll(colonHex(der), ":", "")) {
+			t.Errorf("%s: helper contains an embedded expected fingerprint", scope)
 		}
 		want := map[string]string{ScopeMachine: "$store = 'LocalMachine'", ScopeUser: "$store = 'CurrentUser'"}[scope]
 		if !strings.Contains(text, want) {
 			t.Errorf("%s: want %s", scope, want)
 		}
+		for _, forwarding := range []string{
+			"if ($expected -ne '') { $child += ' -ExpectedSha256 ' + $expected }",
+			"if ($quiet) { $child += ' /quiet' }",
+			"$p = Start-Process -FilePath $env:ComSpec -ArgumentList '/c', $child -Verb RunAs -Wait -PassThru",
+		} {
+			if !strings.Contains(text, forwarding) {
+				t.Errorf("%s: elevation does not forward authorization as expected: %s", scope, forwarding)
+			}
+		}
 	}
 }
 
-// TestWindowsHelperRuns (Windows only – the windows CI job and a Windows
-// workstation): cmd.exe runs the helper with /check, which imports nothing:
-// the fingerprint passes; a copy with one changed character in the
-// certificate stops with exit code 2 before any import.
+// instrumentedHelper replaces only the store block in a test copy. Production
+// has no test switch or alternate import path.
+func instrumentedHelper(t *testing.T, cmd []byte) []byte {
+	t.Helper()
+	const store = "$cert = New-Object Security.Cryptography.X509Certificates.X509Certificate2 (, $der)\r\n" +
+		"$root = New-Object Security.Cryptography.X509Certificates.X509Store ('Root', $store)\r\n" +
+		"$root.Open('ReadWrite')\r\n" +
+		"try { $root.Add($cert) } finally { $root.Close() }"
+	text := strings.Replace(string(cmd), store, "Write-Host 'TEST STORE REACHED'", 1)
+	if !strings.Contains(text, "TEST STORE REACHED") {
+		t.Fatal("could not instrument the test copy")
+	}
+	return []byte(text)
+}
+
+func changedHelper(t *testing.T, cmd []byte) []byte {
+	t.Helper()
+	lines := strings.Split(string(cmd), "\r\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "-----BEGIN") {
+			target := lines[i+2]
+			c := byte('A')
+			if target[10] == 'A' {
+				c = 'B'
+			}
+			lines[i+2] = target[:10] + string(c) + target[11:]
+			return []byte(strings.Join(lines, "\r\n"))
+		}
+	}
+	t.Fatal("no embedded certificate to change")
+	return nil
+}
+
+// TestWindowsHelperRuns exercises cmd.exe and PowerShell on Windows. Every
+// import-path test uses an instrumented test copy and never opens a real store.
 func TestWindowsHelperRuns(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("cmd.exe and PowerShell only on Windows")
 	}
 	t.Parallel()
 	der := testRoot(t)
+	expected := strings.ReplaceAll(colonHex(der), ":", "")
 	dir := filepath.Join(t.TempDir(), "with space")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	run := func(name string, data []byte, arg ...string) (int, string) {
+	run := func(name string, data []byte, stdin string, arg ...string) (int, string) {
 		t.Helper()
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if len(arg) == 0 {
-			arg = []string{"/check"}
+		command := exec.CommandContext(t.Context(), "cmd.exe", append([]string{"/c", path}, arg...)...) // #nosec G204 -- test: the helper just written
+		command.Stdin = strings.NewReader(stdin)
+		out, err := command.CombinedOutput()
+		var exit *exec.ExitError
+		switch {
+		case err == nil:
+			return 0, string(out)
+		case errors.As(err, &exit):
+			return exit.ExitCode(), string(out)
 		}
-		out, err := exec.CommandContext(t.Context(), "cmd.exe", append([]string{"/c", path}, arg...)...).CombinedOutput() // #nosec G204 -- test: the helper just written
+		t.Fatalf("%s: %v", name, err)
+		return 0, ""
+	}
+	runPowerShell := func(name string, data []byte, arg ...string) (int, string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args := append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "& ([ScriptBlock]::Create([IO.File]::ReadAllText($env:MYOWNPKI_SELF))) @args"}, arg...)
+		command := exec.CommandContext(t.Context(), "powershell.exe", args...) // #nosec G204 -- test: the helper just written
+		command.Env = append(os.Environ(), "MYOWNPKI_SELF="+path)
+		out, err := command.CombinedOutput()
 		var exit *exec.ExitError
 		switch {
 		case err == nil:
@@ -115,32 +175,52 @@ func TestWindowsHelperRuns(t *testing.T) {
 	}
 	for _, scope := range []string{ScopeMachine, ScopeUser} {
 		cmd := windowsHelper("root", 1, der, scope)
-		code, out := run("root-"+scope+".cmd", cmd)
-		if code != 0 || !strings.Contains(out, "Fingerprint ok") || !strings.Contains(out, colonHex(der)) {
+		code, out := run("root-"+scope+"-check.cmd", cmd, "", "/check")
+		if code != 0 || !strings.Contains(out, colonHex(der)) || !strings.Contains(out, sha1ColonHex(der)) || !strings.Contains(out, "SHA-256 (authoritative)") || !strings.Contains(out, "SHA-1 (display only") {
 			t.Errorf("%s /check: exit %d\n%s", scope, code, out)
 		}
-		// A mistyped switch must never become an import (Git Bash, for
-		// one, turns /check into a path).
-		code, out = run("root-"+scope+"-arg.cmd", cmd, "/chek")
+		code, out = run("root-"+scope+"-arg.cmd", cmd, "", "/chek")
 		if code != 64 || !strings.Contains(out, "nothing was imported") {
 			t.Errorf("%s, unknown argument: exit %d\n%s", scope, code, out)
 		}
-		// One base64 character of the certificate changed (still valid base64).
-		lines := strings.Split(string(cmd), "\r\n")
-		for i, l := range lines {
-			if strings.HasPrefix(l, "-----BEGIN") {
-				target := lines[i+2]
-				c := byte('A')
-				if target[10] == 'A' {
-					c = 'B'
-				}
-				lines[i+2] = target[:10] + string(c) + target[11:]
-				break
-			}
+		code, out = run("root-"+scope+"-changed-check.cmd", changedHelper(t, cmd), "", "/check", "-ExpectedSha256", expected)
+		if code != 2 || !strings.Contains(out, "does not match -ExpectedSha256") {
+			t.Errorf("%s, changed certificate: exit %d\n%s", scope, code, out)
 		}
-		code, out = run("root-"+scope+"-changed.cmd", []byte(strings.Join(lines, "\r\n")))
-		if code != 2 || !strings.Contains(out, "STOP: the certificate in this file does not match") {
-			t.Errorf("%s, changed: exit %d\n%s", scope, code, out)
+	}
+
+	cmd := instrumentedHelper(t, windowsHelper("root", 1, der, ScopeUser))
+	assertAbort := func(name string, wantCode int, stdin string, args ...string) {
+		t.Helper()
+		code, out := run(name+".cmd", cmd, stdin, args...)
+		if code != wantCode || strings.Contains(out, "TEST STORE REACHED") {
+			t.Errorf("%s: exit %d, want %d\n%s", name, code, wantCode, out)
 		}
+	}
+	assertAbort("missing-expected", 64, "", "-ExpectedSha256")
+	for i, malformed := range []string{"", strings.Repeat("A", 63), strings.Repeat("A", 65), colonHex(der), expected[:32] + " " + expected[32:], expected[:32] + "\t" + expected[32:], strings.Repeat("G", 64)} {
+		name := "malformed-expected-" + string(rune('a'+i))
+		code, out := runPowerShell(name+".cmd", cmd, "-ExpectedSha256", malformed)
+		if code != 64 || strings.Contains(out, "TEST STORE REACHED") {
+			t.Errorf("%s: exit %d, want 64\n%s", name, code, out)
+		}
+	}
+	assertAbort("wrong-expected", 2, "", "-ExpectedSha256", strings.Repeat("0", 64))
+	code, out := run("changed-pem.cmd", instrumentedHelper(t, changedHelper(t, cmd)), "", "-ExpectedSha256", expected)
+	if code != 2 || strings.Contains(out, "TEST STORE REACHED") {
+		t.Errorf("changed PEM: exit %d\n%s", code, out)
+	}
+	assertAbort("quiet-without-expected", 3, "", "/quiet")
+	for i, answer := range []string{"", "\n", "no\n", "other\n", "yes\n"} {
+		assertAbort("confirmation-negative-"+string(rune('a'+i)), 3, answer)
+	}
+
+	code, out = run("expected-match.cmd", cmd, "", "-ExpectedSha256", expected)
+	if code != 0 || !strings.Contains(out, "TEST STORE REACHED") || !strings.Contains(out, "SHA-256 matches") {
+		t.Errorf("exact expected match: exit %d\n%s", code, out)
+	}
+	code, out = run("independent-confirmation.cmd", cmd, "YES\n")
+	if code != 0 || !strings.Contains(out, "TEST STORE REACHED") || !strings.Contains(out, "Done: imported") {
+		t.Errorf("independent confirmation: exit %d\n%s", code, out)
 	}
 }

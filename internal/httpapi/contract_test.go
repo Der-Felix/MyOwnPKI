@@ -425,10 +425,18 @@ func TestContract(t *testing.T) {
 		{op: "revokeCertificate", as: rootview, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 404, note: "no-read"},
 		{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{}, want: 400},
+		{op: "planCertificateRevocation", as: anon, path: "/certificates/" + keyedID + "/revocation-plan", body: map[string]any{"planned_at": v.clk.Now().Add(time.Hour).Format(time.RFC3339)}, want: 401, note: "no-session"},
+		{op: "planCertificateRevocation", as: viewer, path: "/certificates/" + keyedID + "/revocation-plan", body: map[string]any{"planned_at": v.clk.Now().Add(time.Hour).Format(time.RFC3339)}, want: 403, note: "low-role"},
+		{op: "planCertificateRevocation", as: rootview, path: "/certificates/" + keyedID + "/revocation-plan", body: map[string]any{"planned_at": v.clk.Now().Add(time.Hour).Format(time.RFC3339)}, want: 404, note: "no-read"},
+		{op: "planCertificateRevocation", as: op, path: "/certificates/" + keyedID + "/revocation-plan", body: map[string]any{"planned_at": v.clk.Now().Add(time.Hour).Format(time.RFC3339)}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "cancelCertificateRevocation", as: anon, path: "/certificates/" + keyedID + "/revocation-plan", want: 401, note: "no-session"},
+		{op: "cancelCertificateRevocation", as: viewer, path: "/certificates/" + keyedID + "/revocation-plan", want: 403, note: "low-role"},
+		{op: "cancelCertificateRevocation", as: rootview, path: "/certificates/" + keyedID + "/revocation-plan", want: 404, note: "no-read"},
+		{op: "cancelCertificateRevocation", as: op, path: "/certificates/" + keyedID + "/revocation-plan", want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "renewCertificate", as: anon, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 401, note: "no-session"},
 		{op: "renewCertificate", as: viewer, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "renewCertificate", as: rootview, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 404, note: "no-read"},
-		{op: "renewCertificate", as: op, path: "/certificates/" + keyedID + "/renew", body: map[string]any{}, want: 201},
+		{op: "renewCertificate", as: op, path: "/certificates/" + keyedID + "/renew", body: map[string]any{"predecessor": map[string]any{"choice": "never"}}, want: 201},
 		{op: "renewCertificate", as: op, path: "/certificates/" + keyedID + "/renew", body: map[string]any{"csr_pem": csrPEM}, want: 422, kind: "policy-violation"},
 		{op: "inspectCSR", as: anon, body: map[string]string{"csr_pem": csrPEM}, want: 401, note: "no-session"},
 		{op: "inspectCSR", as: viewer, body: map[string]string{"csr_pem": csrPEM}, want: 403, kind: "forbidden", note: "low-role"},
@@ -480,6 +488,8 @@ func TestContract(t *testing.T) {
 	}
 	// The rest needs a sequence: step-up, export, second factor, logout.
 	op.stepUp(t, "op")
+	run(contractCase{op: "planCertificateRevocation", as: op, path: "/certificates/" + keyedID + "/revocation-plan", body: map[string]any{"planned_at": v.clk.Now().Add(time.Hour).Format(time.RFC3339)}, want: 200})
+	run(contractCase{op: "cancelCertificateRevocation", as: op, path: "/certificates/" + keyedID + "/revocation-plan", want: 200})
 	run(contractCase{op: "exportCertificateWithKey", as: op, path: "/certificates/" + keyedID + "/export", body: map[string]string{"format": "pkcs8-pem"}, want: 200})
 	run(contractCase{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 200})
 	run(contractCase{op: "revokeCertificate", as: op, path: "/certificates/" + revokableID + "/revoke", body: map[string]string{"reason": "superseded"}, want: 422, kind: "policy-violation"})
@@ -684,7 +694,14 @@ func TestContract(t *testing.T) {
 		{op: "getSettings", as: viewer, want: 200},
 		{op: "updateSettings", as: anon, body: settings, want: 401, note: "no-session"},
 		{op: "updateSettings", as: viewer, body: settings, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "updateSettings", as: self, body: settings, want: 403, kind: "forbidden", note: "operator"},
 		{op: "updateSettings", as: admin, body: settings, want: 200},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 30), want: 200, note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 0), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, -1), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 7), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 61), want: 422, kind: "policy-violation", note: "step-up-lifetime"},
+		{op: "updateSettings", as: admin, body: withStepUp(settings, 5), want: 200, note: "step-up-lifetime"},
 		{op: "updateSettings", as: admin, body: map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": "Germany"}}, want: 422, kind: "policy-violation"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 100, 3, 20), want: 200, note: "acme-limits"},
 		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
@@ -814,6 +831,43 @@ func TestContract(t *testing.T) {
 		run(cc)
 	}
 
+	// ACME accounts and their predecessor overrides.
+	accountID := "acc_contract"
+	stamp := v.clk.Now().Format(time.RFC3339)
+	if accountErr := pkidb.New(v.in.PKIDB.Write).InsertACMEAccount(t.Context(), pkidb.InsertACMEAccountParams{
+		ID: accountID, KeyThumbprint: accountID, Jwk: "{}", Status: "valid", Contact: "[]", CreatedAt: stamp, UpdatedAt: stamp,
+	}); accountErr != nil {
+		t.Fatal(accountErr)
+	}
+	accountPath := "/acme/accounts/" + accountID
+	admin.stepUp(t, "demo")
+	for _, cc := range []contractCase{
+		{op: "getACMEAccount", as: viewer, path: accountPath, want: 200},
+		{op: "getACMEAccount", as: anon, path: accountPath, want: 401, note: "no-session"},
+		{op: "getACMEAccount", as: rootview, path: accountPath, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "getACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", want: 200},
+		{op: "getACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", want: 401, note: "no-session"},
+		{op: "getACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "no-read"},
+		{op: "setACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "setACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "setACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 401, note: "no-session"},
+		{op: "clearACMEPredecessorPolicy", as: viewer, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "clearACMEPredecessorPolicy", as: rootview, path: accountPath + "/predecessor-policy", want: 403, kind: "forbidden", note: "no-read"},
+		{op: "clearACMEPredecessorPolicy", as: anon, path: accountPath + "/predecessor-policy", want: 401, note: "no-session"},
+	} {
+		run(cc)
+	}
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	for _, cc := range []contractCase{
+		{op: "setACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "clearACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", want: 403, kind: "step-up-required", note: "step-up"},
+	} {
+		run(cc)
+	}
+	admin.stepUp(t, "demo")
+	run(contractCase{op: "setACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 200})
+	run(contractCase{op: "clearACMEPredecessorPolicy", as: admin, path: accountPath + "/predecessor-policy", want: 200})
+
 	// Agents (v0.3): the agent CA, an admitted agent (join token and check,
 	// verified), two enrollments in the queue, and join tokens.
 	admin.stepUp(t, "demo")
@@ -877,11 +931,27 @@ func TestContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, cc := range []contractCase{
-		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 202},
-		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
-		{op: "renewAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
-		{op: "renewAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
-		{op: "renewAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
+		{op: "setAgentPredecessorPolicy", as: admin, path: agentPath + "/predecessor-policy", body: map[string]any{"choice": "after", "days": 2}, want: 200},
+		{op: "setAgentPredecessorPolicy", as: viewer, path: agentPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, note: "low-role"},
+		{op: "setAgentPredecessorPolicy", as: rootview, path: agentPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, note: "no-read"},
+		{op: "setAgentPredecessorPolicy", as: anon, path: agentPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 401, note: "no-session"},
+		{op: "clearAgentPredecessorPolicy", as: admin, path: agentPath + "/predecessor-policy", want: 200},
+		{op: "clearAgentPredecessorPolicy", as: viewer, path: agentPath + "/predecessor-policy", want: 403, note: "low-role"},
+		{op: "clearAgentPredecessorPolicy", as: rootview, path: agentPath + "/predecessor-policy", want: 403, note: "no-read"},
+		{op: "clearAgentPredecessorPolicy", as: anon, path: agentPath + "/predecessor-policy", want: 401, note: "no-session"},
+		{op: "setDeploymentPredecessorPolicy", as: admin, path: agentPath + "/deployments/proxy/predecessor-policy", body: map[string]any{"choice": "never"}, want: 200},
+		{op: "setDeploymentPredecessorPolicy", as: viewer, path: agentPath + "/deployments/proxy/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, note: "low-role"},
+		{op: "setDeploymentPredecessorPolicy", as: rootview, path: agentPath + "/deployments/proxy/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, note: "no-read"},
+		{op: "setDeploymentPredecessorPolicy", as: anon, path: agentPath + "/deployments/proxy/predecessor-policy", body: map[string]any{"choice": "never"}, want: 401, note: "no-session"},
+		{op: "clearDeploymentPredecessorPolicy", as: admin, path: agentPath + "/deployments/proxy/predecessor-policy", want: 200},
+		{op: "clearDeploymentPredecessorPolicy", as: viewer, path: agentPath + "/deployments/proxy/predecessor-policy", want: 403, note: "low-role"},
+		{op: "clearDeploymentPredecessorPolicy", as: rootview, path: agentPath + "/deployments/proxy/predecessor-policy", want: 403, note: "no-read"},
+		{op: "clearDeploymentPredecessorPolicy", as: anon, path: agentPath + "/deployments/proxy/predecessor-policy", want: 401, note: "no-session"},
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 202},
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 409},
+		{op: "renewAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 403, note: "low-role"},
+		{op: "renewAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 403, note: "no-read"},
+		{op: "renewAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 401, note: "no-session"},
 		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 200},
 		{op: "withdrawAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", want: 409},
 		{op: "withdrawAgentDeployment", as: viewer, path: agentPath + "/deployments/proxy/renew", want: 403, note: "low-role"},
@@ -942,6 +1012,11 @@ func TestContract(t *testing.T) {
 	// The step-up cases, after the step-up ran out; the revocation last.
 	v.clk.Advance(authz.StepUpWindow + time.Second)
 	for _, cc := range []contractCase{
+		{op: "renewAgentDeployment", as: admin, path: agentPath + "/deployments/proxy/renew", body: map[string]any{}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "setAgentPredecessorPolicy", as: admin, path: agentPath + "/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "clearAgentPredecessorPolicy", as: admin, path: agentPath + "/predecessor-policy", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "setDeploymentPredecessorPolicy", as: admin, path: agentPath + "/deployments/proxy/predecessor-policy", body: map[string]any{"choice": "never"}, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "clearDeploymentPredecessorPolicy", as: admin, path: agentPath + "/deployments/proxy/predecessor-policy", want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "changeAgentNames", as: admin, path: agentPath + "/names", body: map[string]any{"add": []string{"y.homelab.lan"}}, want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "disableAgent", as: admin, path: agentPath + "/disable", want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "enableAgent", as: admin, path: agentPath + "/enable", want: 403, kind: "step-up-required", note: "step-up"},
@@ -1136,5 +1211,12 @@ func withTrustPage(settings map[string]any, on bool) map[string]any {
 	out := map[string]any{}
 	maps.Copy(out, settings)
 	out["trust_page"] = on
+	return out
+}
+
+func withStepUp(settings map[string]any, minutes int) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["step_up_minutes"] = minutes
 	return out
 }

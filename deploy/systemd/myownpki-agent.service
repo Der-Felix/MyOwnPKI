@@ -1,4 +1,4 @@
-# MyOwnPKI agent on Linux. Installed by deploy/install-agent.sh.
+# MyOwnPKI agent on Linux. Installed by myownpki-agent setup.
 # The 10-paths.conf drop-in repeats the writable paths of agent.yaml.
 # Standalone http-01 also needs 20-low-ports.conf.
 

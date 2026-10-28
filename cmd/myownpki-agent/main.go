@@ -2,6 +2,7 @@
 // (docs/PHASE3.md): it enrolls with the MyOwnPKI server (ADR-18), keeps its
 // agent certificate, and gets and deploys certificates by ACME.
 //
+//	myownpki-agent setup --server URL --ca-bundle FILE --root-sha256 HEX
 //	myownpki-agent enroll [--token-file FILE]   enroll this host (once)
 //	myownpki-agent run                          the service (systemd)
 //	myownpki-agent status                       what the agent knows about itself
@@ -47,7 +48,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "usage: %s enroll [--token-file FILE] | run | status | config check  [--config FILE]\n", binary)
+		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n", binary)
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -65,6 +66,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch rest[0] {
+	case "setup":
+		return cmdSetup(ctx, rest[1:], stdout, stderr)
 	case "enroll":
 		return cmdEnroll(ctx, rest[1:], stdout, stderr)
 	case "run":
@@ -89,6 +92,28 @@ func subFlags(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 		def = agent.DefaultConfigPath
 	}
 	return fs, fs.String("config", def, "agent.yaml (default $"+EnvConfig+", then "+agent.DefaultConfigPath+")")
+}
+
+func cmdSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs, configPath := subFlags("setup", stderr)
+	opts := agent.SetupOptions{Stdout: stdout, Stderr: stderr, Version: version.Get().Version}
+	fs.StringVar(&opts.Server, "server", "", "agent listener, https://host[:port]")
+	fs.StringVar(&opts.CABundle, "ca-bundle", "", "verified root certificate in PEM form")
+	fs.StringVar(&opts.RootSHA256, "root-sha256", "", "expected SHA-256 of the root certificate DER")
+	fs.StringVar(&opts.TokenFile, "token-file", "", "regular 0600 file with the join token")
+	fs.StringVar(&opts.PackageFormat, "package-format", "tarball", "installed package format: deb, rpm or tarball")
+	fs.StringVar(&opts.Webroot, "webroot", "", "existing webroot for enrollment http-01; default standalone")
+	fs.StringVar(&opts.Hostname, "hostname", "", "exact FQDN to prove at enrollment (default: host FQDN)")
+	fs.BoolVar(&opts.LowPorts, "low-ports", false, "allow the service to bind ports below 1024")
+	if fs.Parse(args) != nil || fs.NArg() != 0 {
+		return 2
+	}
+	opts.ConfigPath = *configPath
+	if err := agent.Setup(ctx, opts); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
 }
 
 func load(path string, stderr io.Writer) (*agent.Config, *slog.Logger, bool) {
