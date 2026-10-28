@@ -195,8 +195,10 @@ dockers_v2:
   - id: myownpki
     ids: [myownpki]
     dockerfile: deploy/docker/Dockerfile
+    # The agent packages and checksums.txt for the image (Dockerfile COPY dist/…).
+    # extra_files takes no templates, so the default dist directory is literal.
     extra_files:
-      - "{{ .Dist }}"
+      - dist
     images:
       - ghcr.io/der-felix/myownpki
     # No "latest" before 1.0: an upgrade is a deliberate choice of a version.
