@@ -19,6 +19,9 @@ COPY dist/checksums.txt /opt/myownpki/agent-dist/checksums.txt
 COPY dist/myownpki-agent_*.deb /opt/myownpki/agent-dist/
 COPY dist/myownpki-agent_*.rpm /opt/myownpki/agent-dist/
 COPY dist/myownpki-agent_*.tar.gz /opt/myownpki/agent-dist/
+# agent.package_dir for the container (docs/OPERATIONS.md §2.2); the host
+# default /var/lib/myownpki/agent-dist is the data volume and holds none.
+ENV MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist
 
 # The data directory (data_dir), empty and owned by nonroot. There is no
 # shell for mkdir/chown, so the base image's own empty, 0700 nonroot home

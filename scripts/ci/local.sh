@@ -39,6 +39,7 @@ steps=(
   'install|install.sh functions|linux_goreleaser|bash scripts/ci/install-functions.sh'
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
+  'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
 )
 
 only=
@@ -158,6 +159,13 @@ requirement() {
     linux_goreleaser)
       if [ "$os" != linux ] || ! has_commands go bash goreleaser; then
         echo 'needs Linux + goreleaser'
+      fi
+      ;;
+    linux_docker_goreleaser_disposable)
+      if ! disposable_allowed; then
+        disposable_skip_reason
+      elif [ "$os" != linux ] || ! has_commands go sudo systemctl docker jq goreleaser; then
+        echo 'needs Linux + docker + jq + goreleaser + sudo'
       fi
       ;;
     linux_systemd_goreleaser_disposable)
