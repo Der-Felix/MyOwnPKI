@@ -25,32 +25,37 @@ docker info --format '{{json .DriverStatus}}' | grep -q 'io.containerd.snapshott
 
 goreleaser release --snapshot --clean --skip=sign,sbom
 
-image=$(docker image ls ghcr.io/der-felix/myownpki --format '{{.Repository}}:{{.Tag}}' | head -n 1)
-[ -n "$image" ] || fail "the snapshot built no image ghcr.io/der-felix/myownpki"
-echo "Checking $image"
-
-env=$(docker image inspect --format '{{json .Config.Env}}' "$image")
-grep -q '"MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist"' <<<"$env" ||
-  fail "the image does not point agent.package_dir at /opt/myownpki/agent-dist: $env"
-
+# A snapshot tags one image per platform (<version>-amd64, <version>-arm64);
+# the release pushes them as one multi-platform tag. Check each.
 work=$RUNNER_TEMP/image-check
 rm -rf "$work"
-mkdir -p "$work"
-cid=$(docker create --platform linux/amd64 "$image")
-docker cp "$cid:/opt/myownpki/agent-dist" "$work/agent-dist"
-docker rm "$cid" >/dev/null
+for platform in amd64 arm64; do
+  image=$(docker image ls ghcr.io/der-felix/myownpki --format '{{.Repository}}:{{.Tag}}' | grep -- "-$platform\$" | head -n 1) ||
+    fail "the snapshot built no linux/$platform image ghcr.io/der-felix/myownpki"
+  echo "Checking $image"
 
-cmp dist/checksums.txt "$work/agent-dist/checksums.txt" || fail "checksums.txt in the image differs from dist/"
-count=0
-for arch in amd64 arm64; do
-  for ext in deb rpm tar.gz; do
-    path=$(compgen -G "$work/agent-dist/myownpki-agent_*_linux_${arch}.${ext}") ||
-      fail "the image has no agent package for $arch $ext"
-    name=$(basename "$path")
-    want=$(awk -v f="$name" '$2 == f { print $1 }' dist/checksums.txt)
-    [ -n "$want" ] || fail "$name is not in dist/checksums.txt"
-    [ "$(sha256sum "$path" | awk '{ print $1 }')" = "$want" ] || fail "$name in the image does not match checksums.txt"
-    count=$((count + 1))
+  env=$(docker image inspect --format '{{json .Config.Env}}' "$image")
+  grep -q '"MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist"' <<<"$env" ||
+    fail "$image does not point agent.package_dir at /opt/myownpki/agent-dist: $env"
+
+  dir=$work/$platform
+  mkdir -p "$dir"
+  cid=$(docker create --platform "linux/$platform" "$image")
+  docker cp "$cid:/opt/myownpki/agent-dist" "$dir/agent-dist"
+  docker rm "$cid" >/dev/null
+
+  cmp dist/checksums.txt "$dir/agent-dist/checksums.txt" || fail "checksums.txt in $image differs from dist/"
+  count=0
+  for arch in amd64 arm64; do
+    for ext in deb rpm tar.gz; do
+      path=$(compgen -G "$dir/agent-dist/myownpki-agent_*_linux_${arch}.${ext}") ||
+        fail "$image has no agent package for $arch $ext"
+      name=$(basename "$path")
+      want=$(awk -v f="$name" '$2 == f { print $1 }' dist/checksums.txt)
+      [ -n "$want" ] || fail "$name is not in dist/checksums.txt"
+      [ "$(sha256sum "$path" | awk '{ print $1 }')" = "$want" ] || fail "$name in $image does not match checksums.txt"
+      count=$((count + 1))
+    done
   done
+  echo "$image serves $count agent packages and checksums.txt from /opt/myownpki/agent-dist."
 done
-echo "The image serves $count agent packages and checksums.txt from /opt/myownpki/agent-dist."
