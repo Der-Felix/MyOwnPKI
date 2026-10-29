@@ -294,3 +294,25 @@ jobs:
       - name: Service log
         if: failure()
         run: bash scripts/ci/install-service-log.sh
+
+  # The release image as release.yml builds it (dockers_v2), without push or
+  # signatures: the other snapshots skip the image, so an image problem would
+  # show only after the release tag. Checks that the image points
+  # agent.package_dir at /opt/myownpki/agent-dist and carries every agent
+  # package with the snapshot's checksums.txt.
+  image:
+    name: release image (snapshot)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # GoReleaser takes the version from the last tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          goreleaser: "true"
+      - name: Snapshot with the image, check the agent packages in it
+        run: bash scripts/ci/image-snapshot.sh
