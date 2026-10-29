@@ -7,6 +7,13 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Fixed
+
+- **Agent packages in the container image:** the image carries the agent packages under
+  `/opt/myownpki/agent-dist`, but nothing pointed `agent.package_dir` there, so a container served
+  none of them. The image now sets `MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist`.
+  Installations with install.sh were not affected.
+
 ## [0.3.2] - 2026-10-29
 
 A fix release: the server now serves the agent packages it installs.
