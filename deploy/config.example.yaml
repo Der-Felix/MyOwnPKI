@@ -134,3 +134,31 @@ monitor:
   agent_silent_after: 1h
   # A reminder for an alert that is still open (1h–168h).
   repeat_every: 24h
+
+# Notifications (v0.3.3): one message per change – what opened, became
+# critical, is still open after repeat_every, or was resolved. Both channels
+# are off while smtp and url are empty; alerts still show in the UI. They
+# live here, not in the database, so "sealed" is sent while sealed. Secret
+# files: readable by the service user only (chmod 600), read at each send.
+notify:
+  email:
+    # host:port of the mail server, e.g. mail.homelab.lan:587.
+    smtp: ""
+    # starttls (port 587), tls (port 465) or none (only without username).
+    security: starttls
+    # Optional; with a username, password_file is required.
+    username: ""
+    password_file: ""
+    from: ""
+    # One or more addresses, comma-separated.
+    to: ""
+    # Extra roots for the mail server's certificate, e.g. this PKI's root.
+    ca_file: ""
+  webhook:
+    # https:// (http:// only to a loopback address). Gets a JSON POST.
+    url: ""
+    # HMAC-SHA256 key: the header X-MyOwnPKI-Signature: sha256=<hex> signs
+    # the body. Required with url.
+    secret_file: ""
+    # Extra roots for the receiver's certificate.
+    ca_file: ""

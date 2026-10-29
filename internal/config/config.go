@@ -48,6 +48,7 @@ type Config struct {
 	ACME    ACME    `yaml:"acme"`
 	Agent   Agent   `yaml:"agent"`
 	Monitor Monitor `yaml:"monitor"`
+	Notify  Notify  `yaml:"notify"`
 }
 
 // Log configures the process log (not the audit log).
@@ -171,6 +172,7 @@ func Default() Config {
 		ACME:    ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
 		Agent:   Agent{Listen: ":8444", PackageDir: "/var/lib/myownpki/agent-dist"},
 		Monitor: defaultMonitor(),
+		Notify:  Notify{Email: Email{Security: SMTPStartTLS}},
 	}
 }
 
@@ -286,6 +288,7 @@ func (c Config) Validate() error {
 	if _, err := c.Monitor.Values(); err != nil {
 		add("%w", err)
 	}
+	c.validateNotify(add)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("%w:\n  %w", ErrInvalid, joinIndented(errs))

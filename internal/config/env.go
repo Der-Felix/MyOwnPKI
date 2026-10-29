@@ -44,6 +44,16 @@ func envFields(c *Config) map[string]*string {
 		EnvPrefix + "MONITOR_SEALED_AFTER":       &c.Monitor.SealedAfter,
 		EnvPrefix + "MONITOR_AGENT_SILENT_AFTER": &c.Monitor.AgentSilentAfter,
 		EnvPrefix + "MONITOR_REPEAT_EVERY":       &c.Monitor.RepeatEvery,
+		EnvPrefix + "NOTIFY_EMAIL_SMTP":          &c.Notify.Email.SMTP,
+		EnvPrefix + "NOTIFY_EMAIL_SECURITY":      &c.Notify.Email.Security,
+		EnvPrefix + "NOTIFY_EMAIL_USERNAME":      &c.Notify.Email.Username,
+		EnvPrefix + "NOTIFY_EMAIL_PASSWORD_FILE": &c.Notify.Email.PasswordFile,
+		EnvPrefix + "NOTIFY_EMAIL_FROM":          &c.Notify.Email.From,
+		EnvPrefix + "NOTIFY_EMAIL_TO":            &c.Notify.Email.To,
+		EnvPrefix + "NOTIFY_EMAIL_CA_FILE":       &c.Notify.Email.CAFile,
+		EnvPrefix + "NOTIFY_WEBHOOK_URL":         &c.Notify.Webhook.URL,
+		EnvPrefix + "NOTIFY_WEBHOOK_SECRET_FILE": &c.Notify.Webhook.SecretFile,
+		EnvPrefix + "NOTIFY_WEBHOOK_CA_FILE":     &c.Notify.Webhook.CAFile,
 	}
 }
 

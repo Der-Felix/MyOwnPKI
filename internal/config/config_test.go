@@ -188,7 +188,8 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
 		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}, Agent: Agent{"marker", "marker", "marker", "marker", "marker"},
-		Monitor: Monitor{"marker", "marker", "marker", "marker", "marker"}}
+		Monitor: Monitor{"marker", "marker", "marker", "marker", "marker"},
+		Notify:  Notify{Email{"marker", "marker", "marker", "marker", "marker", "marker", "marker"}, Webhook{"marker", "marker", "marker"}}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)
 	}
@@ -300,16 +301,17 @@ func TestExampleFileHasEveryKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	have := map[string]bool{}
-	for k, v := range doc {
-		sub, ok := v.(map[string]any)
-		if !ok {
-			have[EnvPrefix+strings.ToUpper(k)] = true
-			continue
-		}
-		for kk := range sub {
-			have[EnvPrefix+strings.ToUpper(k+"_"+kk)] = true
+	var walk func(prefix string, m map[string]any)
+	walk = func(prefix string, m map[string]any) {
+		for k, v := range m {
+			if sub, ok := v.(map[string]any); ok {
+				walk(prefix+k+"_", sub)
+				continue
+			}
+			have[EnvPrefix+strings.ToUpper(prefix+k)] = true
 		}
 	}
+	walk("", doc)
 	for _, name := range EnvNames() {
 		if !have[name] {
 			t.Errorf("deploy/config.example.yaml lacks the key of %s", name)

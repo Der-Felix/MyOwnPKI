@@ -905,7 +905,8 @@ notify:
     username: pki@homelab.lan        # optional
     password_file: /etc/myownpki/smtp-password   # optional, read at each send
     from: pki@homelab.lan
-    to: [ops@homelab.lan]
+    to: ops@homelab.lan, lead@homelab.lan   # comma-separated
+    ca_file: /etc/myownpki/mail-ca.pem          # optional extra roots, e.g. this PKI's root
   webhook:
     url: https://hooks.homelab.lan/myownpki
     secret_file: /etc/myownpki/webhook-secret    # HMAC-SHA256 key, required
@@ -916,11 +917,12 @@ notify:
   alert is "sealed", and a sealed server can't decrypt a DEK-encrypted SMTP password. Secrets live in
   files next to `tls_key_file` and `auth.key_file`, readable by the service user only; the
   configuration holds the path. Environment variables `MYOWNPKI_NOTIFY_*` as for every other key.
-- **Webhook:** `POST` JSON (`{"server": …, "events": [{kind, subject, severity, state, since, link}]}`),
-  header `X-MyOwnPKI-Signature: sha256=<hex HMAC of the body>`, 10 s timeout, no redirects, TLS
+- **Webhook:** `POST` JSON (`{"server": …, "created": …, "events": [{kind, subject, severity, state, since, detail, link}]}`,
+  state `opened`, `raised`, `reminder`, `resolved` or `test`), header `X-MyOwnPKI-Signature: sha256=<hex HMAC of the body>`, 10 s timeout, no redirects, TLS
   against the system roots plus `ca_file`. The URL is the operator's, so the http-01 SSRF rules do
-  not apply; it must be `https`, except `http` to a loopback address.
-- **E-mail:** plain-text, one message per digest, subject `[MyOwnPKI] 2 new, 1 resolved`; links
+  not apply; it must be `https`, except `http` to a loopback address. The standard proxy variables
+  (`HTTPS_PROXY`, `NO_PROXY`) apply.
+- **E-mail:** plain-text, one message per digest, subject `[MyOwnPKI] pki01: 2 new, 1 resolved`; links
   point to the first name of `admin.tls_names` and the port of `admin.listen` (no link without
   `tls_names`). Standard library `net/smtp` – no new dependency.
 - **Neither channel configured:** alerts still open and show in the UI; `config check` and the
