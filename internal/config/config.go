@@ -40,13 +40,14 @@ var ErrInvalid = errors.New("invalid configuration")
 // Config is the server configuration. Field order is the order of the example file.
 type Config struct {
 	// DataDir holds system.db and the tenant directories. Absolute path.
-	DataDir string `yaml:"data_dir"`
-	Log     Log    `yaml:"log"`
-	Admin   Admin  `yaml:"admin"`
-	Public  Public `yaml:"public"`
-	Auth    Auth   `yaml:"auth"`
-	ACME    ACME   `yaml:"acme"`
-	Agent   Agent  `yaml:"agent"`
+	DataDir string  `yaml:"data_dir"`
+	Log     Log     `yaml:"log"`
+	Admin   Admin   `yaml:"admin"`
+	Public  Public  `yaml:"public"`
+	Auth    Auth    `yaml:"auth"`
+	ACME    ACME    `yaml:"acme"`
+	Agent   Agent   `yaml:"agent"`
+	Monitor Monitor `yaml:"monitor"`
 }
 
 // Log configures the process log (not the audit log).
@@ -164,11 +165,12 @@ var (
 // deliberate decision of the operator.
 func Default() Config {
 	return Config{
-		Log:    Log{Level: "info", Format: "json"},
-		Admin:  Admin{Listen: "127.0.0.1:9443"},
-		Public: Public{Listen: ":8080"},
-		ACME:   ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
-		Agent:  Agent{Listen: ":8444", PackageDir: "/var/lib/myownpki/agent-dist"},
+		Log:     Log{Level: "info", Format: "json"},
+		Admin:   Admin{Listen: "127.0.0.1:9443"},
+		Public:  Public{Listen: ":8080"},
+		ACME:    ACME{Listen: "127.0.0.1:8081", TrustedProxies: "127.0.0.1, ::1"},
+		Agent:   Agent{Listen: ":8444", PackageDir: "/var/lib/myownpki/agent-dist"},
+		Monitor: defaultMonitor(),
 	}
 }
 
@@ -281,6 +283,9 @@ func (c Config) Validate() error {
 	}
 	c.validateACME(admin, add)
 	c.validateAgent(add)
+	if _, err := c.Monitor.Values(); err != nil {
+		add("%w", err)
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("%w:\n  %w", ErrInvalid, joinIndented(errs))

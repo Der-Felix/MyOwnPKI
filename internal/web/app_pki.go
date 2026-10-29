@@ -173,6 +173,15 @@ func (a *app) dashboard(c *rc) {
 		},
 		Attention: []view.Message{},
 	}
+	if a.d.Alerts != nil {
+		open, alertErr := a.d.Alerts.Open(ctx)
+		if alertErr != nil {
+			c.fail(alertErr)
+			return
+		}
+		d.Numbers = append(d.Numbers, alertNumber(open))
+		d.Attention = append(d.Attention, alertMessages(open)...)
+	}
 	sealed := a.d.Keys.Status().Sealed
 	if a.d.ServerAttention != nil {
 		d.Attention = append(d.Attention, a.d.ServerAttention(sealed)...)

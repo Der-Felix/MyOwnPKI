@@ -26,6 +26,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
@@ -74,6 +75,13 @@ type AppDeps struct {
 	// (admin.tls_issuer, acme.tls_issuer) and the scheduled backups; nil =
 	// nothing to report.
 	ServerAttention func(sealed bool) []view.Message
+	// Alerts are the open alerts of the monitoring (v0.3.3); nil hides them.
+	Alerts AlertSource
+}
+
+// AlertSource is what the UI reads of the monitoring.
+type AlertSource interface {
+	Open(ctx context.Context) ([]monitor.Alert, error)
 }
 
 // ACMEAdmin is what the UI uses of the ACME server.

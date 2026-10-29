@@ -116,3 +116,21 @@ agent:
   # The agent listener serves only these files; no runtime download is needed.
   # Docker sets /opt/myownpki/agent-dist instead.
   package_dir: /var/lib/myownpki/agent-dist
+
+# Monitoring (v0.3.3): what turns into an alert on the dashboard and in the
+# log. Checked every minute; works while the server is sealed.
+monitor:
+  # End-entity certificates: warning and critical days before they expire.
+  # A certificate is no longer an alert once a newer one for the same names
+  # exists.
+  expiry_days: "14, 3"
+  # CA certificates: warning and critical days before they expire.
+  ca_expiry_days: "90, 30"
+  # How long the server may stay sealed before it alerts (1m–1h). A sealed
+  # server can't sign CRLs, so it turns critical a day before one is due.
+  sealed_after: 10m
+  # How long an agent may be silent before it alerts (10m–24h); critical
+  # after 24 hours.
+  agent_silent_after: 1h
+  # A reminder for an alert that is still open (1h–168h).
+  repeat_every: 24h

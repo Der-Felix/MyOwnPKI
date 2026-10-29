@@ -125,6 +125,9 @@ type Server struct {
 	// The agent listener (v0.3.0): nil while agent.base_url is empty.
 	agent *agentSide
 
+	// Monitoring (v0.3.3): alert rules and alerts.
+	monitor *monitorSide
+
 	closeOnce sync.Once
 }
 
@@ -318,6 +321,9 @@ func (s *Server) build(key *auth.Key) error {
 		s.jobs.add(jobACMEExpire, 5*time.Minute, 5*time.Minute, s.acme.ExpireStale)
 	}
 	if err := s.buildAgents(); err != nil {
+		return err
+	}
+	if err := s.buildMonitor(); err != nil {
 		return err
 	}
 	if s.opt.Config.Admin.TLSIssuer != "" || s.opt.Config.ACME.DirectTLS() || s.opt.Config.Agent.Enabled() {
@@ -753,7 +759,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention,
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(),
 		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Release),
 		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Release,
 	}})
