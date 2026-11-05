@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	stdhtml "html"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -117,8 +118,28 @@ func TestAgentPages(t *testing.T) {
 	// never again on the list.
 	r := b.post(t, "/agents/tokens", url.Values{"csrf_token": {token}, "label": {"proxy1"}, "names": {"proxy1.homelab.lan\n*.apps.homelab.lan"}, "hours": {"2"}})
 	secret := reSecret.FindString(r.html())
-	if r.Code != http.StatusOK || secret == "" || r.Header().Get("Cache-Control") != "no-store" || !strings.Contains(r.html(), "myownpki-agent enroll --token-file") {
+	if r.Code != http.StatusOK || secret == "" || r.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("new token: %d %q %s", r.Code, r.Header().Get("Cache-Control"), r.html())
+	}
+	// Setup, not enroll: on a fresh package host only setup writes agent.yaml
+	// and installs the unit. The secret goes into the file by here-doc.
+	page := stdhtml.UnescapeString(r.html())
+	checkAgentCalls(t, page, "setup --server 'https://pki.homelab.lan:8444' --ca-bundle /root/myownpki-root.pem --root-sha256 ")
+	for _, want := range []string{
+		"cat > /root/myownpki-join-token <<'MYOWNPKI_TOKEN'\n" + secret + "\nMYOWNPKI_TOKEN\n", "sha256sum | awk",
+		`--package-format "$format" --hostname "$(hostname -f)" --token-file /root/myownpki-join-token )`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("new token page lacks %q", want)
+		}
+	}
+	if strings.Contains(page, " enroll --token-file") || strings.Contains(page, "'"+secret+"'") {
+		t.Errorf("enroll command or token as an argument:\n%s", page)
+	}
+	// One exact name fixes --hostname; the host's own name may be short.
+	exact := stdhtml.UnescapeString(b.post(t, "/agents/tokens", url.Values{"csrf_token": {token}, "names": {"mail.homelab.lan"}, "hours": {"1"}}).html())
+	if !strings.Contains(exact, "--hostname 'mail.homelab.lan' --token-file") {
+		t.Errorf("exact token page:\n%s", exact)
 	}
 	if list := b.get(t, "/agents/tokens").html(); strings.Contains(list, secret) || !strings.Contains(list, "*.apps.homelab.lan") || !strings.Contains(list, "unused") {
 		t.Errorf("token list: %s", list)

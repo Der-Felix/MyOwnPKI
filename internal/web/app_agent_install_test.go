@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +27,21 @@ import (
 
 func guidedForm(csrf, host string) url.Values {
 	return url.Values{"csrf_token": {csrf}, "hostname": {host}, "arch": {"amd64"}, "format": {"deb"}, "mode": {"standalone"}, "webroot": {""}, "token": {"yes"}}
+}
+
+// reBareAgent finds an agent call that relies on PATH; root's PATH may lack
+// /usr/local/bin (Debian 13), so root commands must use agentdist.BinaryPath.
+var reBareAgent = regexp.MustCompile(`(^|[\s;&|(])myownpki-agent (setup|enroll|run|status|config)\b`)
+
+// checkAgentCalls wants want, the absolute call, and no bare call in text.
+func checkAgentCalls(t *testing.T, text, want string) {
+	t.Helper()
+	if !strings.Contains(text, agentdist.BinaryPath+" "+want) {
+		t.Errorf("no %q call in:\n%s", agentdist.BinaryPath+" "+want, text)
+	}
+	if bare := reBareAgent.FindString(text); bare != "" {
+		t.Errorf("agent call without absolute path %q in:\n%s", bare, text)
+	}
 }
 
 func TestGuidedAgentInstallTrustStepUpAndOneTimeToken(t *testing.T) {
@@ -85,6 +101,7 @@ func TestGuidedAgentInstallTrustStepUpAndOneTimeToken(t *testing.T) {
 			t.Errorf("guided output lacks %q", want)
 		}
 	}
+	checkAgentCalls(t, html, "setup --server")
 	command := "test \"$(" + `openssl x509 -in /root/myownpki-root.pem -outform DER | sha256sum | awk '{print $1}'` + ")\" = '" + rootHex + "'"
 	if strings.Count(html, rootSHA1Hex) != 1 || !strings.Contains(html, stdhtml.EscapeString(command)) {
 		t.Error("SHA-1 entered a command or the independent root SHA-256 literal changed")
@@ -185,6 +202,16 @@ func TestAgentUpdateOnlyOlderWithInstalledFormat(t *testing.T) {
 	if update.Code != http.StatusOK || !strings.Contains(update.html(), "--package-format deb") || strings.Contains(update.html(), "--token-file") {
 		t.Errorf("update command: %d %s", update.Code, update.html())
 	}
+	checkAgentCalls(t, update.html(), "setup --server")
+	// A tarball update installs the binary where the command then calls it.
+	if err := svc.Report(t.Context(), caller, agents.ReportInput{Version: "0.3.0", OS: "linux", Arch: "amd64", PackageFormat: "tarball"}); err != nil {
+		t.Fatal(err)
+	}
+	tarball := b.get(t, "/agents/"+id+"/update").html()
+	if !strings.Contains(tarball, "--package-format tarball") || !strings.Contains(tarball, "/root/myownpki-agent-package/myownpki-agent "+agentdist.BinaryPath+"\n") {
+		t.Errorf("tarball update command: %s", tarball)
+	}
+	checkAgentCalls(t, tarball, "setup --server")
 	for _, version := range []string{"0.3.1", "0.3.2", "dev", "0.3.1-alpha.1"} {
 		if err := svc.Report(t.Context(), caller, agents.ReportInput{Version: version, OS: "linux", Arch: "amd64", PackageFormat: "deb"}); err != nil {
 			t.Fatal(err)
@@ -241,7 +268,7 @@ func TestGuidedCommandFailClosed(t *testing.T) {
 	rootHash := hex.EncodeToString(rootSum[:])
 	var command string
 	for _, part := range strings.Split(response.html(), "<pre") {
-		if !strings.Contains(part, "myownpki-agent setup") {
+		if !strings.Contains(part, agentdist.BinaryPath+" setup") {
 			continue
 		}
 		_, body, _ := strings.Cut(part, ">")
@@ -268,22 +295,27 @@ func TestGuidedCommandFailClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 			logPath := filepath.Join(dir, "calls.log")
-			writeMock := func(name, body string) {
+			writeFile := func(path, body string) {
 				t.Helper()
 				// Executable, or Linux bash skips the mock and runs the real tool
 				// from /usr/bin (Git Bash on Windows ignores the mode).
-				if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o700); err != nil { // #nosec G306 -- test mock in t.TempDir must be executable
+				if err := os.WriteFile(path, []byte(body), 0o700); err != nil { // #nosec G306 -- test mock in t.TempDir must be executable
 					t.Fatal(err)
 				}
 			}
+			writeMock := func(name, body string) { t.Helper(); writeFile(filepath.Join(bin, name), body) }
 			writeMock("curl", "#!/usr/bin/env bash\nprintf 'curl %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
 			writeMock("openssl", "#!/usr/bin/env bash\nprintf '%s\\n' \"$MOCK_ROOT_HASH\"\n")
 			// --check is the package checksum; otherwise pass openssl's mocked
 			// root hash through to awk.
 			writeMock("sha256sum", "#!/usr/bin/env bash\nif [ \"${1:-}\" = --check ]; then cat >/dev/null; exit \"$MOCK_SUM_STATUS\"; fi\ncat\n")
 			writeMock("apt-get", "#!/usr/bin/env bash\nprintf 'apt-get %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
-			writeMock("myownpki-agent", "#!/usr/bin/env bash\nprintf 'myownpki-agent %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
-			cmd := exec.CommandContext(t.Context(), "bash", "-c", command) // #nosec G204 -- actual rendered command with only mocked executables
+			// The agent mock stands at its own absolute path, outside PATH like
+			// /usr/local/bin on Debian 13: a bare call would not find it.
+			agentMock := filepath.Join(dir, "myownpki-agent")
+			writeFile(agentMock, "#!/usr/bin/env bash\nprintf 'myownpki-agent %s\\n' \"$*\" >> \"$MOCK_LOG\"\n")
+			script := strings.ReplaceAll(command, agentdist.BinaryPath, filepath.ToSlash(agentMock))
+			cmd := exec.CommandContext(t.Context(), "bash", "-c", script) // #nosec G204 -- actual rendered command with only mocked executables
 			cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "MOCK_LOG="+logPath, "MOCK_ROOT_HASH="+tt.rootHash, "MOCK_SUM_STATUS="+tt.sumStatus)
 			output, err := cmd.CombinedOutput()
 			if tt.name == "success" {
@@ -310,5 +342,73 @@ func TestGuidedCommandFailClosed(t *testing.T) {
 				t.Errorf("setup reached = %v, want %v\n%s", got, tt.wantSetup, calls)
 			}
 		})
+	}
+}
+
+// TestJoinTokenCommandRunsSetup runs the host commands of a new join token
+// with mocked tools: the token file, the verified root, the detected package
+// format and setup by its absolute path, outside PATH.
+func TestJoinTokenCommandRunsSetup(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("executes the rendered POSIX shell command")
+	}
+	v, _ := newAgentsUIEnv(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	r := b.post(t, "/agents/tokens", url.Values{"csrf_token": {b.csrf(t)}, "names": {"proxy1.homelab.lan"}, "hours": {"1"}})
+	secret := reSecret.FindString(r.html())
+	var blocks []string
+	for _, part := range strings.Split(r.html(), "<pre")[1:] {
+		_, body, _ := strings.Cut(part, ">")
+		text, _, _ := strings.Cut(body, "</pre>")
+		blocks = append(blocks, stdhtml.UnescapeString(text))
+	}
+	if r.Code != http.StatusOK || secret == "" || len(blocks) != 2 {
+		t.Fatalf("new token page: %d %d blocks", r.Code, len(blocks))
+	}
+	chain, err := v.Engine.CAChain(t.Context(), testinstance.Console, v.CAIDs["issuing"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSum := sha256.Sum256(chain[len(chain)-1])
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if mkErr := os.Mkdir(bin, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	writeFile := func(path, body string) {
+		t.Helper()
+		if writeErr := os.WriteFile(path, []byte(body), 0o700); writeErr != nil { // #nosec G306 -- test mock in t.TempDir must be executable
+			t.Fatal(writeErr)
+		}
+	}
+	writeFile(filepath.Join(bin, "curl"), "#!/usr/bin/env bash\nprintf 'curl %s\n' \"$*\" >> \"$MOCK_LOG\"\n")
+	writeFile(filepath.Join(bin, "openssl"), "#!/usr/bin/env bash\nprintf '%s\n' \"$MOCK_ROOT_HASH\"\n")
+	writeFile(filepath.Join(bin, "sha256sum"), "#!/usr/bin/env bash\ncat\n")
+	writeFile(filepath.Join(bin, "dpkg"), "#!/usr/bin/env bash\nexit 0\n")
+	agentMock := filepath.Join(dir, "myownpki-agent")
+	writeFile(agentMock, "#!/usr/bin/env bash\nprintf 'myownpki-agent %s\n' \"$*\" >> \"$MOCK_LOG\"\n")
+	// /root/ becomes the temp directory: the test does not run as root.
+	script := strings.ReplaceAll(strings.Join(blocks, "\n"), agentdist.BinaryPath, filepath.ToSlash(agentMock))
+	script = strings.ReplaceAll(script, "/root/", filepath.ToSlash(dir)+"/")
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", script) // #nosec G204 -- actual rendered command with only mocked executables
+	cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "MOCK_LOG="+logPath, "MOCK_ROOT_HASH="+hex.EncodeToString(rootSum[:]))
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("rendered commands failed: %v\n%s\n%s", runErr, output, script)
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "myownpki-agent setup --server https://pki.homelab.lan:8444 ") ||
+		!strings.Contains(string(calls), "--package-format deb --hostname proxy1.homelab.lan --token-file ") {
+		t.Errorf("setup call:\n%s", calls)
+	}
+	token, err := os.ReadFile(filepath.Join(dir, "myownpki-join-token"))
+	if err != nil || string(token) != secret+"\n" {
+		t.Errorf("token file: %v %q", err, token)
 	}
 }

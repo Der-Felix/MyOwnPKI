@@ -25,6 +25,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	agentv1 "github.com/Der-Felix/MyOwnPKI/internal/gen/myownpki/agent/v1"
 )
@@ -36,6 +37,10 @@ const (
 	maxBackoff     = time.Hour
 	agentFile      = "agent.json"
 )
+
+// notEnrolledHint names the binary by its absolute path: root's PATH can lack
+// /usr/local/bin.
+const notEnrolledHint = "not enrolled – run: " + agentdist.BinaryPath + " enroll --token-file FILE"
 
 // ErrEnrolled: enroll on an agent whose certificate is still valid.
 var ErrEnrolled = errors.New("this agent is enrolled and its certificate is valid")
@@ -305,7 +310,7 @@ func (a *Agent) waitForEnrollment(ctx context.Context) error {
 	}
 	switch {
 	case res == nil:
-		a.log.Warn("not enrolled – run: myownpki-agent enroll --token-file FILE")
+		a.log.Warn(notEnrolledHint)
 		return a.Sleep(ctx, notEnrolledLog)
 	case res.Admitted():
 		return nil
