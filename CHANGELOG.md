@@ -7,12 +7,78 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.3]
+
+Monitoring: the server checks itself every minute, shows what needs an admin on a new Alerts page
+and tells you by e-mail or webhook – also while it is sealed.
+
+### Added
+
+- **Alerts:** a job evaluates the rules every minute and keeps one alert per condition (kind and
+  subject, severity, first and last seen, resolved) in system.db (migration 0014, additive). Kinds:
+  `cert_expiry` (a valid end-entity certificate ends and no newer valid certificate covers the same
+  names; agent identity certificates never count; an expired one stays 30 days), `ca_expiry`, `crl`
+  (the dashboard's existing CRL states), `sealed`, `agent_silent`, `agent_certificate` and
+  `deploy_failed`. `sealed` opens after 10 minutes and turns critical when a CRL of an online CA is
+  less than 24 hours from its next update, because a sealed server can't sign a new one (RFC 5280
+  §5.1.2.5). Alerts rise from warning to critical, resolve when the cause is gone and never
+  duplicate. The evaluation reads `pki.db` and the seal state and decrypts nothing, so it works while
+  sealed. Opened, raised, lowered and resolved alerts are logged once as `alert`.
+- **Thresholds:** the new `monitor:` section (also `MYOWNPKI_MONITOR_*`): `expiry_days` (default
+  `14, 3`), `ca_expiry_days` (`90, 30`), `sealed_after` (10m, 1m–1h), `agent_silent_after` (1h,
+  10m–24h) and `repeat_every` (24h, 1h–168h). Out-of-range values fail `config check` and the start.
+- **Notifications:** the new `notify:` section (also `MYOWNPKI_NOTIFY_*`) with an e-mail channel
+  (`smtp`, `security` `starttls`/`tls`/`none`, `username`, `password_file`, `from`, `to`, `ca_file`;
+  `none` only without a username) and a webhook (`url`, `secret_file`, `ca_file`). Channels and secrets
+  live in the configuration and in files read at each send – not in the database – so a sealed server
+  can still report that it is sealed. After each evaluation one **digest** per channel lists what
+  opened, became critical, is still open after `repeat_every`, or was resolved; nothing is sent when
+  nothing changed. E-mail is plain text over `net/smtp`; the webhook is a JSON `POST`, signed with
+  `X-MyOwnPKI-Signature: sha256=<HMAC-SHA256 of the body>`, https only (http to loopback), 10 seconds,
+  no redirects, honoring `HTTPS_PROXY`/`NO_PROXY`. Messages are queued in system.db and retried after
+  1 minute, 5 minutes, 30 minutes and 2 hours, then dropped and logged as an error
+  (`notification dropped after the last retry`). While no channel is configured nothing is marked as
+  notified, so the first message after configuring one lists every open alert.
+- **Alerts page and dashboard:** *Alerts* lists the open alerts (what to do, linked to the object) and
+  those resolved in the last 7 days; admins get *Send test message*. The dashboard shows an *Open
+  alerts* figure and lists critical certificate alerts, silent agents and failed deployments in
+  *Needs attention*, with a link to the page.
+- **REST:** `GET /api/v1/alerts` (viewer and up, `?state=open|resolved`) and
+  `POST /api/v1/notifications/test` (tenant admin; `409` without a channel, `429` with `Retry-After`
+  within 10 seconds of the last test). New permission `notification.test` (admin); each UI or REST
+  test is audited as `notification.test` with the result per channel, never a secret.
+- **`myownpki notify test [--channel email|webhook]`** sends a test message through the configured
+  channels with the server's configuration and secret files (run it as the service user).
+- **`config check`** shows the channels (e-mail by server, security and recipient count; the webhook
+  by host only) and the thresholds in effect. A missing, unreadable or empty password, secret or CA
+  file fails the check (exit 1); no channel at all only warns.
+- **Operations guide:** chapter 13, *Monitoring and notifications* – setup, secret files, container
+  variables, the test, what each alert means and what to do, retries, troubleshooting and an
+  end-to-end check.
+
+### Changed
+
+- **Alerts name the whole tenant,** so reading them needs a tenant-wide role (viewer or higher). A role
+  limited to one CA gets `403` from the API, has no *Alerts* entry and sees no alert block on the
+  dashboard.
+
 ### Fixed
 
 - **Agent packages in the container image:** the image carries the agent packages under
   `/opt/myownpki/agent-dist`, but nothing pointed `agent.package_dir` there, so a container served
   none of them. The image now sets `MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist`.
   Installations with install.sh were not affected.
+
+### Upgrade notes
+
+- No action is needed: migration 0014 is additive and `notify:` is off by default. To get messages,
+  configure `notify.email` and/or `notify.webhook` (operations guide, chapter 13), restart and
+  unseal. A restart leaves the server sealed, as always.
+- The first evaluation runs one minute after the start. A server left sealed for more than 10
+  minutes (for example after an update) opens a `sealed` alert, and agents that stopped reporting
+  open `agent_silent` alerts, as soon as that evaluation finds them.
+- Container installations: add the `MYOWNPKI_NOTIFY_*` variables and mount the secret files
+  read-only (operations guide, §13.3).
 
 ## [0.3.2] - 2026-10-29
 
