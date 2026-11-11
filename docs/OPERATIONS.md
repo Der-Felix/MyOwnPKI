@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.2
+v=0.3.3
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -289,8 +289,10 @@ myownpki healthcheck --config /etc/myownpki/config.yaml
 Asks `/healthz` of the admin listener on this machine; exit code 0 = healthy, 1 = not. It checks
 the connection against the exact certificate file the server serves (no CA involved), so it never
 talks to something else on the port. `/healthz` says nothing about the seal state on purpose – a
-sealed server is healthy but can't sign; watch the log for `crl attention` (a CRL gets old while
-sealed) and alert on it.
+sealed server is healthy but can't sign. Since v0.3.3 the server reports that itself, and a CRL that
+gets old, expiring certificates and silent agents too: by e-mail or webhook, see
+[chapter 13](#13-monitoring-and-notifications). Watching the process from outside (`healthcheck`, the
+log) stays useful for a server that is down.
 
 Logs go to standard error as JSON (`log.format: text` for reading at a console). They never
 contain secrets. The audit log is separate, hash-chained and signed:
@@ -488,6 +490,14 @@ From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`)
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+From v0.3.2 to v0.3.3: system.db migration 0014 adds the tables for alerts and queued
+notifications; it is additive and changes no certificate. No configuration change is needed. Alerts
+start with the first check, one minute after the start, and the server tells nobody until you
+configure `notify:` ([chapter 13](#13-monitoring-and-notifications)). The first message after you do
+lists every alert that is open then. Expect a `sealed` alert if you leave the freshly updated server
+sealed for more than 10 minutes, and `agent_silent` for agents that stopped reporting. The container
+image sets no `notify` values; add the `MYOWNPKI_NOTIFY_*` variables to your Compose file.
 
 From v0.3.1 to v0.3.2: no migrations and no configuration change. Update the server first, as
 always: until then the agent listener of a v0.3.1 server serves no agent packages, so guided
@@ -984,15 +994,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.2
+v=0.3.3
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.2_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.3_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.2_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.2_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.3_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.3_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1238,3 +1248,559 @@ The `acme-<directory-hash>` files must be removed together because the old ACME 
 the revoked agent ID. Keep `deployments.json`, `deployment-journal.json`, `deploy-backup-*` and
 `webroot-files.json`: they carry deployment history, rollback data and crash cleanup state. Delete
 those only as part of a separate, manually verified reset of deployment state.
+
+## 13. Monitoring and notifications
+
+Since v0.3.3 the server watches itself. **Every minute** it checks the certificates, the CAs and
+their CRLs, the seal state and the agents against the thresholds in §13.7 and keeps one **alert** per
+condition. The alerts are on the *Alerts* page, in the dashboard's *Needs attention* block and in
+`GET /api/v1/alerts`. If you configure **e-mail** or a **webhook**, a change also goes out as a
+message: **one digest** for everything that happened in that minute (not one mail per certificate), a
+**reminder** every `repeat_every` while an alert stays open, and a last message when the problem is
+gone. The checks and the messages **work while the server is sealed** – that is the point: the most
+important alert is "the server is sealed", and a sealed server can't decrypt anything. So the
+channels live in the configuration file and their secrets in files next to it, not in the database.
+
+Without a channel nothing breaks: alerts still open and show in the UI, only nobody is told.
+`myownpki config check` and the Alerts page say so.
+
+### 13.1 Set up e-mail
+
+1. Create the password file, if the mail server needs a login. The service user (`myownpki` with
+   install.sh) must be able to read it, nobody else; root owns it, like `config.yaml`:
+
+   ```bash
+   sudo install -m 0640 -o root -g myownpki /dev/null /etc/myownpki/smtp-password
+   ```
+
+   ```bash
+   sudo bash -c 'read -rsp "SMTP password: " p && printf "%s" "$p" > /etc/myownpki/smtp-password'
+   ```
+
+   The first command creates the empty file with owner and mode, the second fills it without the
+   password showing up on the screen, in the shell history or in a process list. A trailing newline
+   in the file is ignored. (Owner `myownpki` with mode `0600` works as well.) The file is read at
+   each send, so a changed password needs no restart.
+
+2. If the mail server's certificate comes from your own CA, give the server the root as an extra
+   trusted root (public data, any readable PEM file will do – for example the root from the trust
+   page, [chapter 11](#11-the-public-trust-page)):
+
+   ```bash
+   sudo curl -fsS -o /etc/myownpki/mail-ca.pem http://pki.homelab.lan/ca/root/1.pem
+   ```
+
+   (`root` and `1` are the name and generation of your root.) Compare its fingerprint with the admin
+   UI before you rely on it (§10.4).
+
+3. Add the channel to `/etc/myownpki/config.yaml`:
+
+   ```yaml
+   notify:
+     email:
+       smtp: mail.homelab.lan:587           # host:port
+       security: starttls                   # starttls | tls | none
+       username: pki@homelab.lan            # optional; with it password_file is required
+       password_file: /etc/myownpki/smtp-password
+       from: pki@homelab.lan
+       to: ops@homelab.lan, lead@homelab.lan   # comma-separated, one message for all
+       ca_file: /etc/myownpki/mail-ca.pem   # optional, added to the system roots
+   ```
+
+4. Check the file **as the service user** – a secret that only root can read passes as root and
+   fails for the server:
+
+   ```bash
+   sudo -u myownpki /usr/local/bin/myownpki config check --config /etc/myownpki/config.yaml
+   ```
+
+5. Restart the service (the channels are read at start) and **unseal it again** – every start is
+   sealed (§9):
+
+   ```bash
+   sudo systemctl restart myownpki
+   ```
+
+6. Send a test message (§13.5).
+
+| `security` | Usual port | What happens |
+|---|---|---|
+| `starttls` (default) | 587 | Connects in plain text and switches to TLS **before** the login. Refuses if the server doesn't offer STARTTLS. |
+| `tls` | 465 | TLS from the first byte. |
+| `none` | 25 | No encryption. **Only without `username`** – a password never travels in plain text, and `config check` refuses the combination. For an internal relay that accepts mail from the server's address. |
+
+The server's certificate is always checked against the system roots (plus `ca_file`) and must carry
+the host name used in `smtp` – with an IP address in `smtp` it needs that IP as a name. TLS 1.2 is
+the minimum. The login is `PLAIN`, sent only inside TLS; a server that offers only `LOGIN` or
+OAuth is not supported – use a relay for the server's address instead. The mail is plain text,
+UTF-8, marked `Auto-Submitted: auto-generated`; `from` must be an address the mail server accepts.
+One delivery has 20 seconds. E-mail **doesn't use the proxy variables** (§13.3): the mail server
+must be reachable directly.
+
+### 13.2 Set up a webhook
+
+A webhook is one `POST` with a JSON body to a URL of yours – a small receiver, or a relay that turns
+it into Slack, Teams, ntfy or a ticket.
+
+1. Create the secret – the key that signs every call – and give the same value to the receiver:
+
+   ```bash
+   sudo install -m 0640 -o root -g myownpki /dev/null /etc/myownpki/webhook-secret
+   ```
+
+   ```bash
+   openssl rand -hex 32 | sudo tee /etc/myownpki/webhook-secret >/dev/null
+   ```
+
+   ```bash
+   sudo cat /etc/myownpki/webhook-secret
+   ```
+
+   The key is the text of the file (without surrounding white space), not the bytes behind the hex.
+
+2. Add the channel to `config.yaml`:
+
+   ```yaml
+   notify:
+     webhook:
+       url: https://hooks.homelab.lan/myownpki
+       secret_file: /etc/myownpki/webhook-secret   # required
+       ca_file: /etc/myownpki/hooks-ca.pem         # optional, added to the system roots
+   ```
+
+3. Check, restart and unseal, test – as in §13.1, steps 4 to 6.
+
+The URL must be `https://`; `http://` is accepted only for a loopback address (a relay on the same
+host). It may not carry a user name or password – the request is signed instead. The receiver's
+certificate is checked against the system roots plus `ca_file`. Any **2xx** answer is success; a
+redirect is **not followed** (a redirect could carry the signed body somewhere else) and counts as a
+failure, as does any other status. One call has 10 seconds. Errors in the log and in the UI name the
+host, never the path or query – they may hold a token.
+
+**What arrives.** `Content-Type: application/json`, `User-Agent: MyOwnPKI/<version>` and
+
+```text
+X-MyOwnPKI-Signature: sha256=<hex HMAC-SHA256 of the body, key = the secret>
+```
+
+```json
+{
+  "server": "pki.homelab.lan",
+  "created": "2026-11-11T12:00:03Z",
+  "events": [
+    {
+      "kind": "sealed",
+      "subject": "Server sealed",
+      "severity": "warning",
+      "state": "opened",
+      "since": "2026-11-11T11:50:01Z",
+      "detail": "The server has been sealed since 2026-11-11 11:50 UTC – it signs nothing: …",
+      "link": "https://pki.homelab.lan:9443/unseal"
+    }
+  ]
+}
+```
+
+`state` is `opened`, `raised` (warning → critical), `reminder`, `resolved`, or `test` for a test
+message. `since` is when the alert opened. `link` is left out when the server has no name to link
+to (§13.6). Check the signature on the **raw body, before you parse it**, and compare in constant
+time. A receiver in shell, for a body saved as `body.json` and the header value in `$header`:
+
+```bash
+expected="sha256=$(openssl dgst -sha256 -hmac "$(cat /etc/myownpki/webhook-secret)" < body.json | sed 's/^.* //')"
+```
+
+```bash
+[ "$header" = "$expected" ] && echo valid || echo INVALID
+```
+
+The signature proves who sent the body, not when: the digest has `created`, but no timestamp is
+signed separately, so a receiver that must reject replays should remember what it has seen.
+
+**Through a proxy.** The webhook honors the standard `HTTPS_PROXY` and `NO_PROXY` variables of the
+**server process**, read once at start. With systemd, put them in a drop-in:
+
+```bash
+sudo systemctl edit myownpki
+```
+
+```ini
+[Service]
+Environment=HTTPS_PROXY=http://proxy.homelab.lan:3128
+Environment=NO_PROXY=localhost,127.0.0.1,.homelab.lan
+```
+
+Restart (and unseal) afterwards. `myownpki notify test` run in a shell doesn't see the unit's
+`Environment=`; set the variables for that command too (§13.5).
+
+### 13.3 In the container image
+
+Every key is also an environment variable: `MYOWNPKI_` plus the path in upper case, `.` as `_`. A
+variable wins over `config.yaml`. The secret files are files, so mount them **read-only** into the
+container and make them readable for UID 65532, the user of the image:
+
+```bash
+sudo install -d -m 0750 -o 65532 -g 65532 secrets
+```
+
+```bash
+sudo install -m 0400 -o 65532 -g 65532 /dev/null secrets/webhook-secret
+```
+
+```bash
+openssl rand -hex 32 | sudo tee secrets/webhook-secret >/dev/null
+```
+
+Create `smtp-password` and copy the root PEM (`root-ca.pem`, mode `0444`) there the same way. Then
+in `docker-compose.yml`:
+
+```yaml
+services:
+  myownpki:
+    # The server name in the message subject; the default is a random container ID.
+    hostname: pki.homelab.lan
+    environment:
+      MYOWNPKI_NOTIFY_EMAIL_SMTP: mail.homelab.lan:587
+      MYOWNPKI_NOTIFY_EMAIL_SECURITY: starttls
+      MYOWNPKI_NOTIFY_EMAIL_USERNAME: pki@homelab.lan
+      MYOWNPKI_NOTIFY_EMAIL_PASSWORD_FILE: /run/secrets/smtp-password
+      MYOWNPKI_NOTIFY_EMAIL_FROM: pki@homelab.lan
+      MYOWNPKI_NOTIFY_EMAIL_TO: ops@homelab.lan, lead@homelab.lan
+      MYOWNPKI_NOTIFY_EMAIL_CA_FILE: /run/secrets/root-ca.pem
+      MYOWNPKI_NOTIFY_WEBHOOK_URL: https://hooks.homelab.lan/myownpki
+      MYOWNPKI_NOTIFY_WEBHOOK_SECRET_FILE: /run/secrets/webhook-secret
+      HTTPS_PROXY: http://proxy.homelab.lan:3128
+      NO_PROXY: localhost,127.0.0.1,.homelab.lan
+    volumes:
+      - ./secrets/smtp-password:/run/secrets/smtp-password:ro
+      - ./secrets/webhook-secret:/run/secrets/webhook-secret:ro
+      - ./secrets/root-ca.pem:/run/secrets/root-ca.pem:ro
+```
+
+The thresholds (§13.7) are `MYOWNPKI_MONITOR_EXPIRY_DAYS`, `MYOWNPKI_MONITOR_CA_EXPIRY_DAYS`,
+`MYOWNPKI_MONITOR_SEALED_AFTER`, `MYOWNPKI_MONITOR_AGENT_SILENT_AFTER` and
+`MYOWNPKI_MONITOR_REPEAT_EVERY`. Check and test with the same Compose file, so the same variables
+and mounts apply:
+
+```bash
+docker compose run --rm myownpki config check
+```
+
+```bash
+docker compose run --rm myownpki notify test
+```
+
+`config check` shows `(from MYOWNPKI_NOTIFY_…)` behind a value that came from a variable. A change
+needs `docker compose up -d` (the container restarts sealed – unseal it).
+
+### 13.4 Two things to know before you rely on it
+
+- **A restart seals the server.** Changing the channels or thresholds means a restart, and a
+  restart means an unseal in the browser. Do it when nobody waits for a certificate.
+- **No message is sent while the server is down.** It tells you about its own sealed state, not about
+  being off. For that, watch from outside: `myownpki healthcheck` or your monitoring system on
+  `/healthz` (§4).
+
+### 13.5 Test the channels
+
+```bash
+sudo -u myownpki /usr/local/bin/myownpki notify test --config /etc/myownpki/config.yaml
+```
+
+One test message goes through every configured channel, right now, with the server's configuration
+and secret files; `--channel email` or `--channel webhook` limits it to one. Success:
+
+```text
+email    sent to ops@homelab.lan, lead@homelab.lan via mail.homelab.lan:587
+webhook  sent to hooks.homelab.lan
+```
+
+A failure prints `email    FAILED: <reason>` (the reason names the host and what went wrong, never
+a password or the webhook path) and the exit code is 1. The command needs neither a running server
+nor an unsealed one and sends no alerts. Behind a proxy, give the variables to the command:
+
+```bash
+sudo -u myownpki env HTTPS_PROXY=http://proxy.homelab.lan:3128 /usr/local/bin/myownpki notify test --config /etc/myownpki/config.yaml
+```
+
+The e-mail subject of a test is `[MyOwnPKI] pki.homelab.lan: test message`; the webhook gets one
+event with `"state": "test"` and `"severity": "info"`.
+
+The same test from the running server:
+
+- **UI:** *Alerts → Notifications → Send test message* (tenant admins). The page then shows one line
+  per channel, success or the reason.
+- **REST:** `POST /api/v1/notifications/test` with the token of a tenant admin:
+
+  ```bash
+  curl -sS --cacert root.pem -X POST -H "Authorization: Bearer $MYOWNPKI_TOKEN" https://pki.homelab.lan:9443/api/v1/notifications/test
+  ```
+
+  ```json
+  {"channels":[{"channel":"email","ok":true},{"channel":"webhook","ok":false,"error":"webhook hooks.homelab.lan answered 403 Forbidden"}]}
+  ```
+
+  A failing channel doesn't fail the call (`200`, `ok: false`). `409` means no channel is
+  configured, `403` that the token isn't a tenant admin's, `429` that the last test was less than
+  10 seconds ago (`Retry-After` says how long).
+
+The UI and REST tests are limited to **one every 10 seconds** and audited as `notification.test`
+(§13.9). `myownpki notify test` is neither limited nor audited – it runs on the machine, as the
+service user.
+
+**`config check`** shows what is in effect and reads the secret and CA files:
+
+```text
+Notifications (notify:)
+  e-mail           mail.homelab.lan:587, starttls, 2 recipients
+  webhook          hooks.homelab.lan, signed with HMAC-SHA256
+
+Alert thresholds (monitor:)
+  certificates     warning 14 days, critical 3 days before they end
+  CA certificates  warning 90 days, critical 30 days before they end
+  sealed server    alert after 10m
+  silent agent     alert after 1h
+  reminder         every 24h while an alert is open
+```
+
+The webhook appears by host only. A file that is missing, unreadable, empty (a password or secret)
+or without a PEM certificate (`ca_file`) is an **error** and the exit code is 1, because every
+message would fail:
+
+```text
+Error: notify.email.password_file /etc/myownpki/smtp-password: the file does not exist.
+Error: notify.webhook.secret_file /etc/myownpki/webhook-secret: the file can't be read (permission denied) – the service user must be able to read it.
+```
+
+With no channel at all it only warns (exit 0): *no notification channel is configured – alerts are
+shown in the UI, nobody is notified*. `config check` doesn't connect to anything; only a test shows
+that the mail server or receiver accepts the message.
+
+### 13.6 The alerts
+
+| Alert | Opens when | Warning | Critical |
+|---|---|---|---|
+| `cert_expiry` | a valid end-entity certificate ends soon and **no newer valid certificate covers the same names** | 14 days left | 3 days left, or expired |
+| `ca_expiry` | the current certificate of an active CA ends soon | 90 days left | 30 days left, or expired |
+| `crl` | the newest CRL of a CA generation is not current | half its lifetime has passed without a renewal, or none was ever published | past its next update |
+| `sealed` | the server has been sealed longer than `sealed_after` | after 10 minutes | a CRL of an online CA is less than 24 hours from its next update |
+| `agent_silent` | an active agent that reported before has not reported | after 1 hour | after 24 hours |
+| `agent_certificate` | an active agent's own certificate has less than 48 hours left | – | always |
+| `deploy_failed` | the last report of a deployment is `failed` or `rolled_back` | always | – |
+
+Warning and critical thresholds are configurable where §13.7 lists a key. An alert changes its
+severity while it is open (warning → critical sends a new message, critical → warning stays quiet)
+and closes by itself at the next check once the cause is gone.
+
+**`cert_expiry`** – a certificate runs out and nothing replaces it. "Replaces" means: another valid,
+unrevoked certificate with the same set of names (DNS names and IPs, or the common name when there
+are none) ends later. Agent identity certificates and revoked certificates never alert. An expired
+certificate stays an alert for 30 days after its end, then it closes. What to do: issue the
+replacement – with ACME the client renews on its own, so look at why it didn't (§10.9; for an
+agent's deployment the agent page and `journalctl -u myownpki-agent`, §12.5, *Renew now*), by hand
+issue a new certificate for the same names and deploy it. If the certificate isn't needed any more,
+revoke it. The alert closes as soon as the replacement is **issued**; the server doesn't look at
+what the host actually serves, so deploying it is still your check (a failed agent deployment is
+`deploy_failed`).
+
+**`ca_expiry`** – the CA's own certificate ends; everything below it stops validating that day. What
+to do: renew the CA from its page under *Certificate authorities* well before the date, and give
+the clients what they need if the renewal brings a new root (§10.4, chapter 11). The 90 days give
+you time; the critical level at 30 days means the planned change was missed.
+
+**`crl`** – clients that check revocation reject certificates below a CA whose CRL has expired
+(RFC 5280 §5.1.2.5: `nextUpdate` is the time after which the CRL must not be relied on). *Warning*
+means the renewal didn't happen: for an online CA the server renews its CRL itself, so the usual
+cause is a sealed server – unseal it, or see the `sealed` alert. For a CA with an **offline root**
+nobody renews it automatically: sign a new CRL on the offline root and upload it on the root's page
+(*Upload the root's CRL*, §5). *Missing* means no CRL was ever published for that generation.
+
+**`sealed`** – the server is sealed and signs nothing: no new certificates, no ACME orders, no
+agent renewals, no CRLs. It opens after `sealed_after` so that the restart of an update, or a short
+seal, doesn't wake anyone. It becomes **critical when a CRL of an online CA is less than 24 hours
+from its next update** (or past it): a sealed server can't sign the replacement, and once the CRL
+expires revocation checks fail for everything below that CA. How soon that happens depends on when
+the last CRL was signed – with the default 7-day CRL of an intermediate (renewed after a third of
+its life), roughly 3½ to 6 days after the seal; a CA with shorter CRLs gets there sooner. What to do: unseal it (*Unseal* in the banner, or `serve --unseal`, §4). An
+instance admin is needed to unseal. If the server was sealed by mistake or after a restart, that's
+all; if you don't know why it sealed, read the audit log first (§8).
+
+**`agent_silent`** – an active agent has not reported for `agent_silent_after` (an agent reports
+every five minutes, §12.5). An agent that never reported doesn't alert. What to do: on the host
+
+```bash
+systemctl status myownpki-agent
+```
+
+```bash
+journalctl -u myownpki-agent -n 100 --no-pager
+```
+
+Typical causes: the host or service is down, the agent port (8444/tcp, §12.4) is blocked, the
+server's agent listener certificate expired while sealed. A disabled or revoked agent doesn't alert.
+
+**`agent_certificate`** – the agent's own 7-day certificate was not renewed at two thirds of its life
+and ends in less than 48 hours. Without it the agent can't reach the server any more. What to do:
+fix the connection as for `agent_silent` while the certificate is still valid; an agent whose
+certificate expired enrolls again with the key of its last one (§12). The same event usually shows as
+`agent_silent` first.
+
+**`deploy_failed`** – the last report of a deployment is `failed` or `rolled_back`. The previous
+certificate is still in place, but it keeps ageing. What to do: open the agent's page (the alert
+links to it) for the error, then `journalctl -u myownpki-agent` and the rollback hints in §12.5. The
+alert closes with the next successful report, or when the deployment is removed.
+
+### 13.7 Thresholds
+
+The defaults suit most installations. Set them in `config.yaml` (restart to apply):
+
+```yaml
+monitor:
+  expiry_days: "14, 3"
+  ca_expiry_days: "90, 30"
+  sealed_after: 10m
+  agent_silent_after: 1h
+  repeat_every: 24h
+```
+
+| Key | Default | Allowed | Environment variable |
+|---|---|---|---|
+| `monitor.expiry_days` | `"14, 3"` | warning and critical days for end-entity certificates; warning 2–90, critical at least 1 and below warning | `MYOWNPKI_MONITOR_EXPIRY_DAYS` |
+| `monitor.ca_expiry_days` | `"90, 30"` | the same for CA certificates; warning 2–365 | `MYOWNPKI_MONITOR_CA_EXPIRY_DAYS` |
+| `monitor.sealed_after` | `10m` | 1m–1h | `MYOWNPKI_MONITOR_SEALED_AFTER` |
+| `monitor.agent_silent_after` | `1h` | 10m–24h | `MYOWNPKI_MONITOR_AGENT_SILENT_AFTER` |
+| `monitor.repeat_every` | `24h` | 1h–168h | `MYOWNPKI_MONITOR_REPEAT_EVERY` |
+
+Durations are written like `10m`, `1h` or `168h`. The server refuses to start, and `config check`
+fails, with a message naming the key when a value is outside its range. Not configurable: the
+24-hour CRL horizon of the critical `sealed` alert, the 24 hours after which a silent agent turns
+critical, the 48 hours of `agent_certificate` and the 30 days an expired certificate stays an alert.
+
+### 13.8 How messages behave
+
+**One digest per minute at most.** After each check the server collects what changed since the last
+message and sends it as one message per channel. A minute without a change sends nothing.
+
+| State | When | In the e-mail |
+|---|---|---|
+| `opened` | a new alert (also: every alert that was open when a channel was first configured) | NEW |
+| `raised` | warning → critical | NOW CRITICAL |
+| `reminder` | still open `repeat_every` after its last message | STILL OPEN |
+| `resolved` | the cause is gone, for an alert whose opening was reported | RESOLVED |
+
+The subject counts them: `[MyOwnPKI] pki.homelab.lan: 2 new, 1 resolved`. The name is the host
+name of the machine (or the container's `hostname:`). The body lists each alert with its severity,
+what it is and what to do, and a link to the object in the web UI. Links need a name: they use the
+first name of `admin.tls_names` (an IP if there is no name) and the port of `admin.listen`; without
+`tls_names` there are no links. Names in the message come from certificates and are cleaned of
+control characters.
+
+```text
+Subject: [MyOwnPKI] pki.homelab.lan: 1 new
+
+MyOwnPKI on pki.homelab.lan, 2026-11-11 12:00 UTC
+
+NEW
+
+  [critical] www.homelab.lan
+  Certificate www.homelab.lan (serial 04A1…, CA issuing) expires in 2 days (2026-11-13 09:00 UTC) and no newer certificate covers its names – renew it.
+  https://pki.homelab.lan:9443/certificates/<id>
+
+-- 
+Sent by MyOwnPKI. The open alerts are on the dashboard.
+```
+
+**No channel, no marking.** While neither channel is configured, nothing is marked as notified. The
+first message after you configure one lists **every alert that is open then**, as new.
+
+**Delivery and retries.** Messages are queued in `system.db` and sent by the same minute job, so
+they survive a restart. A failed delivery is tried again after **1 minute, 5 minutes, 30 minutes and
+2 hours**; after the fifth failed attempt (about two and a half hours after the first) the message is
+**dropped**. The log shows each step (JSON; `journalctl -u myownpki -o cat`):
+
+| Log message | Level | Meaning |
+|---|---|---|
+| `notification failed – will retry` | warn | with `channel`, `attempt`, `next_attempt`, `error` |
+| `notification sent` | info | after at least one failure, with the attempt that worked |
+| `notification dropped after the last retry – the alerts are still on the dashboard` | error | gave up; with `channel` and the last `error` |
+| `alert` | warn / info | an alert `opened`, `raised`, `lowered` or `resolved` – logged whether or not a channel exists |
+| `no notification channel configured – alerts show only in the UI …` | info | at start |
+
+```bash
+journalctl -u myownpki -o cat | grep -E 'notification|"alert"'
+```
+
+Set up an alarm on **`notification dropped`** in your log system: it's the one case where the server
+tried and nobody was told. A dropped message is not repeated – the alerts it carried count as
+reported, so open ones come again with their next reminder (after `repeat_every`), but a `resolved`
+message that was dropped is lost; the Alerts page still shows it for 7 days. Delivery and retries of
+the two channels are independent: a broken webhook doesn't hold back the mail.
+
+Alerts resolved more than 30 days ago and finished queue entries are deleted daily; the Alerts page
+and API show the open ones and those resolved in the last 7 days.
+
+### 13.9 Who sees and does what
+
+| | Role | Notes |
+|---|---|---|
+| Alerts page, dashboard figure *Open alerts*, `GET /api/v1/alerts` | tenant-wide **viewer** or higher | `?state=open` or `resolved`. Alerts name certificates, CAs and hosts of the whole tenant, so a role limited to one CA gets 403, has no *Alerts* entry in the menu and no alert block on the dashboard. Works while sealed. |
+| *Send test message*, `POST /api/v1/notifications/test` | tenant **admin** (permission `notification.test`) | No step-up – it changes nothing. One every 10 seconds. A refused attempt is audited as denied. |
+| Channels and thresholds | whoever edits `config.yaml` or the environment, on the server | There is no setting in the UI. |
+
+Each test is in the tenant audit log as `notification.test` with the result per channel (`ok`, or the
+error text). The error text may name hosts, file paths and recipient addresses; it never holds a
+password, the webhook secret, or the webhook's path or query.
+
+### 13.10 When no message arrives
+
+Work from the server outward:
+
+1. **Is a channel configured?** `config check` (as the service user) shows the channels, or says
+   *off*. The start of the log has `no notification channel configured` if not. Was the service
+   restarted after the change?
+2. **Do the files work?** `config check` names a missing, unreadable or empty password, secret or
+   CA file. The service user must be able to read them (`sudo -u myownpki cat <file> >/dev/null`).
+3. **Does a test arrive?** `myownpki notify test` (§13.5). If it says `sent` but no mail arrives,
+   the problem is behind the server: spam filter, the relay's sender rules for `from`, a wrong `to`.
+   Look at the mail server's log for the message from the server's address.
+4. **Is there anything to report?** A message goes out only when an alert opened, rose, resolved or
+   is due for a reminder. Look at the *Alerts* page. After an alert was reported, the next message is
+   the reminder in `repeat_every`.
+5. **Did it fail and get dropped?** `journalctl -u myownpki -o cat | grep notification`. The
+   `error` says why.
+6. **Is the monitoring running?** `journalctl -u myownpki -o cat | grep '"job failed"'` – a failing
+   `monitor` job logs its error every minute.
+
+| Error (from the test or the log) | Cause and fix |
+|---|---|
+| `x509: certificate signed by unknown authority` | the mail server's or receiver's certificate comes from a CA the server doesn't trust: set `ca_file` to its root (§13.1, §13.2) |
+| `x509: certificate is valid for …, not …` | the host in `smtp` or `url` isn't a name in the certificate; use a name it carries |
+| `the server does not offer STARTTLS – set notify.email.security to tls or none` | wrong `security` for that port: 465 needs `tls`, 25 often `none` |
+| `authentication as <user>: 535 …` | wrong user or password in the file; or the server wants `LOGIN` or OAuth, which isn't supported |
+| `MAIL FROM: 550 …`, `RCPT TO <address>: 550 …` | the relay refuses the sender or a recipient: allow the server's address, check `from` and `to` |
+| `connection refused`, `i/o timeout`, `no such host` | name resolution or firewall from the server to the mail server or receiver; e-mail ignores the proxy |
+| `webhook … answered 401` or `403` | the receiver rejects the signature: another secret, a body that was parsed and written out again before hashing, or the `sha256=` prefix left out when comparing |
+| `webhook … answered 404`, `5xx` | wrong path, or the receiver itself fails; look at its log |
+| `webhook … answered 301` or `302` | redirects aren't followed: use the final URL |
+| `proxyconnect` or `Forbidden` from the proxy | `HTTPS_PROXY` points to a proxy that refuses the destination, or `NO_PROXY` should list it; the variables are read when the server starts |
+| `secret file: … permission denied` | the service user can't read the file (§13.1, step 1) |
+
+### 13.11 An end-to-end check
+
+Do this once after setup, and again after changing a channel. It uses a real alert, so it proves the
+whole chain: check, digest, queue, channel. **While the server is sealed it signs nothing** – no new
+certificates, ACME orders, agent renewals or CRLs. The web UI keeps working, so you can unseal; but
+choose a time when nobody waits for a certificate, and keep it short. You need an instance admin
+account.
+
+1. Note the time and seal the server: *Seal now* next to your user name in the UI, or
+   `POST /api/v1/system/seal`. The UI shows the seal banner at once; nothing else happens yet.
+2. After `sealed_after` (default **10 minutes**) plus up to a minute for the next check, **one
+   message** arrives through every channel: `[MyOwnPKI] pki.homelab.lan: 1 new`, with *Server
+   sealed* and a link to *Unseal*. The *Alerts* page shows an open `sealed` alert (warning – critical
+   only if a CRL is due within a day), and the log has `"msg":"alert"` with `"state":"opened"`.
+3. Unseal the server. Within about **one to two minutes** a second message follows: `1 resolved`,
+   *Server sealed (open since …)*. The alert moves to *Resolved in the last 7 days*.
+
+If step 2 doesn't happen after about twelve minutes, go through §13.10. If you only want to know that
+the channels work, the test of §13.5 is enough and seals nothing.
