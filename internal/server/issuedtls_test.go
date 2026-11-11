@@ -468,7 +468,9 @@ func TestIssuedListeners(t *testing.T) {
 	go func() { done <- srv.Serve(ctx) }()
 	defer func() {
 		cancel()
-		<-done
+		if serr := <-done; serr != nil {
+			t.Errorf("server stopped with an error: %v", serr)
+		}
 	}()
 	handshake := func(addr, name string) []*x509.Certificate {
 		t.Helper()

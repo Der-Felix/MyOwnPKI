@@ -543,7 +543,7 @@ Rationale and alternatives: docs/NIGHTLOG.md.
 | Clock | `internal/clock`: `Clock` interface, `System` (UTC) – the only code allowed to call `time.Now` (lint rule) – and `Fake` for tests |
 | Dev mode | `myownpki serve --dev` – CLI flag only, never in the config file; binds only to the IP literals `127.0.0.1`/`::1`; "DEV MODE – no TLS, no auth" on start and on every page |
 | Tools in `go.mod` (`go tool`) | templ (generator = runtime version), govulncheck |
-| Tools as pinned binaries | golangci-lint 2.14.0 (GPL – must not enter `go.mod`), sqlc 1.31.1 (from phase 1), ShellCheck 0.11.0 (CI) |
+| Tools as pinned binaries | golangci-lint 2.15.0 (GPL – must not enter `go.mod`), sqlc 1.31.1 (from phase 1), ShellCheck 0.11.0 (CI) |
 | CI | GitHub Actions; actions pinned to commit SHAs; downloads verified by SHA-256; read-only token; daily govulncheck; Dependabot weekly |
 | Lint | golangci-lint v2 with security and project rules (`.golangci.yml`): e.g. no `math/rand`, no `time.Now` outside tests, no `//nolint` without reason |
 | Presets | `presets/*.yaml`, embedded; strict validation; parity test against `legacy/lib/presets.sh` |

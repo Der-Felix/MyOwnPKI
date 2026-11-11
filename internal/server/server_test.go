@@ -577,7 +577,9 @@ func TestACMEListener(t *testing.T) {
 	go func() { done <- srv.Serve(ctx) }()
 	defer func() {
 		cancel()
-		<-done
+		if serr := <-done; serr != nil {
+			t.Errorf("server stopped with an error: %v", serr)
+		}
 	}()
 	get := func(u string) (int, string) {
 		t.Helper()
