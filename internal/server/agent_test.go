@@ -135,7 +135,9 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 	go func() { done <- srv.Serve(runCtx) }()
 	t.Cleanup(func() {
 		cancel()
-		<-done
+		if serr := <-done; serr != nil {
+			t.Errorf("server stopped with an error: %v", serr)
+		}
 	})
 	return e
 }

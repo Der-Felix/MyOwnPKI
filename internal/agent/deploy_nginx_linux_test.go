@@ -108,10 +108,12 @@ func startNginx(t *testing.T, r *deployRig, d Deployment) Files {
 		timer := time.NewTimer(5 * time.Second)
 		defer timer.Stop()
 		select {
-		case <-done:
+		// Stopping nginx by signal may end in a non-zero exit status; that is expected.
+		case werr := <-done:
+			t.Logf("nginx stopped: %v", werr)
 		case <-timer.C:
 			_ = cmd.Process.Kill()
-			<-done
+			t.Logf("nginx killed: %v", <-done)
 		}
 	})
 	waitForNginxPID(t, filepath.Join(prefix, "nginx.pid"), done)
