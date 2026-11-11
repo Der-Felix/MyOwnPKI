@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"io"
+	"sort"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
 
@@ -117,6 +120,35 @@ func (s *Store) Open(ctx context.Context) ([]Alert, error) {
 		return nil, err
 	}
 	return toAlerts(rows), nil
+}
+
+// ResolvedWindow is how long a resolved alert stays on the Alerts page and
+// in the API (it is kept 30 days, see internal/server/monitor.go).
+const ResolvedWindow = 7 * 24 * time.Hour
+
+// List is what the Alerts page and GET /alerts show to who: the open alerts
+// (critical first, then the oldest) and those resolved within ResolvedWindow
+// (newest first). Alerts name certificates, CAs and hosts of the whole tenant,
+// so it needs the tenant-wide read role (viewer); a role limited to one CA
+// does not see them.
+func (s *Store) List(ctx context.Context, who keys.Who, now time.Time) (open, resolved []Alert, err error) {
+	if err = who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: s.Tenant}, now); err != nil {
+		return nil, nil, err
+	}
+	all, err := s.Since(ctx, now.Add(-ResolvedWindow))
+	if err != nil {
+		return nil, nil, err
+	}
+	open, resolved = []Alert{}, []Alert{}
+	for _, a := range all {
+		if a.Open() {
+			open = append(open, a)
+		} else {
+			resolved = append(resolved, a)
+		}
+	}
+	sort.SliceStable(resolved, func(i, j int) bool { return resolved[i].Resolved.After(resolved[j].Resolved) })
+	return open, resolved, nil
 }
 
 // Since lists the open alerts and those resolved at or after since.

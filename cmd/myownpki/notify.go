@@ -63,13 +63,13 @@ func runNotify(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	digest := notify.TestDigest(hostname, clock.System{}.Now())
 	failed := 0
-	for _, c := range channels {
-		if err := c.Send(ctx, digest); err != nil {
+	for _, r := range notify.SendAll(ctx, channels, digest) {
+		if !r.OK {
 			failed++
-			_, _ = fmt.Fprintf(stderr, "%-8s FAILED: %v\n", c.Name(), err)
+			_, _ = fmt.Fprintf(stderr, "%-8s FAILED: %s\n", r.Channel, r.Error)
 			continue
 		}
-		_, _ = fmt.Fprintf(stdout, "%-8s sent%s\n", c.Name(), target(cfg, c.Name()))
+		_, _ = fmt.Fprintf(stdout, "%-8s sent%s\n", r.Channel, target(cfg, r.Channel))
 	}
 	if failed > 0 {
 		return 1
