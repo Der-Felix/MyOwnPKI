@@ -30,7 +30,7 @@ func TestAlertsOnTheDashboard(t *testing.T) {
 	if got[2].Kind != view.MessageError || got[0].Kind != view.MessageWarning {
 		t.Errorf("kinds: %+v", got)
 	}
-	if n := alertNumber(open); n.Value != "6" || n.Status != view.StatusCrit {
+	if n := alertNumber(open); n.Value != "6" || n.Status != view.StatusCrit || n.Label != "Open alerts, 2 critical" || n.Href != "/alerts" {
 		t.Errorf("number: %+v", n)
 	}
 	if n := alertNumber(open[:1]); n.Status != view.StatusWarn {

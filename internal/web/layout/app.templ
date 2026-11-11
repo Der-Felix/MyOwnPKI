@@ -21,6 +21,7 @@ type navGroup struct {
 var nav = []navGroup{
 	{"Overview", []navItem{
 		{Key: "dashboard", Label: "Dashboard", Href: "/", Primary: true},
+		{Key: "alerts", Label: "Alerts", Href: "/alerts", Primary: true, Real: true},
 	}},
 	{"Certificates", []navItem{
 		{Key: "certificates", Label: "All certificates", Href: "/certificates", Primary: true},

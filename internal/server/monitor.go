@@ -33,6 +33,7 @@ type monitorSide struct {
 	store  *monitor.Store
 	queue  *notify.Queue
 	digest monitor.DigestOptions
+	tester *notify.Tester // the test message of the UI and the API
 }
 
 // buildMonitor wires the evaluation; the configuration was validated, so
@@ -60,6 +61,7 @@ func (s *Server) buildMonitor() error {
 	}
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
+	m.tester = &notify.Tester{Channels: m.queue.Channels, Server: s.opt.Hostname, Clock: s.clk, Audit: s.engine.Audit, Scope: s.engine.Scope, Tenant: store.DefaultTenant}
 	if len(m.queue.Channels) == 0 {
 		s.log.Info("no notification channel configured – alerts show only in the UI (notify.email, notify.webhook)")
 	}
@@ -160,4 +162,21 @@ func (s *Server) alertSource() web.AlertSource {
 		return nil
 	}
 	return s.monitor.store
+}
+
+// Notifier sends the test message for the REST API; nil without monitoring.
+func (s *Server) Notifier() *notify.Tester {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.tester
+}
+
+// notifier is the same as the UI's interface – nil (not a typed nil)
+// without monitoring.
+func (s *Server) notifier() web.NotifyTester {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.tester
 }

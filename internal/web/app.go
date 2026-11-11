@@ -27,6 +27,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
+	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
@@ -77,11 +78,21 @@ type AppDeps struct {
 	ServerAttention func(sealed bool) []view.Message
 	// Alerts are the open alerts of the monitoring (v0.3.3); nil hides them.
 	Alerts AlertSource
+	// Notifier tests the notification channels (v0.3.3); nil hides the button.
+	Notifier NotifyTester
 }
 
-// AlertSource is what the UI reads of the monitoring.
+// AlertSource is what the UI reads of the monitoring: the open alerts and
+// those resolved in the last 7 days, if who may read them.
 type AlertSource interface {
-	Open(ctx context.Context) ([]monitor.Alert, error)
+	List(ctx context.Context, who keys.Who, now time.Time) (open, resolved []monitor.Alert, err error)
+}
+
+// NotifyTester sends the test message through the configured channels (the
+// service checks the role and audits it).
+type NotifyTester interface {
+	Names() []string
+	Send(ctx context.Context, who keys.Who) ([]notify.Result, error)
 }
 
 // ACMEAdmin is what the UI uses of the ACME server.
@@ -131,6 +142,8 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("POST /step-up", a.signedIn(a.stepUp))
 
 	mux.HandleFunc("GET /{$}", a.signedIn(a.dashboard))
+	mux.HandleFunc("GET /alerts", a.signedIn(a.alertsPage))
+	a.protected(mux, "POST /alerts/test", a.alertsTest)
 	mux.HandleFunc("GET /certificates", a.signedIn(a.certificateList))
 	mux.HandleFunc("GET /certificates/new", a.signedIn(a.issueStart))
 	mux.HandleFunc("POST /certificates/new", a.signedIn(a.issueStep))
@@ -474,6 +487,9 @@ func (c *rc) page(title, section string, crumbs ...view.Crumb) view.Page {
 	}
 	if !c.instanceAdmin() {
 		p.Session.Hidden = append(p.Session.Hidden, "users")
+	}
+	if c.a.d.Alerts == nil || !c.may(authz.ReadPKI, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "alerts")
 	}
 	if !c.may(authz.ReadAudit, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "audit")
