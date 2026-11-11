@@ -54,3 +54,6 @@ CLAUDE.local.md
 
 # Test tools built by tasks (lego, pebble) – never committed
 /.tools/
+
+# graphify knowledge graph (generated, ~9 MB; rebuild with `graphify update .`)
+/graphify-out/
