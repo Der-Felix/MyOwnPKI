@@ -8,6 +8,23 @@ import (
 	"database/sql"
 )
 
+type Alert struct {
+	ID               string
+	Tenant           string
+	AlertKey         string
+	Kind             string
+	Subject          string
+	Severity         string
+	Detail           string
+	Href             string
+	FirstSeenAt      string
+	LastSeenAt       string
+	ResolvedAt       sql.NullString
+	NotifiedSeverity sql.NullString
+	NotifiedAt       sql.NullString
+	ResolveNotified  int64
+}
+
 type ApiToken struct {
 	ID         string
 	UserID     string
@@ -28,6 +45,18 @@ type Instance struct {
 	ID            int64
 	Demo          int64
 	InitializedAt string
+}
+
+type Notification struct {
+	ID            int64
+	Channel       string
+	CreatedAt     string
+	PayloadJson   string
+	Attempts      int64
+	NextAttemptAt string
+	SentAt        sql.NullString
+	DroppedAt     sql.NullString
+	LastError     sql.NullString
 }
 
 type Outbox struct {

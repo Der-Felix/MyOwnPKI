@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) being released 2026-10-24; next: phase 3 – v0.3.0 the Linux agent (docs/PHASE3.md), monitoring in v0.3.x · Last updated: 2026-10-24 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) released 2026-10-24; phase 3 (docs/PHASE3.md) – v0.3.0 (Linux agent) released 2026-10-25, v0.3.1 (packages, guided installation) 2026-10-28, v0.3.2 (agent package fix) 2026-10-29; v0.3.3 (monitoring) in progress, the releases up to v1.0 in §10.1 · Last updated: 2026-11-08 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -15,7 +15,7 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 - **Secure web UI** with dashboards, upload/download and role-based access
 - **Agents** deploy certificates to target servers and monitor them (similar to SaltStack)
 - **ACME in both directions:** an ACME server for the internal CA *and* an ACME
-  client for Let's Encrypt / ZeroSSL (http-01, dns-01, tls-alpn-01)
+  client for Let's Encrypt / ZeroSSL (http-01, dns-01, tls-alpn-01 – the last one after v1.0, §10.1)
 - **Multiple domains** as first-class objects with policies and ownership
 - **Multi-tenant** (optional), scales to thousands of servers
 - **Runs anywhere:** Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
@@ -419,7 +419,7 @@ MyOwnPKI/
 |---|---|---|
 | **0 – Foundation** ✅ 2026-10-13 | Go skeleton, CI, presets → YAML, OpenAPI draft, design tokens + component gallery | Runnable empty binary, design system visible (`task dev` → `/design`) |
 | **1 – Core** ✅ 2026-10-21 | Data model, CA engine, importer, REST API, login (2FA), RBAC, unseal, audit log, UI: issue / revoke / upload / download, layout B | Bash script replaced in the browser |
-| **2 – ACME server & domains** | ACME server (http-01, dns-01, tls-alpn-01), domain model, policies, approval levels, EAB | certbot/Traefik/Caddy against the own CA (integration level 1) |
+| **2 – ACME server & domains** ✅ 2026-10-23 | ACME server (http-01, dns-01; tls-alpn-01 after v1.0, §10.1), domain model, policies, approval levels, EAB | certbot/Traefik/Caddy against the own CA (integration level 1) |
 | **3 – Agent** | Enrollment with proof of control, issuance via ACME, deploy profiles (Linux first), heartbeat/inventory, batched reload + rollback; then Windows, FreeBSD; ACME client (lego) for Let's Encrypt | Deploy and monitor certificates (level 3), public certificates |
 | **4 – Operations** | Dashboards, layouts A + C, themes (3 levels), notifications, OCSP/CRL, Prometheus, Litestream, trust store distribution, **alarm when the server stays sealed** (measured against the remaining CRL lifetimes) | Production-ready |
 | **5 – Enterprise** | Tenant UI, OIDC, HSM build, SIEM export, CT monitoring, network scan, **Shamir split of the recovery key (m of n, four-eyes principle)** | Enterprise feature set |
@@ -428,15 +428,29 @@ MyOwnPKI/
 The phases describe the architecture's building blocks; **what ships when** is decided by the
 release plan below – v1.0 takes parts of phases 2–4 and leaves others for later.
 
-### 10.1 Release plan to a stable v1.0 (owner decision 2026-10-14)
+### 10.1 Release plan to a stable v1.0 (owner decisions 2026-10-14, 2026-11-08)
 
 | Version | Content | Outcome |
 |---|---|---|
-| **v0.1** | Phase 1 complete, as planned in `docs/PHASE1.md` | Bash script replaced in the browser |
-| **v0.2** | ACME server with **http-01 and dns-01** (the server only *reads* the TXT record, through a **configurable DNS resolver** – internal DNS, split DNS); domain model and approval levels | certbot/Traefik/Caddy against the own CA |
-| **v0.3** | **v0.3.0: Linux agent** with http-01 (standalone and webroot), nginx and file profiles, "Renew now" (docs/PHASE3.md, owner 2026-10-24); **v0.3.x: monitoring**, dns-01 in the agent (DNS providers), Apache and HAProxy profiles, demo (details below) | Certificates deployed and watched |
-| **Beta** | Feature freeze; release pipeline, demo, guides, upgrade tests; only fixes | Tested by others before 1.0 |
+| **v0.1** ✅ 2026-10-22 | Phase 1 complete, as planned in `docs/PHASE1.md` | Bash script replaced in the browser |
+| **v0.2** ✅ 2026-10-23 | ACME server with **http-01 and dns-01** (the server only *reads* the TXT record, through a **configurable DNS resolver** – internal DNS, split DNS); domain model and approval levels; v0.2.1 systemd installation, v0.2.2 own TLS, daily backup, trust page | certbot/Traefik/Caddy against the own CA |
+| **v0.3.0–v0.3.2** ✅ 2026-10-29 | v0.3.0 Linux agent with http-01 (standalone and webroot), nginx and file profiles, "Renew now"; v0.3.1 packages and guided installation; v0.3.2 agent package fix (docs/PHASE3.md §3, §8) | Certificates deployed by the agent |
+| **v0.3.3** | **Monitoring:** alert evaluation, e-mail and webhook notifications (digest), alerts page and `GET /api/v1/alerts`, test button and `myownpki notify test` (PHASE3 §9, steps 22–25); a code review of the branch before the merge | Problems reported without anyone opening the dashboard |
+| **v0.3.4** | **TLS scan** of endpoints (integration level 2, §6.3a), alert `scan_mismatch` (PHASE3 step 26) | Served certificates checked against the issued ones |
+| **v0.3.5** | **Agent and host onboarding:** `myownpki-agent deployment add` writes the deployment into `agent.yaml` and the systemd sandbox drop-in `10-paths.conf` in one step; an "Add host" assistant in the UI combines agent installation and the first certificate; an **automation path with the existing API tokens** (v0.1, §14 "Night run 2026-10-21"): a documented, least-privilege token for onboarding (create join tokens, read agents and deployments), checked end to end without a browser – for Salt, Ansible, scripts, CI; anything still missing for it (e.g. a narrower scope, §6.5 "API tokens with scopes") is listed in the v0.3.5 work plan; recipes in the docs for common services (Postfix, Dovecot, Proxmox) | A new host in a few steps, scripts without a browser |
+| **v0.3.6** | **Salt formula** in `deploy/salt/`: installs the agent with a checksum check, renders `agent.yaml` from pillar, manages the systemd path drop-in, runs the enrollment; uses the onboarding command and the token path of v0.3.5 | Agents rolled out by configuration management |
+| **v0.3.7** | **dns-01 in the agent** through the lego DNS providers **RFC 2136 and Cloudflare**: wildcards, hosts without port 80, hosts behind NAT. The lego provider packages are a new dependency – owner approval when the step starts | Certificates where http-01 can't reach |
+| **v0.3.8** | **Web UI: charts, reports, analysis.** Charts on the dashboard and a new "Reports" page, collapsible, calm: expiry timeline per week for 90 days, issuances per week by source (ACME, agent, UI), certificates per CA and status, alert history, agent fleet health. An **"Analysis" page** with rule-based, explainable findings and recommendations: orphaned certificates not served anywhere (per TLS scan), duplicate valid certificates for the same names, renewal loops, expiry waves, weak or legacy keys and signatures (e.g. RSA-1024 or SHA-1 from imports), an intermediate CA that expires before its certificates are needed, outdated agents, unused ACME accounts, domains without issuances. Gaps from a **UI inventory** (a screenshot walk through every page, light and dark, giving a gap list for the owner – candidates: global search, host view, chain view, CSV export, audit log filters, notification settings in the UI). Charts use Apache ECharts as a vendored `<pki-chart>` island (ADR-04, `references/frontend.md`: Apache-2.0, pinned in the repo, no CDN, CSP `script-src 'self'`); the dependency still needs the owner's go when the step starts. No external AI service: findings never send internal names or certificate data anywhere | State of the PKI at a glance, with reasons |
+| **v0.3.9** | **Public trust portal** on the public port (no login, next to the CRLs and CA files): detects the client OS and offers the root download and install steps for Windows (`.cer` + PowerShell one-liner), macOS/iOS (`.mobileconfig`), Android, Linux (Debian/Fedora commands), Firefox, Java; always shows the SHA-256 fingerprint, and the scripts verify it. The agent can add the root to the system trust store (optional). Absorbs the `.mobileconfig` item of the backlog (§12) | Clients trust the root without a support ticket |
+| **v0.3.10** | **Safe "undo" building blocks:** a **preview / dry run** before issuance (names, validity, extensions, policy result – nothing is signed); **versioned settings** (domains, policies, presets, tenant settings with diff and restore – rules only, never certificates) | Mistakes seen before signing, rule changes reversible |
+| **v0.3.11** | **Apache and HAProxy** deploy profiles; **guides in the web UI** ("first steps" assistant after `init`, embedded guides); demo `deploy/demo/docker-compose.yml`; container base moved from `distroless/static-debian12` to `distroless/static-debian13` (pinned by digest, THIRD_PARTY.md updated) | Feature set of v1.0 complete |
+| **Before Beta** | **Quality round:** dead code and duplicates, consistent error messages, coverage report and test gaps, **Go fuzzing** of the CSR, ACME request and upload parsers (attacker input; today `task fuzz` covers the ACME JWS parser), stricter lint rules | Fewer surprises in the beta |
+| **Beta** | Feature freeze, upgrade tests between versions, only fixes | Tested by others before 1.0 |
 | **v1.0** | Everything above, stable | – |
+
+- **Order before numbers:** the version numbers after v0.3.4 are the current plan and can shift;
+  the order is the owner's decision (2026-11-08).
+- Each v0.3.x release gets its own work plan in `docs/PHASE3.md` before it is built.
 
 **v1.0 contains:**
 
@@ -444,34 +458,40 @@ release plan below – v1.0 takes parts of phases 2–4 and leaves others for la
 - **ACME server:** http-01 and dns-01; domain model and approval levels (§6.3, §6.4).
   - With dns-01 the *client* sets the TXT record; the server only reads it. So the server needs no
     DNS provider, but a **configurable DNS resolver** (e.g. the internal DNS, also for split DNS).
-  - Until the agent brings provider support (v0.3), the docs show `certbot-dns-rfc2136` and
+  - Until the agent brings provider support (v0.3.7), the docs show `certbot-dns-rfc2136` and
     `certbot-dns-cloudflare`.
 - **Linux agent:** enrollment with proof of control (ADR-18), issuance via ACME (ADR-19), deploy
   profiles **nginx, Apache, HAProxy, file + hook**, reload with rollback, heartbeat/inventory.
-  - DNS providers for dns-01 through the lego providers: **RFC 2136 and Cloudflare** first.
+  - DNS providers for dns-01 through the lego providers: **RFC 2136 and Cloudflare** first (v0.3.7).
   - The ACME directory URL is configurable from the start, so Let's Encrypt later is only configuration.
-  - It can optionally add the root to the system trust store.
+  - It can optionally add the root to the system trust store (v0.3.9).
+  - `deployment add` and the "Add host" assistant (v0.3.5); a Salt formula (v0.3.6).
+- **Automation:** a documented, least-privilege onboarding path with the existing API tokens (v0.1)
+  for scripts and configuration management, checked end to end without a browser (v0.3.5).
 - **Monitoring:**
   - dashboard: expiry, agent status, sealed warning;
-  - TLS scan of the endpoints (integration level 2, §6.3a);
-  - notifications by **e-mail and webhook**, including the alarm when the server stays sealed.
-- **Trust store, small form:**
+  - alerts and notifications by **e-mail and webhook**, including the alarm when the server stays
+    sealed (v0.3.3);
+  - TLS scan of the endpoints (integration level 2, §6.3a; v0.3.4);
+  - charts, a "Reports" page and a rule-based "Analysis" page (v0.3.8).
+- **Safe changes:** preview / dry run before issuance, versioned settings (v0.3.10).
+- **Trust store, small form** – the public trust portal (v0.3.9):
   - root download as PEM, DER and `.mobileconfig` (Apple);
-  - a guide per system in the web guide: Windows, macOS, iOS, Android, Linux, Firefox;
+  - a guide per system: Windows, macOS, iOS, Android, Linux, Firefox, Java;
   - the Linux agent can add the root to the system trust store (optional).
-- **Guide in the web UI:**
+- **Guide in the web UI** (v0.3.11):
   - a "first steps" assistant after `init`;
   - embedded guides: building a CA, offline root, connecting certbot, installing the agent,
     backup/restore.
 - **Live test:**
   - `deploy/demo/docker-compose.yml` with MyOwnPKI, nginx with the agent, and a certbot container –
-    one command shows http-01 end to end;
+    one command shows http-01 end to end (v0.3.11);
   - additionally, the static UI demo on GitHub Pages.
 - **Release:**
   - GoReleaser, cosign signatures, SBOM;
-  - Docker image (distroless, non-root);
+  - Docker image (distroless, non-root; Debian 13 base from v0.3.11);
   - an upgrade test between versions;
-  - a beta phase before 1.0.
+  - a quality round and a beta phase before 1.0.
 
   The tools are asked for when the release step comes up, and every publication needs the owner's
   go (CLAUDE.md).
@@ -479,10 +499,24 @@ release plan below – v1.0 takes parts of phases 2–4 and leaves others for la
 **After v1.0:**
 - layouts A and C, themes;
 - OCSP, Prometheus, Litestream;
-- tls-alpn-01 and EAB;
+- **tls-alpn-01 in the server** – only for clients like Traefik and Caddy that prefer it; never in
+  the agent, where it would collide with the web server on port 443;
 - Windows and FreeBSD agent;
 - ACME client for Let's Encrypt in the agent (only configuration then, see above);
 - trust-store distribution by GPO, MDM and into Java trust stores;
+- **Lab CA:** a playground CA whose root is distributed nowhere and that can be deleted completely;
+- **change sets ("snapshots") in full:** issuances grouped into a named change set; "undo" revokes
+  every certificate of the set with a reason, and agents fall back to the previous, still valid
+  certificate. Undo means revocation, never a database rollback: an issued certificate stays valid
+  wherever it was copied, and a restore loses track of it and risks reused serial numbers and
+  decreasing CRL numbers (RFC 5280 §5.2.3 requires them to increase);
+- **Docker/Podman:** Podman rootless (mapping of UID 65532, volume option `:U` or
+  `--userns=keep-id`), Quadlet files with an explicit `HealthCmd=` (Podman reads `HEALTHCHECK` only
+  from Docker-format images), SELinux volume label `:Z`, a CI job that really runs Podman;
+- **server-assigned deployments inside local limits:** the agent's local configuration defines what
+  is allowed (paths, hooks), and the server may only assign deployments within those limits. Needs
+  an ADR change (ADR-10; today the agent takes no commands from the server and hooks are local only,
+  §6.2) – owner decision first, and only if `deployment add` and the Salt formula are not enough;
 - phase 5 (enterprise).
 
 ---
@@ -511,6 +545,7 @@ plugin pages only inside `<iframe sandbox>` on a separate origin.
 - [x] Server-side key generation: yes, switchable per tenant, CSR is the default (§5)
 - [x] Key storage: encrypted in `pki.db`, `keys/` only for HSM references (§4)
 - [x] Repository visibility: public (2026-10-13)
+- [ ] Apache ECharts for charts – owner go needed before v0.3.8 (new vendored dependency)
 
 ### Backlog – noted, not built
 
@@ -526,7 +561,18 @@ Left out of v0.2.2 (owner 2026-10-24):
 
 - Trust page: an Apple configuration profile (`.mobileconfig`) per root for iPhone, iPad and macOS
   – a named profile instead of the bare DER file; on iOS full trust is still switched on by hand
-  (§14 "v0.2.2"; §10.1 "trust store, small form", PHASE3 step 10).
+  (§14 "v0.2.2"; §10.1 "trust store, small form", PHASE3 step 10). **Planned in v0.3.9** as part
+  of the public trust portal (owner 2026-11-08).
+
+#### Considered and rejected (owner 2026-11-08)
+
+- **Rewriting parts in Rust:** no gain in speed – the PKI waits on the database, the network and
+  the ACME validation, and Go's crypto is fast and audited. Stability comes from tests, not from the
+  language. Two languages would break ADR-01 (one static binary, no C toolchain, four OS targets)
+  and double the supply chain. Stability work instead: end-to-end tests on real Linux, fuzzing,
+  upgrade tests.
+- **Analysis through an external AI service:** it would send internal names, hosts and certificate
+  data to a third party. The "Analysis" page (v0.3.8) stays rule-based and local.
 
 ---
 
@@ -820,3 +866,16 @@ decisions taken alone that night (the cautious variant each time) were confirmed
 | Elevation forwards the validated expected SHA-256 and `/quiet`; the elevated child recomputes and authorizes again | Authorization survives self-elevation without trusting the parent process |
 | Any unknown argument stops the helper with exit code 64 before anything is imported | Found while testing: Git Bash turned `/check` into a path, and the helper went on to the import – a typo must never become a trust decision |
 | No `.mobileconfig` for Apple yet (PLAN §10.1 "trust store, small form" names it) | Not asked for in this run; the DER file works on iOS and macOS, the guide says how. In the backlog (§12) |
+
+### Release sequence to v1.0 (owner decision 2026-11-08)
+The v0.3 line as numbered releases (§10.1); the backlog and the rejected ideas are in §12. No ADR
+changes.
+
+| Decision | Why |
+|---|---|
+| v0.3.3 monitoring and v0.3.4 TLS scan as planned in PHASE3 §9; from v0.3.5 on the numbers are a plan, the order is the decision | Each release stays small and testable; a number can move without reopening the order |
+| Onboarding (v0.3.5) and the Salt formula (v0.3.6) before dns-01 (v0.3.7) and the UI work (v0.3.8) | Rolling out agents is the daily work in the homelab; the formula uses the onboarding command and the token path of v0.3.5 |
+| "Undo" before v1.0 only as preview / dry run and versioned settings (v0.3.10); change sets with revocation after v1.0 | Nothing is signed in a preview and rules can be restored safely; undoing an issuance means revoking it, never rolling back a database (RFC 5280 §5.2.3) |
+| The "Analysis" page is rule-based and local; no external AI service | Internal names and certificate data never leave the instance; every finding can be explained |
+| Apache ECharts (v0.3.8) and the lego DNS providers (v0.3.7) are asked for when their step starts | New dependencies need the owner's go (CLAUDE.md); ECharts is already named in ADR-04 |
+| Server-assigned deployments stay after v1.0 and need an ADR change first | Today the agent takes no commands from the server (ADR-10, §6.2); `deployment add` and Salt may be enough |

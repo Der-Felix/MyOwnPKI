@@ -35,6 +35,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy/legacytest"
+	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
@@ -352,6 +353,10 @@ func TestContract(t *testing.T) {
 	// shows the refusal. The successful export follows a fresh step-up below.
 	v.clk.Advance(authz.StepUpWindow + time.Second)
 
+	// Alerts (v0.3.3): one open, one resolved.
+	v.syncAlerts(t, alertFinding("a", monitor.Critical), alertFinding("b", monitor.Warning))
+	v.syncAlerts(t, alertFinding("a", monitor.Critical))
+
 	cases := []contractCase{
 		{op: "getSystemStatus", as: viewer, want: 200},
 		{op: "getSystemStatus", as: nobody, want: 200},
@@ -376,6 +381,17 @@ func TestContract(t *testing.T) {
 		{op: "getSession", as: viewer, want: 200},
 		{op: "getSession", as: anon, want: 401, note: "no-session"},
 		{op: "logout", as: anon, want: 401, note: "no-session"},
+
+		{op: "listAlerts", as: viewer, want: 200},
+		{op: "listAlerts", as: viewer, path: "/alerts?state=resolved", want: 200},
+		{op: "listAlerts", as: viewer, path: "/alerts?state=nope", want: 400, kind: "bad-request"},
+		{op: "listAlerts", as: rootview, want: 403, kind: "forbidden"},
+		{op: "listAlerts", as: anon, want: 401, note: "no-session"},
+		{op: "sendTestNotification", as: anon, want: 401, note: "no-session"},
+		{op: "sendTestNotification", as: viewer, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "sendTestNotification", as: op, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "sendTestNotification", as: admin, want: 200},
+		{op: "sendTestNotification", as: admin, want: 429, kind: "rate-limited"},
 
 		{op: "listPresets", as: nobody, want: 200},
 		{op: "listPresets", as: anon, want: 401, note: "no-session"},
@@ -1047,6 +1063,11 @@ func TestContract(t *testing.T) {
 		cc.want, cc.kind, cc.note, cc.detail = http.StatusForbidden, "forbidden", "token", "an API token can't "
 		run(cc)
 	}
+
+	// No channel configured: nothing to test.
+	v.clk.Advance(time.Minute)
+	v.tester.Channels = nil
+	run(contractCase{op: "sendTestNotification", as: admin, want: 409, kind: "conflict", detail: "no notification channel"})
 
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {

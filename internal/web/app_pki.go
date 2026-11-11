@@ -173,6 +173,20 @@ func (a *app) dashboard(c *rc) {
 		},
 		Attention: []view.Message{},
 	}
+	if a.d.Alerts != nil {
+		open, _, alertErr := a.d.Alerts.List(ctx, c.who(), a.now())
+		switch {
+		case alertErr == nil:
+			d.Numbers = append(d.Numbers, alertNumber(open))
+			d.Attention = append(d.Attention, alertMessages(open)...)
+			d.AlertsHref = "/alerts"
+		case errors.Is(alertErr, authz.ErrDenied):
+			// A role limited to one CA doesn't see the alerts of the tenant.
+		default:
+			c.fail(alertErr)
+			return
+		}
+	}
 	sealed := a.d.Keys.Status().Sealed
 	if a.d.ServerAttention != nil {
 		d.Attention = append(d.Attention, a.d.ServerAttention(sealed)...)

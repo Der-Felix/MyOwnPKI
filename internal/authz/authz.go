@@ -49,6 +49,7 @@ const (
 	ManageTenant Permission = "tenant.manage"      // tenant settings
 	ManageAgents Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
 	RenewAgent   Permission = "agent.renew"        // request renewal of a locally configured deployment
+	TestNotify   Permission = "notification.test"  // send a test message through the configured channels; no step-up (it changes nothing)
 )
 
 // Instance permissions: instance admins only.
@@ -60,7 +61,7 @@ const (
 var rolePermissions = map[Role][]Permission{
 	Viewer:   {ReadPKI},
 	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent},
-	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent},
+	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent, TestNotify},
 }
 
 var instancePermissions = []Permission{Unseal, ManageUsers}
