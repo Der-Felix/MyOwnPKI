@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.3]
+## [0.3.3] - 2026-11-12
 
 Monitoring: the server checks itself every minute, shows what needs an admin on a new Alerts page
 and tells you by e-mail or webhook – also while it is sealed.
@@ -472,7 +472,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.2.2...v0.3.0
