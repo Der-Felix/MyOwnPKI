@@ -6,6 +6,19 @@
 # - downloaded tools are verified against pinned SHA-256 checksums
 # - GOTOOLCHAIN=local: CI never silently downloads a different Go version
 #
+# Documentation-only pull requests skip the heavy jobs:
+# - job `changes` (scripts/ci/changes.sh) lists the files of the pull request.
+#   "Documentation only" means every changed file is one of: .claude/**,
+#   docs/**/*.md, or a *.md in the repository root. Any other file (including
+#   other *.md such as presets/README.md, .github/**, scripts/**, deploy/**)
+#   makes it a code change; so does an empty or unreadable diff.
+# - Pushes to main, the daily schedule and workflow_dispatch are never reduced:
+#   main always runs everything, and workflow_dispatch forces a full run of
+#   any branch. `vuln` has no dependency and runs in every case.
+# - The other jobs depend on `changes` through a job-level `if:` (not
+#   `paths-ignore`): a skipped job reports as skipped, which counts as
+#   success for branch protection, so a required check never stays pending.
+#
 # Pinned versions must match Taskfile.yml – `task tools:check` fails otherwise.
 
 name: CI
@@ -47,9 +60,33 @@ env:
   CGO_ENABLED: "0"
 
 jobs:
+  # Decides whether the heavy jobs run (see the header). Always `true` unless
+  # the event is a pull request that changes documentation only. The full
+  # history is needed for the merge base of the pull request.
+  changes:
+    name: changes (docs-only pull requests skip the heavy jobs)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash scripts/ci/changes.sh --self-test
+      - name: Classify the changed files
+        id: filter
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ci/changes.sh --pr >>"$GITHUB_OUTPUT"
+
   check:
     name: check (fmt, lint, test, build, generated code)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,7 +115,8 @@ jobs:
 
   race:
     name: tests with race detector
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     # A hang ends as a clear timeout (a normal run takes a few minutes).
     timeout-minutes: 20
@@ -107,7 +145,8 @@ jobs:
 
   test-os:
     name: tests on ${{ matrix.os }}
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +182,8 @@ jobs:
 
   cross:
     name: cross-compile (linux, darwin, windows, freebsd)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,7 +204,8 @@ jobs:
 
   lint-meta:
     name: workflows and API spec (actionlint, vacuum)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,7 +223,8 @@ jobs:
 
   shellcheck:
     name: legacy Bash suite (shellcheck, smoke test)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,7 +250,8 @@ jobs:
   # listener (acme.tls_issuer), with the root as the only trust anchor.
   conformance:
     name: ACME conformance (lego, certbot, acme.sh; Pebble as control)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -227,7 +270,8 @@ jobs:
 
   agent-e2e:
     name: agent end-to-end
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -264,7 +308,8 @@ jobs:
   # archive path stays relative: install.sh changes to / before it reads it.
   install:
     name: systemd installation (install.sh)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -302,7 +347,8 @@ jobs:
   # package with the snapshot's checksums.txt.
   image:
     name: release image (snapshot)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
