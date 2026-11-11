@@ -30,6 +30,8 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
+	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 )
@@ -62,6 +64,9 @@ type Deps struct {
 	Agents *agents.Service
 	// ACME is nil while the ACME server is disabled.
 	ACME *acme.Server
+	// Alerts and Notify serve the monitoring (v0.3.3); nil = monitoring off.
+	Alerts *monitor.Store
+	Notify *notify.Tester
 }
 
 // access says who may call a route.

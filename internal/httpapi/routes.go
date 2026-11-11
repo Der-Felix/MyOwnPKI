@@ -101,5 +101,8 @@ func (a *API) table() []Route {
 		{OperationID: "listAgentJoinTokens", Method: http.MethodGet, Path: "/agent-join-tokens", access: signedIn, handle: a.listAgentJoinTokens},
 		{OperationID: "createAgentJoinToken", Method: http.MethodPost, Path: "/agent-join-tokens", access: signedIn, body: true, handle: a.createAgentJoinToken},
 		{OperationID: "deleteAgentJoinToken", Method: http.MethodDelete, Path: "/agent-join-tokens/{joinTokenId}", access: signedIn, handle: a.deleteAgentJoinToken},
+
+		{OperationID: "listAlerts", Method: http.MethodGet, Path: "/alerts", access: signedIn, handle: a.listAlerts},
+		{OperationID: "sendTestNotification", Method: http.MethodPost, Path: "/notifications/test", access: signedIn, handle: a.sendTestNotification},
 	}
 }

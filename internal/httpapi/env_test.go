@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
+	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
@@ -43,6 +46,9 @@ type env struct {
 	caIDs       map[string]string
 	agents      *agents.Service
 	acme        *acme.Server
+	alerts      *monitor.Store
+	tester      *notify.Tester
+	mail, hook  *stubChannel
 	logs        bytes.Buffer
 }
 
@@ -66,10 +72,14 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(acmeServer.Close)
 	v.acme = acmeServer
+	v.alerts = &monitor.Store{DB: in.SystemDB.Write, Tenant: store.DefaultTenant}
+	v.mail, v.hook = &stubChannel{name: "email"}, &stubChannel{name: "webhook"}
+	v.tester = &notify.Tester{Channels: []notify.Channel{v.mail, v.hook}, Server: "pki01", Clock: in.Clock, Audit: in.TenantAudit.Write, Scope: in.Engine.Scope, Tenant: store.DefaultTenant}
 	v.api = New(Deps{
 		Auth: in.Auth, Engine: in.Engine, Keys: in.Ring, Presets: in.Presets, Clock: in.Clock,
 		Log: slog.New(slog.NewJSONHandler(&v.logs, nil)), Version: "test", Demo: true,
 		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents, ACME: acmeServer,
+		Alerts: v.alerts, Notify: v.tester,
 	})
 	return v
 }
@@ -204,3 +214,26 @@ func (c *client) stepUp(t *testing.T, name string) {
 type passChecker struct{}
 
 func (passChecker) Check(context.Context, string, string, string, string) error { return nil }
+
+// stubChannel is a notification channel that records what it was sent.
+type stubChannel struct {
+	name string
+	err  error
+	mu   sync.Mutex
+	got  []notify.Digest
+}
+
+func (s *stubChannel) Name() string { return s.name }
+
+func (s *stubChannel) Send(_ context.Context, d notify.Digest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.got = append(s.got, d)
+	return s.err
+}
+
+func (s *stubChannel) sent() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.got)
+}
