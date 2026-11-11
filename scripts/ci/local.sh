@@ -6,6 +6,7 @@ root=$PWD
 # Central CI step registry: job | step | prerequisite | command.
 # Keep this in .github/workflows/ci.yml job order. New steps belong here too.
 steps=(
+  'changes|docs-only classification self-test|git|bash scripts/ci/changes.sh --self-test'
   'check|check|check_tools|bash scripts/ci/check-check.sh'
   'check|generate:check|generate_tools|bash scripts/ci/check-generate.sh'
   'check|agent protocol compatibility|go_git|bash scripts/ci/check-agent-protocol.sh'
@@ -116,6 +117,7 @@ requirement() {
     windows) [ "$os" = windows ] || echo 'needs Windows' ;;
     openssl) has_commands openssl || echo 'needs openssl' ;;
     bash) has_commands bash || echo 'needs bash' ;;
+    git) has_commands bash git || echo 'needs bash + git' ;;
     bash_openssl) has_commands bash openssl sha256sum || echo 'needs bash + openssl + sha256sum' ;;
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
     vacuum) has_commands go task vacuum || echo 'needs Go + Task + vacuum' ;;

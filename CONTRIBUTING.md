@@ -56,6 +56,18 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
   binaries and state as root. Without GitHub Actions or this explicit opt-in they are skipped;
   the scripts also refuse to overwrite a pre-existing installation.
 
+## Documentation-only pull requests
+
+A pull request that changes **only** documentation skips the heavy CI jobs (tests, race
+detector, cross-build, conformance, agent end-to-end, install, image); the job `changes`
+(`scripts/ci/changes.sh`) decides. "Documentation" is exactly: `.claude/**`, `docs/**/*.md` and
+`*.md` files in the repository root. Everything else counts as code, including other Markdown
+files such as `presets/README.md` and `assets/brand/README.md`, `.github/**` and `scripts/**`;
+so does an empty or unreadable diff. Skipped jobs show as skipped, which counts as success for
+branch protection, and `vuln` always runs. Pushes to `main` and the daily schedule are never
+reduced. To force a full run on any branch, start the CI workflow by hand
+(*Actions → CI → Run workflow*, `workflow_dispatch`).
+
 ## Commits and pull requests
 
 - [Conventional Commits](https://www.conventionalcommits.org/) in English, for example

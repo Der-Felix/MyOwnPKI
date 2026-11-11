@@ -87,6 +87,7 @@
   `templ generate` / `sqlc generate` diff check, no-inline-style check, cross-compile matrix
   (linux/amd64, linux/arm64, darwin/arm64, windows/amd64, freebsd/amd64), legacy ShellCheck (severity warning) and `legacy/tests/smoke.sh` (Linux; needs openssl),
   actionlint on the workflows (`task lint:ci`) and vacuum on the OpenAPI spec (`task lint:api`, rules in `api/vacuum.yaml`).
+  Pull requests that change only documentation (`.claude/**`, `docs/**/*.md`, root `*.md`) skip the heavy jobs; `main` never does (`scripts/ci/changes.sh`, CONTRIBUTING.md).
 - Releases with GoReleaser + cosign + SBOM; container image `ghcr.io/der-felix/myownpki`.
 
 ## Commits
