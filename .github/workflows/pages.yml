@@ -1,0 +1,112 @@
+# Documentation site of MyOwnPKI on GitHub Pages: https://der-felix.github.io/MyOwnPKI/
+#
+# The source is site/ (Markdown, one small Jekyll layout, one style sheet). The
+# operations guide, the release notes and the example configuration are NOT
+# copied into it by hand: scripts/ci/site-prepare.sh generates the pages under
+# site/reference/ from docs/OPERATIONS.md, CHANGELOG.md and
+# deploy/config.example.yaml (CONTRIBUTING.md, "Documentation site").
+#
+# - pull requests and branches: only the `build` job. It checks the links and
+#   anchors, builds the site with GitHub's Jekyll action and checks the HTML;
+#   nothing is deployed. The job log is the preview (no local Jekyll needed).
+# - main (push, or "Run workflow" on main): `build`, then `deploy`.
+#
+# Security posture, like ci.yml and release.yml:
+# - read-only token at the top (permissions: contents: read); only the deploy
+#   job gets pages: write and id-token: write, and it runs no checkout and no
+#   script of ours
+# - only GitHub's own actions, pinned to a full commit SHA (the version is the
+#   comment). Releases at least 14 days old when chosen (PLAN section 14)
+# - no theme or plugin from the network, no Node, Python or Docker of ours (the
+#   Jekyll action runs GitHub's own image), no secrets
+#
+# Pages itself is switched on by the owner once: Settings -> Pages -> Source:
+# GitHub Actions. Until then the deploy job fails and the build job still works.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/OPERATIONS.md"
+      - "CHANGELOG.md"
+      - "README.md"
+      - "deploy/config.example.yaml"
+      - "scripts/ci/site-*.sh"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/OPERATIONS.md"
+      - "CHANGELOG.md"
+      - "README.md"
+      - "deploy/config.example.yaml"
+      - "scripts/ci/site-*.sh"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (links, Jekyll, HTML)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # A newer push to the same branch or pull request replaces a running build.
+    concurrency:
+      group: pages-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test the site scripts
+        run: |
+          bash scripts/ci/site-prepare.sh --self-test
+          bash scripts/ci/site-check.sh --self-test
+
+      - name: Generate the reference pages
+        run: bash scripts/ci/site-prepare.sh
+
+      - name: Check links and anchors in the sources
+        run: bash scripts/ci/site-check.sh
+
+      - name: Build with Jekyll (GitHub's action)
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
+        with:
+          source: ./site
+          destination: ./site/_site
+
+      - name: Check the built HTML
+        run: bash scripts/ci/site-check.sh --built site/_site
+
+      - name: Package the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/_site
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    # One deployment at a time; a running one is never canceled.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
