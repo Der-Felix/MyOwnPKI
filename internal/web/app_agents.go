@@ -171,15 +171,7 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 		lastSeen = ag.ApprovedAt
 	}
 	for _, d := range ag.Deployments {
-		status := view.StatusNeutral
-		switch d.State {
-		case "deployed":
-			status = view.StatusOK
-		case "failed":
-			status = view.StatusCrit
-		case "rolled_back":
-			status = view.StatusWarn
-		}
+		status := deploymentStatus(d.State)
 		serial := admin.Cell{Text: orDash(d.Serial), Mono: true}
 		if d.CertificateID != "" {
 			serial.Href = "/certificates/" + d.CertificateID
@@ -690,4 +682,18 @@ func splitNames(s string) []string {
 		}
 	}
 	return names
+}
+
+// deploymentStatus maps the state of a deployment to its fixed status color,
+// as the agent page and the Add host progress page show it.
+func deploymentStatus(state string) view.Status {
+	switch state {
+	case "deployed":
+		return view.StatusOK
+	case "failed":
+		return view.StatusCrit
+	case "rolled_back":
+		return view.StatusWarn
+	}
+	return view.StatusNeutral
 }
