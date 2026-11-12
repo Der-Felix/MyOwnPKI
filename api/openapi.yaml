@@ -4000,8 +4000,9 @@ components:
           description: |
             `pending`: not scanned yet. `ok`: the served certificate is the one issued for the
             name and its chain is trusted. `unmanaged`: nothing was issued for the name by this
-            PKI and the served certificate is not one of its own (no alert). `older`: a valid
-            but superseded certificate of this PKI is served. `foreign`: the name has a
+            PKI and the served certificate is not one of its own (no alert). `older`: a
+            superseded certificate of this PKI is served, or one that has ended with nothing newer
+            issued (then `expiry_severity` is set). `foreign`: the name has a
             certificate here, but another CA's is served. `wrong_name`: a certificate of this
             PKI that does not cover the name. `revoked`: a revoked certificate of this PKI.
             `chain`: the right certificate with an incomplete or untrusted chain.

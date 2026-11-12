@@ -263,6 +263,50 @@ func TestEndpointsPageStates(t *testing.T) {
 	}
 }
 
+// TestEndpointsPageExpiredWithNoReplacement: a certificate of this PKI that
+// has ended and was never replaced is not "an older certificate" - nothing
+// newer exists to compare it with. The page says Expired, in the status color
+// of the expiry alert; an expired one that was renewed stays the older one.
+func TestEndpointsPageExpiredWithNoReplacement(t *testing.T) {
+	t.Parallel()
+	e := newEndpointsUIEnv(t)
+	gone, err := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"gone.homelab.lan"}, ValidityDays: 1, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedOld, err := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"renewed.homelab.lan"}, ValidityDays: 1, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Clock.Advance(2 * 24 * time.Hour)
+	if _, ierr := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"renewed.homelab.lan"}, ValidityDays: 90, Who: testinstance.Console}); ierr != nil {
+		t.Fatal(ierr)
+	}
+	goneID := e.add(t, "gone.homelab.lan", 443)
+	renewedID := e.add(t, "renewed.homelab.lan", 443)
+	e.serve(t, goneID, gone.Fingerprint, "CN=Issuing CA", "CN=gone.homelab.lan", gone.NotAfter)
+	e.serve(t, renewedID, renewedOld.Fingerprint, "CN=Issuing CA", "CN=renewed.homelab.lan", renewedOld.NotAfter)
+	admin := e.browser("192.0.2.1")
+	admin.signIn(t, "demo", e.DemoPassword)
+	html := admin.get(t, "/endpoints").html()
+	rows := regexp.MustCompile(`(?s)<tr.*?</tr>`).FindAllString(html, -1)
+	var goneRow, renewedRow string
+	for _, r := range rows {
+		switch {
+		case strings.Contains(r, "gone.homelab.lan:443"):
+			goneRow = r
+		case strings.Contains(r, "renewed.homelab.lan:443"):
+			renewedRow = r
+		}
+	}
+	if !strings.Contains(goneRow, "Expired") || strings.Contains(goneRow, "Wrong certificate") || strings.Contains(goneRow, "older") {
+		t.Errorf("expired and never replaced: %s", goneRow)
+	}
+	if !strings.Contains(renewedRow, "Wrong certificate") || !strings.Contains(renewedRow, "an older certificate of this PKI") {
+		t.Errorf("expired and renewed: %s", renewedRow)
+	}
+}
+
 // TestEndpointsPageEscapesWhatTheRemoteHostSent: the issuer and the subject
 // of a served certificate are the remote host's text.
 func TestEndpointsPageEscapesWhatTheRemoteHostSent(t *testing.T) {
