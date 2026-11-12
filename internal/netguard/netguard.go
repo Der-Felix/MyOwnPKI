@@ -58,6 +58,25 @@ func (e *Error) Unwrap() error { return e.Err }
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 
+// embeddingPrefixes are the IPv6 ranges that carry an IPv4 address inside
+// (or tunnel to one). A client or a router may translate such an address to
+// the embedded IPv4 one, so "::7f00:1" or "64:ff9b::7f00:1" can reach
+// 127.0.0.1 although the IPv6 address itself looks global. Judging the
+// embedded address would need one parser per format; none of these ranges is
+// a place anybody's TLS endpoint or ACME client lives, so they are refused
+// entirely. IPv4-mapped (::ffff:0:0/96) is not here: it is unmapped first and
+// judged as the IPv4 address it is.
+var embeddingPrefixes = []struct {
+	prefix netip.Prefix
+	name   string
+}{
+	{netip.MustParsePrefix("::/96"), "an IPv4-compatible address (::/96)"},
+	{netip.MustParsePrefix("64:ff9b::/96"), "a NAT64 address (64:ff9b::/96)"},
+	{netip.MustParsePrefix("64:ff9b:1::/48"), "a local-use NAT64 address (64:ff9b:1::/48)"},
+	{netip.MustParsePrefix("2002::/16"), "a 6to4 address (2002::/16)"},
+	{netip.MustParsePrefix("2001::/32"), "a Teredo address (2001::/32)"},
+}
+
 // Allowed applies the address policy: nil if a may be connected to under
 // policy ("internal" or "public"). The error names the address and the rule
 // – for the log, not for the client.
@@ -71,6 +90,13 @@ func Allowed(a netip.Addr, policy string) error {
 		return fmt.Errorf("%s has a zone and is never a validation target", a)
 	case a.Is4() && (a.As4()[0] == 0 || a.As4()[0] >= 240):
 		return fmt.Errorf("%s is a reserved address", a)
+	}
+	if a.Is6() {
+		for _, e := range embeddingPrefixes {
+			if e.prefix.Contains(a) {
+				return fmt.Errorf("%s is %s that can embed an IPv4 address and is never a validation target", a, e.name)
+			}
+		}
 	}
 	if policy == PolicyPublic && (a.IsPrivate() || cgnat.Contains(a)) {
 		return fmt.Errorf("%s is a private address and the domain allows public addresses only", a)

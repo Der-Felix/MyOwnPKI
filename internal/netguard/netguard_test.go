@@ -44,6 +44,18 @@ func TestAllowed(t *testing.T) {
 		{"::ffff:169.254.169.254", false, false},
 		{"::ffff:0.0.0.0", false, false},
 		{"2001:db8::1%eth0", false, false}, // a zone is never a target
+		// IPv6 forms that embed an IPv4 address are refused as a whole range.
+		{"::7f00:1", false, false},                             // IPv4-compatible 127.0.0.1
+		{"::a00:1", false, false},                              // IPv4-compatible 10.0.0.1
+		{"::c000:20a", false, false},                           // IPv4-compatible 192.0.2.10: the range goes, not only bad contents
+		{"64:ff9b::7f00:1", false, false},                      // NAT64 127.0.0.1
+		{"64:ff9b::a00:1", false, false},                       // NAT64 10.0.0.1
+		{"64:ff9b::c000:20a", false, false},                    // NAT64 192.0.2.10
+		{"64:ff9b:1::7f00:1", false, false},                    // local-use NAT64 (RFC 8215)
+		{"2002:7f00:1::", false, false},                        // 6to4 127.0.0.1
+		{"2002:a9fe:a9fe::1", false, false},                    // 6to4 169.254.169.254
+		{"2002:c000:20a::1", false, false},                     // 6to4 192.0.2.10
+		{"2001:0:4136:e378:8000:63bf:3fff:fdd2", false, false}, // Teredo
 		// Private: only under "internal".
 		{"10.0.0.1", true, false},
 		{"172.16.5.4", true, false},
@@ -58,6 +70,12 @@ func TestAllowed(t *testing.T) {
 		{"203.0.113.9", true, true},
 		{"2001:db8::1", true, true},
 		{"::ffff:192.0.2.10", true, true},
+		// Ordinary global IPv6 next to the refused ranges is untouched.
+		{"2606:4700:4700::1111", true, true},
+		{"2001:1::1", true, true},    // 2001::/16 outside the Teredo /32
+		{"2003::1", true, true},      // next to 6to4
+		{"64:ff9a::1", true, true},   // next to NAT64
+		{"64:ff9b:2::1", true, true}, // next to local-use NAT64
 	} {
 		a, err := netip.ParseAddr(tc.addr)
 		if err != nil {
