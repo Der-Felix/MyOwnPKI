@@ -47,6 +47,10 @@ type Evaluator struct {
 	// Scan gives the TLS endpoints and their last scans; nil = no scan rules
 	// (docs/PHASE3.md §10.2).
 	Scan EndpointSource
+	// ScanOff: scanning is switched off (monitor.scan_interval: off). The scan
+	// alerts are not produced, so they resolve – there is no fresh result –
+	// but EndpointStates still tells the last known state.
+	ScanOff bool
 }
 
 // Evaluate returns every condition that holds at now, sorted by key.
@@ -71,7 +75,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, now time.Time) ([]Finding, err
 		}
 		out = append(out, ag...)
 	}
-	if e.Scan != nil {
+	if e.Scan != nil && !e.ScanOff {
 		sf, err := e.scanFindings(ctx, now, certs)
 		if err != nil {
 			return nil, fmt.Errorf("monitor: TLS scan: %w", err)

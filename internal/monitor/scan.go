@@ -31,6 +31,50 @@ type EndpointSource interface {
 // issuer of a served certificate are chosen by the remote end and never get
 // here – they are on the page and in the API, escaped.
 func (e *Evaluator) scanFindings(ctx context.Context, now time.Time, certs *certSet) ([]Finding, error) {
+	states, err := e.assessEndpoints(ctx, now, certs)
+	if err != nil {
+		return nil, err
+	}
+	certExpiry := map[string]bool{} // the certificates that have their own cert_expiry finding
+	for _, f := range certs.findings {
+		if f.Kind == KindCertExpiry {
+			certExpiry[strings.TrimPrefix(f.Key, KindCertExpiry+":")] = true
+		}
+	}
+	var out []Finding
+	for _, s := range states {
+		out = append(out, endpointFindings(s.Endpoint, s.Assessment, s.Input, s.ServedID, certExpiry, now)...)
+	}
+	return out, nil
+}
+
+// EndpointState is an endpoint with what the PKI says about it and the
+// assessment of the two – the state the page, the API and the alerts all show.
+type EndpointState struct {
+	Endpoint   tlsscan.Endpoint
+	Assessment tlsscan.Assessment
+	// Input is the expected set and the served leaf as the PKI knows it (the
+	// serial of the newest certificate, for the page).
+	Input tlsscan.Input
+	// ServedID is the ID of the served leaf if the PKI issued it, else "".
+	ServedID string
+}
+
+// EndpointStates assesses every endpoint at now, in the order of the source.
+// It reads like the evaluation and changes nothing; with no endpoint source
+// it returns nothing.
+func (e *Evaluator) EndpointStates(ctx context.Context, now time.Time) ([]EndpointState, error) {
+	if e.Scan == nil {
+		return nil, nil
+	}
+	certs, err := e.certificates(ctx, now)
+	if err != nil {
+		return nil, fmt.Errorf("monitor: certificates: %w", err)
+	}
+	return e.assessEndpoints(ctx, now, certs)
+}
+
+func (e *Evaluator) assessEndpoints(ctx context.Context, now time.Time, certs *certSet) ([]EndpointState, error) {
 	endpoints, err := e.Scan.List(ctx, e.Who)
 	if err != nil {
 		return nil, err
@@ -39,18 +83,12 @@ func (e *Evaluator) scanFindings(ctx context.Context, now time.Time, certs *cert
 		UnreachableAfter: e.Rules.ScanUnreachableAfter, MismatchAfter: e.Rules.ScanMismatchAfter,
 		ExpiryWarn: e.Rules.ExpiryWarn, ExpiryCrit: e.Rules.ExpiryCrit,
 	}
-	certExpiry := map[string]bool{} // the certificates that have their own cert_expiry finding
-	for _, f := range certs.findings {
-		if f.Kind == KindCertExpiry {
-			certExpiry[strings.TrimPrefix(f.Key, KindCertExpiry+":")] = true
-		}
-	}
 	byFP := map[string]*ca.CertificateInfo{}
 	for i := range certs.valid {
 		byFP[strings.ToUpper(certs.valid[i].Fingerprint)] = &certs.valid[i]
 	}
 	lookups := map[string]*ca.CertificateInfo{} // fingerprints not in the valid list, looked up once per run
-	var out []Finding
+	var out []EndpointState
 	for _, ep := range endpoints {
 		name := ep.Name()
 		in := tlsscan.Input{Current: expectedSet(certs, name, now)}
@@ -80,8 +118,7 @@ func (e *Evaluator) scanFindings(ctx context.Context, now time.Time, certs *cert
 				}
 			}
 		}
-		a := tlsscan.Assess(ep, in, params, now)
-		out = append(out, endpointFindings(ep, a, in, servedID, certExpiry, now)...)
+		out = append(out, EndpointState{Endpoint: ep, Assessment: tlsscan.Assess(ep, in, params, now), Input: in, ServedID: servedID})
 	}
 	return out, nil
 }

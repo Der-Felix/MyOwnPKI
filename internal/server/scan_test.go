@@ -197,6 +197,9 @@ func TestScanOffRegistersNoJob(t *testing.T) {
 	if got, _ := srv.Endpoints().Get(t.Context(), console, ep.ID); got.Scanned() {
 		t.Errorf("scanned while off: %+v", got)
 	}
+	if st, err := srv.EndpointStates(t.Context()); err != nil || len(st) != 1 || st[0].Assessment.State != tlsscan.StatePending {
+		t.Errorf("states while off: %+v, %v", st, err)
+	}
 }
 
 func TestScanSettingsComeFromTheConfiguration(t *testing.T) {

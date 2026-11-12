@@ -179,6 +179,9 @@ func TestScanMismatchEndToEnd(t *testing.T) {
 	if got := r.open(); len(got) != 1 || got[monitor.KindScanMismatch] != monitor.Warning {
 		t.Fatalf("68 minutes after the renewal: %v", got)
 	}
+	if st, err := r.srv.EndpointStates(t.Context()); err != nil || len(st) != 1 || st[0].Assessment.State != tlsscan.StateOlder {
+		t.Fatalf("the state for the page: %+v, %v", st, err)
+	}
 	digests := r.received()
 	if len(digests) != 1 || len(digests[0].Events) != 1 || digests[0].Events[0].Kind != monitor.KindScanMismatch || digests[0].Events[0].State != notify.Opened ||
 		digests[0].Events[0].Subject != "www.homelab.lan:443" || !strings.Contains(digests[0].Events[0].Detail, b.SerialHex) {
@@ -196,6 +199,9 @@ func TestScanMismatchEndToEnd(t *testing.T) {
 	r.cycle()
 	if got := r.open(); len(got) != 0 {
 		t.Fatalf("after the fix: %v", got)
+	}
+	if st, err := r.srv.EndpointStates(t.Context()); err != nil || st[0].Assessment.State != tlsscan.StateOK {
+		t.Fatalf("the state after the fix: %+v, %v", st, err)
 	}
 	if got := r.received(); len(got) != 2 || got[1].Events[0].State != notify.Resolved || got[1].Events[0].Kind != monitor.KindScanMismatch {
 		t.Fatalf("webhook after the fix: %+v", got)

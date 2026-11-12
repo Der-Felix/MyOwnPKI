@@ -89,6 +89,13 @@ func TestScanMismatch(t *testing.T) {
 		}
 	}
 
+	// The page and the API read the same state.
+	states, err := e.eval.EndpointStates(t.Context(), e.inst.Clock.Now())
+	if err != nil || len(states) != 1 || states[0].Assessment.State != tlsscan.StateOlder || states[0].ServedID != old.ID ||
+		states[0].Input.Known == nil || states[0].Input.Known.Serial != old.SerialHex || states[0].Assessment.Newest == nil || states[0].Assessment.Newest.Serial != renewed.SerialHex {
+		t.Fatalf("EndpointStates: %+v, %v", states, err)
+	}
+
 	// No duplicates across runs.
 	for range 3 {
 		if _, ch = e.run(t); len(ch.Opened)+len(ch.Resolved)+len(ch.Raised) != 0 {
@@ -326,9 +333,12 @@ func TestScanDeletedEndpointAndSwitchedOff(t *testing.T) {
 	}
 	scans.eps = []tlsscan.Endpoint{ep}
 	e.run(t)
-	e.eval.Scan = nil // monitor.scan_interval: off
+	e.eval.ScanOff = true // monitor.scan_interval: off
 	if found, ch := e.run(t); len(byKind(found, KindScanUnreachable)) != 0 || len(only(ch.Resolved, KindScanUnreachable)) != 1 {
 		t.Fatalf("scanning off: %+v / %+v", found, ch)
+	}
+	if st, err := e.eval.EndpointStates(t.Context(), e.inst.Clock.Now()); err != nil || len(st) != 1 || st[0].Assessment.State != tlsscan.StateUnreachable {
+		t.Fatalf("the last known state is still shown: %+v, %v", st, err)
 	}
 }
 

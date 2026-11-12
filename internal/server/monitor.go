@@ -74,9 +74,7 @@ func (s *Server) buildMonitor() error {
 	if a := s.Agents(); a != nil {
 		m.eval.Agents = a
 	}
-	if !sv.Off() {
-		m.eval.Scan = s.scan.svc // with scanning off the scan alerts resolve: there is no fresh result
-	}
+	m.eval.Scan, m.eval.ScanOff = s.scan.svc, sv.Off()
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
 	m.tester = &notify.Tester{Channels: m.queue.Channels, Server: s.opt.Hostname, Clock: s.clk, Audit: s.engine.Audit, Scope: s.engine.Scope, Tenant: store.DefaultTenant}
@@ -235,4 +233,15 @@ func (s *Server) Endpoints() *tlsscan.Service {
 		return nil
 	}
 	return s.scan.svc
+}
+
+// EndpointStates is every TLS endpoint with its assessed state – the same
+// one the scan alerts follow – for the page and the API. It reads the
+// certificates like the evaluation does; nothing is changed. Without
+// monitoring it returns nothing.
+func (s *Server) EndpointStates(ctx context.Context) ([]monitor.EndpointState, error) {
+	if s.monitor == nil {
+		return nil, nil
+	}
+	return s.monitor.eval.EndpointStates(ctx, s.clk.Now())
 }
