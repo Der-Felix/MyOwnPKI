@@ -144,3 +144,23 @@ func TestHandlerBoundsResponse(t *testing.T) {
 		t.Fatalf("served %d bytes, want %d", len(body), artifact.Size)
 	}
 }
+
+// Generated commands call BinaryPath; it must stay where the packages, the
+// tarball wrapper and the systemd unit put and run the binary.
+func TestBinaryPathMatchesInstallation(t *testing.T) {
+	t.Parallel()
+	dir := strings.TrimSuffix(BinaryPath, "/myownpki-agent")
+	for file, want := range map[string]string{
+		"../../.goreleaser.yaml":                      "bindir: " + dir + "\n",
+		"../../deploy/systemd/myownpki-agent.service": "ExecStart=" + BinaryPath + " run ",
+		"../../deploy/install-agent.sh":               "BIN=" + BinaryPath + "\n",
+	} {
+		data, err := os.ReadFile(filepath.FromSlash(file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.ReplaceAll(string(data), "\r\n", "\n"), want) {
+			t.Errorf("%s lacks %q", file, want)
+		}
+	}
+}

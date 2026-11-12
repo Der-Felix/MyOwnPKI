@@ -1,11 +1,13 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -486,7 +488,7 @@ func (a *app) joinTokens(c *rc) {
 	}
 	sections := []admin.Section{{Text: []string{
 		"A join token lets one host enroll; in the mode verified it is needed together with a passed check. It works once, expires, and only for hosts whose name matches.",
-		"Its secret is shown once – put it into a file on the host and run myownpki-agent enroll --token-file FILE.",
+		"Its secret is shown once, together with the setup commands for the host (" + agentdist.BinaryPath + " setup --token-file FILE).",
 	}}}
 	if c.may(authz.ManageAgents, "") {
 		forms := []admin.FormData{c.form(admin.FormData{
@@ -530,12 +532,20 @@ func (a *app) joinTokenCreate(c *rc) {
 		return
 	}
 	crumbs := []view.Crumb{{Label: "Join tokens", Href: "/agents/tokens"}}
-	c.once(c.page("New join token", "join-tokens", crumbs...), admin.DetailData{Sections: []admin.Section{
+	sections := []admin.Section{
 		{Text: []string{"Copy the token now – it is not shown again. It works once, for " + strings.Join(jt.Patterns, ", ") + ", until " + dateTime(jt.ExpiresAt) + "."},
 			KV: []view.KV{{Key: "Join token", Value: secret}}},
-		{Title: "On the host", Pre: []admin.Pre{{Title: "Enroll", Text: "umask 077\nprintf '%s\\n' '" + secret + "' > /root/join-token\n" +
-			"myownpki-agent enroll --token-file /root/join-token\nrm /root/join-token\nsystemctl enable --now myownpki-agent"}}},
-	}})
+	}
+	// The token exists now; a missing root must not cost its only display.
+	if trust, trustErr := a.agentTLSTrust(c); trustErr != nil {
+		a.log.WarnContext(c.r.Context(), "join token: no agent TLS root for the setup command", slog.Any("error", trustErr))
+		sections = append(sections, admin.Section{Title: "On the host", Text: []string{
+			"Write the token to a root-only file and run " + agentdist.BinaryPath + " setup --token-file FILE as described in docs/OPERATIONS.md (Agent).",
+		}})
+	} else {
+		sections = append(sections, a.joinTokenHostSection(trust, jt.Patterns, secret))
+	}
+	c.once(c.page("New join token", "join-tokens", crumbs...), admin.DetailData{Sections: sections})
 }
 
 func (a *app) joinTokenDelete(c *rc) {

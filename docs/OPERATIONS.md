@@ -979,7 +979,10 @@ to `/root/myownpki-join-token`, mode 0600; setup receives only `--token-file`. T
 into an argument, URL, action summary, report or access log, and later pages cannot show it again.
 Tokenless guided commands still require fresh step-up. The alternative *Agents → Join tokens →
 Create token* flow remains available for exact names or patterns such as `*.apps.homelab.lan`; store
-its secret the same way and never put it in `agent.yaml` or on a command line.
+its secret the same way and never put it in `agent.yaml` or on a command line. Its one-time page shows
+the same root check and a `setup` command for a host where the package or tarball is already
+installed: it writes the token file, detects the installed format, and passes `--hostname` for a
+token with one exact name (otherwise `hostname -f`, which must match one of the patterns).
 
 Download the root PEM independently and compare its fingerprint with the authenticated admin UI.
 `setup` requires this expected value and checks SHA-256 over the certificate DER, not the PEM text.
@@ -1007,12 +1010,15 @@ Install a package with `sudo dpkg -i myownpki-agent_0.3.3_linux_amd64.deb` or
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
 `/usr/local/bin/myownpki-agent`; its `deploy/` tree contains the same example sources. Packages and
-tarballs run exactly the same setup code.
+tarballs run exactly the same setup code. Both put the binary at `/usr/local/bin/myownpki-agent`,
+and the commands here and in the UI call it by that absolute path: root's `PATH` does not include
+`/usr/local/bin` on every distribution (Debian 13, for example), and a bare `myownpki-agent` then
+fails with `command not found`.
 
 Run setup as root. Webroot enrollment is recommended when nginx already answers port 80:
 
 ```bash
-sudo myownpki-agent setup \
+sudo /usr/local/bin/myownpki-agent setup \
   --server https://pki.homelab.lan:8444 \
   --ca-bundle root.pem \
   --root-sha256 AA:BB:CC:... \
@@ -1051,7 +1057,7 @@ release.
 ### 12.3 agent.yaml and deployment profiles
 
 The file is `/etc/myownpki-agent/agent.yaml`, state is `/var/lib/myownpki-agent` (0700, files 0600).
-After editing, run `myownpki-agent config check` and `systemctl restart myownpki-agent`.
+After editing, run `/usr/local/bin/myownpki-agent config check` and `systemctl restart myownpki-agent`.
 
 An nginx profile with webroot enrollment and ACME:
 
@@ -1202,8 +1208,8 @@ server never connects to an administrative agent port.
 ### 12.5 Status and troubleshooting
 
 ```bash
-myownpki-agent config check
-myownpki-agent status
+/usr/local/bin/myownpki-agent config check
+/usr/local/bin/myownpki-agent status
 systemctl status myownpki-agent
 journalctl -u myownpki-agent -n 100 --no-pager
 ```
@@ -1240,7 +1246,7 @@ sudo systemctl stop myownpki-agent
 cd /var/lib/myownpki-agent
 sudo rm -f agent.json agent.key agent.crt pending.key enrollment.json
 sudo rm -f acme-*.key acme-*.json
-sudo myownpki-agent enroll --token-file /root/myownpki-join-token
+sudo /usr/local/bin/myownpki-agent enroll --token-file /root/myownpki-join-token
 sudo systemctl start myownpki-agent
 ```
 

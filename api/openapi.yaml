@@ -3016,7 +3016,7 @@ components:
         used_by: { type: string }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
-        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent enroll --token-file" }
+        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent setup --token-file" }
 
     TenantSettings:
       description: "Settings of the tenant"

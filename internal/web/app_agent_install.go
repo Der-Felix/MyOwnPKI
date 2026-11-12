@@ -216,16 +216,13 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	if err != nil {
 		return nil, err
 	}
-	rootPath := "/root/myownpki-root.pem"
+	rootPath := agentRootPath
 	packagePath := "/root/" + artifact.Name
 	base := strings.TrimRight(a.d.AgentBaseURL, "/")
 	packageURL := base + agentdist.BasePath + artifact.Name
 	sumsURL := base + agentdist.BasePath + agentdist.Checksums
 	var commands strings.Builder
-	commands.WriteString("( set -euo pipefail\n")
-	commands.WriteString("umask 077\n")
-	fmt.Fprintf(&commands, "curl --fail --silent --show-error --output %s %s\n", rootPath, shellQuote(trust.rootURL))
-	fmt.Fprintf(&commands, "test \"$(openssl x509 -in %s -outform DER | sha256sum | awk '{print $1}')\" = %s || { echo \"root fingerprint does not match the UI value – nothing installed\" >&2; exit 1; }\n", rootPath, shellQuote(trust.rootSHA256))
+	writeRootCheck(&commands, trust)
 	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output %s %s\n", rootPath, packagePath, shellQuote(packageURL))
 	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output /root/checksums.txt %s\n", rootPath, shellQuote(sumsURL))
 	fmt.Fprintf(&commands, "printf '%%s  %%s\\n' %s %s | sha256sum --check - || { echo \"package checksum does not match the UI value – nothing installed\" >&2; exit 1; }\n", shellQuote(artifact.SHA256), packagePath)
@@ -237,15 +234,16 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	case "tarball":
 		commands.WriteString("install -d -m 0700 /root/myownpki-agent-package\n")
 		fmt.Fprintf(&commands, "tar -xzf %s -C /root/myownpki-agent-package\n", packagePath)
-		commands.WriteString("install -m 0755 /root/myownpki-agent-package/myownpki-agent /usr/local/bin/myownpki-agent\n")
+		fmt.Fprintf(&commands, "install -m 0755 /root/myownpki-agent-package/myownpki-agent %s\n", agentdist.BinaryPath)
 	}
-	fmt.Fprintf(&commands, "myownpki-agent setup --server %s --ca-bundle %s --root-sha256 %s --package-format %s --hostname %s",
-		shellQuote(a.d.AgentBaseURL), rootPath, shellQuote(trust.rootSHA256), in.format, shellQuote(in.hostname))
+	// The absolute path: root's PATH may lack /usr/local/bin.
+	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format %s --hostname %s",
+		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), rootPath, shellQuote(trust.rootSHA256), in.format, shellQuote(in.hostname))
 	if in.mode == "webroot" {
 		fmt.Fprintf(&commands, " --webroot %s", shellQuote(in.webroot))
 	}
 	if secret != "" {
-		commands.WriteString(" --token-file /root/myownpki-join-token")
+		commands.WriteString(" --token-file " + agentTokenPath)
 	}
 	commands.WriteString(" )\n")
 	sections := []admin.Section{
@@ -260,12 +258,56 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	if secret != "" {
 		sections = append(sections, admin.Section{Title: "One-use join token — shown only now", Text: []string{
 			"This token is valid for 15 minutes and only for " + in.hostname + ". It is absent from URLs, process arguments, action summaries and later pages.",
-		}, Pre: []admin.Pre{{Title: "Write the root-only token file", Text: "( set -euo pipefail\numask 077\ncat > /root/myownpki-join-token <<'MYOWNPKI_TOKEN'\n" + secret + "\nMYOWNPKI_TOKEN\nchmod 0600 /root/myownpki-join-token\n )"}}})
+		}, Pre: []admin.Pre{{Title: "Write the root-only token file", Text: tokenFileCommands(secret)}}})
 	}
 	sections = append(sections, admin.Section{Title: "Verified download, installation and setup", Text: []string{
 		"Run as root on " + in.hostname + ". The root comes over HTTP but is accepted only after its DER fingerprint matches the independent UI literal. Packages and checksums then use HTTPS with that verified root.",
 	}, Pre: []admin.Pre{{Title: "Commands", Text: commands.String()}}})
 	return sections, nil
+}
+
+// Files the generated commands write on the host.
+const (
+	agentRootPath  = "/root/myownpki-root.pem"
+	agentTokenPath = "/root/myownpki-join-token" // #nosec G101 -- a file path, not a credential
+)
+
+// writeRootCheck opens a fail-closed root subshell and fetches the agent TLS
+// root over HTTP. It is accepted only when its DER SHA-256 matches the
+// literal from this authenticated UI – the download never vouches for itself.
+func writeRootCheck(b *strings.Builder, trust agentTrust) {
+	b.WriteString("( set -euo pipefail\n")
+	b.WriteString("umask 077\n")
+	fmt.Fprintf(b, "curl --fail --silent --show-error --output %s %s\n", agentRootPath, shellQuote(trust.rootURL))
+	fmt.Fprintf(b, "test \"$(openssl x509 -in %s -outform DER | sha256sum | awk '{print $1}')\" = %s || { echo \"root fingerprint does not match the UI value – nothing installed\" >&2; exit 1; }\n", agentRootPath, shellQuote(trust.rootSHA256))
+}
+
+// tokenFileCommands writes the join token to a root-only file by here-doc,
+// so the secret never becomes a process argument.
+func tokenFileCommands(secret string) string {
+	return "( set -euo pipefail\numask 077\ncat > " + agentTokenPath + " <<'MYOWNPKI_TOKEN'\n" + secret + "\nMYOWNPKI_TOKEN\nchmod 0600 " + agentTokenPath + "\n )"
+}
+
+// joinTokenHostSection is the host part of a new join token: the token file,
+// the verified root and setup. Setup, not enroll: on a fresh package or
+// tarball host only setup writes agent.yaml and installs the unit. A token
+// for one exact name fixes --hostname; with patterns the host's FQDN must
+// match one of them.
+func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret string) admin.Section {
+	hostname := `"$(hostname -f)"`
+	if len(patterns) == 1 && !strings.Contains(patterns[0], "*") {
+		hostname = shellQuote(patterns[0])
+	}
+	var commands strings.Builder
+	writeRootCheck(&commands, trust)
+	// The installed format, so that update links suggest the right one later.
+	commands.WriteString("if dpkg -s myownpki-agent >/dev/null 2>&1; then format=deb; elif rpm -q myownpki-agent >/dev/null 2>&1; then format=rpm; else format=tarball; fi\n")
+	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format \"$format\" --hostname %s --token-file %s )\n",
+		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), agentRootPath, shellQuote(trust.rootSHA256), hostname, agentTokenPath)
+	return admin.Section{Title: "On the host", Text: []string{
+		"Run as root on the host after installing the agent package or tarball; Agents → Install agent does both for one exact host. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here.",
+	}, KV: []view.KV{{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true}},
+		Pre: []admin.Pre{{Title: "Write the root-only token file", Text: tokenFileCommands(secret)}, {Title: "Verify the root and run setup", Text: commands.String()}}}
 }
 
 func shellQuote(value string) string {
