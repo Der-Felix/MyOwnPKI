@@ -1,0 +1,285 @@
+{#-
+  Merges defaults.yaml with the pillar myownpki:agent, checks the result and
+  derives what agent.sls needs. Import it with context:
+
+    {% from "myownpki/map.jinja" import m, errors with context %}
+
+  `errors` collects every reason the pillar cannot be used. agent.sls renders
+  one failing state when it is not empty and nothing else (fail closed).
+-#}
+{% import_yaml "myownpki/defaults.yaml" as defaults %}
+
+{% set errors = [] %}
+{% set pillar_agent = salt['pillar.get']('myownpki:agent', {}) %}
+{% if pillar_agent is none %}
+{%   set pillar_agent = {} %}
+{% elif pillar_agent is not mapping %}
+{%   set _ = errors.append('pillar myownpki:agent must be a mapping') %}
+{%   set pillar_agent = {} %}
+{% endif %}
+
+{#- Unknown keys are almost always typos; a silently ignored key is worse than a refusal. -#}
+{% for key in pillar_agent %}
+{%   if key not in defaults['agent'] %}
+{%     set _ = errors.append('unknown pillar key myownpki:agent:' ~ key) %}
+{%   endif %}
+{% endfor %}
+
+{% set pillar_package = pillar_agent.get('package') %}
+{% if pillar_package is none %}
+{%   set pillar_package = {} %}
+{% elif pillar_package is not mapping %}
+{%   set _ = errors.append('myownpki:agent:package must be a mapping') %}
+{%   set pillar_package = {} %}
+{% endif %}
+{% for key in pillar_package %}
+{%   if key not in defaults['agent']['package'] %}
+{%     set _ = errors.append('unknown pillar key myownpki:agent:package:' ~ key) %}
+{%   endif %}
+{% endfor %}
+
+{#- Two levels of merge, by hand: a null in the pillar means "not set". -#}
+{% set cfg = {} %}
+{% set _ = cfg.update(defaults['agent']) %}
+{% for key, value in pillar_agent.items() %}
+{%   if key != 'package' and value is not none %}
+{%     set _ = cfg.update({key: value}) %}
+{%   endif %}
+{% endfor %}
+{% set package = {} %}
+{% set _ = package.update(defaults['agent']['package']) %}
+{% for key, value in pillar_package.items() %}
+{%   if value is not none %}
+{%     set _ = package.update({key: value}) %}
+{%   endif %}
+{% endfor %}
+
+{#- Required scalar keys. -#}
+{% for key in ['version', 'server', 'acme_directory', 'root_source', 'root_sha256'] %}
+{%   if cfg[key] is none or cfg[key] == '' %}
+{%     set _ = errors.append('missing required pillar key myownpki:agent:' ~ key) %}
+{%   elif cfg[key] is not string %}
+{%     set _ = errors.append('myownpki:agent:' ~ key ~ ' must be a string') %}
+{%   endif %}
+{% endfor %}
+
+{% set version = cfg['version'] if cfg['version'] is string else '' %}
+{% if version != '' and not (version | regex_match('^[0-9][0-9A-Za-z.+~_-]*$')) %}
+{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.6') %}
+{% endif %}
+
+{% set server = cfg['server'] if cfg['server'] is string else '' %}
+{% if server != '' and not (server | regex_match('^https://[^/ ]+/?$')) %}
+{%   set _ = errors.append('myownpki:agent:server must look like https://pki.homelab.lan:8444 (https, no path)') %}
+{% endif %}
+
+{% set acme_directory = cfg['acme_directory'] if cfg['acme_directory'] is string else '' %}
+{% if acme_directory != '' and not (acme_directory | regex_match('^https://[^ ]+$')) %}
+{%   set _ = errors.append('myownpki:agent:acme_directory must be an https:// URL') %}
+{% endif %}
+
+{% set root_source = cfg['root_source'] if cfg['root_source'] is string else '' %}
+{% if root_source != '' and not (root_source | regex_match('^salt://[^ ]+$')) %}
+{%   set _ = errors.append('myownpki:agent:root_source must be a salt:// source') %}
+{% endif %}
+
+{% set root_sha256 = (cfg['root_sha256'] | replace(':', '') | lower) if cfg['root_sha256'] is string else '' %}
+{% if root_sha256 != '' and not (root_sha256 | regex_match('^[0-9a-f]{64}$')) %}
+{%   set _ = errors.append('myownpki:agent:root_sha256 must be 64 hexadecimal digits (colons are allowed)') %}
+{% endif %}
+
+{#- Optional scalars. -#}
+{% set webroot = '' %}
+{% if cfg['webroot'] is not none %}
+{%   if cfg['webroot'] is not string or cfg['webroot'] == '' or cfg['webroot'] == '/' or not (cfg['webroot'] | regex_match('^/.+')) %}
+{%     set _ = errors.append('myownpki:agent:webroot must be an absolute directory other than /') %}
+{%   else %}
+{%     set webroot = cfg['webroot'] %}
+{%   endif %}
+{% endif %}
+
+{% if cfg['low_ports'] is not sameas true and cfg['low_ports'] is not sameas false %}
+{%   set _ = errors.append('myownpki:agent:low_ports must be true or false') %}
+{% endif %}
+
+{% set config_source = '' %}
+{% if cfg['config_source'] is not none %}
+{%   if cfg['config_source'] is not string or not (cfg['config_source'] | regex_match('^salt://[^ ]+$')) %}
+{%     set _ = errors.append('myownpki:agent:config_source must be a salt:// source') %}
+{%   else %}
+{%     set config_source = cfg['config_source'] %}
+{%   endif %}
+{% endif %}
+
+{#- The pass is the only secret. Its value is never put into a message or a command. -#}
+{% set enrollment_pass = cfg['enrollment_pass'] %}
+{% if enrollment_pass is not none and enrollment_pass is not string %}
+{%   set _ = errors.append('myownpki:agent:enrollment_pass must be a string (quote the value in the pillar)') %}
+{% endif %}
+{% set pass_set = enrollment_pass is string and enrollment_pass | trim != '' %}
+
+{#- Package: architecture, format, hash, source. -#}
+{% set arch_map = {'amd64': 'amd64', 'x86_64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'} %}
+{% set osarch = grains.get('osarch') %}
+{% set arch = arch_map.get(osarch) %}
+{% if arch is none %}
+{%   set _ = errors.append('unsupported architecture "' ~ osarch ~ '" (grain osarch); agent packages exist for amd64 and arm64') %}
+{% endif %}
+
+{% set package_format = '' %}
+{% if package['format'] is not string %}
+{%   set _ = errors.append('myownpki:agent:package:format must be auto, deb or rpm') %}
+{% elif package['format'] == 'auto' %}
+{%   set package_format = {'Debian': 'deb', 'RedHat': 'rpm', 'Suse': 'rpm'}.get(grains.get('os_family'), '') %}
+{%   if package_format == '' %}
+{%     set _ = errors.append('cannot derive the package format from os_family "' ~ grains.get('os_family') ~ '"; set myownpki:agent:package:format to deb or rpm') %}
+{%   endif %}
+{% elif package['format'] in ['deb', 'rpm'] %}
+{%   set package_format = package['format'] %}
+{% else %}
+{%   set _ = errors.append('unknown package.format "' ~ package['format'] ~ '"; use auto, deb or rpm') %}
+{% endif %}
+
+{% set package_sha256 = '' %}
+{% if package['sha256'] is not mapping or package['sha256'] | length == 0 %}
+{%   set _ = errors.append('missing required pillar key myownpki:agent:package:sha256 (a map of amd64 and arm64 to the SHA-256 of the package)') %}
+{% else %}
+{%   for key in package['sha256'] %}
+{%     if key not in ['amd64', 'arm64'] %}
+{%       set _ = errors.append('unknown architecture "' ~ key ~ '" in myownpki:agent:package:sha256; use amd64 and arm64') %}
+{%     endif %}
+{%   endfor %}
+{%   if arch is not none %}
+{%     set wanted = package['sha256'].get(arch) %}
+{%     if wanted is none or wanted == '' %}
+{%       set _ = errors.append('missing myownpki:agent:package:sha256:' ~ arch ~ ' for this minion (grain osarch is ' ~ osarch ~ ')') %}
+{%     elif wanted is not string or not ((wanted | lower) | regex_match('^[0-9a-f]{64}$')) %}
+{%       set _ = errors.append('myownpki:agent:package:sha256:' ~ arch ~ ' must be 64 hexadecimal digits (quote the value in the pillar)') %}
+{%     else %}
+{%       set package_sha256 = wanted | lower %}
+{%     endif %}
+{%   endif %}
+{% endif %}
+
+{% set package_template = package['source'] %}
+{% if package_template is not string or not (package_template | regex_match('^(salt|https)://[^ ]+$')) %}
+{%   set _ = errors.append('myownpki:agent:package:source must start with salt:// or https://') %}
+{%   set package_template = '' %}
+{% endif %}
+
+{% set package_name = 'myownpki-agent_' ~ version ~ '_linux_' ~ (arch if arch is not none else 'unknown') ~ '.' ~ package_format %}
+{% set package_source = package_template | replace('{name}', package_name) %}
+
+{#- Deployments and the one-owner rule. -#}
+{% set deployments = cfg['deployments'] %}
+{% if deployments is none %}
+{%   set deployments = {} %}
+{% elif deployments is not mapping %}
+{%   set _ = errors.append('myownpki:agent:deployments must be a mapping of names to options') %}
+{%   set deployments = {} %}
+{% endif %}
+{% set absent_raw = cfg['absent'] %}
+{% set absent = [] %}
+{% if absent_raw is none %}
+{%   set absent_raw = [] %}
+{% elif absent_raw is string or absent_raw is not iterable or absent_raw is mapping %}
+{%   set _ = errors.append('myownpki:agent:absent must be a list of deployment names') %}
+{%   set absent_raw = [] %}
+{% endif %}
+
+{% if config_source != '' and (deployments | length > 0 or absent_raw | length > 0) %}
+{%   set _ = errors.append('config_source and deployments/absent are mutually exclusive: agent.yaml has one owner, either the rendered file or deployment add/remove') %}
+{% endif %}
+
+{% set name_re = '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$' %}
+{% for a in absent_raw %}
+{%   if a is not string or not (a | regex_match(name_re)) %}
+{%     set _ = errors.append('myownpki:agent:absent: "' ~ a ~ '" is not a valid deployment name') %}
+{%   elif a in deployments %}
+{%     set _ = errors.append('deployment "' ~ a ~ '" is in deployments and in absent') %}
+{%   else %}
+{%     set _ = absent.append(a) %}
+{%   endif %}
+{% endfor %}
+
+{#- The options of "myownpki-agent deployment add" (internal/agent/deployment_cli.go) except
+    --dry-run (a state that never writes) and --config (the path stays the default). -#}
+{% set opts_string = ['recipe', 'profile', 'challenge', 'webroot', 'dir', 'certificate', 'chain', 'fullchain', 'key', 'owner', 'group', 'key_mode', 'test_hook', 'reload_hook', 'check', 'acme_directory'] %}
+{% set opts_list = ['name', 'hook', 'sandbox_write'] %}
+{% set opts_bool = ['low_ports', 'create_dirs', 'restart'] %}
+{% set opts_allowed = opts_string + opts_list + opts_bool %}
+
+{% set agent_bin = '/usr/local/bin/myownpki-agent' %}
+{% set deployment_list = [] %}
+{% for dname, opts in deployments | dictsort %}
+{%   if dname is not string or not (dname | regex_match(name_re)) %}
+{%     set _ = errors.append('"' ~ dname ~ '" is not a valid deployment name (lower case letters, digits and hyphens)') %}
+{%   elif opts is none or opts is not mapping %}
+{%     set _ = errors.append('deployment "' ~ dname ~ '": the options must be a mapping') %}
+{%   else %}
+{%     set flags = [] %}
+{%     for o in opts %}
+{%       if o not in opts_allowed %}
+{%         set _ = errors.append('deployment "' ~ dname ~ '": unknown option "' ~ o ~ '"; allowed: ' ~ (opts_allowed | join(', '))) %}
+{%       endif %}
+{%     endfor %}
+{%     for o in opts_allowed %}
+{%       if o in opts and opts[o] is not none %}
+{%         set v = opts[o] %}
+{%         set flag = '--' ~ (o | replace('_', '-')) %}
+{%         if o in opts_string %}
+{%           if v is not string or v == '' %}
+{%             set _ = errors.append('deployment "' ~ dname ~ '": option "' ~ o ~ '" must be a non-empty string (quote values such as 0640)') %}
+{%           else %}
+{%             set _ = flags.append(flag ~ ' ' ~ (v | quote)) %}
+{%           endif %}
+{%         elif o in opts_list %}
+{%           if v is not string and (v is mapping or v is not iterable) %}
+{%             set _ = errors.append('deployment "' ~ dname ~ '": option "' ~ o ~ '" must be a string or a list of strings') %}
+{%           else %}
+{%             for item in ([v] if v is string else v) %}
+{%               if item is not string or item == '' %}
+{%                 set _ = errors.append('deployment "' ~ dname ~ '": option "' ~ o ~ '" must be a string or a list of strings') %}
+{%               else %}
+{%                 set _ = flags.append(flag ~ ' ' ~ (item | quote)) %}
+{%               endif %}
+{%             endfor %}
+{%           endif %}
+{%         else %}
+{%           if v is not sameas true and v is not sameas false %}
+{%             set _ = errors.append('deployment "' ~ dname ~ '": option "' ~ o ~ '" must be true or false') %}
+{%           elif v %}
+{%             set _ = flags.append(flag) %}
+{%           endif %}
+{%         endif %}
+{%       endif %}
+{%     endfor %}
+{%     set _ = deployment_list.append({'name': dname, 'command': ([agent_bin, 'deployment', 'add', dname] + flags) | join(' ')}) %}
+{%   endif %}
+{% endfor %}
+
+{#- What agent.sls needs. -#}
+{% set cache_dir = '/var/cache/myownpki-agent' %}
+{% set m = {
+  'agent_bin': agent_bin,
+  'agent_crt': '/var/lib/myownpki-agent/agent.crt',
+  'config_path': '/etc/myownpki-agent/agent.yaml',
+  'config_source': config_source,
+  'token_file': '/root/myownpki-join-token',
+  'cache_dir': cache_dir,
+  'package_path': cache_dir ~ '/' ~ package_name,
+  'package_source': package_source,
+  'package_sha256': package_sha256,
+  'package_format': package_format,
+  'arch': arch,
+  'root_path': cache_dir ~ '/root.pem',
+  'root_source': root_source,
+  'root_sha256': root_sha256,
+  'server': server,
+  'acme_directory': acme_directory,
+  'webroot': webroot,
+  'low_ports': cfg['low_ports'] is sameas true,
+  'pass_set': pass_set,
+  'deployments': deployment_list,
+  'absent': absent,
+} %}

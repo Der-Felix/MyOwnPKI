@@ -16,8 +16,9 @@
 
 services:
   myownpki:
-    # Pin the version you tested; there is no "latest" tag before 1.0.
-    image: ghcr.io/der-felix/myownpki:0.3.5
+    # Pin the version you tested. The "latest" tag exists, but it moves with every
+    # stable release, and an update of a CA should be a decision, not a pull.
+    image: ghcr.io/der-felix/myownpki:0.3.6
     restart: unless-stopped
     volumes:
       - myownpki-data:/var/lib/myownpki

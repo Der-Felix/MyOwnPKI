@@ -172,7 +172,9 @@ For ACME without a reverse proxy see `--acme` above and
 ## Option B: container
 
 The image is `ghcr.io/der-felix/myownpki` for linux/amd64 and linux/arm64. It is distroless and runs
-as the non-root user **UID 65532**. Pin the version you tested; there is no `latest` tag before 1.0.
+as the non-root user **UID 65532**. Each stable release is tagged with its version
+(`:{{ site.data.release.version }}`) and with `:latest`. Pin the version you tested: `:latest` moves with every
+stable release, and updating a CA should be a decision, not a pull. Pre-releases get only their version tag.
 
 You need two files from the `deploy/` directory of the release,
 [`docker-compose.yml` and `docker/config.yaml`](https://github.com/Der-Felix/MyOwnPKI/tree/v{{ site.data.release.version }}/deploy).

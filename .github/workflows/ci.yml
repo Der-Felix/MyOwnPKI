@@ -362,3 +362,40 @@ jobs:
           goreleaser: "true"
       - name: Snapshot with the image, check the agent packages in it
         run: bash scripts/ci/image-snapshot.sh
+
+  # The Salt formula (deploy/salt/myownpki, docs/PHASE3.md section 12): every test
+  # pillar is rendered and applied with test=True by a pinned Salt (no minion, no
+  # master, nothing is installed). Not a required check.
+  salt:
+    name: salt formula
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Salt 3008.5, the LTS line, onedir for Linux x86_64. License Apache-2.0
+      # (salt-3008.5.dist-info/METADATA in the tarball). Released 2026-10-26,
+      # more than two weeks before it was pinned. The SHA-256 is the digest that
+      # packages.broadcom.com reports for the file; it is also the digest of the
+      # asset of the same name on https://github.com/saltstack/salt/releases/tag/v3008.5
+      # and the file matched the published .SHA512 asset.
+      SALT_VERSION: "3008.5"
+      SALT_SHA256: "3bbc89d18ff1cef340bfe662d0e973db8387c9affbb0633df1645725bb63786e"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash scripts/ci/salt-test.sh --self-test
+      - name: Download Salt (pinned SHA-256)
+        run: |
+          mkdir -p "$RUNNER_TEMP/salt-dl"
+          cd "$RUNNER_TEMP/salt-dl"
+          curl -fsSL -o salt.tar.xz \
+            "https://packages.broadcom.com/artifactory/saltproject-generic/onedir/${SALT_VERSION}/salt-${SALT_VERSION}-onedir-linux-x86_64.tar.xz"
+          echo "${SALT_SHA256}  salt.tar.xz" | sha256sum -c -
+          tar -xJf salt.tar.xz
+          echo "$RUNNER_TEMP/salt-dl/salt" >> "$GITHUB_PATH"
+      # Root: the formula states manage /root and /var/cache, and salt-call runs
+      # state.apply test=True. PATH is passed on so that sudo finds salt-call and jq.
+      - name: Render and apply every test pillar
+        run: sudo env "PATH=$PATH" bash scripts/ci/salt-test.sh

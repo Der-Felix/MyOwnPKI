@@ -1432,3 +1432,189 @@ the existing ones (inline styles, undefined classes, hostile text). Docs are che
   transaction per database), ADR-10 and ADR-11 (no change to the channel or the keys), ADR-12, ADR-17,
   ADR-18 (the pass is a join token; the proof of control stays required) and ADR-19 (issuance is still
   ACME); it adds one tiny package (`internal/recipe`), no dependency and no protocol change.
+
+## 12. Salt formula: v0.3.6
+
+v0.3.5 gave a script the pieces it needs (`setup --token-file`, `deployment add`, `sandbox sync`, the
+enrollment pass). v0.3.6 puts them into a **Salt formula** in `deploy/salt/myownpki/`, so that a
+fleet is rolled out by `state.apply myownpki` instead of a hand-copied state file. The sketch in
+`site/hosts/salt.md` (written in v0.3.5, never run) becomes the starting point; the formula is the
+tested version of it.
+
+Goal of v0.3.6, measured on the live installation: a minion whose pillar names the server, the root
+fingerprint, the package hash and one deployment is, after `salt 'minion-01.homelab.lan' state.apply
+myownpki`, enrolled (with an enrollment pass: without a click) and has its certificate; a second
+`state.apply` changes nothing; a minion without a pass waits for one approval and the next highstate
+finishes the job.
+
+### 12.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 34 | 0.3.6 | **The formula.** `deploy/salt/myownpki/` with `init.sls`, `agent.sls`, `map.jinja`, `defaults.yaml`, `pillar.example` and `README.md`. States: verified package (`file.managed` with `source_hash`, then `pkg.installed` through the file, never an unverified URL), the root PEM, the pass (only while the host has no agent certificate), `setup` (`creates:` the agent certificate), the deployments (§12.2) and the sandbox. No `service.running` (a not enrolled agent stays disabled) *Built:* in one commit (`aa599b9`), as planned in states and files; the differences are in §12.4. The staged package is checked by the state `myownpki-agent-package-verified` (an explicit `sha256sum` that fails the run), because Salt ignores `source_hash` for `salt://` sources; `pkg.installed` uses `sources` with the staged file. The README of the formula carries the pillar table, the states, the rules and what is not tested. | `salt-call --local state.show_highstate` renders for the test pillars; `shellcheck` on any helper script |
+| 35 | 0.3.6 | **Test and CI.** `deploy/salt/test/` (minion config with grains, pillars for Debian amd64 with a pass, RedHat arm64 without a pass, own-file mode, and the refusals of §12.2; dummy package, root and `agent.yaml` fixtures with their real hashes) and `scripts/ci/salt-test.sh`. A new CI job `salt formula` downloads the **Salt onedir tarball with a pinned SHA-256** (same pattern as cosign in `release.yml`), renders every test pillar with `state.show_highstate`, runs `state.apply test=True` and checks the expected states and absent states (§12.2). The job runs for code changes like the other heavy jobs *Built:* in two commits (`49e5476` test, `91c5972` CI). 13 cases in `deploy/salt/test/cases` (Debian amd64 with a pass, two deployments and one removal; Debian minimal; RedHat arm64 with `config_source`; Suse aarch64 with an `https://` source; nine refusals), one dummy package per format with its real SHA-256. Cases marked `mode: render` are only rendered (the runner has no `rpm`, and an `https://` source would download). The CI job `salt formula` pins Salt 3008.5 (onedir, SHA-256 in the job and in `THIRD_PARTY.md`), runs `salt-test.sh --self-test`, then `salt-test.sh` as root, and is **not** a required check. `scripts/ci/local.sh` has the two lines for `task ci:local`. | The job is green on the PR; `bash scripts/ci/salt-test.sh --self-test` runs the part that needs no Salt |
+| 36 | 0.3.6 | **Docs.** `site/hosts/salt.md` is rewritten around the formula (the sketch stays as "what the formula does, step by step"); `deploy/salt/myownpki/README.md`; `site/hosts.md`, `site/upgrade.md` (updating agents with the formula), `site/troubleshooting.md` and OPERATIONS get the formula where they now say "plain Salt"; PHASE3 live-test checklist *Built:* the Salt page is rewritten around the formula (the old state-file sketch is gone, because the formula is what it described; the page lists what the formula does step by step); `site/hosts.md`, `site/upgrade.md` (the update path and a 0.3.5 to 0.3.6 row), `site/troubleshooting.md` (a Salt formula section), `site/index.md`, the README line, and OPERATIONS (new 12.10, pointers in 12.3 and 12.8, an upgrade paragraph). The README of the formula is part of step 34. `site-check.sh` passes; Jekyll was not built here, and no documented `salt` command was run against a Salt master (the commands are checked against the formula and the agent code). | `scripts/ci/site-check.sh` |
+| 37 | 0.3.6 | **Release.** CHANGELOG `[0.3.6]`, version bump (`DEFAULT_VERSION` in both install scripts, `api/openapi.yaml`), PLAN §10.1 and `CLAUDE.md` after the tag | RELEASING.md |
+
+**Live test for the owner** (names are examples; use two test minions, one for the pass and one without). Status after the run of 2026-11-12 (§12.4): the upgrade of enrolled hosts (steps 4 and 8) and `low_ports` are done on five enrolled Debian amd64 hosts; the steps that enroll a new host (3, 5 and 9) are open; steps 6 and 7 were not reported:
+
+1. Update the server and one agent to v0.3.6 (`myownpki --version`; the agent through *Agents → Update*).
+   v0.3.6 has no migration; `myownpki db status` stays at `pki.db` 0019.
+2. On the Salt master, copy `deploy/salt/myownpki` from the tag into `/srv/salt/`, put the root and the
+   packages (`deb` and, if you have a Red Hat or SUSE minion, `rpm`) into `/srv/salt/myownpki/files/`, and
+   take the root's SHA-256 and the package hashes from the admin UI (*Agents → Add host*, or
+   `GET /api/v1/agent-install`). Write the pillar `myownpki:agent` for `minion-01.homelab.lan` (version,
+   server, ACME directory, root, hashes, a webroot, one `nginx` deployment) and check
+   `salt 'minion-01.homelab.lan' state.show_highstate`: no `myownpki-agent-refused`.
+3. **With a pass:** (*open*) create a pass (`*.homelab.lan`, 3 uses, 1 hour) and put it into the pillar of
+   `minion-01.homelab.lan`. `salt -t 300 'minion-01.homelab.lan' state.apply myownpki`. The output ends
+   with `Agent … is enrolled; myownpki-agent is enabled and running.`; the agent page shows the
+   deployment and a deployed certificate (compare the serial with
+   `openssl s_client -connect minion-01.homelab.lan:443`). **Without a pass:** the same for
+   `minion-02.homelab.lan` with no `enrollment_pass`: `setup` prints `Enrollment is pending`.
+4. **The second apply is a no-op:** (*done*) run the same `state.apply` on `minion-01.homelab.lan` again with
+   `--state-output=changes`. No state reports a change, and the summary has no `changed=` count.
+5. **Pending approval:** (*open*) on `minion-02.homelab.lan` approve the request (*Agents → Enrollment requests*,
+   second factor), then `state.apply myownpki` again (or the next highstate): the host is enrolled, the
+   service is enabled and running, the deployment is deployed. Check that the deployments were already
+   in `agent.yaml` after the first apply (§12.4), and that `/root/myownpki-join-token` is gone from the host
+   that waited with a pass after the second apply (`myownpki-agent-pass-absent`, §12.4).
+6. **Refusals:** break the pillar one way at a time and read the reason with `state.show_highstate`: a
+   missing `server`, a typo in a key, a wrong hash length, `config_source` together with `deployments`,
+   an unknown deployment option. Each gives only `myownpki-agent-refused`, and nothing is installed.
+   Then give the pillar a wrong package hash for the architecture: `state.apply` fails in
+   `myownpki-agent-package-verified` and does not install.
+7. **`absent`:** put the deployment name into `absent`, apply (`deployment remove`; deployed files stay),
+   then remove it from `absent`, restore it in `deployments` and apply again (it is added back). Change
+   an option of an existing deployment in the pillar without `absent`: nothing happens, as documented.
+8. **Update to a new release:** (*done*, 0.3.2 to 0.3.5 on five hosts) when the next release exists, change `version` and the hashes, stage the
+   package and apply to one minion: the package is installed from the verified file and the state
+   `myownpki-agent-setup-update` runs `setup` again; `myownpki-agent --version` shows the new release
+   and the deployment still works.
+9. **Remove the pass:** (*open*) delete `enrollment_pass` from the pillar, apply, and check
+   `salt 'minion-*' cmd.run 'test -e /root/myownpki-join-token && echo present || echo absent'`; revoke
+   the pass if it has uses left and read its host list. The audit log shows create, the uses and revoke,
+   never the secret.
+
+If something differs from `site/hosts/salt.md`, write the difference into the page before the release is
+published.
+
+### 12.2 Rules and defaults
+
+**Pillar (`myownpki:agent`).** Defaults in `defaults.yaml`, merged with the pillar in `map.jinja`.
+
+| Key | Meaning |
+|---|---|
+| `version` (required) | The release to install, for example `0.3.6`. Part of the package file name |
+| `server` (required) | Agent listener, `https://pki.homelab.lan:8444` |
+| `acme_directory` (required) | ACME directory the agent uses; goes into `agent.yaml` through `setup --acme-directory` |
+| `root_source` + `root_sha256` (required) | `salt://` source of the root PEM and its SHA-256 from the admin UI |
+| `package.sha256` (required) | Map `amd64` / `arm64` to the SHA-256 of the package from the admin UI |
+| `package.source` | Default `salt://myownpki/files/{name}`, `{name}` is `myownpki-agent_<version>_linux_<arch>.<deb\|rpm>`; an `https://` URL is allowed because the hash is checked |
+| `package.format` | `auto` (deb for `os_family` Debian, rpm for RedHat and Suse), or `deb` / `rpm` |
+| `webroot` | Existing webroot for the enrollment check; unset means standalone on port 80 |
+| `low_ports` | `true` passes `--low-ports` to `setup` |
+| `enrollment_pass` | Optional secret, read from the pillar; written to `/root/myownpki-join-token` (0600, `show_changes: False`) only while `/var/lib/myownpki-agent/agent.crt` does not exist. Never on a command line |
+| `config_source` | Optional `salt://` full `agent.yaml` (the file mode of v0.3.5). `sandbox sync` runs when it changes |
+| `deployments` | Optional map name -> options, applied with `deployment add` unless `deployment list` already shows the name. Allowed options are exactly those `deployment add` has (`recipe`, `name`, `webroot`, `create_dirs`, `restart`, ...); an unknown option fails the render |
+| `absent` | Optional list of deployment names to `deployment remove` |
+
+**One owner of `agent.yaml`.** `config_source` and `deployments` are mutually exclusive; the render
+fails with a message that says so. A changed option of an existing deployment is not applied (the
+state sees the name and stops): remove it first through `absent`, or use `config_source`.
+
+**Failing closed.** A missing required key, a missing hash for the minion's architecture, an
+`enrollment_pass` that is not a string, or an unknown `package.format` fails the state (a
+`test.fail_without_changes` state with the reason), never a partial install. The package is installed
+only from the hash-checked local file. The formula never runs `service.running` or enables the unit.
+
+**Secrets.** The pass is the only secret. It comes from the pillar (documented as encrypted pillar,
+targeted at the hosts of the roll-out), is written with `show_changes: False` and removed from the
+pillar by the admin afterwards. Any `cmd.run` that uses it passes the **file**, never the value.
+
+**Tested versions.** The CI job pins one Salt release; the README names it and says what is not tested
+(other Salt versions, a real apply against a server).
+
+### 12.3 Not in v0.3.6
+
+- **A real `state.apply` against a server in CI** (needs a PKI server and port 80 on the runner; the
+  `agent end-to-end` job covers the agent side). The owner's live test covers it.
+- **Managing the server** (`install.sh`, backup timer) with Salt.
+- **Ansible or Puppet roles** (a later release may reuse the pillar names).
+- **Windows minions** (the agent only compiles there).
+- **Shipping the formula as a release asset.** It is copied or fetched with gitfs; a tarball asset
+  would change the 22-file release layout and the checklist.
+- **No ADR changes, no change to the product code** unless step 34 shows that `deployment list` has no
+  output the state can test for the name; then a machine-readable form is a separate, small commit.
+
+### 12.4 Built (differences from the plan)
+
+Steps 34 to 36 were built on `release/v0.3.6`: the formula, its tests and the pages are in the repository,
+the live test above was run by the maintainer on 2026-11-12 (result below), so the changelog says what was tested. Where the build differs
+from §12.1 and §12.2 (the code decides):
+
+- **The pillar path is `myownpki:agent:*`.** The sketch in `site/hosts/salt.md` read
+  `myownpki:enrollment_pass`. The keys are `version`, `server`, `acme_directory`, `root_source`,
+  `root_sha256`, `package.{sha256, source, format}`, `webroot`, `low_ports`, `enrollment_pass`,
+  `config_source`, `deployments` and `absent`. An unknown key anywhere is refused.
+- **Salt ignores `source_hash` for `salt://` sources.** The plan said `file.managed` with `source_hash`.
+  The formula verifies the staged package itself (`myownpki-agent-package-verified`, an explicit
+  `sha256sum`; a mismatch fails the run on every apply) and installs only from that local, verified file in
+  `/var/cache/myownpki-agent` (root-owned, mode 0755). `source_hash` is passed only for an `https://`
+  source, where Salt does check it.
+- **A new package on an enrolled host runs `setup` again** (`myownpki-agent-setup-update`). This is the
+  documented update path (it refreshes the unit and the drop-ins and restarts the agent); the plan did not
+  list it. It belongs into `site/upgrade.md`, "Update the agents", and is there.
+- **The unit is never enabled or started by the formula.** The restart is `systemctl try-restart` only,
+  after a changed `agent.yaml` or deployment. `restart: true` as a deployment option would start an agent
+  that waits for approval; the docs say to leave it unset.
+- **Deployments.** `deployment add` runs only when `deployment list` does not show the name, so a changed
+  option of an existing deployment is **not** applied (remove it through `absent` first, or use
+  `config_source`). `config_source` and `deployments`/`absent` are mutually exclusive. The allowed options
+  are the flags of `deployment add` except `dry_run` and `config`. `acme_directory` is required in the
+  pillar even with `config_source`, because `setup` takes it.
+- **Fails closed, with many refusals:** missing required keys, no hash for the minion's architecture, an
+  unsupported architecture, an `os_family` that `auto` cannot map, an unknown key, option, architecture or
+  format, a pass that is not a string, a value of the wrong type, a name in both `deployments` and
+  `absent`. The one failing state is `myownpki-agent-refused`; the reason is in its **name**, because
+  `test=True` hides the comment, so the docs say to read it with `state.show_highstate`.
+- **`state_dir` other than `/var/lib/myownpki-agent` breaks the `agent.crt` checks** of the pass state and
+  of `setup` (`creates`). The docs say to keep the default.
+- **A pending host is not an error for Salt.** `setup` exits 0 with `Enrollment is pending`, so the state
+  succeeds, the deployments are added (the file does not depend on the approval) and the unit stays
+  disabled. The next apply polls the request, because `agent.crt` still does not exist. This is read from
+  the code (`internal/agent/setup.go`, the state requisites) and part of the live test.
+- **A leftover pass file (found while writing the docs; fixed afterwards).** `setup` deletes the token
+  file only when it admits the host in that run (`newlyAdmitted`). A host that waited and was approved
+  later, and a host whose pass was removed from the pillar while it waited, would keep
+  `/root/myownpki-join-token`. The state `myownpki-agent-pass-absent` (`file.absent`, `onlyif: test -e` the
+  agent certificate, after `setup`) deletes it, with or without `enrollment_pass` in the pillar, and never
+  before the host has its certificate (a host that still waits needs the file for the next `setup`).
+  CI asserts the state in every case that renders the formula and not in the refusals.
+- **Tested** (CI job `salt formula`, Salt 3008.5, not a required check): every pillar of
+  `deploy/salt/test/cases` rendered with `state.show_highstate`, expected and forbidden states, that the
+  pass appears in no output, and `state.apply test=True` for the cases a Debian runner can apply.
+  **Not tested:** a real apply against a server, other Salt versions, `pkg.installed` for `rpm`, and the
+  `https://` source. The README and `site/hosts/salt.md` say so.
+- **Live test by the maintainer (2026-11-12).** Five enrolled Debian amd64 hosts; Salt master and minions on
+  a current Salt version; the package came from the Salt file server (`salt://myownpki/files/<deb>`). One
+  real `state.apply myownpki` upgraded the agent from 0.3.2 (installed by `install-agent.sh`, not by `dpkg`)
+  to 0.3.5 on all five: package staged, the hash check passed (the verify state was skipped), `pkg.installed`
+  from the local file, `myownpki-agent-setup-update` ran once, `myownpki-agent-setup` was skipped
+  (`agent.crt` exists), `myownpki-agent-pass-absent` did nothing. The `agent.yaml` hash, the certificate
+  serial and the existing deployments were unchanged, and the service restarted and was active. A second
+  apply changed nothing (`setup-update`: none of the onchanges reqs changed). Four hosts had
+  `20-low-ports.conf` and needed `low_ports: true`; `setup` printed `Kept in 10-paths.conf …` for a
+  hand-added `/var/log/nginx` and kept it. The pass is not needed for enrolled hosts.
+- **Found by the live test:**
+  - The pillar top file (`/srv/pillar/top.sls`) and the state top file (`/srv/salt/top.sls`) are different
+    files; the formula reads only the pillar.
+  - A host already listed in the pillar top under its own id needs a second entry with another matcher
+    (`'L@minion-01.homelab.lan'` with `- match: compound`); a duplicate YAML key silently drops the first.
+  - A scheduled highstate (for example every 60 minutes) applies the formula for real as soon as it is in
+    the state top file: apply by hand with `state.apply` first, add the state top entry afterwards.
+  - `low_ports: true` is needed on enrolled hosts that already have the low-ports drop-in; a small overlay
+    pillar file with only that key, listed after the base file in the pillar top, was enough.
+- **Still not live tested:** the enrollment of a new host with an enrollment pass (`setup --token-file`,
+  `pass-absent` after the enrollment, a pending host), `rpm` hosts, `arm64`, `config_source`, the gitfs
+  install and other Salt versions.

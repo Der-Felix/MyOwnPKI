@@ -143,6 +143,7 @@ every row between your version and the new one, newest first. Always back up fir
 
 | From → to | Database | What to do |
 |---|---|---|
+| 0.3.5 → 0.3.6 | None | Nothing to configure and nothing to migrate: the server and the agent behave as in 0.3.5 (no code change), so going back needs no restore. New: the [Salt formula]({{ '/hosts/salt/' | relative_url }}) in the repository (`deploy/salt/myownpki/`), which installs, enrolls and configures agents from a pillar. It is not part of the release archives; copy it from the tag or fetch it with gitfs. Its CI tests render and apply it with `test=True`, and the maintainer used it to upgrade five enrolled Debian amd64 hosts from 0.3.2 to 0.3.5; try it on one minion first. |
 | 0.3.4 → 0.3.5 | `pki.db` 0019 adds the columns for the enrollment pass to the join tokens (additive) | Nothing to configure. **Update the server first**; agents of 0.3.4 keep reporting and nothing changes on them, but the new commands (`deployment add`, `sandbox sync`) need the 0.3.5 agent. **Run `setup` once on each existing agent** (*Agents → Update* shows the commands): it now keeps a hand-made `/var/log/nginx` in `10-paths.conf` and an installed `20-low-ports.conf` (it said `Kept in 10-paths.conf …`; 0.3.4 rewrote the first and removed the second). Existing join tokens stay single-use tokens. New: the [Add host assistant]({{ '/hosts/' | relative_url }}#add-host-the-guided-installation), [enrollment passes]({{ '/hosts/' | relative_url }}#the-enrollment-pass-for-roll-outs) and [recipes]({{ '/recipes/' | relative_url }}). **Behavior change:** switching the agent enrollment mode needs a fresh second factor and no API token can do it; a script that sets `agent_enrollment` through `PUT /settings` now gets `403`. Going back means restoring the backup (0.3.4 refuses the newer `pki.db`) and removing the `sandbox:` block from `agent.yaml`, which a 0.3.4 agent does not know. |
 | 0.3.3 → 0.3.4 (2026-11-12) | `pki.db` 0018 adds the table for the TLS scan's endpoints (additive) | Nothing to configure: the [TLS scan]({{ '/tls-scan/' | relative_url }}) connects nowhere until an admin enters an endpoint, and the new `monitor.scan_*` keys have defaults (`monitor.scan_interval: off` switches it off). Admins get the new permission `endpoint.manage`, operators and admins `endpoint.scan`. **Behavior change:** the address guard shared by http-01 validation, the agent enrollment check and the scan now refuses more ranges outright: the IPv6 forms that embed or translate to an IPv4 address (NAT64, IPv4-compatible, 6to4, Teredo, IPv4-translated), addresses with a zone and some non-global ranges such as `192.0.0.0/24` and `198.18.0.0/15` ([full list]({{ '/reference/operations/' | relative_url }}#148-which-addresses-are-never-scanned); the documentation ranges stay allowed). A service that really lives there can no longer be an http-01 target or an enrollment host. Going back means restoring the backup, because 0.3.3 refuses the newer `pki.db`. |
 | 0.3.2 → 0.3.3 (2026-11-12) | `system.db` 0014 adds the tables for alerts and queued notifications (additive) | No configuration change. Alerts start one minute after the start; nobody is told until you configure `notify:` ([Monitoring]({{ '/monitoring/' | relative_url }})); the first message then lists every alert that is open. Expect a `sealed` alert if you leave the updated server sealed for more than 10 minutes, and `agent_silent` for agents that stopped reporting. **Containers:** add the `MYOWNPKI_NOTIFY_*` variables and mount the secret files read-only; the image now sets `MYOWNPKI_AGENT_PACKAGE_DIR`. Alerts need a tenant-wide role (viewer or higher): a role limited to one CA no longer sees the Alerts page. |
@@ -168,8 +169,22 @@ package and `checksums.txt`, check the package against the value shown in the UI
 `myownpki-agent setup`. Run them as root **on the agent host**. The update keeps `agent.yaml` and
 restarts the service. Since 0.3.5 it also keeps a hand-made `/var/log/nginx` in the systemd drop-in `10-paths.conf` and an installed `20-low-ports.conf`, and says `Kept in 10-paths.conf …` when it does; an agent updated from 0.3.4 or earlier gets this the first time `setup` runs.
 
-On many hosts the same commands go into your configuration management; see
-[Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}).
+### With the Salt formula
+
+On many hosts the same update is one `state.apply`: change `version` and the `package.sha256` entries in
+the pillar to the new release (the hashes from the admin UI), put the new package on the file server of
+the master, and apply to one minion first:
+
+```bash
+salt -t 300 'minion-01.homelab.lan' state.apply myownpki
+```
+
+On an enrolled host the formula checks the new package against the hash, installs it and runs `setup`
+again (the state `myownpki-agent-setup-update`), which is the step above: it refreshes the unit and the
+drop-ins, keeps `agent.yaml` and restarts the agent. A host that already has the drop-in `20-low-ports.conf` needs `low_ports: true` in its pillar. Then apply to the rest. Update the server before you
+change the pillar. The details, and what the formula does not test, are on
+[Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}#update-the-agents). Without the formula, the
+same commands go into your own configuration management.
 
 ## Roll back
 

@@ -15,11 +15,11 @@ PowerShell 5.1: the commands write `"${VERSION}"` in double quotes, which both s
 Commands that differ between the shells are marked. Set the version once per shell window:
 
 ```bash
-VERSION=0.3.5
+VERSION=0.3.6
 ```
 
 ```powershell
-$VERSION = "0.3.5"
+$VERSION = "0.3.6"
 ```
 
 The sections "Check the draft" and "Remove a draft" are used twice – for the release candidate
@@ -228,6 +228,17 @@ docker pull "ghcr.io/der-felix/myownpki:${RELEASE}"
 
 ```bash
 docker run --rm "ghcr.io/der-felix/myownpki:${RELEASE}" --version
+```
+
+A stable release also moves the tag `latest` (a pre-release does not). Check that it points to the same
+image and is signed too:
+
+```bash
+cosign verify ghcr.io/der-felix/myownpki:latest --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v${RELEASE}" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+```bash
+docker run --rm ghcr.io/der-felix/myownpki:latest --version
 ```
 
 It prints `myownpki v<release> (commit …)`.

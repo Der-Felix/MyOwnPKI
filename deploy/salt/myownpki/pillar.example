@@ -1,0 +1,47 @@
+# Example pillar for the MyOwnPKI agent formula (deploy/salt/myownpki).
+# Copy it to your pillar tree, for example /srv/pillar/myownpki.sls, fill in the values from
+# the admin UI and target it at the hosts of the roll-out in your pillar top file.
+# Host names and addresses here are examples: homelab.lan and 192.0.2.x.
+myownpki:
+  agent:
+    # Required. The release to install; part of the package file name.
+    version: "0.3.6"
+    # Required. The agent listener of the server: https, host and port, no path.
+    server: https://pki.homelab.lan:8444
+    # Required. The ACME directory the agent uses (goes into a new agent.yaml).
+    acme_directory: https://pki.homelab.lan/acme/directory
+    # Required. salt:// source of the root certificate (PEM) and its SHA-256 from the
+    # authenticated admin UI (Agents -> Add host). setup refuses a root that differs.
+    root_source: salt://myownpki/files/root.pem
+    root_sha256: "<SHA-256 of the root from the admin UI>"
+    package:
+      # Required. The SHA-256 of the package of each architecture, from the admin UI.
+      # Quote the values. Only the architectures you roll out are needed.
+      sha256:
+        amd64: "<SHA-256 of myownpki-agent_0.3.6_linux_amd64.deb or .rpm>"
+        arm64: "<SHA-256 of myownpki-agent_0.3.6_linux_arm64.deb or .rpm>"
+      # Where the package comes from. {name} is myownpki-agent_<version>_linux_<arch>.<deb|rpm>.
+      # salt:// or https:// only; the SHA-256 above is checked either way. This is the default.
+      source: salt://myownpki/files/{name}
+      # auto: deb for os_family Debian, rpm for RedHat and Suse. Or deb / rpm.
+      format: auto
+    # An existing webroot for the enrollment check (http-01). Unset: standalone on port 80.
+    webroot: /var/www/html
+    # true: pass --low-ports to setup (needed when nginx listens on port 443).
+    low_ports: false
+    # Optional secret: an enrollment pass made by an admin with the second factor, 1 to 25 hosts.
+    # Written to /root/myownpki-join-token (0600) only until the host has its agent
+    # certificate. Keep it in an encrypted pillar and remove it when the roll-out is done.
+    # Unset: the host waits for one approval in the UI and the next highstate finishes the job.
+    # enrollment_pass: "<enrollment pass from the admin UI>"
+    # Either deployments (applied with "deployment add") ...
+    deployments:
+      proxy:
+        recipe: nginx
+        name: minion-01.homelab.lan
+        webroot: /var/www/html
+        create_dirs: true
+    # ... and names of deployments to remove with "deployment remove":
+    absent: []
+    # ... or a complete agent.yaml, rendered by Salt (then neither deployments nor absent):
+    # config_source: salt://myownpki/files/agent.yaml

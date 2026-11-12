@@ -26,3 +26,7 @@ LICENSE  text eol=lf
 *.der    binary
 *.p12    binary
 *.pfx    binary
+
+# Dummy packages of the Salt formula test: their SHA-256 is in the test pillars
+deploy/salt/test/files/*.deb binary
+deploy/salt/test/files/*.rpm binary
