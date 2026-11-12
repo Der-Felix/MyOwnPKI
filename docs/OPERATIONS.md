@@ -1253,9 +1253,7 @@ identity and account binding:
 
 ```bash
 sudo systemctl stop myownpki-agent
-cd /var/lib/myownpki-agent
-sudo rm -f agent.json agent.key agent.crt pending.key enrollment.json
-sudo rm -f acme-*.key acme-*.json
+sudo sh -c 'cd /var/lib/myownpki-agent && rm -f agent.json agent.key agent.crt pending.key enrollment.json acme-*.key acme-*.json'
 sudo /usr/local/bin/myownpki-agent enroll --token-file /root/myownpki-join-token
 sudo systemctl start myownpki-agent
 ```

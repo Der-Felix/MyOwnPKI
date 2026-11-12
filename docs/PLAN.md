@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) released 2026-10-24; phase 3 (docs/PHASE3.md) – v0.3.0 (Linux agent) released 2026-10-25, v0.3.1 (packages, guided installation) 2026-10-28, v0.3.2 (agent package fix) 2026-10-29; v0.3.3 (monitoring) in progress, the releases up to v1.0 in §10.1 · Last updated: 2026-11-08 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) released 2026-10-24; phase 3 (docs/PHASE3.md) – v0.3.0 (Linux agent) released 2026-10-25, v0.3.1 (packages, guided installation) 2026-10-28, v0.3.2 (agent package fix) 2026-10-29, v0.3.3 (monitoring) 2026-11-12; v0.3.4 (TLS scan) in progress, the releases up to v1.0 in §10.1 · Last updated: 2026-11-12 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
