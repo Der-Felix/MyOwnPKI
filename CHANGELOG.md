@@ -7,6 +7,68 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.6]
+
+Salt formula: `deploy/salt/myownpki/` installs the agent from a hash-checked package, enrolls it with an
+enrollment pass, adds its deployments and keeps them in step, from one `state.apply myownpki`. The
+server and the agent are unchanged; the live test by the owner is pending.
+
+### Added
+
+- **Salt formula for the agent** (`deploy/salt/myownpki/`: `init.sls`, `agent.sls`, `map.jinja`,
+  `defaults.yaml`, `pillar.example` and a README). The pillar is `myownpki:agent`: `version`, `server`,
+  `acme_directory`, `root_source` and `root_sha256`, `package.sha256` per architecture (`amd64`,
+  `arm64`), optional `package.source` and `package.format`, `webroot`, `low_ports`, `enrollment_pass`,
+  `config_source`, `deployments` and `absent`. On a minion it stages the package (`deb` or `rpm`, from the
+  Salt file server or an `https://` URL) in `/var/cache/myownpki-agent`, **checks its SHA-256 against
+  the value from your admin UI and installs only from that local file**, stages the root (which `setup`
+  checks against `root_sha256`), writes the enrollment pass to `/root/myownpki-join-token` (mode 0600,
+  never shown in any output or put on a command line) only while the host has no agent certificate, runs
+  `setup` until it has one, and then applies the deployments with `deployment add` and `deployment
+  remove` or renders a complete `agent.yaml` and runs `sandbox sync`. A second `state.apply` changes
+  nothing. A new package on an enrolled host runs `setup` again, which is the update path. The formula
+  never enables or starts the service (`setup` does when the host is admitted; the restart is
+  `systemctl try-restart`), so a host that waits for an approval stays down until the next apply finds it
+  approved. It fails closed: a missing required key, no hash for the minion's architecture, an unknown
+  key, option or format, a pass that is not a string, `config_source` together with `deployments` and
+  similar mistakes render one failing state, `myownpki-agent-refused`, and install nothing. Salt ignores
+  `source_hash` for `salt://` sources, so the formula's explicit check, not Salt, protects the install.
+  It is copied from the tag or fetched with gitfs; it is not part of the release archives.
+- **CI job `salt formula`:** renders every test pillar of `deploy/salt/test/cases` (Debian amd64 with a
+  pass, RedHat arm64 with `config_source`, a minimal pillar, an `https://` source and nine refusals) with
+  `state.show_highstate`, checks which states exist and which must not, that the pass appears in no output,
+  and runs `state.apply test=True` for the cases a Debian runner can apply. It uses a pinned Salt 3008.5
+  (onedir, SHA-256 checked); `bash scripts/ci/salt-test.sh --self-test` runs the checks that need no Salt.
+  It is not a required check.
+
+### Changed
+
+- **Documentation:** the Salt page is rewritten around the formula (install, minimal and full pillar, the
+  first and the second apply, a host waiting for approval, removing the pass, updating, changing or
+  removing a deployment, the refusals, what is and is not tested); the operations guide has a new
+  chapter 12.10; the pages on adding hosts, upgrading and troubleshooting name the formula.
+- `api/openapi.yaml` `info.version` is 0.3.6.
+
+### Known limitations
+
+- The formula was **not applied against a real server**: CI renders and applies it with `test=True` only.
+  Other Salt versions than 3008.5 and the installation of an `rpm` package are not tested either. Try it on
+  one minion first.
+- A changed option of an existing deployment in the pillar is not applied: the formula adds a deployment
+  only when `deployment list` does not show the name. Remove it through `absent` first, or use
+  `config_source`.
+- A host that waited for an approval and was approved later keeps `/root/myownpki-join-token`: `setup`
+  deletes the file only when it admits the host in that run, and the formula does not remove it. Delete
+  it by hand and take the pass out of the pillar after the roll-out.
+- The agent's state directory must stay `/var/lib/myownpki-agent`; the formula looks for `agent.crt` there.
+
+### Upgrade notes
+
+- No migration, no configuration change and no change to the server or the agent. Update the server first,
+  as always; going back needs no restore.
+- Nothing uses the formula until you copy it to a Salt master. With it, updating the agents is a change of
+  `version` and `package.sha256` in the pillar and a `state.apply`.
+
 ## [0.3.5] - 2026-11-12
 
 Host onboarding: a new host goes from its name to a deployed certificate with an *Add host* assistant,
@@ -712,7 +774,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...v0.3.3
