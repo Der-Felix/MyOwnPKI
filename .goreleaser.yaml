@@ -201,9 +201,12 @@ dockers_v2:
       - dist
     images:
       - ghcr.io/der-felix/myownpki
-    # No "latest" before 1.0: an upgrade is a deliberate choice of a version.
+    # "latest" follows the newest stable release; a pre-release renders an empty
+    # tag, which GoReleaser skips. Production setups should still pin the version:
+    # an upgrade is a deliberate choice (site/upgrade.md).
     tags:
       - "{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
     platforms:
       - linux/amd64
       - linux/arm64

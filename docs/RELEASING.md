@@ -230,6 +230,17 @@ docker pull "ghcr.io/der-felix/myownpki:${RELEASE}"
 docker run --rm "ghcr.io/der-felix/myownpki:${RELEASE}" --version
 ```
 
+A stable release also moves the tag `latest` (a pre-release does not). Check that it points to the same
+image and is signed too:
+
+```bash
+cosign verify ghcr.io/der-felix/myownpki:latest --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v${RELEASE}" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+```bash
+docker run --rm ghcr.io/der-felix/myownpki:latest --version
+```
+
 It prints `myownpki v<release> (commit …)`.
 
 ## Publish
