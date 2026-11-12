@@ -53,6 +53,8 @@ code can make a token fresh. Such a request answers `403` with the problem type 
 - managing users;
 - managing agents: creating join tokens, approving or denying enrollments, disabling or revoking an
   agent. (Reading them is allowed.)
+- changing the agent enrollment mode: `PUT /settings` with a different `agent_enrollment` (any other
+  setting, or the same mode, works with a token);
 - creating other API tokens.
 
 Issuing and renewing certificates, reading CAs, certificates, agents, alerts and the audit log,
@@ -83,7 +85,7 @@ everything its roles allow, after the step-up.
 | system | `GET /system/status`, `POST /system/unseal`, `POST /system/seal` | signed in; unseal and seal need an instance admin |
 | auth, users | sign-in, step-up, `GET /users`, own password and second factor | varies |
 | tokens | `GET /tokens`, `POST /tokens`, `DELETE /tokens/{tokenId}` | signed in |
-| settings | `GET /settings`, `PUT /settings` | viewer reads, admin changes |
+| settings | `GET /settings`, `PUT /settings` | viewer reads, admin changes (a different enrollment mode needs the second factor) |
 | domains, acme | `GET /domains`, ACME accounts and their predecessor policies | viewer / admin |
 | cas | `GET /cas`, `POST /cas`, `/cas/{caId}/certificate`, `/cas/{caId}/crl` | viewer reads, admin changes |
 | certificates | `GET /certificates`, `/certificates/{id}/download/{format}`, `…/renew`, `…/revoke` | viewer reads; operator issues, renews and revokes (revoking needs the second factor) |

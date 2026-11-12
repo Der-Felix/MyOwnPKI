@@ -98,6 +98,12 @@ settings*):
 | `auto` | yes, or the check passed | | admitted |
 | `manual` | any | any | waits for an admin |
 
+Changing the mode needs a **fresh second factor**, because `auto` admits a host without a person, and an
+API token can never do it. In the UI the form asks for the code and then saves; over the REST API a
+`PUT /api/v1/settings` with a different `agent_enrollment` answers `403` (`step-up-required` for a
+session without a fresh code, `forbidden` for a token). Saving other settings, or the same mode, needs
+no code.
+
 A token is valid when it is unused, not expired, and its name patterns match the host. A token is
 marked used even when the agent then waits in the queue. A **waiting** agent leaves the service
 disabled and prints `systemctl enable --now myownpki-agent` for use after approval; an admin approves

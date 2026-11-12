@@ -283,7 +283,7 @@ func (a *app) settingsPage(c *rc) {
 			{ID: "acme_accounts", Label: "ACME: new accounts per client address and hour", Type: "number", Value: strconv.Itoa(s.ACME.AccountsPerIP), Hint: "1 to 1000; IPv6 counts per /64"},
 			{ID: "trust_page", Label: "Public trust page at / of the public listener (CA certificates, fingerprints, install guides)", Type: "checkbox", Checked: s.TrustPage != nil && *s.TrustPage},
 			{ID: "agent_enrollment", Label: "Agents: how an enrollment is admitted", Type: "select", Options: enrollmentOptions(s.AgentEnrollment),
-				Hint: "verified: join token and passed check (one alone waits for an admin); auto: either one; manual: an admin decides every enrollment"},
+				Hint: "verified: join token and passed check (one alone waits for an admin); auto: either one; manual: an admin decides every enrollment. Changing the mode needs a fresh second factor."},
 			{ID: "step_up_minutes", Label: "Second-factor confirmation: valid for", Type: "select", Options: stepUpOptions(s.StepUpMinutes),
 				Hint: "Applies to new confirmations only; an existing confirmation keeps its original lifetime"},
 		},

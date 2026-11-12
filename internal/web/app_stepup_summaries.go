@@ -142,6 +142,8 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		summary = a.userActionSummary(c, entry, "Enable user")
 	case "POST /admin/users/{id}/unlock":
 		summary = a.userActionSummary(c, entry, "Unlock user")
+	case "POST /admin/settings":
+		summary = "Set the agent enrollment mode to " + entry.form["agent_enrollment"] + " and save the tenant settings"
 	case "POST /admin/import":
 		mode := "import"
 		if yes(entry.form["dry_run"]) {

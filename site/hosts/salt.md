@@ -47,7 +47,8 @@ That leaves two patterns that work today:
 Join tokens are single-use, also when the name is a pattern such as `*.homelab.lan`: one token enrolls
 one host. Pattern A needs one approval per host, pattern B one token per host, so for a fleet pattern A is
 simpler and keeps the secrets out of Salt. A tenant in `auto` enrollment mode admits a host whose check
-passed without any approval, but that is a weaker setting; see
+passed without any approval, but that is a weaker setting (switching to it needs the second factor and
+cannot be scripted with an API token); see
 [Adding hosts]({{ '/hosts/' | relative_url }}#admission-token-check-approval).
 
 ## Preconditions

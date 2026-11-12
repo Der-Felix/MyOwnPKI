@@ -776,6 +776,15 @@ paths:
         pki.conf of pki.sh) – never the common name.
         `acme_limits` (since 0.2, optional here) are the rate limits of the ACME server.
         `trust_page` (since 0.2.2, optional here) switches the public trust page.
+
+        **Changing `agent_enrollment` to a different value needs a fresh second factor** (see
+        `POST /auth/step-up`) and is never possible with an API token: in `auto` mode a host that
+        passes the check is admitted without a person, which weighs as much as approving an
+        enrollment. Without a fresh proof the request fails with `403` and problem type
+        `step-up-required`; with an API token it fails with `403` and problem type `forbidden`, and
+        nothing is stored. A request that leaves the mode as it is (same value, or the field left
+        out) and every other setting need no second factor. This is why the operation carries no
+        `x-step-up: true`, which would mean every call needs one.
       x-required-role: admin
       requestBody:
         description: "The settings"
@@ -3318,7 +3327,8 @@ components:
           description: |
             How agents are admitted (since 0.3, ADR-18): `auto` – a valid join token or a passed
             http-01 check; `verified` (default) – both, one alone waits for an admin; `manual` – an
-            admin decides every enrollment. Always in the answer; optional in a change.
+            admin decides every enrollment. Always in the answer; optional in a change. A change to
+            a different mode needs a fresh second factor and is refused for an API token.
           type: string
           enum: [auto, verified, manual]
         step_up_minutes:

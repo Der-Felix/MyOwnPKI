@@ -761,10 +761,16 @@ func TestContract(t *testing.T) {
 		{op: "updateSettings", as: admin, body: withLimits(settings, 0, 3, 20), want: 422, kind: "policy-violation", note: "acme-limits"},
 		{op: "updateSettings", as: admin, body: withTrustPage(settings, false), want: 200, note: "trust-page"},
 		{op: "updateSettings", as: admin, body: withTrustPage(settings, true), want: 200, note: "trust-page"},
+		// The enrollment mode admits hosts without a person (auto): it needs a fresh
+		// second factor, replayed with a token at the end. The mode as stored is no change.
+		{op: "updateSettings", as: admin, body: withMode(settings, "auto"), want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "updateSettings", as: admin, body: withMode(settings, "verified"), want: 200, note: "enrollment-mode"},
 	} {
 		run(cc)
 	}
 	admin.stepUp(t, "demo")
+	run(contractCase{op: "updateSettings", as: admin, body: withMode(settings, "auto"), want: 200, note: "enrollment-mode"})
+	run(contractCase{op: "updateSettings", as: admin, body: withMode(settings, "verified"), want: 200, note: "enrollment-mode"})
 	run(contractCase{op: "createUser", as: admin, body: newUser, want: 201})
 	run(contractCase{op: "createUser", as: admin, body: newUser, want: 422, kind: "policy-violation"})
 	workerID := v.in.UserID(t, "worker")
@@ -1330,5 +1336,13 @@ func withStepUp(settings map[string]any, minutes int) map[string]any {
 	out := map[string]any{}
 	maps.Copy(out, settings)
 	out["step_up_minutes"] = minutes
+	return out
+}
+
+// withMode adds agent_enrollment to a settings body (v0.3.0).
+func withMode(settings map[string]any, mode string) map[string]any {
+	out := map[string]any{}
+	maps.Copy(out, settings)
+	out["agent_enrollment"] = mode
 	return out
 }

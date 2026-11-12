@@ -250,7 +250,8 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /admin/users/{id}/enable", a.userEnable)
 	a.protected(mux, "POST /admin/users/{id}/unlock", a.userUnlock)
 	mux.HandleFunc("GET /admin/settings", a.signedIn(a.settingsPage))
-	mux.HandleFunc("POST /admin/settings", a.signedIn(a.saveSettings))
+	a.protected(mux, "POST /admin/settings", a.saveSettings, "keygen", "o", "ou", "l", "st", "c", "acme_orders", "acme_failed", "acme_accounts", "trust_page", "agent_enrollment", "step_up_minutes",
+		"agent_predecessor", "agent_predecessor_days", "other_predecessor", "other_predecessor_days")
 	mux.HandleFunc("GET /admin/audit", a.signedIn(a.auditLog))
 	mux.HandleFunc("GET /admin/import", a.signedIn(a.importPage))
 	a.protected(mux, "POST /admin/import", a.runImport, "dry_run", "base", "root_key", "ca_pass", "key_pass")

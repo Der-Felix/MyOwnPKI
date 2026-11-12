@@ -7,6 +7,20 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Security
+
+- **Changing the agent enrollment mode now needs a fresh second factor and is refused for an API
+  token.** In `auto` mode a host that passes the enrollment check is admitted without a person, so the
+  mode weighs as much as approving an enrollment (which already needed step-up) – but an API token with
+  the admin role could set it, because tenant settings needed no step-up. The new permission
+  `agent.enrollment` (admin only, step-up) guards exactly that change: in the UI the settings form asks
+  for the code and then saves; `PUT /api/v1/settings` with a different `agent_enrollment` answers `403`
+  `step-up-required` to a session without a fresh code and `403` `forbidden` to a token, and stores
+  nothing. Saving the same mode, leaving the field out, and every other setting stay as they were, with a
+  token too, and so does reading. **Behavior change for scripts:** one that switches the mode through the
+  API stops working; change the mode in the UI. The `tenant.settings` audit entry already named the old
+  and the new mode.
+
 ## [0.3.4] - 2026-11-12
 
 TLS scan: the server connects to the TLS endpoints you enter, reads the certificate each one serves and

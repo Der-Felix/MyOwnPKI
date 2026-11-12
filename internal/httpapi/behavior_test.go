@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -620,4 +621,94 @@ func fullChain(t *testing.T, c *client, id string) (*x509.Certificate, []*x509.C
 		t.Fatalf("fullchain has %d certificates, want the leaf and its issuing CA", len(certs))
 	}
 	return certs[0], certs[1:]
+}
+
+// TestEnrollmentModeNeedsASecondFactor: in auto mode a host that passes the
+// check is admitted without a person, so the mode is as weighty as approving
+// an enrollment. Changing it needs a fresh second factor, an API token never
+// does it (even with the admin role), and the other settings, reading and a
+// PUT that leaves the mode as it is stay open to a token.
+func TestEnrollmentModeNeedsASecondFactor(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.unseal(t)
+	admin := v.client("192.0.2.1")
+	admin.signIn(t, "demo", v.demoPass)
+	admin.stepUp(t, "demo")
+	created := admin.do(t, http.MethodPost, "/tokens", map[string]any{"name": "script", "expires_at": v.clk.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"roles": []map[string]any{{"role": "admin", "scope": map[string]string{"type": "tenant"}}}})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("token: %d %s", created.Code, created.Body.String())
+	}
+	secret, _ := created.body["secret"].(string)
+	bearer := []string{"Authorization", "Bearer " + secret}
+	bot := v.client("192.0.2.2")
+	settings := map[string]any{"allow_server_keygen": false, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": ""}}
+	withMode := func(mode string) map[string]any {
+		out := maps.Clone(settings)
+		out["agent_enrollment"] = mode
+		return out
+	}
+	mode := func(c *client, header ...string) string {
+		t.Helper()
+		r := c.do(t, http.MethodGet, "/settings", nil, header...)
+		if r.Code != http.StatusOK {
+			t.Fatalf("read settings: %d %s", r.Code, r.Body.String())
+		}
+		m, _ := r.body["agent_enrollment"].(string)
+		return m
+	}
+	changes := func() int {
+		v.deliver(t)
+		return count(v.audit(t, v.ia), "tenant.settings/success")
+	}
+	if got := mode(bot, bearer...); got != "verified" {
+		t.Fatalf("default mode %q read by the token", got)
+	}
+	base := changes()
+
+	// The token: a plain refusal that says what is missing, for every mode.
+	for _, m := range []string{"auto", "manual"} {
+		r := bot.do(t, http.MethodPut, "/settings", withMode(m), bearer...)
+		if r.Code != http.StatusForbidden || r.problemType() != "forbidden" ||
+			r.body["detail"] != "an API token can't change the agent enrollment mode – sign in and confirm with a fresh code" {
+			t.Errorf("token sets %s: %d %s", m, r.Code, r.Body.String())
+		}
+	}
+	// A session of the admin without a fresh second factor is asked for it.
+	v.clk.Advance(authz.StepUpWindow + time.Second)
+	if r := admin.do(t, http.MethodPut, "/settings", withMode("auto")); r.Code != http.StatusForbidden || r.problemType() != "step-up-required" {
+		t.Errorf("session without step-up sets auto: %d %s", r.Code, r.Body.String())
+	}
+	if got := mode(admin); got != "verified" || changes() != base {
+		t.Fatalf("a refused change took effect: mode %q, %d changes", got, changes()-base)
+	}
+
+	// What stays open to the token: the same mode, no mode, other settings.
+	trustOff := withMode("verified")
+	trustOff["trust_page"] = false
+	for name, body := range map[string]map[string]any{"same mode": withMode("verified"), "no mode": settings, "other setting": trustOff} {
+		if r := bot.do(t, http.MethodPut, "/settings", body, bearer...); r.Code != http.StatusOK {
+			t.Errorf("token, %s: %d %s", name, r.Code, r.Body.String())
+		}
+	}
+	if got := changes(); got != base+3 {
+		t.Errorf("settings changes recorded: %d, want 3", got-base)
+	}
+
+	// With a fresh second factor the session changes it, and the token sees it.
+	admin.stepUp(t, "demo")
+	if r := admin.do(t, http.MethodPut, "/settings", withMode("auto")); r.Code != http.StatusOK || r.body["agent_enrollment"] != "auto" {
+		t.Fatalf("session with step-up sets auto: %d %s", r.Code, r.Body.String())
+	}
+	if got := mode(bot, bearer...); got != "auto" {
+		t.Errorf("mode read by the token: %q", got)
+	}
+	// And the token cannot take it back either.
+	if r := bot.do(t, http.MethodPut, "/settings", withMode("manual"), bearer...); r.Code != http.StatusForbidden || r.problemType() != "forbidden" {
+		t.Errorf("token leaves auto: %d %s", r.Code, r.Body.String())
+	}
+	if got := changes(); got != base+4 {
+		t.Errorf("settings changes recorded: %d, want 4", got-base)
+	}
 }
