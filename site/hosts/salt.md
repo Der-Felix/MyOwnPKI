@@ -29,12 +29,12 @@ On every host, as root, in this order:
 
 How the pieces work is on [Adding hosts]({{ '/hosts/' | relative_url }}); this page only adds Salt.
 
-## The limit of v0.3.3: who creates the join token
+## The limit of v0.3.4: who creates the join token
 
 Enrollment can use a **join token**, but creating one (and approving a waiting enrollment) is an
 action of the permission `agent.manage`. That permission needs a **fresh second factor** from a
 person, and an **API token never satisfies that**: the API answers a token's attempt to create a join
-token with `403`. So with v0.3.3 a script or Salt cannot create join tokens by itself. An automation
+token with `403`. So with v0.3.4 a script or Salt cannot create join tokens by itself. An automation
 path for this, with a documented least-privilege API token, is planned for v0.3.5.
 
 That leaves two patterns that work today:
