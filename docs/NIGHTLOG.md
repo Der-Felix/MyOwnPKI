@@ -1,3 +1,84 @@
+# Night log - v0.3.3 and v0.3.4 released, v0.3.5 in progress
+
+> Autonomous run on 2026-11-12, about 00:50 to 05:50 local, on the maintainer's standing permission
+> in chat: release, push, merge green pull requests, tag and publish. The code was written by
+> subagents in worktrees; the main session planned, reviewed the diffs, linted for `GOOS=windows`
+> and `GOOS=linux` before every push, and merged only on green CI. No force push, no deleted
+> branch, no moved tag. v0.3.5 is **not** released: it sits on `release/v0.3.5` without a pull request.
+
+## Released
+
+| Version | Tag on | Published (UTC) | What |
+|---|---|---|---|
+| v0.3.3 | `8e2f0d5` | 2026-11-12 00:11 | Monitoring: alerts, e-mail and webhook digests, Alerts page and REST, `config check` rows |
+| v0.3.4 | `2354bec` | 2026-11-12 04:23 | TLS scan: endpoints, scanner, four alerts, REST and Endpoints page, shared address guard |
+
+Both drafts were checked as `docs/RELEASING.md` says: 22 assets, release notes not empty, the
+`checksums.txt` signature with `cosign verify-blob`, the SHA-256 of the Windows archive, the image
+signature with `cosign verify`, and the Windows binary's `--version`. Not done: `docker run … --version`
+(no Docker on the maintainer's machine; the CI job "release image" and the signature stand in for it)
+and **any live test on the maintainer's servers** - both are theirs.
+
+## Merged pull requests
+
+| PR | Content |
+|---|---|
+| #21 | golangci-lint 2.15.0 with the checksum of the official release file; five `errcheck` findings fixed (two were Linux-only) |
+| #22 | Go 1.27.4 (GO-2026-6859, `net/http`), the exception of PLAN section 13 |
+| #23 | graphify and ai-ui-design-master skills (project constraints first) |
+| #24 | CI: docs- and skills-only pull requests skip the heavy jobs; main is never reduced |
+| #25, #31 | Releases v0.3.3 and v0.3.4 |
+| #26 | Replaces Dependabot #20 (templ regenerated; `x/net` v0.62.0); #20 closed |
+| #27 | Status line in CLAUDE.md |
+| #28 | Documentation site on GitHub Pages (Jekyll through GitHub's own actions, no dependency); Pages enabled |
+| #29 | `TestRenewNowOverRESTServesNewCertificate` robust under load |
+| #30 | The other session's fix: generated agent commands use `/usr/local/bin/myownpki-agent` |
+| #32 | Security: changing the agent enrollment mode needs a fresh second factor |
+
+## Findings and corrections
+
+- **Correction of a plan claim.** PLAN section 10.1 said an API token could create join tokens for
+  Salt. It cannot: `agent.manage` is a step-up permission and a token never satisfies step-up. The
+  v0.3.5 plan replaces the claim with an enrollment pass (an admin creates it with the second
+  factor, automation consumes it).
+- **Security gap closed (#32).** An admin API token could switch the enrollment mode to `auto`.
+  Still open, same weight: `step_up_minutes` and `allow_server_keygen` can be changed with an admin
+  token, and a refused settings change leaves no audit entry.
+- **Independent review of the TLS scan:** no blocker; six findings fixed with a failing test first
+  (endpoints dormant after a clock step, raw id in the audit target, more non-global ranges refused,
+  own time budget after the handshake, 403 before 404, "Expired" on the page).
+- **Behavior change to know about:** the shared address guard also refuses NAT64, 6to4, Teredo,
+  IPv4-compatible, IPv4-translated and zoned IPv6 addresses for ACME http-01 and the agent
+  enrollment check. An IPv6-only network with DNS64 can no longer be an http-01 target.
+- **Existing `setup` bugs (fixed in v0.3.5, step 30):** `10-paths.conf` was rewritten on every run
+  and lost hand-made entries such as `/var/log/nginx`; `20-low-ports.conf` was removed in webroot
+  mode. Hosts running v0.3.3 agents may be affected until they run the new `setup`.
+- The CHANGELOG had two bullets of the absolute-path fix under 0.3.3 by mistake; moved to 0.3.4.
+
+## Open for the maintainer
+
+1. **Live tests:** v0.3.3 (seal, message after about 10 minutes, unseal, resolved:
+   `docs/OPERATIONS.md` 13.11) and v0.3.4 (`docs/PHASE3.md` section 10.1, checklist of eight steps).
+   Update the server first, the agents afterwards.
+2. **Decisions:** step-up for `step_up_minutes` and `allow_server_keygen`; audit entries for refused
+   settings changes; an API-visible `expired` state for the scan; enrollment pass refusal text (the
+   reason is named, like the join token path - opaque would be a small change); GO-2026-5932 in
+   `x/crypto` stays open (the fix exists only as a pseudo-version).
+3. **v0.3.5** (`release/v0.3.5`, no PR yet): step 30 (`deployment add|list|remove`, `sandbox sync`,
+   drop-in fixes, recipes), step 31 (enrollment pass: migration 0019, REST, Join tokens page) and
+   step 32 (Add host assistant) are built and tested; **step 33 is missing**: OPERATIONS chapter,
+   a recipes page on the site, CHANGELOG 0.3.5 (the Security entry of #32 sits under Unreleased),
+   version bump, pull request, CI, tag. The Postfix, Dovecot and Proxmox recipes are unverified
+   examples and need a test on a non-production host.
+4. ECharts and the lego DNS providers were approved in chat but not needed yet (v0.3.7 and v0.3.8).
+
+## What was not run
+
+`go test -race` (no C compiler on the maintainer's machine; the CI job ran it for every merged
+pull request), the full `task ci:local` (Linux, Docker and systemd steps are for GitHub), and any
+screenshot of the new pages (the browser pane did not render screenshots; the site was checked by
+text, status codes and a width check per page).
+
 # Night log – v0.3.1 release close
 
 > Final review and release preparation on `release/v0.3.1`. No tag and no push. Every commit had a
