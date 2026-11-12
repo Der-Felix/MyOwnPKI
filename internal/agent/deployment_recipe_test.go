@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -181,5 +184,66 @@ func TestRecipeKeepsTheOperatorsLocation(t *testing.T) {
 	}
 	if spec.Dir != "" || spec.Files.Fullchain != "/srv/x/f.pem" || spec.Profile != "" {
 		t.Errorf("spec = %+v", spec)
+	}
+}
+
+// DryRunDeploymentAdd is the entry the tests of other packages use: it needs no
+// root, writes nothing, maps absolute paths below the root and reports the same
+// refusals as the command.
+func TestDryRunDeploymentAddNeedsNoRootAndWritesNothing(t *testing.T) {
+	f := freshFixture(t)
+	editPlatformCheck = rootRequiredError // a development machine: not root
+	host := DryRunHost{Root: f.root, ConfigPath: f.config, UnitPath: f.unit}
+	parse := func(args ...string) DeploymentAddCommand {
+		t.Helper()
+		fs := flag.NewFlagSet("deployment add", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		config := fs.String("config", f.config, "")
+		cmd, err := ParseDeploymentAdd(fs, config, args)
+		if err != nil {
+			t.Fatalf("parse %v: %v", args, err)
+		}
+		return cmd
+	}
+	for _, d := range []string{"etc/ssl/myownpki", "var/log/nginx", "var/www/acme"} {
+		if err := os.MkdirAll(filepath.Join(f.root, filepath.FromSlash(d)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := parse("nginx", "--recipe", "nginx", "--name", "proxy1.homelab.lan", "--challenge", "webroot", "--webroot", "/var/www/acme", "--acme-directory", recipeACME)
+	before := f.tree()
+	out, err := DryRunDeploymentAdd(context.Background(), cmd, host)
+	if err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Dry run: nothing was written.") || !strings.Contains(out, "nginx") {
+		t.Errorf("output:\n%s", out)
+	}
+	if !sameTree(before, f.tree()) {
+		t.Error("the dry run changed the host")
+	}
+	// The same arguments through the real command still need root.
+	if err = AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: cmd.Spec}); err == nil || !strings.Contains(err.Error(), "must run as root") {
+		t.Errorf("AddDeployment without root: %v", err)
+	}
+	// The refusals are those of the command; a ".." survives the mapping. (The
+	// system-root rule works on the text of the path, so it is not tried on a
+	// mapped root; internal/agentpath has its own table.)
+	for args, want := range map[string]string{
+		"--webroot var/www --challenge webroot":            "an absolute path",
+		"--webroot /var/www/../../etc --challenge webroot": "no .. path segments",
+	} {
+		c := parse(append([]string{"nginx", "--recipe", "nginx", "--acme-directory", recipeACME}, strings.Fields(args)...)...)
+		if _, err = DryRunDeploymentAdd(context.Background(), c, host); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", args, err, want)
+		}
+	}
+	// A usage error is told apart from a refusal.
+	fs := flag.NewFlagSet("deployment add", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	config := fs.String("config", "", "")
+	var usage *UsageError
+	if _, err = ParseDeploymentAdd(fs, config, []string{"one", "two"}); !errors.As(err, &usage) || usage.Message == "" {
+		t.Errorf("two names: %v", err)
 	}
 }

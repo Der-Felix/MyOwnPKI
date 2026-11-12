@@ -38,6 +38,10 @@ type EditOptions struct {
 	Restart    bool
 	Stdout     io.Writer
 	Stderr     io.Writer
+
+	// skipPreflight leaves out the platform and root check; only
+	// DryRunDeploymentAdd sets it, and that run writes nothing.
+	skipPreflight bool
 }
 
 // HookSpec is one hook a deployment brings: a name and an argument vector.
@@ -119,7 +123,7 @@ func openEditSession(opts EditOptions, command string, forEdit bool) (*editSessi
 	if opts.Stderr == nil {
 		opts.Stderr = io.Discard
 	}
-	if err := editPlatformCheck(command); err != nil {
+	if err := editPlatformCheck(command); err != nil && !opts.skipPreflight {
 		return nil, err
 	}
 	if opts.ConfigPath == "" {
