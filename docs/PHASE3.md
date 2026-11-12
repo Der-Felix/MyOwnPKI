@@ -1456,7 +1456,7 @@ finishes the job.
 | 36 | 0.3.6 | **Docs.** `site/hosts/salt.md` is rewritten around the formula (the sketch stays as "what the formula does, step by step"); `deploy/salt/myownpki/README.md`; `site/hosts.md`, `site/upgrade.md` (updating agents with the formula), `site/troubleshooting.md` and OPERATIONS get the formula where they now say "plain Salt"; PHASE3 live-test checklist *Built:* the Salt page is rewritten around the formula (the old state-file sketch is gone, because the formula is what it described; the page lists what the formula does step by step); `site/hosts.md`, `site/upgrade.md` (the update path and a 0.3.5 to 0.3.6 row), `site/troubleshooting.md` (a Salt formula section), `site/index.md`, the README line, and OPERATIONS (new 12.10, pointers in 12.3 and 12.8, an upgrade paragraph). The README of the formula is part of step 34. `site-check.sh` passes; Jekyll was not built here, and no documented `salt` command was run against a Salt master (the commands are checked against the formula and the agent code). | `scripts/ci/site-check.sh` |
 | 37 | 0.3.6 | **Release.** CHANGELOG `[0.3.6]`, version bump (`DEFAULT_VERSION` in both install scripts, `api/openapi.yaml`), PLAN §10.1 and `CLAUDE.md` after the tag | RELEASING.md |
 
-**Live test for the owner** (names are examples; use two test minions, one for the pass and one without):
+**Live test for the owner** (names are examples; use two test minions, one for the pass and one without). Status after the run of 2026-11-12 (§12.4): the upgrade of enrolled hosts (steps 4 and 8) and `low_ports` are done on five enrolled Debian amd64 hosts; the steps that enroll a new host (3, 5 and 9) are open; steps 6 and 7 were not reported:
 
 1. Update the server and one agent to v0.3.6 (`myownpki --version`; the agent through *Agents → Update*).
    v0.3.6 has no migration; `myownpki db status` stays at `pki.db` 0019.
@@ -1466,15 +1466,15 @@ finishes the job.
    `GET /api/v1/agent-install`). Write the pillar `myownpki:agent` for `minion-01.homelab.lan` (version,
    server, ACME directory, root, hashes, a webroot, one `nginx` deployment) and check
    `salt 'minion-01.homelab.lan' state.show_highstate`: no `myownpki-agent-refused`.
-3. **With a pass:** create a pass (`*.homelab.lan`, 3 uses, 1 hour) and put it into the pillar of
+3. **With a pass:** (*open*) create a pass (`*.homelab.lan`, 3 uses, 1 hour) and put it into the pillar of
    `minion-01.homelab.lan`. `salt -t 300 'minion-01.homelab.lan' state.apply myownpki`. The output ends
    with `Agent … is enrolled; myownpki-agent is enabled and running.`; the agent page shows the
    deployment and a deployed certificate (compare the serial with
    `openssl s_client -connect minion-01.homelab.lan:443`). **Without a pass:** the same for
    `minion-02.homelab.lan` with no `enrollment_pass`: `setup` prints `Enrollment is pending`.
-4. **The second apply is a no-op:** run the same `state.apply` on `minion-01.homelab.lan` again with
+4. **The second apply is a no-op:** (*done*) run the same `state.apply` on `minion-01.homelab.lan` again with
    `--state-output=changes`. No state reports a change, and the summary has no `changed=` count.
-5. **Pending approval:** on `minion-02.homelab.lan` approve the request (*Agents → Enrollment requests*,
+5. **Pending approval:** (*open*) on `minion-02.homelab.lan` approve the request (*Agents → Enrollment requests*,
    second factor), then `state.apply myownpki` again (or the next highstate): the host is enrolled, the
    service is enabled and running, the deployment is deployed. Check that the deployments were already
    in `agent.yaml` after the first apply (§12.4), and that `/root/myownpki-join-token` is gone from the host
@@ -1487,11 +1487,11 @@ finishes the job.
 7. **`absent`:** put the deployment name into `absent`, apply (`deployment remove`; deployed files stay),
    then remove it from `absent`, restore it in `deployments` and apply again (it is added back). Change
    an option of an existing deployment in the pillar without `absent`: nothing happens, as documented.
-8. **Update to a new release:** when the next release exists, change `version` and the hashes, stage the
+8. **Update to a new release:** (*done*, 0.3.2 to 0.3.5 on five hosts) when the next release exists, change `version` and the hashes, stage the
    package and apply to one minion: the package is installed from the verified file and the state
    `myownpki-agent-setup-update` runs `setup` again; `myownpki-agent --version` shows the new release
    and the deployment still works.
-9. **Remove the pass:** delete `enrollment_pass` from the pillar, apply, and check
+9. **Remove the pass:** (*open*) delete `enrollment_pass` from the pillar, apply, and check
    `salt 'minion-*' cmd.run 'test -e /root/myownpki-join-token && echo present || echo absent'`; revoke
    the pass if it has uses left and read its host list. The audit log shows create, the uses and revoke,
    never the secret.
@@ -1550,7 +1550,7 @@ pillar by the admin afterwards. Any `cmd.run` that uses it passes the **file**, 
 ### 12.4 Built (differences from the plan)
 
 Steps 34 to 36 were built on `release/v0.3.6`: the formula, its tests and the pages are in the repository,
-**not released**, and the live test above is pending, so the changelog says so. Where the build differs
+the live test above was run by the maintainer on 2026-11-12 (result below), so the changelog says what was tested. Where the build differs
 from §12.1 and §12.2 (the code decides):
 
 - **The pillar path is `myownpki:agent:*`.** The sketch in `site/hosts/salt.md` read
@@ -1596,3 +1596,25 @@ from §12.1 and §12.2 (the code decides):
   pass appears in no output, and `state.apply test=True` for the cases a Debian runner can apply.
   **Not tested:** a real apply against a server, other Salt versions, `pkg.installed` for `rpm`, and the
   `https://` source. The README and `site/hosts/salt.md` say so.
+- **Live test by the maintainer (2026-11-12).** Five enrolled Debian amd64 hosts; Salt master and minions on
+  a current Salt version; the package came from the Salt file server (`salt://myownpki/files/<deb>`). One
+  real `state.apply myownpki` upgraded the agent from 0.3.2 (installed by `install-agent.sh`, not by `dpkg`)
+  to 0.3.5 on all five: package staged, the hash check passed (the verify state was skipped), `pkg.installed`
+  from the local file, `myownpki-agent-setup-update` ran once, `myownpki-agent-setup` was skipped
+  (`agent.crt` exists), `myownpki-agent-pass-absent` did nothing. The `agent.yaml` hash, the certificate
+  serial and the existing deployments were unchanged, and the service restarted and was active. A second
+  apply changed nothing (`setup-update`: none of the onchanges reqs changed). Four hosts had
+  `20-low-ports.conf` and needed `low_ports: true`; `setup` printed `Kept in 10-paths.conf …` for a
+  hand-added `/var/log/nginx` and kept it. The pass is not needed for enrolled hosts.
+- **Found by the live test:**
+  - The pillar top file (`/srv/pillar/top.sls`) and the state top file (`/srv/salt/top.sls`) are different
+    files; the formula reads only the pillar.
+  - A host already listed in the pillar top under its own id needs a second entry with another matcher
+    (`'L@minion-01.homelab.lan'` with `- match: compound`); a duplicate YAML key silently drops the first.
+  - A scheduled highstate (for example every 60 minutes) applies the formula for real as soon as it is in
+    the state top file: apply by hand with `state.apply` first, add the state top entry afterwards.
+  - `low_ports: true` is needed on enrolled hosts that already have the low-ports drop-in; a small overlay
+    pillar file with only that key, listed after the base file in the pillar top, was enough.
+- **Still not live tested:** the enrollment of a new host with an enrollment pass (`setup --token-file`,
+  `pass-absent` after the enrollment, a pending host), `rpm` hosts, `arm64`, `config_source`, the gitfs
+  install and other Salt versions.

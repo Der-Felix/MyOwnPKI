@@ -1673,9 +1673,10 @@ formula's own [README](../deploy/salt/myownpki/README.md) lists every state and 
   `myownpki-agent-refused`, and nothing is installed. `state.show_highstate` prints the reason.
 
 **What is tested.** The CI job `salt formula` renders every pillar in `deploy/salt/test/cases` and
-applies it with `test=True` under Salt 3008.5. **Not tested:** a real apply that installs the package and
-enrolls an agent against a server, other Salt versions, and the installation of an `rpm` package. Try
-the formula on one minion before you roll out.
+applies it with `test=True` under Salt 3008.5. The maintainer also applied it for real to five enrolled
+Debian amd64 hosts (agent 0.3.2 to 0.3.5, a second apply changed nothing). **Not tested live:** the
+enrollment of a new host with an enrollment pass, `rpm` hosts, `arm64`, `config_source`, the gitfs
+install and other Salt versions. Try the formula on one minion before you roll out.
 
 ## 13. Monitoring and notifications
 

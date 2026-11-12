@@ -181,6 +181,11 @@ states exist and which do not, checks that the pass appears nowhere in the outpu
 `state.apply test=True` for the cases that a Debian runner can apply. `bash scripts/ci/salt-test.sh
 --self-test` runs the checks that need no Salt (fixture hashes, YAML, example names).
 
-Not tested: other Salt versions, a real `state.apply` (no package is installed, no agent is
-enrolled), `pkg.installed` for rpm (the runner has no `rpm`), and anything against a real server.
-The live test on a minion is the owner's.
+Tested live by the maintainer: a real `state.apply` on five enrolled Debian amd64 hosts upgraded the
+agent from 0.3.2 to 0.3.5 (package staged and checked, installed from the local file, `setup` run once
+by `myownpki-agent-setup-update`, `agent.yaml`, certificate serial and deployments unchanged), and a
+second apply changed nothing. Four of the hosts had `20-low-ports.conf` and needed `low_ports: true`.
+
+Not tested live: the enrollment of a new host with an enrollment pass (`--token-file`, the removal of the
+pass file, a host that waits for approval), `rpm` hosts, `arm64`, `config_source`, the gitfs install and
+other Salt versions. CI does not apply for real either: no package is installed and no agent is enrolled.

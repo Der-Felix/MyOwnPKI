@@ -10,11 +10,12 @@ package after a checksum check, enrolls with an **enrollment pass** and adds its
 one `state.apply myownpki`. The page also shows the plain `cmd.run` commands for a first test, and the
 checks that tell you it worked.
 
-> **Note:** The formula is tested in CI, but not against your installation. The CI job renders every test
-> pillar and applies it with `test=True` under Salt 3008.5. **Not tested:** a real apply that installs the
-> package and enrolls an agent against a server, other Salt versions, and the installation of an `rpm`
-> package. Run it on **one minion** first, and read the formula before you roll it out: it runs as root on
-> every minion that gets the pillar.
+> **Note:** The CI job renders every test pillar and applies it with `test=True` under Salt 3008.5. The
+> maintainer also tested the formula live on five enrolled Debian amd64 hosts: it upgraded the agent from
+> 0.3.2 to 0.3.5 and a second apply changed nothing. **Not tested live:** the enrollment of a new host with
+> an enrollment pass, `rpm` hosts, `arm64`, `config_source`, the gitfs install and other Salt versions.
+> Run it on **one minion** first, and read the formula before you roll it out: it runs as root on every
+> minion that gets the pillar.
 {: .note}
 
 * TOC
@@ -212,7 +213,7 @@ The repository has the same file with comments: `deploy/salt/myownpki/pillar.exa
 | `package.source` | no | Default `salt://myownpki/files/{name}`. `{name}` is the package file name. An `https://` URL is allowed because the hash is checked |
 | `package.format` | no | `auto` (default: `deb` for the Debian family, `rpm` for Red Hat and SUSE), `deb` or `rpm` |
 | `webroot` | no | An existing directory for the enrollment check (http-01). Unset: standalone on port 80 |
-| `low_ports` | no | `true` passes `--low-ports` to `setup`, needed when nginx listens on port 443 |
+| `low_ports` | no | `true` passes `--low-ports` to `setup`, needed when nginx listens on port 443. Set it on every host that already has `20-low-ports.conf`: `setup` takes this one setting only from the flag, so an enrolled host loses the drop-in at the next package update if the key is missing |
 | `enrollment_pass` | no | The pass, as a string. Used only while the host has no agent certificate. Unset: pattern A |
 | `config_source` | no | A `salt://` source for a complete `agent.yaml`. Not together with `deployments` or `absent` |
 | `deployments` | no | Map of deployment name to options, applied with `deployment add` |
@@ -379,6 +380,9 @@ Failures at run time:
 | `command not found` for `myownpki-agent` | Use the absolute path `/usr/local/bin/myownpki-agent` in your own `cmd.run` |
 | A second apply shows `setup` running again | The host has no agent certificate yet (still pending), or `state_dir` is not the default |
 | Nothing from the pillar arrives on the minion | Check the pillar top file and `salt 'minion-01.homelab.lan' saltutil.refresh_pillar` |
+| The pillar arrives, but the minion gets nothing from it, although the base file works | The pillar top file (`/srv/pillar/top.sls`) and the state top file (`/srv/salt/top.sls`) are two different files, and the formula reads only the pillar. Put the pillar in the pillar top file |
+| A host that is already listed in the pillar top file under its own id cannot get a second pillar file | Add a second entry with another matcher, for example `'L@minion-01.homelab.lan'` with `- match: compound`. A duplicate YAML key in the file silently drops the first one |
+| The formula runs on the whole fleet without you applying it | A scheduled highstate (for example every 60 minutes) applies the formula for real as soon as it is in the state top file. Apply by hand with `state.apply myownpki` first, and add the state top entry afterwards |
 
 ## Check the fleet
 
