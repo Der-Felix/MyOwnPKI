@@ -148,10 +148,8 @@ func (a *API) deleteEndpoint(c *call) error {
 	if err != nil {
 		return err
 	}
-	id := pathID(c, "endpointId")
-	if id == "" {
-		return tlsscan.ErrNotFound
-	}
+	// The raw path value: the service checks the role first and treats an ID that is not well-formed as unknown (403 before 404).
+	id := c.r.PathValue("endpointId")
 	if err := s.Delete(c.ctx(), c.who(), id); err != nil {
 		return err
 	}
@@ -165,10 +163,8 @@ func (a *API) scanEndpoint(c *call) error {
 	if err != nil {
 		return err
 	}
-	id := pathID(c, "endpointId")
-	if id == "" {
-		return tlsscan.ErrNotFound
-	}
+	// The raw path value: the service checks the role first and treats an ID that is not well-formed as unknown (403 before 404).
+	id := c.r.PathValue("endpointId")
 	if err := s.ScanNow(c.ctx(), c.who(), id); err != nil {
 		return err
 	}
