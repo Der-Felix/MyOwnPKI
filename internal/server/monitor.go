@@ -62,12 +62,20 @@ func (s *Server) buildMonitor() error {
 		rules.AgentSilentCrit = v.AgentSilent
 	}
 	rules.RepeatEvery = v.RepeatEvery
+	sv, err := s.buildScan()
+	if err != nil {
+		return err
+	}
+	rules.ScanUnreachableAfter, rules.ScanMismatchAfter = sv.UnreachableAfter, sv.MismatchAfter
 	m := &monitorSide{
 		eval:  &monitor.Evaluator{Engine: s.engine, Seal: s.ring.Status, Rules: rules, Who: monitorWho},
 		store: &monitor.Store{DB: s.sys.Write, Tenant: store.DefaultTenant},
 	}
 	if a := s.Agents(); a != nil {
 		m.eval.Agents = a
+	}
+	if !sv.Off() {
+		m.eval.Scan = s.scan.svc // with scanning off the scan alerts resolve: there is no fresh result
 	}
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
@@ -76,9 +84,6 @@ func (s *Server) buildMonitor() error {
 		s.log.Info("no notification channel configured – alerts show only in the UI (notify.email, notify.webhook)")
 	}
 	s.monitor = m
-	if err := s.buildScan(); err != nil {
-		return err
-	}
 	s.jobs.add(jobMonitor, monitorEvery, monitorEvery, s.evaluateAlerts)
 	s.jobs.add(jobMonitorPrune, 24*time.Hour, 24*time.Hour, func(ctx context.Context) error {
 		cutoff := s.clk.Now().Add(-monitorKeep)
@@ -199,15 +204,15 @@ func (s *Server) notifier() web.NotifyTester {
 // scheduler (one goroutine for all jobs) is never held up by a slow host.
 // With monitor.scan_interval: off endpoints can still be entered and
 // removed, but nothing connects.
-func (s *Server) buildScan() error {
+func (s *Server) buildScan() (config.ScanValues, error) {
 	cfg := s.opt.Config
 	sv, err := cfg.Monitor.Scan()
 	if err != nil {
-		return err
+		return sv, err
 	}
 	resolver, err := config.ACMEResolver(cfg.ACME.Resolver)
 	if err != nil {
-		return fmt.Errorf("acme.resolver: %w", err)
+		return sv, fmt.Errorf("acme.resolver: %w", err)
 	}
 	svc := &tlsscan.Service{
 		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, Clock: s.clk, Wake: s.wakeUp,
@@ -218,10 +223,10 @@ func (s *Server) buildScan() error {
 	s.scan = &scanSide{svc: svc, scanner: scanner}
 	if sv.Off() {
 		s.log.Info("TLS scan is off (monitor.scan_interval: off) – the server connects to no endpoint")
-		return nil
+		return sv, nil
 	}
 	s.jobs.add(jobScan, tlsscan.DispatchEvery, tlsscan.DispatchEvery, scanner.Dispatch)
-	return nil
+	return sv, nil
 }
 
 // Endpoints is the TLS scan endpoint service for the UI and the API.

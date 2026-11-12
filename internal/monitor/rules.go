@@ -24,6 +24,12 @@ const (
 	KindAgentSilent      = "agent_silent"
 	KindAgentCertificate = "agent_certificate"
 	KindDeployFailed     = "deploy_failed"
+
+	// The TLS scan (docs/PHASE3.md §10.2, v0.3.4).
+	KindScanMismatch    = "scan_mismatch"
+	KindScanExpiry      = "scan_expiry"
+	KindScanUnreachable = "scan_unreachable"
+	KindScanChain       = "scan_chain"
 )
 
 // Rules are the thresholds of the evaluation (configuration `monitor:`).
@@ -44,6 +50,11 @@ type Rules struct {
 	ExpiredFor time.Duration
 	// RepeatEvery: a reminder for an open alert (step 23).
 	RepeatEvery time.Duration
+	// The TLS scan (docs/PHASE3.md §10.2): failed scans in a row before an
+	// endpoint is unreachable, and how old the newest certificate for a name
+	// must be before an older one that is still served is an alert.
+	ScanUnreachableAfter int
+	ScanMismatchAfter    time.Duration
 }
 
 // DefaultRules are the owner-approved defaults (Q7, 2026-10-29).
@@ -53,9 +64,10 @@ func DefaultRules() Rules {
 		CAWarn: 90 * day, CACrit: 30 * day,
 		SealedAfter: 10 * time.Minute, CRLHorizon: 24 * time.Hour,
 		AgentSilentWarn: time.Hour, AgentSilentCrit: 24 * time.Hour,
-		AgentCertificate: 48 * time.Hour,
-		ExpiredFor:       30 * day,
-		RepeatEvery:      24 * time.Hour,
+		AgentCertificate:     48 * time.Hour,
+		ExpiredFor:           30 * day,
+		RepeatEvery:          24 * time.Hour,
+		ScanUnreachableAfter: 3, ScanMismatchAfter: time.Hour,
 	}
 }
 

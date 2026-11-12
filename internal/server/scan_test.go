@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -27,17 +28,28 @@ import (
 
 // scanServer opens a server (sealed) of an instance with the test CA and the
 // domain homelab.lan.
-func scanServer(t *testing.T, edit func(*config.Config)) (*Server, *clock.Fake) {
+func scanServer(t *testing.T, edit func(*config.Config)) (*Server, *clock.Fake, string) {
 	t.Helper()
 	cfg := testConfig(t)
 	if edit != nil {
 		edit(&cfg)
 	}
 	clk := clock.NewFake(t0)
-	if _, err := setup.Run(t.Context(), setup.Options{
+	res, err := setup.Run(t.Context(), setup.Options{
 		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: "http://pki.homelab.lan", Hostname: "pki01", Who: console, TestKDF: true, Clock: clk,
-	}, setup.NewLineInput(strings.NewReader(""), io.Discard)); err != nil {
+	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
+	if err != nil {
 		t.Fatal(err)
+	}
+	secrets, err := os.ReadFile(res.DemoSecretsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var passphrase string
+	for line := range strings.SplitSeq(string(secrets), "\n") {
+		if p, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "unseal passphrase: "); ok {
+			passphrase = p
+		}
 	}
 	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.DiscardHandler), Clock: clk, Hostname: "pki01", Version: "test", Release: "0.3.4"})
 	if err != nil {
@@ -48,7 +60,7 @@ func scanServer(t *testing.T, edit func(*config.Config)) (*Server, *clock.Fake) 
 	if _, err := srv.engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: console}); err != nil {
 		t.Fatal(err)
 	}
-	return srv, clk
+	return srv, clk, passphrase
 }
 
 func hasJob(s *Server, name string) bool {
@@ -65,7 +77,7 @@ func hasJob(s *Server, name string) bool {
 // jobs behind the scan (the CRL, ACME and alert jobs).
 func TestScanJobOnlyDispatches(t *testing.T) {
 	t.Parallel()
-	srv, clk := scanServer(t, func(c *config.Config) { c.Monitor.ScanTimeout = "30s" }) // longer than the wait below
+	srv, clk, _ := scanServer(t, func(c *config.Config) { c.Monitor.ScanTimeout = "30s" }) // longer than the wait below
 	if srv.Endpoints() == nil || !hasJob(srv, jobScan) {
 		t.Fatal("the scan is not wired")
 	}
@@ -114,7 +126,7 @@ func TestScanJobOnlyDispatches(t *testing.T) {
 // TestScanWorksWhileSealed: nothing is decrypted, so a sealed server scans.
 func TestScanWorksWhileSealed(t *testing.T) {
 	t.Parallel()
-	srv, clk := scanServer(t, nil)
+	srv, clk, _ := scanServer(t, nil)
 	if !srv.Sealed() {
 		t.Fatal("not sealed")
 	}
@@ -171,7 +183,7 @@ func TestScanWorksWhileSealed(t *testing.T) {
 
 func TestScanOffRegistersNoJob(t *testing.T) {
 	t.Parallel()
-	srv, clk := scanServer(t, func(c *config.Config) { c.Monitor.ScanInterval = "off" })
+	srv, clk, _ := scanServer(t, func(c *config.Config) { c.Monitor.ScanInterval = "off" })
 	if hasJob(srv, jobScan) {
 		t.Error("the scan job is registered while scan_interval is off")
 	}
@@ -189,7 +201,7 @@ func TestScanOffRegistersNoJob(t *testing.T) {
 
 func TestScanSettingsComeFromTheConfiguration(t *testing.T) {
 	t.Parallel()
-	srv, _ := scanServer(t, func(c *config.Config) {
+	srv, _, _ := scanServer(t, func(c *config.Config) {
 		c.Monitor.ScanPorts, c.Monitor.ScanMaxEndpoints, c.Monitor.ScanTimeout, c.Monitor.ScanInterval = "443, 9999", "1", "3s", "30m"
 	})
 	st := srv.scan.svc.Settings
