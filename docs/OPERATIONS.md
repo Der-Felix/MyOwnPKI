@@ -496,9 +496,11 @@ additive and changes no certificate. Nothing needs to be configured: the scan st
 and connects nowhere until an admin enters one ([chapter 14](#14-tls-scan)), the new `monitor.scan_*`
 keys have defaults, and the permissions `endpoint.manage` (admin) and `endpoint.scan` (operator, admin)
 come with the built-in roles. **One behavior change:** the address guard that http-01 validation, the
-agent enrollment check and the scan share now refuses the IPv6 ranges that embed an IPv4 address (NAT64,
-IPv4-compatible, 6to4, Teredo; §14.8) outright. A service that really lives in such a range can no longer
-be an http-01 target or an enrollment host. Going back to v0.3.3 means the backup from step 1, because
+agent enrollment check and the scan share now refuses more ranges outright: the IPv6 forms that embed
+or translate to an IPv4 address (NAT64, IPv4-compatible, 6to4, Teredo, IPv4-translated), an address with
+a zone, and the non-global ranges `192.0.0.0/24`, `198.18.0.0/15`, `192.88.99.0/24`, `fec0::/10`,
+`100::/64` and `5f00::/16` (the full list is in §14.8; the documentation ranges stay allowed). A service
+that really lives in such a range can no longer be an http-01 target or an enrollment host. Going back to v0.3.3 means the backup from step 1, because
 v0.3.3 refuses the newer database.
 
 From v0.3.2 to v0.3.3: system.db migration 0014 adds the tables for alerts and queued
@@ -724,7 +726,7 @@ ACME issues for a name only when a **domain** covers it (*ACME → Domains*). A 
 | Wildcards | `*.homelab.lan` – proven by dns-01 only; off by default |
 | Approval | *open*: any account that passes the challenge. *approved accounts* (default): a new account waits in *ACME → Accounts* until an admin approves it, or brings an EAB key. *new names*: the first certificate for a name waits in *ACME → New names* |
 | Preset, validity | The certificate's profile (must allow serverAuth); 90 days by default, never beyond the CA |
-| Addresses http-01 may reach | *internal networks too* (homelab) or *public only* – loopback and link-local are never reached (the ranges are in §14.8; the agent enrollment check and the TLS scan follow the same setting) |
+| Addresses http-01 may reach | *internal networks too* (homelab) or *public only* – some ranges are never reached under either setting (loopback, link-local and more; the full list is in §14.8; the agent enrollment check and the TLS scan follow the same setting) |
 | IP ranges | Which IP addresses may be in certificates (http-01 only) |
 
 An **EAB key** (*ACME → EAB keys*, external account binding) lets one client skip the approval
@@ -828,7 +830,7 @@ The **validator** – the part of MyOwnPKI that checks a challenge – connects 
 | `rejectedIdentifier: no domain covers …` | No domain for the name, or a wildcard on a domain without wildcards | *ACME → Domains* |
 | `unauthorized: account … waits for approval` | Approval level *approved accounts* | *ACME → Accounts*, or an EAB key |
 | `connection: … could not be reached` | The client's port 80 is closed for the PKI host, or the name resolves elsewhere | `acme.resolver`, firewall; the server log has the address |
-| `connection: … address policy … refuses` | The name resolves to loopback, link-local, an IPv6 form that embeds an IPv4 address (NAT64, 6to4, Teredo; §14.8), or to a private address on a *public only* domain | The domain's address setting |
+| `connection: … address policy … refuses` | The name resolves to a range that is never reached (loopback, link-local and others; the list is in §14.8), or to a private address on a *public only* domain | The domain's address setting |
 | `incorrectResponse: … answered with status 404` | The client's web server doesn't serve `/.well-known/acme-challenge/` | The client's http-01 mode (standalone, webroot) |
 | `dns: … has no TXT record` | The TXT record went to another zone than the resolver reads | Split DNS (10.7) |
 | `rateLimited` | A limit of 10.8 | Wait for `Retry-After`, or raise the limit |
@@ -2027,7 +2029,8 @@ confirmation (§14.5).
 | **OK** | The served certificate is the one this PKI issued for the name (current, not superseded) and the chain is trusted | – | Nothing. |
 | **Expiring** (warning or critical) | As OK, but the served certificate ends within the `monitor.expiry_days` thresholds | `scan_expiry` | The host does not renew. Fix the renewal: ACME client or agent (§10.9, §12.5). |
 | **Not issued by this PKI** | This PKI never issued a certificate for this name, and the served one is not from this PKI | – | Nothing is wrong as far as this PKI can tell (a router with its own certificate, a service of another CA). Remove the endpoint if it has no meaning for you; set an SNI for an IP address. |
-| **Wrong certificate** – an older certificate of this PKI | The endpoint serves a valid certificate of this PKI that a newer one has superseded | `scan_mismatch` | The renewal did not reach the host: reload the service, or check the deployment (agent page, ACME client log, hook). |
+| **Wrong certificate** – an older certificate of this PKI | The endpoint serves a certificate of this PKI that a newer one has superseded (it may still be valid, or have ended) | `scan_mismatch` | The renewal did not reach the host: reload the service, or check the deployment (agent page, ACME client log, hook). |
+| **Expired** – no newer certificate was issued | The endpoint serves a certificate of this PKI that has ended, and this PKI has issued nothing newer for the name. The color is that of the expiry alert. The state word in the API is `older`, as for a superseded certificate | `scan_expiry` (critical), unless `cert_expiry` already reports it | The certificate was never renewed. Issue one and deploy it (ACME client or agent, §10.9, §12.5). A certificate that was renewed but not deployed is *Wrong certificate* above. |
 | **Wrong certificate** – not issued by this PKI | This PKI issued a certificate for the name, but the endpoint serves another CA's – often a self-signed default after a reinstall | `scan_mismatch` | Point the service at the certificate of this PKI. |
 | **Wrong certificate** – not valid for this name | The served certificate is from this PKI but does not cover the name (another host's certificate, a wildcard of a different level) | `scan_mismatch` | Point the service at the certificate issued for this name. |
 | **Wrong certificate** – revoked (critical) | The endpoint serves a revoked certificate of this PKI | `scan_mismatch`, critical | Replace it at once; clients that check revocation reject it. |
@@ -2061,7 +2064,7 @@ follows within a minute of the next good scan, or of removing the endpoint.
 
 | Alert | Opens when | Warning | Critical |
 |---|---|---|---|
-| `scan_mismatch` | the state is *an older certificate*, *not issued by this PKI* or *not valid for this name*, **two scans in a row saw the same certificate**, and the newest certificate for the name is at least `scan_mismatch_after` old (counted from its creation) | always | – |
+| `scan_mismatch` | the state is *an older certificate* (a newer one exists), *not issued by this PKI* or *not valid for this name*, **two scans in a row saw the same certificate**, and the newest certificate for the name is at least `scan_mismatch_after` old (counted from its creation). *Expired* never opens it: there is no newer certificate to wait for | always | – |
 | `scan_mismatch` (revoked) | the state is *revoked* and two scans in a row saw it; no waiting time | – | always |
 | `scan_expiry` | the served certificate ends within `monitor.expiry_days` or has ended, unless that certificate has its own `cert_expiry` alert | 14 days left | 3 days left, or expired |
 | `scan_unreachable` | `scan_unreachable_after` scans in a row failed with *dns*, *timed out*, *connection refused*, *could not connect*, *TLS handshake failed* or *no certificate* | from that failure on | down for 24 hours |
@@ -2117,7 +2120,7 @@ monitor:
 | Key | Default | Allowed | Environment variable |
 |---|---|---|---|
 | `monitor.scan_interval` | `15m` | `5m`–`24h`, or `off` to never connect | `MYOWNPKI_MONITOR_SCAN_INTERVAL` |
-| `monitor.scan_timeout` | `10s` | `2s`–`30s`; resolve, connect and handshake of one scan together | `MYOWNPKI_MONITOR_SCAN_TIMEOUT` |
+| `monitor.scan_timeout` | `10s` | `2s`–`30s`; resolve, connect and handshake of one scan together (judging the chain afterwards has its own 5 seconds, §14.7) | `MYOWNPKI_MONITOR_SCAN_TIMEOUT` |
 | `monitor.scan_ports` | `443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443` | 1 to 32 different ports from 1 to 65535, comma-separated | `MYOWNPKI_MONITOR_SCAN_PORTS` |
 | `monitor.scan_max_endpoints` | `100` | 1–500 | `MYOWNPKI_MONITOR_SCAN_MAX_ENDPOINTS` |
 | `monitor.scan_unreachable_after` | `3` | 1–10 failed scans in a row | `MYOWNPKI_MONITOR_SCAN_UNREACHABLE_AFTER` |
@@ -2131,7 +2134,9 @@ need protocol bytes before the handshake. In a container set the variables in th
 the defaults need none.
 
 Each endpoint is scanned every `scan_interval` plus a random 0–10 %, so that 100 endpoints do not all fire
-together after a restart. Not configurable: the 4 workers, the 30-second dispatch, the 60 seconds between
+together after a restart. If the clock of the server steps back (a VM that booted with a wrong time and
+then set it right), an endpoint whose next scan lies more than twice the interval ahead counts as due, so
+a wrong clock does not leave endpoints silent. Not configurable: the 4 workers, the 30-second dispatch, the 60 seconds between
 two *Scan now* of one endpoint and the 24 hours after which an unreachable endpoint turns critical.
 
 ### 14.7 What is stored, and the limits
@@ -2149,7 +2154,7 @@ the last result. The data is part of `pki.db`, so backups carry it.
 |---|---|
 | Endpoints | 100 (`scan_max_endpoints`, 1–500); the next one is refused with `409` |
 | Scans at the same time | 4 workers; an endpoint that is being scanned is skipped; a backlog is worked off at the speed of the workers |
-| One scan | `scan_timeout` (10 s) for everything; at most 4 addresses are tried, 3 seconds each; the leaf and 8 intermediates are looked at |
+| One scan | `scan_timeout` (10 s) for resolve, connect and handshake; at most 4 addresses are tried, 3 seconds each; the leaf and 8 intermediates are looked at. Judging the chain against this PKI's CAs after the handshake has a budget of its own, **5 seconds**, so a slow handshake cannot leave it without time |
 | Request body of *add* | 4 KiB |
 | *Scan now* | once per endpoint and 60 seconds (kept in the database, so a restart does not reset it) |
 
@@ -2176,12 +2181,22 @@ resolver's order.
 
 - unspecified (`0.0.0.0`, `::`), **loopback** (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`,
   `fe80::/10`) and multicast addresses, and an IPv6 address with a zone (`%eth0`);
-- the reserved IPv4 ranges `0.0.0.0/8` and `240.0.0.0/4`;
-- the IPv6 ranges that carry an IPv4 address inside: IPv4-compatible (`::/96`), NAT64 (`64:ff9b::/96` and
-  `64:ff9b:1::/48`), 6to4 (`2002::/16`) and Teredo (`2001::/32`). A router or a client may translate such
-  an address to the embedded IPv4 one, so `64:ff9b::7f00:1` could reach `127.0.0.1` although it looks
+- the reserved IPv4 ranges `0.0.0.0/8` and `240.0.0.0/4` (the latter includes the broadcast address);
+- the IPv6 ranges that carry an IPv4 address inside, or translate to one: IPv4-compatible (`::/96`),
+  NAT64 (`64:ff9b::/96` and `64:ff9b:1::/48`), 6to4 (`2002::/16`), Teredo (`2001::/32`) and the
+  IPv4-translated range (`::ffff:0:0:0/96`). A router or a client may translate such an address to the
+  embedded IPv4 one, so `64:ff9b::7f00:1` or `::ffff:0:7f00:1` could reach `127.0.0.1` although it looks
   like a global address. The ranges are refused entirely, because no service of an internal PKI lives
-  there. IPv4-mapped addresses (`::ffff:a.b.c.d`) are judged as the IPv4 address they carry.
+  there. IPv4-mapped addresses (`::ffff:a.b.c.d`, a different range from the IPv4-translated one) are
+  judged as the IPv4 address they carry;
+- ranges that are not globally reachable and are not private networks either, so nothing of yours lives
+  there: `192.0.0.0/24` (IETF protocol assignments), `198.18.0.0/15` (benchmarking), `192.88.99.0/24`
+  (the retired 6to4 relay anycast), `fec0::/10` (the retired site-local range), `100::/64` (discard only)
+  and `5f00::/16` (SRv6 segment identifiers).
+
+The documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and `2001:db8::/32`) are not
+on the list: they are allowed, because the examples and tests of this project use them as stand-ins for
+public addresses. They are not routed on the internet, so a scan of one simply times out.
 
 **Under the policy *public only*** a domain also refuses private networks (`10.0.0.0/8`,
 `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and the carrier-grade NAT range `100.64.0.0/10`.
@@ -2202,7 +2217,13 @@ that any client on that network does not get anyway.
 The tenant audit log (*Administration → Audit log*) records `endpoint.create`, `endpoint.delete` and
 `endpoint.scan` (scan now) with host and port. **A refusal is recorded too**, with the reason and the
 result `denied` or `failure`: an attempt to point the server at `127.0.0.1`, or at a port outside the
-list, is on record. The scans themselves are not audited, only the requests.
+list, is on record.
+
+An endpoint ID that is not well-formed (1 to 64 letters, digits, `_` or `-`) is "not found", and that is
+checked after the role: a viewer still gets 403 first. If such a request is denied or fails, the audit
+entry names only the target type `endpoint`; what was asked for is in the details (`id`), cleaned of
+control characters and clipped to 64 bytes, so a hostile ID cannot put text into the log. The scans
+themselves are not audited, only the requests.
 
 ### 14.10 When something does not work
 
@@ -2232,14 +2253,16 @@ Other symptoms:
 |---|---|
 | Adding is refused: `host: no domain covers this host – the host must lie in a domain of this PKI (Domains)` | No domain matches (§14.2). Create one, or let an existing one include subdomains. |
 | `port: port 22 is not in the list of scannable ports (monitor.scan_ports: …)` | The port is not in the list (§14.6). |
-| `host: this address range is never scanned …` | The IP address is in one of the ranges of §14.8. The message lists the common ones; the NAT64, 6to4, Teredo and IPv4-compatible ranges are refused the same way. Use the host's name or another address. |
+| `host: this address range is never scanned …` | The IP address is in one of the ranges of §14.8. The message lists only the common ones (unspecified, loopback, link-local, multicast, reserved); the IPv6 forms that embed an IPv4 address and the non-global ranges are refused the same way. Use the host's name or another address. |
 | `host: the address policy of the domain "homelab.lan" (public) does not allow this address` | A private address on a *public only* domain. |
 | `host: …` about spaces, a scheme, brackets or a port | Enter a host name or IP address only; the port is its own field. `localhost` and single-label names fail because a fully qualified name is required. |
 | `409`: `the limit of 100 endpoints is reached …` or `this endpoint is entered already` | Remove one or raise `scan_max_endpoints`; or the same host, port and SNI exist already. |
 | *Scan now* is missing, or `409 scanning is switched off` | `monitor.scan_interval: off`. |
 | *Scan now* answers `429` (*try again in N seconds*) | One request per endpoint and 60 seconds. |
+| *That endpoint is gone already* on the page, or `404` from the API, for an endpoint that exists | The ID in the request is not well-formed (1 to 64 letters, digits, `_` or `-`), so it counts as "not found". Use the buttons of the page, or the `id` that `GET /api/v1/endpoints` returns. A caller without the role gets 403 first, never 404. |
 | State *Not issued by this PKI*, but the name has a certificate here | The endpoint is an IP address without an SNI, or the certificate this PKI issued names something else (check *Certificates* for the names). Add the endpoint again with the SNI. |
 | State *Wrong certificate* – *an older certificate* right after a renewal | The state shows at once; the alert waits `scan_mismatch_after`. Reload the service, then *Scan now*. |
+| State *Expired* – *no newer certificate was issued* | The host serves a certificate of this PKI that has ended, and nothing newer exists for the name. Issue a new certificate and deploy it (§10.9, §12.5). |
 | The state stays *Pending* | The first scans failed fewer than `scan_unreachable_after` times (see *Last error*), or scanning is off, or the server was started a moment ago. |
 | No alert although the state is wrong | The two scans or the waiting time are not over yet (§14.5), the name has no current certificate here, or the endpoint is *Not issued by this PKI*. Then §13.10 for the messages. |
 

@@ -87,7 +87,8 @@ rule. The list shows the same states as the page; see [REST API]({{ '/reference/
 | **OK** | The served certificate is the one this PKI issued for the name, and the chain is trusted | Nothing |
 | **Expiring** | As OK, but the served certificate ends soon | The host does not renew: fix the ACME client or the agent |
 | **Not issued by this PKI** | This PKI never issued a certificate for the name, and the served one is not from here | Nothing is wrong as far as this PKI can tell. An IP address without SNI is always here: add it again with an SNI |
-| **Wrong certificate**, an older certificate | The host still serves a superseded certificate of this PKI | The renewal did not reach it: reload the service, check the deployment |
+| **Wrong certificate**, an older certificate | The host still serves a superseded certificate of this PKI, one that a newer certificate replaced | The renewal did not reach it: reload the service, check the deployment |
+| **Expired**, no newer certificate was issued | The host serves a certificate of this PKI that has ended, and nothing newer exists for the name (the API state is still `older`) | Issue a new certificate and deploy it |
 | **Wrong certificate**, not issued by this PKI | This PKI issued a certificate for the name, but another CA's is served | Point the service at the certificate of this PKI |
 | **Wrong certificate**, not valid for this name | A certificate of this PKI that does not cover the name | Point the service at the right one |
 | **Wrong certificate**, revoked | The host serves a revoked certificate | Replace it at once |
@@ -123,13 +124,13 @@ In `config.yaml`; restart to apply. Every key is also `MYOWNPKI_MONITOR_SCAN_…
 | Key | Default | Allowed |
 |---|---|---|
 | `monitor.scan_interval` | `15m` | `5m` to `24h`, or `off` to never connect |
-| `monitor.scan_timeout` | `10s` | `2s` to `30s` |
+| `monitor.scan_timeout` | `10s` | `2s` to `30s`; resolve, connect and handshake (judging the chain afterwards has its own 5 seconds) |
 | `monitor.scan_ports` | `443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443` | 1 to 32 ports |
 | `monitor.scan_max_endpoints` | `100` | 1 to 500 |
 | `monitor.scan_unreachable_after` | `3` | 1 to 10 failed scans |
 | `monitor.scan_mismatch_after` | `1h` | `5m` to `24h` |
 
-`config check` shows them under *Alert thresholds*.
+`config check` shows them under *Alert thresholds*. An endpoint is scanned every `scan_interval` plus a random 0 to 10 %. If the server's clock steps back (a VM that booted with a wrong time), an endpoint whose next scan lies more than twice the interval ahead counts as due, so none stays silent.
 
 ## What is stored, and what is never scanned
 
@@ -138,12 +139,16 @@ Per endpoint the server keeps only metadata of the last result: fingerprint, ser
 names in it or the address a name resolved to. Subject and issuer are chosen by the remote host and are
 shown as plain text.
 
-The server **never connects** to loopback, link-local, multicast, unspecified or reserved addresses, nor
-to the IPv6 ranges that embed an IPv4 address (NAT64, IPv4-compatible, 6to4, Teredo). A domain set to
-*public only* also refuses private networks and `100.64.0.0/10`. A name is resolved once and the
+The server **never connects** to loopback, link-local, multicast, unspecified or reserved addresses, to
+an IPv6 address with a zone, to the IPv6 ranges that embed or translate to an IPv4 address (NAT64,
+IPv4-compatible, 6to4, Teredo, IPv4-translated), nor to some ranges that are not globally reachable
+(for example `192.0.0.0/24` and `198.18.0.0/15`). The documentation ranges (`192.0.2.0/24`,
+`198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`) stay allowed. The full list is in
+[operations guide §14.8]({{ '/reference/operations/' | relative_url }}#148-which-addresses-are-never-scanned).
+A domain set to *public only* also refuses private networks and `100.64.0.0/10`. A name is resolved once and the
 connection goes to the address that was checked. The same guard applies to http-01 validation and the
 agent enrollment check. Attempts, refused ones too, are in the audit log as `endpoint.create`,
-`endpoint.delete` and `endpoint.scan`.
+`endpoint.delete` and `endpoint.scan`. An endpoint ID that is not well-formed is "not found", checked after the role, so a caller without the role still gets 403.
 
 ## When it does not work
 
@@ -158,7 +163,7 @@ agent enrollment check. Attempts, refused ones too, are in the audit log as `end
 | `TLS handshake failed` | The port is not TLS from the first byte (plain HTTP, a STARTTLS port), or the service speaks only TLS 1.0 or 1.1 | `openssl s_client` shows which; remove a STARTTLS endpoint |
 | `no certificate` | The server presented no certificate | Rare; the scan cannot judge such a service |
 | `client certificate required` | The service demands a client certificate | It cannot be scanned and raises no alert: remove the endpoint |
-| `refused by the address policy` | Every address of the name is in a refused range | Look at what the name resolves to |
+| `refused by the address policy` | Every address of the name is in a refused range (see above) | Look at what the name resolves to |
 | `no domain covers the host` | The domain was removed or narrowed | Restore the domain or remove the endpoint |
 | `port is not in monitor.scan_ports` | The port list was changed | Put the port back or remove the endpoint |
 
