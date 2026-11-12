@@ -280,11 +280,23 @@ func runBlock(t *testing.T, block string) (agentCalls, installCalls [][]string) 
 	return read("agent.calls"), read("install.calls")
 }
 
+// realTempDir is t.TempDir() with every symbolic link resolved. The agent
+// refuses a path with a link on its way, and on macOS t.TempDir() lives below
+// /var, a link to /private/var, so the root of a dry run must be the real one.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // newDryRunHost is a host as setup leaves it for plan: agent.yaml with the
 // enrollment challenge of the plan, below a temporary root.
 func newDryRunHost(t *testing.T, p hostPlan) agent.DryRunHost {
 	t.Helper()
-	root := t.TempDir()
+	root := realTempDir(t)
 	slash := filepath.ToSlash(root)
 	for _, dir := range []string{"etc/myownpki-agent", "var/lib/myownpki-agent", "etc/systemd/system"} {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o750); err != nil {

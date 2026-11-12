@@ -31,7 +31,7 @@ type editFixture struct {
 
 func newEditFixture(t *testing.T, input string) *editFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := realTempDir(t) // symlink-free: see realTempDir
 	for _, d := range []string{"etc", "state", "www", "ssl", "bin", "systemd", "log-a", "mail"} {
 		// #nosec G301 -- test directories.
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
@@ -517,8 +517,8 @@ func TestAddRefusesASymlinkOnTheWay(t *testing.T) {
 	} {
 		before := f.tree()
 		err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec})
-		if err == nil {
-			t.Errorf("%s: accepted", name)
+		if err == nil || !strings.Contains(err.Error(), "is a symbolic link") {
+			t.Errorf("%s: error = %v, want the symbolic link refusal", name, err)
 			continue
 		}
 		if !sameTree(before, f.tree()) {
@@ -533,6 +533,59 @@ func TestAddRefusesASymlinkOnTheWay(t *testing.T) {
 	err := AddDeployment(context.Background(), AddOptions{EditOptions: f2.edit(), Spec: DeploymentSpec{Name: "p", Dir: f2.p("ssl", "link", "p"), ACMEDirectory: "https://pki.homelab.lan/acme/directory"}})
 	if err == nil || !strings.Contains(err.Error(), "not under paths") {
 		t.Errorf("link out of a covered path: %v", err)
+	}
+}
+
+// The rule behind the macOS failure, pinned without depending on the machine's
+// layout: a directory reached through a link is refused with the link named,
+// the same directory by its real path is accepted. (On macOS t.TempDir() is
+// below the link /var; the tests start from realTempDir for that reason.)
+func TestSymlinkOnTheWayIsRefusedAndTheRealPathIsAccepted(t *testing.T) {
+	root := realTempDir(t)
+	target := filepath.Join(root, "real")
+	link := filepath.Join(root, "link")
+	// #nosec G301 -- test directory.
+	if err := os.MkdirAll(filepath.Join(target, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable on this machine: %v", err)
+	}
+	want := link + " is a symbolic link (to " + target + ")"
+	for _, p := range []string{link, filepath.Join(link, "sub"), filepath.Join(link, "not", "yet", "there")} {
+		if err := checkNoSymlink(p); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("checkNoSymlink(%s) = %v, want %q", p, err, want)
+		}
+	}
+	for _, p := range []string{target, filepath.Join(target, "sub"), filepath.Join(target, "not", "yet", "there")} {
+		if err := checkNoSymlink(p); err != nil {
+			t.Errorf("checkNoSymlink(%s) = %v, want nil", p, err)
+		}
+	}
+
+	// The same through the command: --dir below the link is refused and the
+	// host stays as it is, the real directory is accepted.
+	raw, _ := os.ReadFile(filepath.Join("testdata", "edit", "fresh.in.yaml"))
+	f := newEditFixture(t, string(raw))
+	realSSL := f.p("ssl", "real")
+	// #nosec G301 -- test directory.
+	if err := os.MkdirAll(realSSL, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realSSL, f.p("ssl", "link")); err != nil {
+		t.Skipf("symlinks unavailable on this machine: %v", err)
+	}
+	const acme = "https://pki.homelab.lan/acme/directory"
+	before := f.tree()
+	err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: DeploymentSpec{Name: "p", Dir: f.p("ssl", "link", "p"), ACMEDirectory: acme}})
+	if err == nil || !strings.Contains(err.Error(), "--dir "+f.p("ssl", "link", "p")+": "+f.p("ssl", "link")+" is a symbolic link (to "+realSSL+") – use the real directory") {
+		t.Fatalf("--dir below a link: %v", err)
+	}
+	if !sameTree(before, f.tree()) || len(f.runner.calls) != 0 {
+		t.Error("a refused add changed the host")
+	}
+	if err = AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: DeploymentSpec{Name: "p", Dir: f.p("ssl", "real", "p"), ACMEDirectory: acme}}); err != nil {
+		t.Errorf("--dir by its real path: %v", err)
 	}
 }
 
