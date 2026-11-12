@@ -60,6 +60,12 @@ agent; the rest of this list follows up to v1.0:
   </tr>
 </table>
 
+## Documentation
+
+The documentation site has guides for the daily work: installation, upgrades, adding hosts (the agent,
+also with Salt), monitoring, best practices and troubleshooting. The operations guide
+([docs/OPERATIONS.md](docs/OPERATIONS.md)) is part of it. <https://der-felix.github.io/MyOwnPKI/>
+
 ## Install
 
 Read [docs/OPERATIONS.md](docs/OPERATIONS.md) first – above all the warning about the unseal
