@@ -372,3 +372,91 @@ func TestRenewNowOverRESTServesNewCertificate(t *testing.T) {
 		t.Fatal("the endpoint kept the old certificate")
 	}
 }
+
+// TestEnrollmentPassEndToEnd: the real agent against the real server with an
+// enrollment pass of two uses, no agent-side change. Two hosts are admitted
+// without anybody approving them (verified: pass and passed check), each
+// with its own host name as the only allowed name; the third is turned away
+// with the reason and waits in the queue; after the pass is revoked a fourth
+// host, with a fresh pass of three uses, is turned away as well, and the
+// admitted agents are unchanged.
+func TestEnrollmentPassEndToEnd(t *testing.T) {
+	t.Parallel()
+	e := newAgentEnv(t)
+	ctx := t.Context()
+	svc := e.srv.Agents()
+	for _, h := range []string{"minion-01.homelab.lan", "minion-02.homelab.lan", "minion-03.homelab.lan", "minion-04.homelab.lan"} {
+		e.hosts.Store(h, true)
+	}
+	enroll := func(host, secret string) *agent.Result {
+		t.Helper()
+		a, _ := e.newTestAgent(t, func(c *agent.Config) { c.Hostname = host })
+		res, err := a.Enroll(ctx, secret)
+		if err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+		return res
+	}
+	secret, pass, err := svc.CreateEnrollmentPass(ctx, console, "e2e roll-out", []string{"*.homelab.lan"}, 2, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"minion-01.homelab.lan", "minion-02.homelab.lan"} {
+		res := enroll(host, secret)
+		if !res.Admitted() {
+			t.Fatalf("%s was not admitted: %+v", host, res)
+		}
+		a, gerr := svc.GetAgent(ctx, console, res.AgentID)
+		if gerr != nil || a.Hostname != host || len(a.Names) != 1 || a.Names[0].Pattern != host || a.Names[0].Source != "hostname" {
+			t.Errorf("agent %s: %+v %v", host, a, gerr)
+		}
+	}
+	res := enroll("minion-03.homelab.lan", secret)
+	if res.Admitted() || !strings.Contains(res.Message, "the enrollment pass has no uses left (2 of 2)") {
+		t.Fatalf("third host: %+v", res)
+	}
+	got := func(id string) agentsJoinToken {
+		list, lerr := svc.ListJoinTokens(ctx, console)
+		if lerr != nil {
+			t.Fatal(lerr)
+		}
+		for _, j := range list {
+			if j.ID == id {
+				return agentsJoinToken{UseCount: j.UseCount, Hosts: len(j.Hosts), Revoked: !j.RevokedAt.IsZero()}
+			}
+		}
+		t.Fatalf("pass %s is gone", id)
+		return agentsJoinToken{}
+	}
+	if st := got(pass.ID); st.UseCount != 2 || st.Hosts != 2 {
+		t.Errorf("pass after three hosts: %+v", st)
+	}
+
+	// A second pass, revoked after one host.
+	secret2, pass2, err := svc.CreateEnrollmentPass(ctx, console, "e2e second", []string{"*.homelab.lan"}, 3, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res = enroll("minion-04.homelab.lan", secret2); !res.Admitted() {
+		t.Fatalf("fourth host: %+v", res)
+	}
+	if err = svc.RevokeJoinToken(ctx, console, pass2.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.hosts.Store("minion-05.homelab.lan", true)
+	if res = enroll("minion-05.homelab.lan", secret2); res.Admitted() || !strings.Contains(res.Message, "the pass was revoked") {
+		t.Fatalf("host after the revocation: %+v", res)
+	}
+	if st := got(pass2.ID); st.UseCount != 1 || !st.Revoked {
+		t.Errorf("revoked pass: %+v", st)
+	}
+	agentsNow, _ := svc.ListAgents(ctx, console)
+	if len(agentsNow) != 3 {
+		t.Errorf("%d agents, want 3 (the refused hosts have none)", len(agentsNow))
+	}
+}
+
+type agentsJoinToken struct {
+	UseCount, Hosts int
+	Revoked         bool
+}
