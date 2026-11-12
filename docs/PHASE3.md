@@ -1432,3 +1432,74 @@ the existing ones (inline styles, undefined classes, hostile text). Docs are che
   transaction per database), ADR-10 and ADR-11 (no change to the channel or the keys), ADR-12, ADR-17,
   ADR-18 (the pass is a join token; the proof of control stays required) and ADR-19 (issuance is still
   ACME); it adds one tiny package (`internal/recipe`), no dependency and no protocol change.
+
+## 12. Salt formula: v0.3.6
+
+v0.3.5 gave a script the pieces it needs (`setup --token-file`, `deployment add`, `sandbox sync`, the
+enrollment pass). v0.3.6 puts them into a **Salt formula** in `deploy/salt/myownpki/`, so that a
+fleet is rolled out by `state.apply myownpki` instead of a hand-copied state file. The sketch in
+`site/hosts/salt.md` (written in v0.3.5, never run) becomes the starting point; the formula is the
+tested version of it.
+
+Goal of v0.3.6, measured on the live installation: a minion whose pillar names the server, the root
+fingerprint, the package hash and one deployment is, after `salt 'minion-01.homelab.lan' state.apply
+myownpki`, enrolled (with an enrollment pass: without a click) and has its certificate; a second
+`state.apply` changes nothing; a minion without a pass waits for one approval and the next highstate
+finishes the job.
+
+### 12.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 34 | 0.3.6 | **The formula.** `deploy/salt/myownpki/` with `init.sls`, `agent.sls`, `map.jinja`, `defaults.yaml`, `pillar.example` and `README.md`. States: verified package (`file.managed` with `source_hash`, then `pkg.installed` through the file, never an unverified URL), the root PEM, the pass (only while the host has no agent certificate), `setup` (`creates:` the agent certificate), the deployments (§12.2) and the sandbox. No `service.running` (a not enrolled agent stays disabled) | `salt-call --local state.show_highstate` renders for the test pillars; `shellcheck` on any helper script |
+| 35 | 0.3.6 | **Test and CI.** `deploy/salt/test/` (minion config with grains, pillars for Debian amd64 with a pass, RedHat arm64 without a pass, own-file mode, and the refusals of §12.2; dummy package, root and `agent.yaml` fixtures with their real hashes) and `scripts/ci/salt-test.sh`. A new CI job `salt formula` downloads the **Salt onedir tarball with a pinned SHA-256** (same pattern as cosign in `release.yml`), renders every test pillar with `state.show_highstate`, runs `state.apply test=True` and checks the expected states and absent states (§12.2). The job runs for code changes like the other heavy jobs | The job is green on the PR; `bash scripts/ci/salt-test.sh --self-test` runs the part that needs no Salt |
+| 36 | 0.3.6 | **Docs.** `site/hosts/salt.md` is rewritten around the formula (the sketch stays as "what the formula does, step by step"); `deploy/salt/myownpki/README.md`; `site/hosts.md`, `site/upgrade.md` (updating agents with the formula), `site/troubleshooting.md` and OPERATIONS get the formula where they now say "plain Salt"; PHASE3 live-test checklist | `scripts/ci/site-check.sh` |
+| 37 | 0.3.6 | **Release.** CHANGELOG `[0.3.6]`, version bump (`DEFAULT_VERSION` in both install scripts, `api/openapi.yaml`), PLAN §10.1 and `CLAUDE.md` after the tag | RELEASING.md |
+
+### 12.2 Rules and defaults
+
+**Pillar (`myownpki:agent`).** Defaults in `defaults.yaml`, merged with the pillar in `map.jinja`.
+
+| Key | Meaning |
+|---|---|
+| `version` (required) | The release to install, for example `0.3.6`. Part of the package file name |
+| `server` (required) | Agent listener, `https://pki.homelab.lan:8444` |
+| `acme_directory` (required) | ACME directory the agent uses; goes into `agent.yaml` through `setup --acme-directory` |
+| `root_source` + `root_sha256` (required) | `salt://` source of the root PEM and its SHA-256 from the admin UI |
+| `package.sha256` (required) | Map `amd64` / `arm64` to the SHA-256 of the package from the admin UI |
+| `package.source` | Default `salt://myownpki/files/{name}`, `{name}` is `myownpki-agent_<version>_linux_<arch>.<deb\|rpm>`; an `https://` URL is allowed because the hash is checked |
+| `package.format` | `auto` (deb for `os_family` Debian, rpm for RedHat and Suse), or `deb` / `rpm` |
+| `webroot` | Existing webroot for the enrollment check; unset means standalone on port 80 |
+| `low_ports` | `true` passes `--low-ports` to `setup` |
+| `enrollment_pass` | Optional secret, read from the pillar; written to `/root/myownpki-join-token` (0600, `show_changes: False`) only while `/var/lib/myownpki-agent/agent.crt` does not exist. Never on a command line |
+| `config_source` | Optional `salt://` full `agent.yaml` (the file mode of v0.3.5). `sandbox sync` runs when it changes |
+| `deployments` | Optional map name -> options, applied with `deployment add` unless `deployment list` already shows the name. Allowed options are exactly those `deployment add` has (`recipe`, `name`, `webroot`, `create_dirs`, `restart`, ...); an unknown option fails the render |
+| `absent` | Optional list of deployment names to `deployment remove` |
+
+**One owner of `agent.yaml`.** `config_source` and `deployments` are mutually exclusive; the render
+fails with a message that says so. A changed option of an existing deployment is not applied (the
+state sees the name and stops): remove it first through `absent`, or use `config_source`.
+
+**Failing closed.** A missing required key, a missing hash for the minion's architecture, an
+`enrollment_pass` that is not a string, or an unknown `package.format` fails the state (a
+`test.fail_without_changes` state with the reason), never a partial install. The package is installed
+only from the hash-checked local file. The formula never runs `service.running` or enables the unit.
+
+**Secrets.** The pass is the only secret. It comes from the pillar (documented as encrypted pillar,
+targeted at the hosts of the roll-out), is written with `show_changes: False` and removed from the
+pillar by the admin afterwards. Any `cmd.run` that uses it passes the **file**, never the value.
+
+**Tested versions.** The CI job pins one Salt release; the README names it and says what is not tested
+(other Salt versions, a real apply against a server).
+
+### 12.3 Not in v0.3.6
+
+- **A real `state.apply` against a server in CI** (needs a PKI server and port 80 on the runner; the
+  `agent end-to-end` job covers the agent side). The owner's live test covers it.
+- **Managing the server** (`install.sh`, backup timer) with Salt.
+- **Ansible or Puppet roles** (a later release may reuse the pillar names).
+- **Windows minions** (the agent only compiles there).
+- **Shipping the formula as a release asset.** It is copied or fetched with gitfs; a tarball asset
+  would change the 22-file release layout and the checklist.
+- **No ADR changes, no change to the product code** unless step 34 shows that `deployment list` has no
+  output the state can test for the name; then a machine-readable form is a separate, small commit.
