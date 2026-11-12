@@ -128,6 +128,9 @@ type Server struct {
 	// Monitoring (v0.3.3): alert rules and alerts.
 	monitor *monitorSide
 
+	// The TLS scan (v0.3.4): endpoints and the scanner pool.
+	scan *scanSide
+
 	closeOnce sync.Once
 }
 
@@ -722,6 +725,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		reqCancel()
 		if s.acme != nil {
 			s.acme.Close() // running validations finish before the databases close
+		}
+		if s.scan != nil {
+			s.scan.scanner.Close() // running scans are canceled and finish before the databases close
 		}
 		if err := s.ring.Seal(sctx, systemWho); err != nil {
 			errs = append(errs, fmt.Errorf("seal: %w", err))

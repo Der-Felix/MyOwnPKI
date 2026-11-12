@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tlsscan"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
 )
 
@@ -20,6 +22,7 @@ import (
 const (
 	jobMonitor      = "monitor"
 	jobMonitorPrune = "monitor-prune"
+	jobScan         = "tls-scan" // only dispatches: the scans run in the scanner's own workers
 	monitorEvery    = time.Minute
 	// Resolved alerts are kept this long for the UI and the API.
 	monitorKeep = 30 * 24 * time.Hour
@@ -34,6 +37,13 @@ type monitorSide struct {
 	queue  *notify.Queue
 	digest monitor.DigestOptions
 	tester *notify.Tester // the test message of the UI and the API
+}
+
+// scanSide is the TLS scan (docs/PHASE3.md §10): the endpoints and the pool
+// that scans them.
+type scanSide struct {
+	svc     *tlsscan.Service
+	scanner *tlsscan.Scanner
 }
 
 // buildMonitor wires the evaluation; the configuration was validated, so
@@ -66,6 +76,9 @@ func (s *Server) buildMonitor() error {
 		s.log.Info("no notification channel configured – alerts show only in the UI (notify.email, notify.webhook)")
 	}
 	s.monitor = m
+	if err := s.buildScan(); err != nil {
+		return err
+	}
 	s.jobs.add(jobMonitor, monitorEvery, monitorEvery, s.evaluateAlerts)
 	s.jobs.add(jobMonitorPrune, 24*time.Hour, 24*time.Hour, func(ctx context.Context) error {
 		cutoff := s.clk.Now().Add(-monitorKeep)
@@ -179,4 +192,42 @@ func (s *Server) notifier() web.NotifyTester {
 		return nil
 	}
 	return s.monitor.tester
+}
+
+// buildScan wires the TLS scan: the endpoint service and the scanner. The
+// job only dispatches; the scans run in the scanner's workers, so the
+// scheduler (one goroutine for all jobs) is never held up by a slow host.
+// With monitor.scan_interval: off endpoints can still be entered and
+// removed, but nothing connects.
+func (s *Server) buildScan() error {
+	cfg := s.opt.Config
+	sv, err := cfg.Monitor.Scan()
+	if err != nil {
+		return err
+	}
+	resolver, err := config.ACMEResolver(cfg.ACME.Resolver)
+	if err != nil {
+		return fmt.Errorf("acme.resolver: %w", err)
+	}
+	svc := &tlsscan.Service{
+		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, Clock: s.clk, Wake: s.wakeUp,
+		Settings: tlsscan.Settings{Interval: sv.Interval, Timeout: sv.Timeout, Ports: sv.Ports, MaxEndpoints: sv.MaxEndpoints},
+	}
+	scanner := &tlsscan.Scanner{Svc: svc, Engine: s.engine, Clock: s.clk, Log: s.log, Resolver: resolver}
+	svc.Kick = scanner.Kick
+	s.scan = &scanSide{svc: svc, scanner: scanner}
+	if sv.Off() {
+		s.log.Info("TLS scan is off (monitor.scan_interval: off) – the server connects to no endpoint")
+		return nil
+	}
+	s.jobs.add(jobScan, tlsscan.DispatchEvery, tlsscan.DispatchEvery, scanner.Dispatch)
+	return nil
+}
+
+// Endpoints is the TLS scan endpoint service for the UI and the API.
+func (s *Server) Endpoints() *tlsscan.Service {
+	if s.scan == nil {
+		return nil
+	}
+	return s.scan.svc
 }
