@@ -3,6 +3,7 @@ package tlsscan
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -382,5 +383,113 @@ func TestAuditDetailsOfARefusalAreClean(t *testing.T) {
 	}
 	if len(details) > 1200 || strings.ContainsAny(details, "\x1b"+string(rune(0x202e))) || strings.Contains(details, `\u0000`) {
 		t.Errorf("details = %q", details)
+	}
+}
+
+// hostileIDs are what a form post or a hand-made request can put in "id".
+func hostileIDs() map[string]string {
+	return map[string]string{
+		"escape sequence": "ep_\x1b[31mred",
+		"nul":             "ep_\x00x",
+		"newline":         "ep_1\nendpoint.delete/success",
+		"bidi override":   "ep_" + string(rune(0x202e)) + "1",
+		"line separator":  "ep_" + string(rune(0x2028)) + "1",
+		"over-long":       strings.Repeat("a", 300),
+		"path":            "../../etc/passwd",
+		"space":           "ep 1",
+		"non-ASCII":       "ep_" + string(rune(0xe9)),
+		"empty":           "",
+		"invalid UTF-8":   "ep_\xff\xfe",
+	}
+}
+
+type auditTarget struct{ typ, id, details string }
+
+// endpointTargets reads the target and details of every endpoint entry
+// directly from the tenant audit log (denied and failed entries are appended
+// at once, without the outbox).
+func (e *env) endpointTargets(t *testing.T) []auditTarget {
+	t.Helper()
+	rows, err := e.inst.TenantAudit.Read.QueryContext(t.Context(), `SELECT target_type, target_id, details_json FROM audit_entries WHERE action LIKE 'endpoint.%' ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []auditTarget
+	for rows.Next() {
+		var a auditTarget
+		if err := rows.Scan(&a.typ, &a.id, &a.details); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestHostileIDsNeverBecomeAnAuditTarget: the endpoint ID of a UI form is
+// attacker input. Whoever lacks the role gets the refusal (403 comes first)
+// and the audit entry names no target ID that is not a well-formed ID; whoever
+// has the role gets a plain "not found" and nothing is audited.
+func TestHostileIDsNeverBecomeAnAuditTarget(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	real, err := e.svc.Create(t.Context(), testinstance.Console, Request{Host: "a.homelab.lan", Port: 443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.inst.Deliver(t)
+	base := len(e.endpointTargets(t))
+	viewer, operator, admin := who(authz.Viewer, ""), who(authz.Operator, ""), who(authz.Admin, "")
+	wellFormed := regexp.MustCompile(`^[0-9A-Za-z_-]{0,64}$`)
+
+	for name, id := range hostileIDs() {
+		for action, call := range map[string]func(keys.Who) error{
+			"delete": func(w keys.Who) error { return e.svc.Delete(t.Context(), w, id) },
+			"scan":   func(w keys.Who) error { return e.svc.ScanNow(t.Context(), w, id) },
+		} {
+			// The role is checked first: 403 for everybody who lacks it.
+			denied := []keys.Who{viewer}
+			if action == "delete" {
+				denied = append(denied, operator)
+			}
+			for _, w := range denied {
+				if err := call(w); !errors.Is(err, authz.ErrDenied) {
+					t.Errorf("%s/%s as %s: %v, want denied", action, name, w.Actor.Name, err)
+				}
+			}
+			// With the role an invalid ID is simply unknown.
+			if err := call(admin); !errors.Is(err, ErrNotFound) {
+				t.Errorf("%s/%s as admin: %v, want not found", action, name, err)
+			}
+		}
+	}
+	targets := e.endpointTargets(t)
+	if len(targets) <= base {
+		t.Fatalf("the refusals are not on record: %d entries", len(targets))
+	}
+	for _, a := range targets[base:] {
+		if a.typ != "endpoint" || !wellFormed.MatchString(a.id) {
+			t.Errorf("audit target %q %q is not a clean endpoint ID", a.typ, a.id)
+		}
+		if strings.ContainsAny(a.details, "\x1b"+string(rune(0x202e))+string(rune(0x2028))+string(rune(0xfffd))) || strings.Contains(a.details, `\u0000`) || strings.Contains(a.details, `\u001b`) || len(a.details) > 600 {
+			t.Errorf("audit details are not clean: %q", a.details)
+		}
+	}
+	// 6 refusals per hostile ID (viewer: delete, scan; operator: delete) are
+	// all that was written; the admin's "not found" is no event.
+	if want := len(hostileIDs()) * 3; len(targets)-base != want {
+		t.Errorf("%d new audit entries, want %d", len(targets)-base, want)
+	}
+
+	// A refusal for a real ID keeps the ID: that is what the log is for.
+	if err := e.svc.Delete(t.Context(), viewer, real.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Fatal(err)
+	}
+	last := e.endpointTargets(t)
+	if got := last[len(last)-1]; got.id != real.ID {
+		t.Errorf("target of a refusal for a real ID: %q, want %q", got.id, real.ID)
 	}
 }
