@@ -1,0 +1,11 @@
+# Fixture for the Salt formula test (config_source). Not used by a real agent.
+server: "https://pki.homelab.lan:8444"
+ca_bundle: "/etc/myownpki-agent/root.pem"
+hostname: "minion-01.homelab.lan"
+state_dir: "/var/lib/myownpki-agent"
+log_level: "info"
+acme_directory: "https://pki.homelab.lan/acme/directory"
+enrollment:
+  challenge: standalone
+paths: []
+deployments: []

@@ -1,0 +1,14 @@
+# Minion configuration for "salt-call --local" in scripts/ci/salt-test.sh.
+# The script fills in the @...@ paths and appends the grains of the case.
+file_client: local
+id: minion-01.homelab.lan
+root_dir: @WORK@
+cachedir: @WORK@/cache
+log_file: @WORK@/log/minion
+file_roots:
+  base:
+    - @TOP@
+    - @FORMULAS@
+pillar_roots:
+  base:
+    - @PILLAR@

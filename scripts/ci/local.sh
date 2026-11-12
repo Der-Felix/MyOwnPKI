@@ -41,6 +41,8 @@ steps=(
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
+  'salt|self-test without Salt|bash|bash scripts/ci/salt-test.sh --self-test'
+  'salt|render and apply test=True|salt|bash scripts/ci/salt-test.sh'
   # Documentation site: the same steps as the build job of .github/workflows/pages.yml
   # (its Jekyll build and the check of the built HTML run only there).
   'pages|site-prepare self-test|bash|bash scripts/ci/site-prepare.sh --self-test'
@@ -123,6 +125,7 @@ requirement() {
     windows) [ "$os" = windows ] || echo 'needs Windows' ;;
     openssl) has_commands openssl || echo 'needs openssl' ;;
     bash) has_commands bash || echo 'needs bash' ;;
+    salt) has_commands bash salt-call jq || echo 'needs bash + salt-call + jq' ;;
     git) has_commands bash git || echo 'needs bash + git' ;;
     bash_openssl) has_commands bash openssl sha256sum || echo 'needs bash + openssl + sha256sum' ;;
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
