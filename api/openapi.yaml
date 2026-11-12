@@ -78,6 +78,8 @@ tags:
     description: Tamper-evident audit log
   - name: agents
     description: myownpki-agent – enrollments, join tokens, agents and their names (v0.3)
+  - name: monitoring
+    description: Alerts and the test of the notification channels (v0.3.3)
 
 paths:
   # ---------------------------------------------------------------- system
@@ -2284,6 +2286,59 @@ paths:
         "413": { $ref: "#/components/responses/TooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
 
+  # ---------------------------------------------------------------- monitoring (v0.3.3)
+  /alerts:
+    get:
+      tags: [monitoring]
+      operationId: listAlerts
+      summary: List the open alerts and those resolved in the last 7 days
+      description: |
+        What the monitoring found (docs/PHASE3.md §9.2): open alerts first (critical before
+        warning, the oldest first), then the resolved ones (newest first). A resolved alert
+        stays listed for 7 days. The alerts name certificates, CAs and agents of the whole
+        tenant, so a role limited to one CA does not see them (403). Reading works while the
+        server is sealed.
+      x-required-role: viewer
+      parameters:
+        - name: state
+          description: "Only open or only resolved alerts; both without it"
+          in: query
+          schema: { type: string, enum: [open, resolved] }
+      responses:
+        "200":
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Alert" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /notifications/test:
+    post:
+      tags: [monitoring]
+      operationId: sendTestNotification
+      summary: Send a test message through every configured channel
+      description: |
+        Sends one message, marked as a test, through the channels of `notify:` in the server's
+        configuration (e-mail, webhook) and waits for the result of each. A channel that fails
+        does not fail the call: `ok` is false and `error` says why (host and reason, never a
+        secret). The call is audited (`notification.test`) with the result per channel. At most
+        one test every 10 seconds. Needs no step-up: it changes nothing.
+      x-required-role: admin
+      responses:
+        "200":
+          description: One result per configured channel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationTestResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
 components:
   securitySchemes:
     session:
@@ -3762,4 +3817,43 @@ components:
         head: { type: string, description: "seq:hash of the last good entry – compare with the process log or a backup manifest" }
         checkpoints: { type: integer, minimum: 0 }
         checkpoint_key: { type: string, description: "Fingerprint of the key that signs the checkpoints" }
+
+    Alert:
+      description: "One condition the monitoring found (docs/PHASE3.md §9.2)"
+      type: object
+      required: [id, kind, subject, severity, state, first_seen, last_seen, resolved_at, detail, href]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        kind:
+          type: string
+          description: |
+            What was found: `cert_expiry`, `ca_expiry`, `crl`, `sealed`, `agent_silent`,
+            `agent_certificate`, `deploy_failed`. Later releases may add kinds.
+          examples: ["cert_expiry"]
+        subject: { type: string, description: "What it is about, for display (a name, a CA, a host)" }
+        severity: { type: string, enum: [warning, critical] }
+        state: { type: string, enum: [open, resolved] }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time, description: "The last evaluation that still found it" }
+        resolved_at: { type: [string, "null"], format: date-time, description: "Null while open" }
+        detail: { type: string, description: "One sentence: what and what to do" }
+        href: { type: string, description: "Path of the affected object in the web UI; empty for none" }
+
+    NotificationTestResult:
+      description: "The result of the test message, one entry per configured channel"
+      type: object
+      required: [channels]
+      additionalProperties: false
+      properties:
+        channels:
+          type: array
+          items:
+            type: object
+            required: [channel, ok]
+            additionalProperties: false
+            properties:
+              channel: { type: string, enum: [email, webhook] }
+              ok: { type: boolean }
+              error: { type: string, description: "Why it failed; never a secret, but may name hosts, file paths and recipient addresses" }
 

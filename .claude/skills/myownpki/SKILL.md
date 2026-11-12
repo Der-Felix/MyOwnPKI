@@ -57,6 +57,7 @@ language, level of explanation, local environment) are in `CLAUDE.local.md` if p
 | `references/security.md` | Auth, sessions, RBAC, key storage/unseal, uploads, agent trust, ACME validation (SSRF), audit log |
 | `references/go-conventions.md` | Writing Go: layout, errors, logging, config, SQLite/sqlc/migrations, testing, build, CI |
 | `references/frontend.md` | templ pages, htmx, layouts A/B/C, CSS classes and tokens, themes, charts/islands |
+| `../ai-ui-design-master/SKILL.md` | Designing or reviewing UI, components, themes or animations beyond what `frontend.md` fixes (reference only; the MyOwnPKI constraints at its top win) |
 
 ## Definition of done (every change)
 

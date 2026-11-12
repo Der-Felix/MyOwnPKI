@@ -13,6 +13,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 )
 
 // Problem types are URNs (api/openapi.yaml, schema Problem).
@@ -63,6 +64,7 @@ func (c *call) fail(err error) {
 	}
 	var authLocked *auth.LockedError
 	var keysLocked *keys.LockedError
+	var testWait *notify.WaitError
 	var denied *ca.DeniedError
 	var body *bodyError
 	switch {
@@ -78,6 +80,11 @@ func (c *call) fail(err error) {
 	case errors.As(err, &keysLocked):
 		c.retryAfter(keysLocked.RetryAfter)
 		_ = c.problem(http.StatusTooManyRequests, "rate-limited", keysLocked.Error(), nil)
+	case errors.Is(err, notify.ErrNoChannel):
+		_ = c.problem(http.StatusConflict, "conflict", err.Error(), nil)
+	case errors.As(err, &testWait):
+		c.retryAfter(testWait.RetryAfter)
+		_ = c.problem(http.StatusTooManyRequests, "rate-limited", testWait.Error(), nil)
 	case errors.Is(err, auth.ErrBusy):
 		c.retryAfter(time.Second)
 		_ = c.problem(http.StatusServiceUnavailable, "busy", auth.ErrBusy.Error(), nil)

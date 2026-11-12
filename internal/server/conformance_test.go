@@ -61,7 +61,9 @@ func TestConformanceTLS(t *testing.T) {
 	go func() { done <- srv.Serve(sctx) }()
 	defer func() {
 		cancel()
-		<-done
+		if serr := <-done; serr != nil {
+			t.Errorf("server stopped with an error: %v", serr)
+		}
 		if t.Failed() {
 			t.Logf("server log:\n%s", logs.String())
 		}

@@ -53,6 +53,9 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 	}
 	printConfig(stdout, cfg, src)
 	checkTLSIssuers(cfg, stdout, stderr)
+	if !checkNotify(cfg, stdout, stderr) {
+		return 1
+	}
 	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0
 }
@@ -160,4 +163,96 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 	for _, r := range rows {
 		_, _ = fmt.Fprintf(w, "  %-14s %s\n", r[0], r[1])
 	}
+	printMonitoring(w, cfg, src)
+}
+
+// printMonitoring shows the notification channels and the alert thresholds
+// in effect: e-mail by server, security and number of recipients, the
+// webhook by host only (its path or query may hold a token), never a
+// password, a secret or a file's content.
+func printMonitoring(w io.Writer, cfg config.Config, src config.Source) {
+	from := func(envs ...string) string {
+		var out string
+		for _, env := range envs {
+			if slices.Contains(src.Env, env) {
+				out += "   (from " + env + ")"
+			}
+		}
+		return out
+	}
+	email := "off (notify.email.smtp is empty)"
+	if e := cfg.Notify.Email; e.Enabled() {
+		email = fmt.Sprintf("%s, %s, %s", e.SMTP, e.Mode(), plural(len(e.Recipients()), "recipient"))
+	}
+	hook := "off (notify.webhook.url is empty)"
+	if cfg.Notify.Webhook.Enabled() {
+		hook = "no valid URL"
+		if u, err := config.WebhookURL(cfg.Notify.Webhook.URL); err == nil {
+			hook = u.Host + ", signed with HMAC-SHA256"
+		}
+	}
+	rows := [][2]string{
+		{"e-mail", email + from("MYOWNPKI_NOTIFY_EMAIL_SMTP", "MYOWNPKI_NOTIFY_EMAIL_SECURITY", "MYOWNPKI_NOTIFY_EMAIL_TO")},
+		{"webhook", hook + from("MYOWNPKI_NOTIFY_WEBHOOK_URL")},
+	}
+	_, _ = fmt.Fprintf(w, "\nNotifications (notify:)\n")
+	for _, r := range rows {
+		_, _ = fmt.Fprintf(w, "  %-16s %s\n", r[0], r[1])
+	}
+	v, err := cfg.Monitor.Values()
+	if err != nil {
+		return // validated by Load
+	}
+	days := func(d time.Duration) string { return plural(int(d/(24*time.Hour)), "day") }
+	rows = [][2]string{
+		{"certificates", "warning " + days(v.ExpiryWarn) + ", critical " + days(v.ExpiryCrit) + " before they end" + from("MYOWNPKI_MONITOR_EXPIRY_DAYS")},
+		{"CA certificates", "warning " + days(v.CAWarn) + ", critical " + days(v.CACrit) + " before they end" + from("MYOWNPKI_MONITOR_CA_EXPIRY_DAYS")},
+		{"sealed server", "alert after " + shortDuration(v.SealedAfter) + from("MYOWNPKI_MONITOR_SEALED_AFTER")},
+		{"silent agent", "alert after " + shortDuration(v.AgentSilent) + from("MYOWNPKI_MONITOR_AGENT_SILENT_AFTER")},
+		{"reminder", "every " + shortDuration(v.RepeatEvery) + " while an alert is open" + from("MYOWNPKI_MONITOR_REPEAT_EVERY")},
+	}
+	_, _ = fmt.Fprintf(w, "\nAlert thresholds (monitor:)\n")
+	for _, r := range rows {
+		_, _ = fmt.Fprintf(w, "  %-16s %s\n", r[0], r[1])
+	}
+}
+
+// checkNotify reports what would stop a message at the first send. A
+// secret or CA file that is missing, unreadable or empty is an error (exit
+// 1): every digest would fail and be dropped after its retries – while the
+// server itself starts and keeps the alerts. No channel at all is only a
+// warning, on stdout: it is the state of every new installation, and stderr
+// is where install.sh looks for what is wrong.
+func checkNotify(cfg config.Config, stdout, stderr io.Writer) bool {
+	if !cfg.Notify.Email.Enabled() && !cfg.Notify.Webhook.Enabled() {
+		_, _ = fmt.Fprintln(stdout, "\nWarning: no notification channel is configured – alerts are shown in the UI, nobody is notified. Set notify.email or notify.webhook.")
+		return true
+	}
+	problems := cfg.NotifyFileProblems()
+	for _, p := range problems {
+		_, _ = fmt.Fprintf(stderr, "\nError: %s.\n", p)
+	}
+	if len(problems) > 0 {
+		_, _ = fmt.Fprintln(stderr, "\nNotifications would fail until this is fixed. Check as the service user; the files are read at each send, so no restart is needed.")
+	}
+	return len(problems) == 0
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// shortDuration prints 10m instead of 10m0s and 24h instead of 24h0m0s.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }

@@ -12,8 +12,8 @@ vars:
   # a `toolchain` line only appears when it is newer): with the default
   # GOTOOLCHAIN=auto, an older local Go downloads that toolchain by itself.
   # templ and govulncheck are pinned in go.mod (`go tool …`) and need no entry here.
-  GO_VERSION: 1.27.3
-  GOLANGCI_LINT_VERSION: 2.14.0
+  GO_VERSION: 1.27.4
+  GOLANGCI_LINT_VERSION: 2.15.0
   # Prebuilt binary (not `go tool`): checked only once sqlc.yaml exists (phase 1).
   SQLC_VERSION: 1.31.1
   # Prebuilt binaries for lint:ci and lint:api (not part of `task check`).

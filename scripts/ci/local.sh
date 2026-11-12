@@ -6,6 +6,7 @@ root=$PWD
 # Central CI step registry: job | step | prerequisite | command.
 # Keep this in .github/workflows/ci.yml job order. New steps belong here too.
 steps=(
+  'changes|docs-only classification self-test|git|bash scripts/ci/changes.sh --self-test'
   'check|check|check_tools|bash scripts/ci/check-check.sh'
   'check|generate:check|generate_tools|bash scripts/ci/check-generate.sh'
   'check|agent protocol compatibility|go_git|bash scripts/ci/check-agent-protocol.sh'
@@ -40,6 +41,12 @@ steps=(
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
+  # Documentation site: the same steps as the build job of .github/workflows/pages.yml
+  # (its Jekyll build and the check of the built HTML run only there).
+  'pages|site-prepare self-test|bash|bash scripts/ci/site-prepare.sh --self-test'
+  'pages|site-check self-test|bash|bash scripts/ci/site-check.sh --self-test'
+  'pages|generate the reference pages|bash|bash scripts/ci/site-prepare.sh'
+  'pages|links and anchors in the site sources|bash|bash scripts/ci/site-check.sh'
 )
 
 only=
@@ -116,6 +123,7 @@ requirement() {
     windows) [ "$os" = windows ] || echo 'needs Windows' ;;
     openssl) has_commands openssl || echo 'needs openssl' ;;
     bash) has_commands bash || echo 'needs bash' ;;
+    git) has_commands bash git || echo 'needs bash + git' ;;
     bash_openssl) has_commands bash openssl sha256sum || echo 'needs bash + openssl + sha256sum' ;;
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
     vacuum) has_commands go task vacuum || echo 'needs Go + Task + vacuum' ;;

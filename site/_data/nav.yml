@@ -1,0 +1,37 @@
+# Navigation of the documentation site. Every url is the permalink of a page
+# (relative_url adds the base URL). scripts/ci/site-check.sh checks that each
+# one exists. A section shows its children while one of its pages is open.
+- title: Home
+  url: /
+- title: Installation
+  url: /install/
+- title: Upgrade
+  url: /upgrade/
+- title: Adding hosts
+  url: /hosts/
+  children:
+    - title: Rolling out with Salt
+      url: /hosts/salt/
+- title: Monitoring
+  url: /monitoring/
+- title: Best practices
+  url: /best-practices/
+- title: Troubleshooting
+  url: /troubleshooting/
+- title: Reference
+  url: /reference/
+  children:
+    - title: Operations guide
+      url: /reference/operations/
+    - title: Configuration file
+      url: /reference/configuration/
+    - title: Command line
+      url: /reference/cli/
+    - title: REST API
+      url: /reference/api/
+    - title: Release notes
+      url: /reference/changelog/
+    - title: Security
+      url: /reference/security/
+    - title: Contributing
+      url: /reference/contributing/

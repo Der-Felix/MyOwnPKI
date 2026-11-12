@@ -16,11 +16,11 @@ func user(bindings ...Binding) *Principal {
 // deliberate edit here as well.
 func TestRoleMatrix(t *testing.T) {
 	t.Parallel()
-	all := []Permission{ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, Unseal, ManageUsers}
+	all := []Permission{ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, TestNotify, Unseal, ManageUsers}
 	want := map[Role][]Permission{
 		Viewer:   {ReadPKI},
 		Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey},
-		Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant},
+		Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, TestNotify},
 	}
 	res := Resource{Tenant: "default", CA: "issuing"}
 	for _, role := range Roles {

@@ -15,6 +15,8 @@ type Data struct {
 	// Attention is set by the real UI: CRLs, CA certificates and seal state
 	// that need an admin; nil in the prototype.
 	Attention []view.Message
+	// AlertsHref links "All alerts" in the Needs attention heading; empty = no link.
+	AlertsHref string
 	// Real UI: no recent activity yet (the audit log follows in step 18).
 	Real bool
 }
@@ -28,6 +30,9 @@ templ Page(p view.Page, d Data) {
 			<section class="section" aria-labelledby="h-attention">
 				<div class="section-head">
 					<h2 id="h-attention">Needs attention</h2>
+					if d.AlertsHref != "" {
+						<a href={ templ.SafeURL(d.AlertsHref) }>All alerts</a>
+					}
 				</div>
 				if len(d.Attention) == 0 {
 					<p class="empty">Nothing needs attention: every CRL is current and no CA certificate ends soon.</p>

@@ -8,6 +8,8 @@
 > **Progress:** block A done (`9eacb4f`); **block B built** 2026-10-24 – steps 1–3 and the enrollment part
 > of 2a, see "Built in block B" at the end of §6. **Block C reviewed and implemented** –
 > steps 4–6, with the owner's clarifications below. Blocks D–E follow.
+> **v0.3.1–v0.3.2** released (§8). **Monitoring** is planned in §9: v0.3.3 alerts and notifications,
+> v0.3.4 the TLS scan.
 
 Goal of v0.3.0, measured on a real host: on an **nginx reverse proxy** the agent gets its
 certificate by ACME from the own server, puts it in place for nginx, reloads nginx and **rolls back**
@@ -259,17 +261,17 @@ checked in and covered by `task generate:check`. All procedures are unary.
 | 2a | 0.3.0 | **Challenge responder: standalone and webroot** (owner 2026-10-24), shared by enrollment (step 2) and ACME (step 4): standalone listens on `:80` only while a check runs; webroot writes `<webroot>/.well-known/acme-challenge/<token>` (0644) and deletes it afterwards, also after a crash (the agent notes what it wrote); the webroot must lie under `paths` | – | both modes answer the server's check; the token file is gone afterwards; a webroot outside `paths` is refused by the config check; port 80 in use → clear error naming `challenge: webroot` |
 | 3 | 0.3.0 | **Agent certificate renewal** over the channel (7 days, renewed at 2/3 with jitter, new key), revocation and "disable" take effect at the next call; the previous certificate stays valid until it expires | – | fake-clock test; a revoked agent is cut off on its next call; a renewal survives a server restart in between |
 | 4 | 0.3.0 | **ACME in the agent** with lego as a library (only `lego`, `certificate`, `registration`, `challenge/http01` and `providers/http/webroot`; no DNS providers): its own account key on the host, registered by thumbprint over the channel; the ACME server limits orders of that account to the agent's `agent_names` (at `newOrder` and again at `finalize`), on top of the normal domain policy | Q3 – approved | the agent gets a certificate from the phase 2 server; a name outside its list is refused **by the server** (`rejectedIdentifier`), not just by the agent; a revoked agent's account can't order |
-| 5 | 0.3.0 | **Deploy profiles nginx and file** (Apache and HAProxy in v0.3.x): nginx writes `fullchain.pem` and `privkey.pem` into a directory, file writes each part to the path given – for a host that keeps its existing paths and nginx config; temp file in the target directory, `fsync`, rename, `fsync` of the directory; owner, group and mode from the deployment; PEM; key 0600 by default | – | tests in a temp root for both profiles; a path outside `paths` is refused by the agent; files never half-written |
+| 5 | 0.3.0 | **Deploy profiles nginx and file** (Apache and HAProxy in v0.3.11, PLAN §10.1): nginx writes `fullchain.pem` and `privkey.pem` into a directory, file writes each part to the path given – for a host that keeps its existing paths and nginx config; temp file in the target directory, `fsync`, rename, `fsync` of the directory; owner, group and mode from the deployment; PEM; key 0600 by default | – | tests in a temp root for both profiles; a path outside `paths` is refused by the agent; files never half-written |
 | 6 | 0.3.0 | **Reload with rollback, for both profiles**: keep the previous files and a durable journal, replace the files, test, reload once per shared reload hook, then check TLS (SNI = first name, SHA-256 of the expected leaf, bounded retries over ~10 s). On failure restore previous files, remove first-installation files and test the restored group. If it passes and a reload was attempted, attempt one rollback reload/check for existing deployments. An open journal is recovered before another pass (§6.3) | – | both profiles against nginx in the Linux container: a mismatched certificate/key staged after validation fails `nginx -t`, restores the old files and leaves the old certificate served without a reload. A mixed group's TLS failure after reload restores and reloads existing deployments and verifies their old leaf; first installations stay `failed`. Failed restored tests prevent a reload and mark the whole group `failed`, explaining that the service still has the pre-rollback state. A stop between replacement and reload recovers from the journal |
 | 7 | 0.3.0 | **Heartbeat and report** every 5 minutes (±30 s jitter): agent version, OS, every deployment with state, certificate, expiry and last error; `last_seen_at`; the UI shows "silent" after 3 missed beats (the `agent_silent` alert comes with monitoring) | – | fake-clock test; the agent list shows last seen and version |
 | 8 | 0.3.0 | **Renewal scheduling** at 2/3 of the lifetime with jitter (a random point in the last 10 % before 2/3), or earlier when the server's ARI window (PHASE2 step 12) says so | – | fake-clock test; ARI window followed |
 | 8a | 0.3.0 | **"Renew now" without remote commands** (owner 2026-10-24, §6.4): the button sets `renew_requested_at/by` and raises the agent's `desired_version`, with an audit entry; `WatchDesiredState` long-poll (answer at once when newer, else "unchanged" after at most 50 s); the agent renews through its normal ACME path (new key, deploy, rollback) and reports; the server clears the request. operator and admin may, viewer may not; the button is locked while a request is open. UI: agent list, agent detail with deployments | – | the API call reaches the agent within seconds; viewer gets 403; a second request while one is open is refused; a server restart during a long-poll: the agents come back within the backoff, no burst (test with many fake agents) |
 | 9 | 0.3.0 | **Linux packaging**: hardened systemd unit (§6.6), `deploy/install-agent.sh` modelled on `install.sh`, the agent in `.goreleaser.yaml` (released for linux/amd64 and linux/arm64; it must still build for Windows, macOS and FreeBSD in the CI cross-build); CI job **agent end-to-end**; OPERATIONS chapter "Agent"; CHANGELOG 0.3.0 | Q4 – tarball and script | the CI job (§6.7) must run `TestNginxDeployProfiles` with nginx available in Linux CI from this step onward (no skip); `systemd-analyze security` measured in CI and documented |
-| 10 | later | **Trust store, small form** (PLAN §10.1): root download as PEM, DER, `.mobileconfig`; the agent can add the root to the system trust store (`update-ca-certificates`), off by default | – | Debian and Fedora layouts tested in containers |
-| 11 | 0.3.x | **Expiry dashboard**: certificates by expiry, agent status, sealed warning, CRL freshness. Expiry alerts must exclude agent identity certificates from end-entity lists and warn per active agent when its current certificate has less than 48 hours left. | – | handler tests, screenshots light/dark |
-| 12 | 0.3.x | **TLS scan** (integration level 2): scheduled scan of `endpoints` (manual, from agents, from SANs), served certificate vs. the issued one, expiry, chain; SSRF rules as for http-01, ports from the endpoint list only | – | test servers serving the right / an old / a foreign certificate |
-| 13 | 0.3.x | **Notifications**: e-mail (SMTP with STARTTLS/TLS, no plain auth over plain text) and webhook (JSON, HMAC-SHA256 signature header, retries with back-off); alert rules: expiry (30/14/7/1 days), deploy failed, agent silent, scan mismatch, **sealed** – measured against the remaining CRL lifetime | – | a local SMTP and webhook receiver in tests; secrets never in logs; a sealed server alerts before its CRLs expire |
-| 14 | 0.3.x | **Demo**: `deploy/demo/docker-compose.yml` (MyOwnPKI, nginx with the agent, a certbot container – PLAN §10.1 "Live test") | Q5 – later | one command brings the demo up |
+| 10 | 0.3.9 | **Trust store, small form** (PLAN §10.1, part of the public trust portal): root download as PEM, DER, `.mobileconfig`; the agent can add the root to the system trust store (`update-ca-certificates`), off by default | – | Debian and Fedora layouts tested in containers |
+| 11 | 0.3.3 | **Expiry dashboard** (replaced by §9 step 22): certificates by expiry, agent status, sealed warning, CRL freshness. Expiry alerts must exclude agent identity certificates from end-entity lists and warn per active agent when its current certificate has less than 48 hours left. | – | handler tests, screenshots light/dark |
+| 12 | 0.3.4 | **TLS scan** (integration level 2; replaced by §9 step 26): scheduled scan of `endpoints` (manual, from agents, from SANs), served certificate vs. the issued one, expiry, chain; SSRF rules as for http-01, ports from the endpoint list only | – | test servers serving the right / an old / a foreign certificate |
+| 13 | 0.3.3 | **Notifications** (replaced by §9 steps 22–24): e-mail (SMTP with STARTTLS/TLS, no plain auth over plain text) and webhook (JSON, HMAC-SHA256 signature header, retries with back-off); alert rules: expiry (30/14/7/1 days), deploy failed, agent silent, scan mismatch, **sealed** – measured against the remaining CRL lifetime | – | a local SMTP and webhook receiver in tests; secrets never in logs; a sealed server alerts before its CRLs expire |
+| 14 | 0.3.11 | **Demo** (PLAN §10.1): `deploy/demo/docker-compose.yml` (MyOwnPKI, nginx with the agent, a certbot container – PLAN §10.1 "Live test") | Q5 – later | one command brings the demo up |
 
 ### Notes
 
@@ -320,8 +322,8 @@ approved modules, so buf adds no code to any binary.
 | Q4 | Packages | **Archive with an install script**, no `.deb`/`.rpm` yet |
 | Q5 | Demo with external images | **Moved to v0.3.x** |
 | Q6 | Default enrollment mode | **`verified`** – join token **and** a passed check |
-| Q7 | Notification defaults | open – with monitoring (v0.3.x) |
-| Q8 | TLS scan of SANs | open – with monitoring (v0.3.x) |
+| Q7 | Notification defaults | decided 2026-10-29 (§9.2): end-entity 14 / 3 days, CA 90 / 30 days, sealed after 10 minutes, agent silent after 1 hour, reminder every 24 hours, one digest per run |
+| Q8 | TLS scan of SANs | decided 2026-10-29 (§9.2): no automatic scan of SANs – only endpoints entered by an admin or reported by an agent (v0.3.4) |
 | Q9 | Agent self-update | **No** – the install script updates it |
 | – | Proxy | The agent ignores `HTTPS_PROXY`/`HTTP_PROXY`; a proxy only when `agent.yaml` names one |
 | – | Webroot mode | Per deployment `challenge: standalone \| webroot` and `webroot: <path>`, for enrollment **and** ACME; the webroot must be under `paths` (step 2a) |
@@ -599,8 +601,7 @@ Nothing else is opened on the host; in standalone mode port 80 is open only whil
 
 ## 7. Open points
 
-Nothing is open for v0.3.0. With monitoring (v0.3.x): Q7 (notification defaults) and Q8 (TLS scan
-of SANs).
+Nothing is open for v0.3.0. Q7 and Q8 were decided with the monitoring plan (§9.2).
 
 ---
 
@@ -849,3 +850,85 @@ commits, pushes, switches the main checkout or deletes the Wiki checkout.
 The table is exhaustive for the existing step-up-protected web forms. New actions must be added to it
 with their allowlisted parameter shape before continuation is enabled. A pending action never uses a
 raw request body or a caller-provided callback.
+
+---
+
+## 9. Monitoring: v0.3.3 and v0.3.4 (owner 2026-10-29)
+
+The owner asked for monitoring next and left the defaults to this plan ("as you think"). It replaces
+steps 11–13 of §3. **v0.3.3** has alerts and notifications (steps 22–25); **v0.3.4** adds the TLS
+scan (step 26). Branch `release/v0.3.3`; the Docker fix of PR #18 ships with it.
+
+Goal of v0.3.3, measured on the live installation: a server left sealed after an update, a
+certificate that nobody renews, an agent that stops reporting and a failed deployment each produce
+**one** e-mail and webhook call – without anyone opening the dashboard – and a second message when
+the problem is gone.
+
+### 9.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 22 | 0.3.3 | **Alert evaluation.** A job every minute evaluates the rules of §9.2 against `pki.db` and the keyring and keeps the result in `alerts` (`system.db`, migration 0014): one row per condition with a stable key (kind + subject), severity, `first_seen_at`, `last_seen_at`, `resolved_at`. Reading works while sealed; nothing is decrypted. The dashboard's "Needs attention" stays, and its new first block lists the open alerts. | Fake-clock tests per rule: opens at the threshold, raises warning → critical, resolves when fixed (renewed, unsealed, agent back), never duplicates; a superseded certificate and an agent identity certificate never alert; a sealed server opens `sealed` after 10 minutes and `critical` when a CRL's next update is less than 24 hours away. |
+| 23 | 0.3.3 | **Notifications.** Channels come from the configuration (`notify.email`, `notify.webhook`; §9.3), never from the database, so they work while sealed. After each evaluation one **digest** per channel lists what opened, rose, was reminded (every 24 hours while open) or resolved. Queue `notifications` (`system.db`, same migration) with retries 1 min, 5 min, 30 min, 2 h, then dropped and logged. `myownpki notify test` sends a test message from the command line with the server's configuration. | A local SMTP server and webhook receiver in tests: STARTTLS and implicit TLS, no authentication over plain text, HMAC header matches the body, retry schedule with a fake clock, one digest for many alerts, no message when nothing changed. Password and secret never appear in logs, errors, the queue or `config check`. |
+| 24 | 0.3.3 | **Alerts in UI and REST.** Page *Alerts* (open and resolved in the last 7 days), dashboard block, `GET /api/v1/alerts` (viewer and up, `api/openapi.yaml` first), `POST /api/v1/notifications/test` (admin, audited). `config check` shows the channels and the thresholds. *Built:* tenant-wide role needed to read (a role limited to one CA gets 403, the alerts name the whole tenant); the test needs the tenant role admin (permission `notification.test`), no step-up because it changes nothing, at most one every 10 seconds, audit action `notification.test` with the result per channel (never a secret; error texts may name hosts, file paths and recipient addresses); the page's button is a plain POST form that ends in 303 on the page, like every action of the UI (htmx is not shipped yet); a missing, unreadable or empty secret or CA file fails `config check` (exit 1), no channel only warns. | Handler and contract tests, roles (viewer reads, only admin sends the test), audit entry for the test; `config check` names a missing secret file and an unreadable one. |
+| 25 | 0.3.3 | **Docs and release.** OPERATIONS chapter "Monitoring and notifications" (setup, a test, what each alert means and what to do), CHANGELOG 0.3.3, version bump. *Built:* OPERATIONS chapter 13 (setup for e-mail, webhook and the container image, the test, every alert with what to do, retries and the log lines to watch, troubleshooting, an end-to-end check), the 0.3.3 CHANGELOG section with upgrade notes, and the version bump as in v0.3.2 (`DEFAULT_VERSION` of both install scripts, the install, cosign and Compose examples in README, OPERATIONS and RELEASING, the version test of the agent installer); live test by the owner pending. | `task check`, Linux CI including the image job, live test on the owner's installation: seal → message after 10 minutes, unseal → resolved. |
+| 26 | 0.3.4 | **TLS scan** (§3 step 12, Q8): endpoints entered by an admin and the deployments agents report; served leaf vs. the newest issued certificate for that name, expiry, chain; alert `scan_mismatch`. SSRF rules as for http-01, ports from the endpoint list only; **no automatic scan of every SAN**. | Test servers serving the right, an old and a foreign certificate; a private address outside the domain policy is refused. |
+
+### 9.2 Rules and defaults (Q7, Q8)
+
+| Alert | Opens when | Warning | Critical |
+|---|---|---|---|
+| `cert_expiry` | a valid end-entity certificate expires and is **not superseded** – no valid, unrevoked certificate with the same normalized name set ends later. Agent identity certificates never count | ≤ 14 days left | ≤ 3 days left |
+| `ca_expiry` | the current certificate of an active CA expires (the dashboard's existing 90 days) | ≤ 90 days | ≤ 30 days or expired |
+| `crl` | a CRL is not current (the dashboard's existing CRL states) | stale | expired |
+| `sealed` | the server is sealed (since start or the last seal) | after 10 minutes | when a CRL's next update is less than 24 hours away – a sealed server can't sign a new one |
+| `agent_silent` | an active agent has not reported | after 1 hour | after 24 hours |
+| `agent_certificate` | an active agent's own certificate was not renewed | – | < 48 hours left (as on the dashboard today) |
+| `deploy_failed` | the last report of a deployment is `failed` or `rolled_back` | always | – |
+
+- **Thresholds** are configuration (`monitor:`), so an operator can change them without a release.
+  Allowed: expiry days 1–90 with critical below warning, `sealed_after` 1–60 minutes,
+  `agent_silent_after` 10 minutes–24 hours, `repeat_every` 1–168 hours.
+- **Digest instead of one message per alert:** a CA with 40 expiring certificates produces one
+  message, not 40. A message is sent only when something opened, rose, resolved or is due for its
+  reminder.
+- **Q8:** no automatic scan of names from issued certificates – the server would connect to hosts
+  nobody asked it to check. Only endpoints an admin enters or an agent reports (v0.3.4).
+
+### 9.3 Notification channels
+
+```yaml
+notify:
+  email:
+    smtp: mail.homelab.lan:587       # host:port
+    security: starttls               # starttls | tls | none (none: only without username)
+    username: pki@homelab.lan        # optional
+    password_file: /etc/myownpki/smtp-password   # optional, read at each send
+    from: pki@homelab.lan
+    to: ops@homelab.lan, lead@homelab.lan   # comma-separated
+    ca_file: /etc/myownpki/mail-ca.pem          # optional extra roots, e.g. this PKI's root
+  webhook:
+    url: https://hooks.homelab.lan/myownpki
+    secret_file: /etc/myownpki/webhook-secret    # HMAC-SHA256 key, required
+    ca_file: /etc/myownpki/hooks-ca.pem          # optional extra roots
+```
+
+- **Why the configuration and not the database** (a change to the §1.2 draft): the most important
+  alert is "sealed", and a sealed server can't decrypt a DEK-encrypted SMTP password. Secrets live in
+  files next to `tls_key_file` and `auth.key_file`, readable by the service user only; the
+  configuration holds the path. Environment variables `MYOWNPKI_NOTIFY_*` as for every other key.
+- **Webhook:** `POST` JSON (`{"server": …, "created": …, "events": [{kind, subject, severity, state, since, detail, link}]}`,
+  state `opened`, `raised`, `reminder`, `resolved` or `test`), header `X-MyOwnPKI-Signature: sha256=<hex HMAC of the body>`, 10 s timeout, no redirects, TLS
+  against the system roots plus `ca_file`. The URL is the operator's, so the http-01 SSRF rules do
+  not apply; it must be `https`, except `http` to a loopback address. The standard proxy variables
+  (`HTTPS_PROXY`, `NO_PROXY`) apply.
+- **E-mail:** plain-text, one message per digest, subject `[MyOwnPKI] pki01: 2 new, 1 resolved`; links
+  point to the first name of `admin.tls_names` and the port of `admin.listen` (no link without
+  `tls_names`). Standard library `net/smtp` – no new dependency.
+- **Neither channel configured:** alerts still open and show in the UI; `config check` and the
+  dashboard say that nobody is notified.
+
+### 9.4 Not in v0.3.3
+
+The TLS scan (v0.3.4), notification settings in the UI, per-user subscriptions, more channels
+(Slack, Teams, ntfy – the webhook covers them through a relay), and silencing single alerts.

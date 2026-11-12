@@ -412,8 +412,8 @@ func TestSealWaitsForRunningSignature(t *testing.T) {
 	<-inside
 	go func() { sealed <- e.k.Seal(t.Context(), admin) }()
 	select {
-	case <-sealed:
-		t.Fatal("seal returned while a signature was still running")
+	case serr := <-sealed:
+		t.Fatalf("seal returned (%v) while a signature was still running", serr)
 	case <-time.After(50 * time.Millisecond):
 	}
 	close(release)

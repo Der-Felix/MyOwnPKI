@@ -202,20 +202,36 @@ func servedSerial(ctx context.Context, client *http.Client, url string) (string,
 	return resp.TLS.PeerCertificates[0].SerialNumber.Text(16), nil
 }
 
-func waitServedSerial(t *testing.T, client *http.Client, url, previous string, within time.Duration) string {
+// serveCeiling bounds every wait for the endpoint's certificate. A healthy run
+// ends as soon as the serial changes (about a second on an idle machine, a few
+// seconds when the CPUs are busy: ACME issuance, key generation and Argon2
+// are CPU-bound, and lego sleeps real time between its status polls), so the
+// ceiling is reached only when the renewal path is broken.
+const serveCeiling = 60 * time.Second
+
+// waitServedSerial polls the endpoint every 25 ms until it presents a serial
+// other than previous, and fails the test after serveCeiling.
+func waitServedSerial(t *testing.T, client *http.Client, url, previous string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), within)
+	ctx, cancel := context.WithTimeout(t.Context(), serveCeiling)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
+	var lastSerial string
+	var lastErr error
 	for {
 		serial, err := servedSerial(ctx, client, url)
 		if err == nil && serial != previous {
 			return serial
 		}
+		if err == nil {
+			lastSerial = serial
+		} else if ctx.Err() == nil {
+			lastErr = err // the poll cut short by the deadline says nothing
+		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("certificate did not change within %s: %v", within, err)
+			t.Fatalf("certificate did not change from %q within %s (last serial seen %q, last error: %v)", previous, serveCeiling, lastSerial, lastErr)
 		case <-ticker.C:
 		}
 	}
@@ -283,15 +299,15 @@ func TestRenewNowOverRESTServesNewCertificate(t *testing.T) {
 			if runErr != nil {
 				t.Errorf("agent run: %v", runErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveCeiling / 2):
 			t.Error("agent did not stop")
 		}
 	})
-	endpointClient := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, TLSClientConfig: &tls.Config{
+	endpointClient := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, TLSClientConfig: &tls.Config{
 		RootCAs: e.root, ServerName: "proxy1.homelab.lan", MinVersion: tls.VersionTLS12,
 	}}}
 	endpointURL := "https://" + ln.Addr().String()
-	first := waitServedSerial(t, endpointClient, endpointURL, "", 30*time.Second)
+	first := waitServedSerial(t, endpointClient, endpointURL, "")
 
 	access := readDemoAccess(t, e.srv.opt.Config.DataDir)
 	adminRoots := x509.NewCertPool()
@@ -300,7 +316,7 @@ func TestRenewNowOverRESTServesNewCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminClient := &http.Client{Timeout: 5 * time.Second, Jar: jar, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	adminClient := &http.Client{Timeout: 30 * time.Second, Jar: jar, Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		RootCAs: adminRoots, MinVersion: tls.VersionTLS12,
 	}}}
 	adminBase := "https://" + e.srv.AdminAddr() + "/api/v1"
@@ -351,7 +367,7 @@ func TestRenewNowOverRESTServesNewCertificate(t *testing.T) {
 	if status, body, err := api(http.MethodPost, "/agents/"+res.AgentID+"/deployments/proxy/renew", map[string]any{}); err != nil || status != http.StatusAccepted {
 		t.Fatalf("renew now over REST: %d, %v: %s", status, err, body)
 	}
-	second := waitServedSerial(t, endpointClient, endpointURL, first, 5*time.Second)
+	second := waitServedSerial(t, endpointClient, endpointURL, first)
 	if second == first {
 		t.Fatal("the endpoint kept the old certificate")
 	}

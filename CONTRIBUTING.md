@@ -56,6 +56,42 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
   binaries and state as root. Without GitHub Actions or this explicit opt-in they are skipped;
   the scripts also refuse to overwrite a pre-existing installation.
 
+## Documentation-only pull requests
+
+A pull request that changes **only** documentation skips the heavy CI jobs (tests, race
+detector, cross-build, conformance, agent end-to-end, install, image); the job `changes`
+(`scripts/ci/changes.sh`) decides. "Documentation" is exactly: `.claude/**`, `docs/**/*.md` and
+`*.md` files in the repository root. Everything else counts as code, including other Markdown
+files such as `presets/README.md` and `assets/brand/README.md`, `.github/**` and `scripts/**`;
+so does an empty or unreadable diff. Skipped jobs show as skipped, which counts as success for
+branch protection, and `vuln` always runs. Pushes to `main` and the daily schedule are never
+reduced. To force a full run on any branch, start the CI workflow by hand
+(*Actions → CI → Run workflow*, `workflow_dispatch`).
+
+## Documentation site
+
+The guides at <https://der-felix.github.io/MyOwnPKI/> are built from `site/` and deployed to GitHub Pages.
+
+- **Source.** Markdown pages in `site/`, one small Jekyll layout (`site/_layouts/default.html`), the
+  configuration `site/_config.yml`, one style sheet `site/assets/site.css` and the navigation
+  `site/_data/nav.yml`. There is no theme, no plugin of ours, no JavaScript, no web font and nothing
+  loaded from other hosts. Links go through the `relative_url` filter; the examples use only
+  `homelab.lan`, `192.0.2.x`, `pki.homelab.lan` and `minion-01.homelab.lan`, never real names,
+  addresses or secrets.
+- **One source of truth.** The operations guide, the release notes and the example configuration are not
+  copied by hand. `scripts/ci/site-prepare.sh` generates `site/reference/` and `site/_data/release.yml`
+  from `docs/OPERATIONS.md`, `CHANGELOG.md` and `deploy/config.example.yaml` (not committed, see
+  `.gitignore`) and rewrites their relative links. Edit those files, not a copy.
+- **Build.** `.github/workflows/pages.yml` runs on changes to these files. A pull request runs only the
+  `build` job: the self-tests of the scripts, the generation, `scripts/ci/site-check.sh` (every link and
+  anchor of the sources), GitHub's Jekyll action and a check of the built HTML. On `main` the `deploy`
+  job publishes the result; it is the only job with `pages: write`. Only GitHub's own actions are used,
+  pinned to a commit SHA.
+- **Preview.** There is no local Jekyll. Push the branch, open a pull request and read the `build` job.
+  `task ci:local -- --only pages` runs the part that needs only bash and awk: the generation and the
+  link check.
+- GitHub Pages is switched on once by the owner (*Settings → Pages → Source: GitHub Actions*).
+
 ## Commits and pull requests
 
 - [Conventional Commits](https://www.conventionalcommits.org/) in English, for example
