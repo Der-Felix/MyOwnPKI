@@ -7,6 +7,110 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.5]
+
+Host onboarding: a new host goes from its name to a deployed certificate with an *Add host* assistant,
+`myownpki-agent deployment add` writes `agent.yaml` and the systemd sandbox in one step, an enrollment
+pass lets Salt, Ansible or a script enroll many hosts without a click per host, and the documentation
+carries recipes for nginx, Postfix, Dovecot and Proxmox VE. The live test by the owner is pending.
+
+### Added
+
+- **`myownpki-agent deployment add NAME`, `list` and `remove NAME`:** `add` writes a deployment into
+  `agent.yaml` and the matching entries into the systemd drop-ins in one step, instead of two hand edits
+  that showed up only as `Read-only file system` after the first failed renewal. It checks the result
+  with the loader of `run` and `config check` before it writes a byte, refuses a name that exists and the
+  system directories (`/`, `/etc`, `/usr`, `/var`, `/home` and others) as `--dir`, `--webroot` or
+  `--sandbox-write`, keeps comments and the previous file (`agent.yaml.bak`), writes the drop-ins first so
+  that a crash never leaves a missing entry, runs `daemon-reload` and prints the restart command
+  (`--restart` does it; the agent is never restarted by surprise). `--dry-run` prints a diff of
+  `agent.yaml` and both drop-ins and writes nothing. `list` prints the deployments (no root needed);
+  `remove` takes one out again, keeps `paths` unless `--prune-paths`, and never touches deployed files or
+  state. All except `list` need root, also with `--dry-run`, and agent 0.3.5.
+- **The sandbox model and `sandbox sync`:** `agent.yaml` gets an optional `sandbox:` block
+  (`write: [dirs]` for directories only hooks write, such as `/var/log/nginx`, and `low_ports`). The
+  drop-ins `10-paths.conf` and `20-low-ports.conf` are derived from `agent.yaml` by one piece of code that
+  `setup`, `deployment add|remove` and `sandbox sync [--dry-run] [--adopt|--prune]` share. `sandbox sync`
+  is what a configuration tool runs after it has rendered the file; `config check` prints the effective
+  sandbox, whether the drop-ins match and warnings for system directories. `setup --acme-directory URL`
+  writes the ACME directory into a new `agent.yaml`, so that the first deployment needs no hand edit.
+- **Recipes:** `deployment add --recipe nginx|postfix|dovecot|proxmox` fills files, owner, key mode,
+  hooks, the local TLS check and the sandbox directories; every explicit flag wins. The **nginx** recipe
+  rests on a setup the end-to-end tests run. **Postfix, Dovecot and Proxmox VE are unverified examples,
+  written from the documentation of each service and not yet run on a live host:** `deployment add` says
+  so and lists what to verify, and the documentation says to try them on a non-production host first.
+  The Proxmox recipe does not write into `/etc/pve`; `pvenode cert set` installs the files.
+- **Enrollment pass:** one secret (`mjp_…`) that lets 2 to 25 hosts (default 10) enroll without a person
+  looking at each one. An admin creates it with the second factor (*Agents → Join tokens → New enrollment
+  pass*): a required label, 1 to 5 names or `*.suffix` patterns that a domain must cover, up to 7 days
+  (default 24 hours). It is shown once; the server keeps the hash. A pass admits a host only after the
+  server's http-01 check of that host passed (in `verified` and `auto`, never in `manual`), grants the
+  host **its own name only**, and is refused for a host that already has an agent; every enrollment that
+  presents it takes a use, also when it then waits in the queue. When the pass does not count, the host
+  waits in the queue and `setup` prints why (`the enrollment pass has no uses left (10 of 10) – ask an
+  admin for a new one`, `the pass expired`, `the pass was revoked`, `the pass is not for …`, `an agent for
+  … exists – a pass admits new hosts only`). The list shows `active 3 of 10`, `used up`, `expired` or
+  `revoked`, the hosts each pass admitted, and a *Revoke* button; revoking ends use at once and leaves the
+  hosts as they are. Automation uses it with `setup --token-file` and reads the result with a viewer API
+  token. `pki.db` migration 0019 (additive).
+- **Enrollment pass in REST:** `POST /api/v1/agent-join-tokens` takes `kind` (`token` or `pass`) and
+  `max_uses`; the join token schemas gain `kind`, `max_uses`, `use_count`, `state`, `revoked_at`,
+  `revoked_by` and the `hosts` a pass admitted; new `POST /api/v1/agent-join-tokens/{joinTokenId}/revoke`
+  (admin, second factor; `409` for one that cannot admit anybody any more); `DELETE` withdraws only a
+  token or pass nobody used. **No API token can create or revoke a pass or a join token, whatever its
+  role** (`403`; tests pin this for every role); give automation a viewer token. A pass without a label, with more than five names or for a name no
+  domain covers is `422`; `valid_hours` above 168 for a pass and `max_uses` outside 2 to 25 are `400`.
+  Audit actions `agent.token.create` (kind, uses, names, expiry) and the new `agent.token.revoke`; every
+  `agent.enroll` entry names the token, its kind and the use (`3 of 10`), and the reason when it did not
+  count. The secret is in no entry and no log line.
+- **Add host assistant:** *Agents → Add host* (`/hosts/add`, in the menu and as a button on the agent
+  list). Step 1 asks host name, service (nginx, Postfix, Dovecot, Proxmox VE, *certificate files only*),
+  challenge and webroot, up to four more names and the package; step 2 checks the names against your
+  domains and offers the three ways to be admitted with the approval each one still needs (a single-use
+  token for this host, an existing pass that covers it, or no secret); the commands appear once, never
+  cached and never in a URL: the token file, the verified root and package download, `setup`, the
+  `deployment add` block and `deployment list`. The progress page `/hosts/add/<host>` follows the host
+  and reloads itself every 10 seconds until the agent is online and every deployment is deployed:
+  *Host enrolled* (waiting for the host, checking, waiting for your approval with *Approve* and *Refuse*
+  for an admin, refused, expired, admitted), *Agent online* and one row per deployment (pending, deployed
+  with serial and expiry, failed or rolled back with the agent's last error, shortened and shown as
+  text). Viewers and operators can open it and get the commands for *no secret* or a pass; the token and
+  the approval need an admin with a fresh second factor. *Agents → Install agent* is unchanged.
+- **For scripts:** `GET /api/v1/agents` and `GET /api/v1/agent-enrollments` take `?hostname=` (exactly
+  that host name), and the new `GET /api/v1/agent-install` (viewer) returns the facts for installing the
+  agent without a browser: server URL, ACME directory, the root with its SHA-256 and the package files
+  with theirs (`404` while the server has no packages).
+- **Documentation:** operations guide §12.7 *Adding a host*, §12.8 *Enrollment passes* and §12.9
+  *Recipes*, and an upgrade paragraph; the site has the page *Recipes* and rewritten pages for adding
+  hosts and the Salt flow, which now uses an enrollment pass (the Salt formula is still planned for
+  v0.3.6, and the page marks its sketch as an example to adapt).
+
+### Changed
+
+- **The systemd drop-ins come from one model (behavior change of `setup`):** `10-paths.conf` is no
+  longer rewritten from `state_dir` and `paths` alone. See *Fixed* for what an operator sees after the
+  update; `setup` on an existing host now reports `Kept in 10-paths.conf …` and `Added to 10-paths.conf: …`.
+- The agent list has an *Add host* button next to *Install agent*, and *Join tokens* is now one page for
+  tokens and passes. The generic detail and form pages can show wizard steps and reload themselves (the
+  progress page uses a plain `<meta http-equiv="refresh">`; the UI still ships no script for it).
+- `api/openapi.yaml` `info.version` is 0.3.5.
+
+### Fixed
+
+- **`setup` lost the hand-made `/var/log/nginx` entry:** it rewrote `10-paths.conf` from `state_dir` and
+  `paths` on every run, and the *Update agent* commands run `setup`, so the entry that the operations
+  guide tells nginx hosts to add was gone after the next update and `nginx -t` failed with
+  `Read-only file system`. `setup` now keeps entries it cannot explain and says so.
+- **`setup` removed `20-low-ports.conf`:** without `--low-ports` and with webroot enrollment it deleted
+  the drop-in that the nginx hooks need for a listener on port 443. The file is now left as found, and
+  removed only for an explicit `sandbox.low_ports: false`; a file that differs from the packaged one is
+  not overwritten.
+- **A standalone deployment did not count:** only the enrollment's challenge decided about
+  `20-low-ports.conf`; a deployment with `challenge: standalone` failed to bind port 80. Any standalone
+  challenge now installs it.
+- A fresh `agent.yaml` could not hold a deployment, because `acme_directory` is required for one and
+  `setup` wrote none: pass `setup --acme-directory`, or `deployment add --acme-directory`.
+
 ### Security
 
 - **Changing the agent enrollment mode now needs a fresh second factor and is refused for an API
@@ -20,6 +124,27 @@ change the API, the configuration and the database schema; the release notes say
   token too, and so does reading. **Behavior change for scripts:** one that switches the mode through the
   API stops working; change the mode in the UI. The `tenant.settings` audit entry already named the old
   and the new mode.
+- **The enrollment pass is bounded on purpose.** It needs a person with the second factor to create and to
+  revoke (no API token, whatever its role), admits only after a passed http-01 check, grants the host name
+  and not the pattern, never replaces an existing agent, and ends at most 7 days after creation. A leaked
+  pass still admits as many more hosts as it has uses left for names that match; the documentation says
+  to keep it short, small and out of the pillar after the roll-out, and what to do if it leaks.
+
+### Upgrade notes
+
+- `pki.db` migration 0019 is additive: existing join tokens stay single-use tokens (a used one counts
+  as one use), and no certificate, agent or enrollment changes. A restart leaves the server sealed, as
+  always. Update the server first.
+- Agents of 0.3.4 keep reporting and nothing changes on them. `deployment`, `sandbox sync`,
+  `setup --acme-directory` and the `sandbox:` key need the 0.3.5 agent; **run `setup` once on every
+  existing agent** (*Agents → Update*) to get the fixes above: a hand-made `/var/log/nginx` in
+  `10-paths.conf` and an installed `20-low-ports.conf` stay. `myownpki-agent sandbox sync --adopt` turns
+  the kept entries into `sandbox.write`.
+- A script that sets `agent_enrollment` through `PUT /api/v1/settings` now gets `403`; change the mode in
+  the UI.
+- Going back to 0.3.4 means restoring the backup from before the update, because 0.3.4 refuses the newer
+  `pki.db`, and a 0.3.4 agent binary refuses an `agent.yaml` with a `sandbox:` block (remove the block
+  first).
 
 ## [0.3.4] - 2026-11-12
 
@@ -587,7 +712,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...v0.3.2
