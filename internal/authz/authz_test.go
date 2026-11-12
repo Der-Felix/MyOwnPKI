@@ -16,11 +16,11 @@ func user(bindings ...Binding) *Principal {
 // deliberate edit here as well.
 func TestRoleMatrix(t *testing.T) {
 	t.Parallel()
-	all := []Permission{ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, TestNotify, ManageEndpoints, ScanEndpoint, Unseal, ManageUsers}
+	all := []Permission{ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, EnrollMode, TestNotify, ManageEndpoints, ScanEndpoint, Unseal, ManageUsers}
 	want := map[Role][]Permission{
 		Viewer:   {ReadPKI},
 		Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, ScanEndpoint},
-		Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, TestNotify, ManageEndpoints, ScanEndpoint},
+		Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, EnrollMode, TestNotify, ManageEndpoints, ScanEndpoint},
 	}
 	res := Resource{Tenant: "default", CA: "issuing"}
 	for _, role := range Roles {
@@ -102,7 +102,10 @@ func TestStepUp(t *testing.T) {
 		{now.Add(StepUpWindow), RevokeCert, true},
 		{now.Add(StepUpWindow + time.Second), RevokeCert, false},
 		{now.Add(-time.Second), RevokeCert, false}, // step-up from the future: clock jump
-		{now.Add(time.Hour), IssueCert, true},      // no step-up needed
+		{now.Add(StepUpWindow + time.Second), EnrollMode, false},
+		{now.Add(StepUpWindow), EnrollMode, true},
+		{now.Add(time.Hour), IssueCert, true},    // no step-up needed
+		{now.Add(time.Hour), ManageTenant, true}, // the other tenant settings need none
 	} {
 		err := p.Check(c.perm, res, c.at)
 		if (err == nil) != c.ok || (err != nil && !errors.Is(err, ErrStepUpRequired)) {

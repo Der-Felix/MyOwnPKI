@@ -575,3 +575,82 @@ func TestStepUpOneTimeSecretAndMultipart(t *testing.T) {
 		}
 	})
 }
+
+// TestEnrollmentModeNeedsStepUpInTheUI: saving the tenant settings with a
+// different agent enrollment mode continues from the step-up page, whose
+// summary names the new mode; the same mode, or any other setting alone,
+// saves at once. The refused save changes nothing, not even the other fields.
+func TestEnrollmentModeNeedsStepUpInTheUI(t *testing.T) {
+	t.Parallel()
+	v := newUIEnv(t)
+	v.Unseal(t)
+	b := v.browser("192.0.2.1")
+	b.signIn(t, "demo", v.DemoPassword)
+	csrf := b.csrf(t)
+	settings := &tenant.Store{DB: v.SystemDB.Read, Clock: v.Clock}
+	mode := func() string {
+		t.Helper()
+		m, err := settings.AgentEnrollment(t.Context(), store.DefaultTenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	save := func(mode, organization string) page {
+		form := url.Values{"csrf_token": {csrf}, "o": {organization}, "acme_orders": {"300"}, "acme_failed": {"5"}, "acme_accounts": {"10"},
+			"agent_predecessor": {"now"}, "other_predecessor": {"after"}, "other_predecessor_days": {"7"}}
+		if mode != "" {
+			form.Set("agent_enrollment", mode)
+		}
+		return b.post(t, "/admin/settings", form)
+	}
+	// Every field the page offers is on the continuation allowlist (a field
+	// missing there answers 400 and the page could not be saved at all).
+	all := url.Values{"csrf_token": {csrf}}
+	for _, m := range regexp.MustCompile(`<(?:input|select)[^>]* name="([^"]+)"`).FindAllStringSubmatch(b.get(t, "/admin/settings").html(), -1) {
+		if m[1] != "q" && m[1] != "csrf_token" {
+			all.Set(m[1], "1")
+		}
+	}
+	if r := b.post(t, "/admin/settings", all); r.Code == http.StatusBadRequest {
+		t.Fatalf("the settings page offers a field the action does not allow: %v", all)
+	}
+	v.Clock.Advance(authz.StepUpWindow + time.Second)
+
+	// Other settings, and the mode as it is, need no second factor.
+	for _, m := range []string{"", "verified"} {
+		if r := save(m, "Homelab"); r.Code != http.StatusSeeOther || r.location() != "/admin/settings" || !strings.Contains(flashOf(t, b, "/admin/settings"), "saved") {
+			t.Fatalf("save with mode %q: %d %q", m, r.Code, r.location())
+		}
+	}
+
+	// A different mode asks for the code and changes nothing until it is given.
+	if r := save("auto", "Changed Org"); r.Code != http.StatusSeeOther || r.location() != "/step-up" {
+		t.Fatalf("change to auto: %d %q", r.Code, r.location())
+	}
+	if mode() != "verified" {
+		t.Fatal("the mode changed before the second factor")
+	}
+	if got, _ := settings.Defaults(t.Context(), store.DefaultTenant); got.Organization != "Homelab" {
+		t.Errorf("another field was saved before the second factor: %q", got.Organization)
+	}
+	if challenge := b.get(t, "/step-up").html(); !strings.Contains(challenge, "Set the agent enrollment mode to auto") {
+		t.Errorf("summary: %s", challenge)
+	}
+	if r := confirmPending(t, b, csrf, "demo"); r.Code != http.StatusSeeOther || r.location() != "/admin/settings" {
+		t.Fatalf("continued save: %d %q %s", r.Code, r.location(), r.html())
+	}
+	if got, _ := settings.Defaults(t.Context(), store.DefaultTenant); mode() != "auto" || got.Organization != "Changed Org" {
+		t.Errorf("after the second factor: mode %q, organization %q", mode(), got.Organization)
+	}
+	v.Deliver(t)
+	count := 0
+	for _, entry := range testinstance.Audit(t, v.InstanceAudit) {
+		if entry == "tenant.settings/success" {
+			count++
+		}
+	}
+	if count != 3 {
+		t.Errorf("settings audit entries: %d, want 3", count)
+	}
+}

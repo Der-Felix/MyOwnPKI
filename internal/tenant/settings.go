@@ -127,7 +127,12 @@ func anyRole(p *authz.Principal, tenant string) bool {
 }
 
 func (s *Store) read(ctx context.Context, tenant string) (*Settings, error) {
-	r, err := systemdb.New(s.DB).GetTenantSettings(ctx, tenant)
+	return readFrom(ctx, systemdb.New(s.DB), tenant)
+}
+
+// readFrom reads through q, which may belong to a transaction.
+func readFrom(ctx context.Context, q *systemdb.Queries, tenant string) (*Settings, error) {
+	r, err := q.GetTenantSettings(ctx, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -204,9 +209,24 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s", ErrInvalid, strings.Join(problems, "; "))
 	}
-	before, err := s.read(ctx, tenant)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Read inside the (immediate) transaction: the check below compares with the
+	// mode this write replaces, not with one another request changed meanwhile.
+	before, err := readFrom(ctx, systemdb.New(tx), tenant)
+	if err != nil {
+		return err
+	}
+	// In auto mode a host that passes the check is admitted without a person, so
+	// the mode weighs as much as approving an enrollment: a fresh second factor,
+	// never an API token. Leaving the mode as it is changes nothing and needs none.
+	if v.AgentEnrollment != nil && *v.AgentEnrollment != *before.AgentEnrollment {
+		if cerr := who.Principal.Check(authz.EnrollMode, authz.Resource{Tenant: tenant}, now); cerr != nil {
+			return cerr
+		}
 	}
 	limits := *before.ACME
 	if v.ACME != nil {
@@ -240,11 +260,6 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 			p.Days = 7
 		}
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	keygen := int64(0)
 	if v.AllowServerKeygen {
 		keygen = 1
