@@ -7,11 +7,13 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.6]
+## [0.3.6] - 2026-11-12
 
 Salt formula: `deploy/salt/myownpki/` installs the agent from a hash-checked package, enrolls it with an
 enrollment pass, adds its deployments and keeps them in step, from one `state.apply myownpki`. The
-server and the agent are unchanged; the live test by the owner is pending.
+server and the agent are unchanged. The maintainer tested it live on five enrolled Debian amd64 hosts: one
+`state.apply myownpki` upgraded the agent from 0.3.2 to 0.3.5, and a second apply changed nothing. The
+enrollment of a new host with a pass, `rpm` hosts and other Salt versions are not tested live.
 
 ### Added
 
@@ -43,6 +45,12 @@ server and the agent are unchanged; the live test by the owner is pending.
 
 ### Changed
 
+- **Container image tag `latest`:** every stable release now also moves `ghcr.io/der-felix/myownpki:latest`
+  (a pre-release gets only its version tag). Production setups should keep pinning the version: `latest`
+  moves with every stable release, and an update of a CA should be a decision. The example
+  `docker-compose.yml` stays pinned.
+- **`low_ports` on enrolled hosts:** a host that already has the systemd drop-in `20-low-ports.conf` needs
+  `low_ports: true` in its pillar. Four of the five hosts of the live test did.
 - **Documentation:** the Salt page is rewritten around the formula (install, minimal and full pillar, the
   first and the second apply, a host waiting for approval, removing the pass, updating, changing or
   removing a deployment, the refusals, what is and is not tested); the operations guide has a new
@@ -51,8 +59,10 @@ server and the agent are unchanged; the live test by the owner is pending.
 
 ### Known limitations
 
-- The formula was **not applied against a real server**: CI renders and applies it with `test=True` only.
-  Other Salt versions than 3008.5 and the installation of an `rpm` package are not tested either. Try it on
+- Tested live only on enrolled Debian amd64 hosts (the upgrade of the agent, and a second apply that changes
+  nothing). **Not tested live:** the enrollment of a new host with an enrollment pass (`setup --token-file`,
+  the removal of the pass file, a host that waits for approval), `rpm` hosts, `arm64`, `config_source` and
+  the gitfs install. CI renders and applies the formula with `test=True` under Salt 3008.5 only. Try it on
   one minion first.
 - A changed option of an existing deployment in the pillar is not applied: the formula adds a deployment
   only when `deployment list` does not show the name. Remove it through `absent` first, or use
