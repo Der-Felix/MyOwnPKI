@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,6 +211,24 @@ func printMonitoring(w io.Writer, cfg config.Config, src config.Source) {
 		{"sealed server", "alert after " + shortDuration(v.SealedAfter) + from("MYOWNPKI_MONITOR_SEALED_AFTER")},
 		{"silent agent", "alert after " + shortDuration(v.AgentSilent) + from("MYOWNPKI_MONITOR_AGENT_SILENT_AFTER")},
 		{"reminder", "every " + shortDuration(v.RepeatEvery) + " while an alert is open" + from("MYOWNPKI_MONITOR_REPEAT_EVERY")},
+	}
+	if sv, serr := cfg.Monitor.Scan(); serr == nil {
+		scan := "off (monitor.scan_interval) – endpoints are kept, nothing connects" + from("MYOWNPKI_MONITOR_SCAN_INTERVAL")
+		if !sv.Off() {
+			scan = "every " + shortDuration(sv.Interval) + ", timeout " + shortDuration(sv.Timeout) +
+				from("MYOWNPKI_MONITOR_SCAN_INTERVAL", "MYOWNPKI_MONITOR_SCAN_TIMEOUT")
+		}
+		ports := make([]string, len(sv.Ports))
+		for i, p := range sv.Ports {
+			ports[i] = strconv.Itoa(p)
+		}
+		limits := fmt.Sprintf("%s, unreachable after %s, mismatch after %s", plural(sv.MaxEndpoints, "endpoint"),
+			plural(sv.UnreachableAfter, "failed scan"), shortDuration(sv.MismatchAfter))
+		rows = append(rows,
+			[2]string{"TLS scan", scan},
+			[2]string{"scan ports", strings.Join(ports, ", ") + from("MYOWNPKI_MONITOR_SCAN_PORTS")},
+			[2]string{"scan limits", limits + from("MYOWNPKI_MONITOR_SCAN_MAX_ENDPOINTS", "MYOWNPKI_MONITOR_SCAN_UNREACHABLE_AFTER", "MYOWNPKI_MONITOR_SCAN_MISMATCH_AFTER")},
+		)
 	}
 	_, _ = fmt.Fprintf(w, "\nAlert thresholds (monitor:)\n")
 	for _, r := range rows {

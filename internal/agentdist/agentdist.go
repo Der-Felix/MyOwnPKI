@@ -20,6 +20,12 @@ const (
 	Checksums      = "checksums.txt"
 	MaxPackageSize = 64 << 20
 	MaxSumsSize    = 1 << 20
+
+	// BinaryPath is where the deb/rpm packages (nFPM bindir) and the tarball
+	// steps install the agent, and what the systemd unit runs. Commands meant
+	// for root call it by this path because root's PATH can lack
+	// /usr/local/bin (seen on Debian 13).
+	BinaryPath = "/usr/local/bin/myownpki-agent"
 )
 
 var (

@@ -134,6 +134,24 @@ monitor:
   agent_silent_after: 1h
   # A reminder for an alert that is still open (1h–168h).
   repeat_every: 24h
+  # The TLS scan (v0.3.4): the server connects to the endpoints an admin enters
+  # (Endpoints), reads the certificate each one serves and compares it with
+  # what this PKI issued. One TLS handshake, no data sent; works while sealed.
+  # How often each endpoint is scanned (5m–24h, or "off" to never connect).
+  scan_interval: 15m
+  # Resolve, connect and handshake of one scan together (2s–30s).
+  scan_timeout: 10s
+  # The only ports an endpoint may have (1–32 ports, TLS from the first byte).
+  # STARTTLS ports (25, 143, 587) are not supported.
+  scan_ports: "443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443"
+  # How many endpoints may be entered (1–500).
+  scan_max_endpoints: 100
+  # Failed scans in a row before "unreachable" is an alert (1–10); a host that
+  # only reboots stays quiet.
+  scan_unreachable_after: 3
+  # An older certificate that is still served is an alert once the newest one
+  # for the name is this old (5m–24h): the time a deployment may take.
+  scan_mismatch_after: 1h
 
 # Notifications (v0.3.3): one message per change – what opened, became
 # critical, is still open after repeat_every, or was resolved. Both channels

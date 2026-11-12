@@ -41,6 +41,12 @@ steps=(
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
+  # Documentation site: the same steps as the build job of .github/workflows/pages.yml
+  # (its Jekyll build and the check of the built HTML run only there).
+  'pages|site-prepare self-test|bash|bash scripts/ci/site-prepare.sh --self-test'
+  'pages|site-check self-test|bash|bash scripts/ci/site-check.sh --self-test'
+  'pages|generate the reference pages|bash|bash scripts/ci/site-prepare.sh'
+  'pages|links and anchors in the site sources|bash|bash scripts/ci/site-check.sh'
 )
 
 only=

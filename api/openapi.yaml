@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.2.0
+  version: 0.3.4
   summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
     v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy
@@ -16,7 +16,8 @@ info:
     - JSON with `snake_case` fields; times are RFC 3339 in UTC; serial numbers and
       fingerprints are upper-case hex without separators.
     - Requests with a body must send `Content-Type: application/json` (otherwise 415); unknown
-      fields and trailing data are refused (400). Bodies are limited to 128 KiB (413).
+      fields and trailing data are refused (400). Bodies are limited to 128 KiB (413), a few
+      operations to less (createEndpoint: 4 KiB).
     - Errors use RFC 9457 `application/problem+json`. Problem `type` values are URNs
       (`urn:myownpki:problem:<name>`), listed in the `Problem` schema. Every response carries
       `X-Request-ID`; problems repeat it as `request_id`.
@@ -79,7 +80,7 @@ tags:
   - name: agents
     description: myownpki-agent – enrollments, join tokens, agents and their names (v0.3)
   - name: monitoring
-    description: Alerts and the test of the notification channels (v0.3.3)
+    description: Alerts, the test of the notification channels (v0.3.3) and the TLS endpoints that are scanned (v0.3.4)
 
 paths:
   # ---------------------------------------------------------------- system
@@ -2339,6 +2340,111 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
+  # ---------------------------------------------------------------- TLS scan
+  /endpoints:
+    get:
+      tags: [monitoring]
+      operationId: listEndpoints
+      summary: List the TLS endpoints with the certificate each one serves
+      description: |
+        The endpoints an admin entered for the TLS scan (docs/PHASE3.md §10), by host and port,
+        each with the state of its last scans: what it serves, whether that is the certificate
+        this PKI issued for the name, and the error of the last failed scan. `state` and
+        `expiry_severity` are what the scan alerts follow. The endpoints name the hosts of the
+        whole tenant, so a role limited to one CA gets 403. Reading works while the server is
+        sealed. `subject` and `issuer` of the served certificate are chosen by the remote host
+        (clipped to 256 bytes, control characters replaced): treat them as untrusted text.
+        `created_by` is only present for roles that may manage endpoints.
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Endpoints
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Endpoint" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [monitoring]
+      operationId: createEndpoint
+      summary: Add a TLS endpoint to scan
+      description: |
+        Makes the server connect to `host:port` to read the certificate it serves (one TCP
+        connection and one TLS handshake per scan, no HTTP request). The host must be a fully
+        qualified DNS name or an IP address that a **domain** of this PKI covers, the domain's
+        address policy applies, and the port must be in `monitor.scan_ports` of the server's
+        configuration (default 443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443).
+        Loopback, link-local, multicast, unspecified and reserved addresses are never scanned.
+        `sni` is optional: a DNS host is its own SNI, an IP host sends none, and the name given
+        here is the one the certificate is expected for. A trailing dot is dropped and the name
+        lower-cased. Refusals are 422 with the field and the rule, never an address that was
+        resolved. At most `monitor.scan_max_endpoints` (default 100) endpoints (409). The
+        body is limited to 4 KiB (413). Audited (`endpoint.create`), refusals too. Needs no
+        step-up: it grants no trust and changes no certificate.
+      x-required-role: admin
+      requestBody:
+        description: "Host, port and an optional SNI"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EndpointCreate" }
+      responses:
+        "201":
+          description: Added; the first scan follows within a minute
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Endpoint" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+
+  /endpoints/{endpointId}:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    delete:
+      tags: [monitoring]
+      operationId: deleteEndpoint
+      summary: Remove a TLS endpoint
+      description: |
+        The scans stop and the alerts of the endpoint resolve with the next evaluation (within
+        a minute). Audited (`endpoint.delete`). Needs no step-up.
+      x-required-role: admin
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /endpoints/{endpointId}/scan:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    post:
+      tags: [monitoring]
+      operationId: scanEndpoint
+      summary: Scan an endpoint now
+      description: |
+        Makes the endpoint due at once; the scan runs in the background and the answer does not
+        wait for it (read the result with `GET /endpoints`). Once per endpoint and 60 seconds:
+        sooner is 429 with `Retry-After`. Scanning an endpoint that is already entered adds no
+        new target, so the operator role is enough. 409 while scanning is switched off
+        (`monitor.scan_interval: off`). Audited (`endpoint.scan`). Needs no step-up.
+      x-required-role: operator
+      responses:
+        "202": { description: Queued }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
 components:
   securitySchemes:
     session:
@@ -2404,6 +2510,13 @@ components:
     JoinTokenId:
       description: "ID of the join token"
       name: joinTokenId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+
+    EndpointId:
+      description: "ID of the TLS endpoint"
+      name: endpointId
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
@@ -3016,7 +3129,7 @@ components:
         used_by: { type: string }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
-        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent enroll --token-file" }
+        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent setup --token-file" }
 
     TenantSettings:
       description: "Settings of the tenant"
@@ -3829,7 +3942,11 @@ components:
           type: string
           description: |
             What was found: `cert_expiry`, `ca_expiry`, `crl`, `sealed`, `agent_silent`,
-            `agent_certificate`, `deploy_failed`. Later releases may add kinds.
+            `agent_certificate`, `deploy_failed`, and from v0.3.4 the TLS scan kinds
+            `scan_mismatch` (an endpoint serves another certificate than the one issued for its
+            name), `scan_expiry` (the served certificate ends soon), `scan_unreachable` (the
+            endpoint did not answer several scans) and `scan_chain` (the served chain is
+            incomplete or does not lead to this PKI). Later releases may add kinds.
           examples: ["cert_expiry"]
         subject: { type: string, description: "What it is about, for display (a name, a CA, a host)" }
         severity: { type: string, enum: [warning, critical] }
@@ -3839,6 +3956,97 @@ components:
         resolved_at: { type: [string, "null"], format: date-time, description: "Null while open" }
         detail: { type: string, description: "One sentence: what and what to do" }
         href: { type: string, description: "Path of the affected object in the web UI; empty for none" }
+
+    EndpointCreate:
+      description: "A TLS endpoint to scan (docs/PHASE3.md §10.2); every field is untrusted input"
+      type: object
+      required: [host, port]
+      additionalProperties: false
+      properties:
+        host:
+          description: "A fully qualified DNS name or an IP address (IPv6 without brackets), covered by a domain of this PKI"
+          type: string
+          maxLength: 512
+          examples: ["proxy.homelab.lan"]
+        port:
+          description: "One of the server's monitor.scan_ports"
+          type: integer
+          examples: [443]
+        sni:
+          description: "The name to send as SNI and to expect the certificate for; empty = the host (an IP host sends none)"
+          type: string
+          maxLength: 512
+
+    Endpoint:
+      description: "A TLS endpoint with what its last scans found (docs/PHASE3.md §10.2)"
+      type: object
+      required: [id, host, port, sni, name, source, created_at, state, expiry_severity, next_scan_at, last_scan_at, last_ok_at, fail_streak, last_error_kind, served]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        host: { type: string, description: "Lower case, no trailing dot" }
+        port: { type: integer }
+        sni: { type: [string, "null"], description: "Null = the host" }
+        name: { type: string, description: "The name the certificate is expected for: the SNI, else the host" }
+        source: { type: string, enum: [manual, agent], description: "`agent` is reserved; nothing writes it yet" }
+        created_at: { type: string, format: date-time }
+        created_by:
+          type: string
+          description: "Who added it. Present only for roles that may manage endpoints (admin); viewers and operators do not get the field"
+        state:
+          type: string
+          enum: [pending, ok, unmanaged, older, foreign, wrong_name, revoked, chain, unreachable, refused]
+          description: |
+            `pending`: not scanned yet. `ok`: the served certificate is the one issued for the
+            name and its chain is trusted. `unmanaged`: nothing was issued for the name by this
+            PKI and the served certificate is not one of its own (no alert). `older`: a valid
+            but superseded certificate of this PKI is served. `foreign`: the name has a
+            certificate here, but another CA's is served. `wrong_name`: a certificate of this
+            PKI that does not cover the name. `revoked`: a revoked certificate of this PKI.
+            `chain`: the right certificate with an incomplete or untrusted chain.
+            `unreachable`: the last scans failed. `refused`: no domain covers the host any more,
+            or the address policy or the port list refuses it (not an outage).
+        expiry_severity:
+          type: [string, "null"]
+          enum: [warning, critical, null]
+          description: "Set while the served certificate ends within the monitor.expiry_days thresholds, or has ended; null otherwise"
+        next_scan_at: { type: string, format: date-time }
+        last_scan_at: { type: [string, "null"], format: date-time, description: "Null before the first scan" }
+        last_ok_at: { type: [string, "null"], format: date-time, description: "The last scan that got a certificate" }
+        fail_streak: { type: integer, description: "Failed scans in a row" }
+        last_error_kind:
+          type: [string, "null"]
+          enum: [dns, "timed out", "connection refused", "could not connect", "TLS handshake failed", "no certificate", "client certificate required", "refused by the address policy", "no domain covers the host", "port is not in monitor.scan_ports", null]
+          description: "Why the last scan failed, from a fixed vocabulary – never what the remote host said; null when the last scan worked"
+        served:
+          description: "The certificate the endpoint served at the last good scan (it stays while scans fail); null before the first one"
+          oneOf:
+            - $ref: "#/components/schemas/EndpointServed"
+            - type: "null"
+
+    EndpointServed:
+      description: "Metadata of the served leaf certificate. Subject and issuer are chosen by the remote host: untrusted text"
+      type: object
+      required: [fingerprint, certificate_id, serial, subject, issuer, not_before, not_after, chain_len, chain_state, tls_version, seen_count, seen_since]
+      additionalProperties: false
+      properties:
+        fingerprint: { type: string, description: "SHA-256 of the certificate, upper-case hex" }
+        certificate_id:
+          type: [string, "null"]
+          description: "The certificate of this PKI with that fingerprint; null if this PKI did not issue it"
+        serial: { type: string, description: "Upper-case hex" }
+        subject: { type: string, description: "Clipped to 256 bytes, control characters replaced" }
+        issuer: { type: string, description: "Clipped to 256 bytes, control characters replaced" }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+        chain_len: { type: integer, description: "Certificates the endpoint sent" }
+        chain_state:
+          type: string
+          enum: [trusted, incomplete, untrusted]
+          description: "Verified against the CAs of this PKI: `incomplete` leads there only with this PKI's own intermediates (the endpoint forgot to send them)"
+        tls_version: { type: string, examples: ["TLS 1.3"] }
+        seen_count: { type: integer, description: "Successful scans in a row that saw this fingerprint" }
+        seen_since: { type: [string, "null"], format: date-time, description: "Since when this fingerprint is served" }
 
     NotificationTestResult:
       description: "The result of the test message, one entry per configured channel"

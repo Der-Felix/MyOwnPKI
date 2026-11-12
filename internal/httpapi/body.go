@@ -34,7 +34,11 @@ func (c *call) decode(v any) error {
 	data, err := io.ReadAll(c.r.Body)
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		return &bodyError{status: http.StatusRequestEntityTooLarge, kind: "too-large", msg: fmt.Sprintf("the body is larger than %d KiB", MaxBody>>10)}
+		limit := c.limit
+		if limit <= 0 {
+			limit = MaxBody
+		}
+		return &bodyError{status: http.StatusRequestEntityTooLarge, kind: "too-large", msg: fmt.Sprintf("the body is larger than %d KiB", limit>>10)}
 	}
 	if err != nil {
 		return badRequest("", "the body can't be read")

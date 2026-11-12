@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
+	"github.com/Der-Felix/MyOwnPKI/internal/tlsscan"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
 )
 
@@ -20,6 +22,7 @@ import (
 const (
 	jobMonitor      = "monitor"
 	jobMonitorPrune = "monitor-prune"
+	jobScan         = "tls-scan" // only dispatches: the scans run in the scanner's own workers
 	monitorEvery    = time.Minute
 	// Resolved alerts are kept this long for the UI and the API.
 	monitorKeep = 30 * 24 * time.Hour
@@ -29,11 +32,19 @@ var monitorWho = keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "mon
 
 // monitorSide evaluates the alert rules and keeps the alerts.
 type monitorSide struct {
-	eval   *monitor.Evaluator
-	store  *monitor.Store
-	queue  *notify.Queue
-	digest monitor.DigestOptions
-	tester *notify.Tester // the test message of the UI and the API
+	eval      *monitor.Evaluator
+	store     *monitor.Store
+	queue     *notify.Queue
+	digest    monitor.DigestOptions
+	tester    *notify.Tester     // the test message of the UI and the API
+	endpoints *monitor.Endpoints // the TLS endpoints of the UI and the API
+}
+
+// scanSide is the TLS scan (docs/PHASE3.md §10): the endpoints and the pool
+// that scans them.
+type scanSide struct {
+	svc     *tlsscan.Service
+	scanner *tlsscan.Scanner
 }
 
 // buildMonitor wires the evaluation; the configuration was validated, so
@@ -52,6 +63,11 @@ func (s *Server) buildMonitor() error {
 		rules.AgentSilentCrit = v.AgentSilent
 	}
 	rules.RepeatEvery = v.RepeatEvery
+	sv, err := s.buildScan()
+	if err != nil {
+		return err
+	}
+	rules.ScanUnreachableAfter, rules.ScanMismatchAfter = sv.UnreachableAfter, sv.MismatchAfter
 	m := &monitorSide{
 		eval:  &monitor.Evaluator{Engine: s.engine, Seal: s.ring.Status, Rules: rules, Who: monitorWho},
 		store: &monitor.Store{DB: s.sys.Write, Tenant: store.DefaultTenant},
@@ -59,6 +75,8 @@ func (s *Server) buildMonitor() error {
 	if a := s.Agents(); a != nil {
 		m.eval.Agents = a
 	}
+	m.eval.Scan, m.eval.ScanOff = s.scan.svc, sv.Off()
+	m.endpoints = &monitor.Endpoints{Service: s.scan.svc, Eval: m.eval, Clock: s.clk}
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
 	m.tester = &notify.Tester{Channels: m.queue.Channels, Server: s.opt.Hostname, Clock: s.clk, Audit: s.engine.Audit, Scope: s.engine.Scope, Tenant: store.DefaultTenant}
@@ -179,4 +197,71 @@ func (s *Server) notifier() web.NotifyTester {
 		return nil
 	}
 	return s.monitor.tester
+}
+
+// buildScan wires the TLS scan: the endpoint service and the scanner. The
+// job only dispatches; the scans run in the scanner's workers, so the
+// scheduler (one goroutine for all jobs) is never held up by a slow host.
+// With monitor.scan_interval: off endpoints can still be entered and
+// removed, but nothing connects.
+func (s *Server) buildScan() (config.ScanValues, error) {
+	cfg := s.opt.Config
+	sv, err := cfg.Monitor.Scan()
+	if err != nil {
+		return sv, err
+	}
+	resolver, err := config.ACMEResolver(cfg.ACME.Resolver)
+	if err != nil {
+		return sv, fmt.Errorf("acme.resolver: %w", err)
+	}
+	svc := &tlsscan.Service{
+		PKI: s.pki.Write, Tenant: store.DefaultTenant, Engine: s.engine, Clock: s.clk, Wake: s.wakeUp,
+		Settings: tlsscan.Settings{Interval: sv.Interval, Timeout: sv.Timeout, Ports: sv.Ports, MaxEndpoints: sv.MaxEndpoints},
+	}
+	scanner := &tlsscan.Scanner{Svc: svc, Engine: s.engine, Clock: s.clk, Log: s.log, Resolver: resolver}
+	svc.Kick = scanner.Kick
+	s.scan = &scanSide{svc: svc, scanner: scanner}
+	if sv.Off() {
+		s.log.Info("TLS scan is off (monitor.scan_interval: off) – the server connects to no endpoint")
+		return sv, nil
+	}
+	s.jobs.add(jobScan, tlsscan.DispatchEvery, tlsscan.DispatchEvery, scanner.Dispatch)
+	return sv, nil
+}
+
+// Endpoints is the TLS scan endpoint service for the UI and the API.
+func (s *Server) Endpoints() *tlsscan.Service {
+	if s.scan == nil {
+		return nil
+	}
+	return s.scan.svc
+}
+
+// EndpointStates is every TLS endpoint with its assessed state – the same
+// one the scan alerts follow – for the page and the API. It reads the
+// certificates like the evaluation does; nothing is changed. Without
+// monitoring it returns nothing.
+func (s *Server) EndpointStates(ctx context.Context) ([]monitor.EndpointState, error) {
+	if s.monitor == nil {
+		return nil, nil
+	}
+	return s.monitor.eval.EndpointStates(ctx, s.clk.Now())
+}
+
+// EndpointAdmin is the TLS endpoints with their assessed state for the REST
+// API; nil without monitoring.
+func (s *Server) EndpointAdmin() *monitor.Endpoints {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.endpoints
+}
+
+// endpointAdmin is the same as the UI's interface – nil (not a typed nil)
+// without monitoring.
+func (s *Server) endpointAdmin() web.EndpointAdmin {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.endpoints
 }

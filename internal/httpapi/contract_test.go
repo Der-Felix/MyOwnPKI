@@ -357,6 +357,17 @@ func TestContract(t *testing.T) {
 	v.syncAlerts(t, alertFinding("a", monitor.Critical), alertFinding("b", monitor.Warning))
 	v.syncAlerts(t, alertFinding("a", monitor.Critical))
 
+	// TLS scan endpoints (v0.3.4): a domain for the hosts, two endpoints to
+	// scan and remove, a tenant-wide operator (op is limited to one CA).
+	v.endpointDomain(t, "scanlab.lan")
+	v.user(t, "tenantop", false, authz.Binding{Role: authz.Operator})
+	tenantop := v.client("192.0.2.6")
+	tenantop.signIn(t, "tenantop", testPassword)
+	scanID := endpointID(t, admin, "scan.scanlab.lan", 443)
+	goneID := endpointID(t, admin, "gone.scanlab.lan", 443)
+	newEndpoint := map[string]any{"host": "new.scanlab.lan", "port": 443}
+	hugeEndpoint := `{"host":"new2.scanlab.lan","port":443,"sni":"` + strings.Repeat("a", 5000) + `"}`
+
 	cases := []contractCase{
 		{op: "getSystemStatus", as: viewer, want: 200},
 		{op: "getSystemStatus", as: nobody, want: 200},
@@ -392,6 +403,32 @@ func TestContract(t *testing.T) {
 		{op: "sendTestNotification", as: op, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "sendTestNotification", as: admin, want: 200},
 		{op: "sendTestNotification", as: admin, want: 429, kind: "rate-limited"},
+
+		{op: "listEndpoints", as: viewer, want: 200},
+		{op: "listEndpoints", as: tenantop, want: 200},
+		{op: "listEndpoints", as: rootview, want: 403, kind: "forbidden"},
+		{op: "listEndpoints", as: anon, want: 401, note: "no-session"},
+		{op: "createEndpoint", as: admin, body: newEndpoint, want: 201},
+		{op: "createEndpoint", as: admin, body: newEndpoint, want: 409, kind: "conflict"},
+		{op: "createEndpoint", as: admin, body: map[string]any{"host": "localhost", "port": 443}, want: 422, kind: "policy-violation"},
+		{op: "createEndpoint", as: admin, body: map[string]any{"host": "new3.scanlab.lan", "port": 22}, want: 422, kind: "policy-violation"},
+		{op: "createEndpoint", as: admin, body: map[string]any{"host": "new3.scanlab.lan", "port": 443, "extra": 1}, want: 400, kind: "bad-request"},
+		{op: "createEndpoint", as: admin, body: hugeEndpoint, header: []string{"Content-Type", "application/json"}, want: 413, kind: "too-large"},
+		{op: "createEndpoint", as: admin, body: "host=new3.scanlab.lan", want: 415, kind: "unsupported-media-type"},
+		{op: "createEndpoint", as: tenantop, body: newEndpoint, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createEndpoint", as: viewer, body: newEndpoint, want: 403, kind: "forbidden"},
+		{op: "createEndpoint", as: anon, body: newEndpoint, want: 401, note: "no-session"},
+		{op: "scanEndpoint", as: tenantop, path: "/endpoints/" + scanID + "/scan", want: 202},
+		{op: "scanEndpoint", as: admin, path: "/endpoints/" + scanID + "/scan", want: 429, kind: "rate-limited"},
+		{op: "scanEndpoint", as: tenantop, path: "/endpoints/ep_unknown/scan", want: 404, kind: "not-found"},
+		{op: "scanEndpoint", as: viewer, path: "/endpoints/" + scanID + "/scan", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "scanEndpoint", as: rootview, path: "/endpoints/" + scanID + "/scan", want: 403, kind: "forbidden", note: "no-read"},
+		{op: "scanEndpoint", as: anon, path: "/endpoints/" + scanID + "/scan", want: 401, note: "no-session"},
+		{op: "deleteEndpoint", as: tenantop, path: "/endpoints/" + goneID, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "deleteEndpoint", as: rootview, path: "/endpoints/" + goneID, want: 403, kind: "forbidden", note: "no-read"},
+		{op: "deleteEndpoint", as: anon, path: "/endpoints/" + goneID, want: 401, note: "no-session"},
+		{op: "deleteEndpoint", as: admin, path: "/endpoints/" + goneID, want: 204},
+		{op: "deleteEndpoint", as: admin, path: "/endpoints/" + goneID, want: 404, kind: "not-found"},
 
 		{op: "listPresets", as: nobody, want: 200},
 		{op: "listPresets", as: anon, want: 401, note: "no-session"},
@@ -1068,6 +1105,11 @@ func TestContract(t *testing.T) {
 	v.clk.Advance(time.Minute)
 	v.tester.Channels = nil
 	run(contractCase{op: "sendTestNotification", as: admin, want: 409, kind: "conflict", detail: "no notification channel"})
+
+	// Scanning switched off: nothing to ask for.
+	v.scan.Settings.Interval = 0
+	v.clk.Advance(2 * time.Minute)
+	run(contractCase{op: "scanEndpoint", as: admin, path: "/endpoints/" + scanID + "/scan", want: 409, kind: "conflict", detail: "scanning is switched off"})
 
 	// What every operation must have shown, by the spec.
 	for _, rt := range v.api.Routes() {

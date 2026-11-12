@@ -1,6 +1,6 @@
 # MyOwnPKI – Project Plan
 
-> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) released 2026-10-24; phase 3 (docs/PHASE3.md) – v0.3.0 (Linux agent) released 2026-10-25, v0.3.1 (packages, guided installation) 2026-10-28, v0.3.2 (agent package fix) 2026-10-29; v0.3.3 (monitoring) in progress, the releases up to v1.0 in §10.1 · Last updated: 2026-11-08 · License: Apache-2.0
+> Status: phases 1 and 2 complete – v0.1.0 released 2026-10-22, v0.2.0 (phase 2, ACME server) released 2026-10-23, v0.2.1 (installation as a systemd service) released 2026-10-24, v0.2.2 (own TLS, daily backup, trust page) released 2026-10-24; phase 3 (docs/PHASE3.md) – v0.3.0 (Linux agent) released 2026-10-25, v0.3.1 (packages, guided installation) 2026-10-28, v0.3.2 (agent package fix) 2026-10-29, v0.3.3 (monitoring) 2026-11-12; v0.3.4 (TLS scan) in progress, the releases up to v1.0 in §10.1 · Last updated: 2026-11-12 · License: Apache-2.0
 >
 > Goal: turn the existing Bash PKI script into a self-hosted, enterprise-grade
 > PKI platform with a web UI, REST API, ACME and an agent system –
@@ -488,7 +488,9 @@ release plan below – v1.0 takes parts of phases 2–4 and leaves others for la
 - **Live test:**
   - `deploy/demo/docker-compose.yml` with MyOwnPKI, nginx with the agent, and a certbot container –
     one command shows http-01 end to end (v0.3.11);
-  - additionally, the static UI demo on GitHub Pages.
+  - additionally, the static UI demo on GitHub Pages. The documentation site (`site/`, Jekyll built by
+    GitHub's own actions, `.github/workflows/pages.yml`) is deployed to the same Pages site; the demo
+    can live below it (§14, "Documentation site").
 - **Release:**
   - GoReleaser, cosign signatures, SBOM;
   - Docker image (distroless, non-root; Debian 13 base from v0.3.11);
@@ -882,3 +884,12 @@ changes.
 | The "Analysis" page is rule-based and local; no external AI service | Internal names and certificate data never leave the instance; every finding can be explained |
 | Apache ECharts (v0.3.8) and the lego DNS providers (v0.3.7) are asked for when their step starts | New dependencies need the owner's go (CLAUDE.md); ECharts is already named in ADR-04 |
 | Server-assigned deployments stay after v1.0 and need an ADR change first | Today the agent takes no commands from the server (ADR-10, §6.2); `deployment add` and Salt may be enough |
+
+### Documentation site (owner 2026-11-12)
+Guides for operators on GitHub Pages; no ADR changes.
+
+| Decision | Why |
+|---|---|
+| The documentation site is built with Jekyll through GitHub's own actions (`actions/jekyll-build-pages`, `upload-pages-artifact`, `deploy-pages`), from `site/`, and deployed by `.github/workflows/pages.yml` from `main`; pull requests run only the build job. The later static UI demo (§10.1) can live under the same site | No dependency enters the repository: no Ruby, Node or theme of ours, no third-party action; the build runs at GitHub, and the deploy job is the only one with `pages: write`. One Pages site per repository, so the demo shares it |
+| The operations guide, the release notes and the example configuration are generated into the site from `docs/OPERATIONS.md`, `CHANGELOG.md` and `deploy/config.example.yaml` (`scripts/ci/site-prepare.sh`, not committed); the hand-written pages are guides that link into them | One source of truth: the book is not copied by hand and cannot drift from the repository. A broken link or anchor fails the build (`scripts/ci/site-check.sh`) |
+| No JavaScript, web font, CDN or other external request on the site; system fonts, light and dark by `prefers-color-scheme`, the calm look of the product (`references/frontend.md`) | Reading the docs of a CA must not call other hosts; the same direction as the UI |

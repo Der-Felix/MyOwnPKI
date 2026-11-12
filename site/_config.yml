@@ -1,0 +1,29 @@
+# MyOwnPKI documentation site – Jekyll, built by GitHub's own actions
+# (.github/workflows/pages.yml). No theme, no plugins of ours, no remote content.
+#
+# The generated pages (site/reference/, site/_data/release.yml) come from
+# scripts/ci/site-prepare.sh; the hand-written pages are the Markdown files here.
+title: MyOwnPKI documentation
+description: Install, run and automate MyOwnPKI, a self-hosted PKI with an ACME server, a web UI and an optional agent.
+lang: en
+
+# The site is a project page: https://der-felix.github.io/MyOwnPKI/
+# Every link in the pages goes through the relative_url filter.
+url: "https://der-felix.github.io"
+baseurl: "/MyOwnPKI"
+
+repository_url: "https://github.com/Der-Felix/MyOwnPKI"
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  auto_ids: true
+  hard_wrap: false
+  # The table of contents of the long pages ("* TOC" followed by "{:toc}").
+  toc_levels: 2..3
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

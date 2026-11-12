@@ -104,5 +104,9 @@ func (a *API) table() []Route {
 
 		{OperationID: "listAlerts", Method: http.MethodGet, Path: "/alerts", access: signedIn, handle: a.listAlerts},
 		{OperationID: "sendTestNotification", Method: http.MethodPost, Path: "/notifications/test", access: signedIn, handle: a.sendTestNotification},
+		{OperationID: "listEndpoints", Method: http.MethodGet, Path: "/endpoints", access: signedIn, handle: a.listEndpoints},
+		{OperationID: "createEndpoint", Method: http.MethodPost, Path: "/endpoints", access: signedIn, body: true, maxBody: maxEndpointBody, handle: a.createEndpoint},
+		{OperationID: "deleteEndpoint", Method: http.MethodDelete, Path: "/endpoints/{endpointId}", access: signedIn, handle: a.deleteEndpoint},
+		{OperationID: "scanEndpoint", Method: http.MethodPost, Path: "/endpoints/{endpointId}/scan", access: signedIn, handle: a.scanEndpoint},
 	}
 }

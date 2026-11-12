@@ -14,13 +14,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/netguard"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -74,13 +74,7 @@ func newValidator(s *Server, resolverAddr string) *validator {
 // newNetValidator is the network part of the validator, without an ACME
 // server behind it (HTTP01Checker).
 func newNetValidator(log *slog.Logger, resolverAddr string) *validator {
-	r := &net.Resolver{PreferGo: true}
-	if resolverAddr != "" {
-		var d net.Dialer
-		r.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return d.DialContext(ctx, network, resolverAddr) // acme.resolver, never the system's
-		}
-	}
+	r := netguard.NewResolver(resolverAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	v := &validator{log: log, resolver: r, sem: make(chan struct{}, parallelChecks), ctx: ctx, cancel: cancel}
 	var d net.Dialer
@@ -162,106 +156,28 @@ func (v *validator) validate(ctx context.Context, j job) error {
 	return vfail("malformed", "unknown challenge type %q", clip(j.challenge.Type))
 }
 
-// allowedAddr applies the address policy.
-func allowedAddr(a netip.Addr, policy string) error {
-	a = a.Unmap()
-	switch {
-	case !a.IsValid(), a.IsUnspecified(), a.IsLoopback(), a.IsLinkLocalUnicast(), a.IsLinkLocalMulticast(),
-		a.IsInterfaceLocalMulticast(), a.IsMulticast():
-		return fmt.Errorf("%s is never a validation target", a)
-	case a.Is4() && (a.As4()[0] == 0 || a.As4()[0] >= 240):
-		return fmt.Errorf("%s is a reserved address", a)
-	}
-	if policy == ca.AddressPublic && (a.IsPrivate() || cgnat.Contains(a)) {
-		return fmt.Errorf("%s is a private address and the domain allows public addresses only", a)
-	}
-	return nil
-}
-
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
-
-// policyDial resolves once, checks every address and connects to an
-// allowed one – the address that was checked is the address connected to.
+// policyDial is the dialer of http-01: the shared guard (internal/netguard)
+// with the ACME port rule – port 80, and 443 after a redirect. The guard
+// resolves once, checks every address against the domain's policy and
+// connects to an allowed one.
 func (v *validator) policyDial(policy string) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
+		g := netguard.Dialer{
+			Policy: policy, Dial: v.dial, LookupIP: v.lookupIP, Log: v.log, LogName: "acme validation",
+			CheckPort: func(port uint16) error {
+				if port != 80 && port != 443 {
+					return vfail("connection", "port %d: http-01 connects to port 80 (and 443 after a redirect) only", port)
+				}
+				return nil
+			},
 		}
-		if port != "80" && port != "443" {
-			return nil, vfail("connection", "port %s: http-01 connects to port 80 (and 443 after a redirect) only", port)
+		conn, err := g.DialContext(ctx, network, addr)
+		var ge *netguard.Error
+		if errors.As(err, &ge) {
+			return nil, &validationError{typ: ge.Kind, detail: ge.Detail}
 		}
-		var addrs []netip.Addr
-		if a, perr := netip.ParseAddr(host); perr == nil {
-			addrs = []netip.Addr{a}
-		} else if addrs, err = v.lookupIP(ctx, host); err != nil {
-			return nil, vfail("dns", "%s: %s", host, dnsProblem(err))
-		}
-		// The client learns counts and kinds, never addresses or what a
-		// target said: with the policy "internal" this would otherwise map
-		// the inside network. The server log keeps the details.
-		var policyRefused, dialFailed int
-		var kinds []string
-		for _, a := range addrs {
-			if perr := allowedAddr(a, policy); perr != nil {
-				policyRefused++
-				v.log.Info("acme validation: address refused", slog.String("host", host), slog.String("reason", perr.Error()))
-				continue
-			}
-			conn, derr := v.dial(ctx, network, netip.AddrPortFrom(a.Unmap(), portNumber(port)).String())
-			if derr == nil {
-				return conn, nil
-			}
-			dialFailed++
-			kinds = append(kinds, netProblem(derr))
-			v.log.Info("acme validation: connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", netProblem(derr)))
-		}
-		switch {
-		case len(addrs) == 0:
-			return nil, vfail("dns", "%s has no address", host)
-		case dialFailed == 0:
-			return nil, vfail("connection", "%s: the address policy of the domain refuses all %d address(es)", host, policyRefused)
-		}
-		return nil, vfail("connection", "%s: %d address(es) refused by the address policy, %d could not be reached (%s)",
-			host, policyRefused, dialFailed, strings.Join(slices.Compact(kinds), ", "))
+		return conn, err
 	}
-}
-
-// netProblem names the kind of a network error – never its text, which
-// can carry what the target sent (a malformed HTTP response quotes it).
-func netProblem(err error) string {
-	var ne net.Error
-	var op *net.OpError
-	var rh tls.RecordHeaderError
-	var alert tls.AlertError
-	switch {
-	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
-		return "timed out"
-	case errors.As(err, &rh), errors.As(err, &alert):
-		return "TLS handshake failed"
-	case errors.As(err, &op) && op.Op == "dial":
-		return "could not connect"
-	}
-	return "the connection failed or the answer was not HTTP"
-}
-
-// dnsProblem names the kind of a DNS error, without the resolver's address.
-func dnsProblem(err error) string {
-	var de *net.DNSError
-	switch {
-	case errors.As(err, &de) && de.IsNotFound:
-		return "no such name"
-	case errors.As(err, &de) && de.IsTimeout, errors.Is(err, context.DeadlineExceeded):
-		return "the DNS lookup timed out"
-	}
-	return "the DNS lookup failed"
-}
-
-func portNumber(p string) uint16 {
-	if p == "443" {
-		return 443
-	}
-	return 80
 }
 
 // http01 fetches http://<identifier>/.well-known/acme-challenge/<token>
@@ -320,7 +236,7 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 		if errors.As(err, &ve) {
 			return ve
 		}
-		return vfail("connection", "fetching %s: %s", url, netProblem(err))
+		return vfail("connection", "fetching %s: %s", url, netguard.NetProblem(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	// Only status and length go back to the client – what the target said
@@ -330,7 +246,7 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBody+1))
 	if err != nil {
-		return vfail("connection", "reading the answer of %s: %s", url, netProblem(err))
+		return vfail("connection", "reading the answer of %s: %s", url, netguard.NetProblem(err))
 	}
 	if len(body) > maxHTTPBody {
 		return vfail("incorrectResponse", "%s answered more than %d bytes", url, maxHTTPBody)
@@ -391,7 +307,7 @@ func (v *validator) dns01(ctx context.Context, name, keyAuth string) error {
 		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			return vfail("dns", "%s has no TXT record", record)
 		}
-		return vfail("dns", "%s: %s", record, dnsProblem(err))
+		return vfail("dns", "%s: %s", record, netguard.DNSProblem(err))
 	}
 	for _, t := range txts {
 		if strings.TrimSpace(t) == want {
