@@ -5,6 +5,7 @@ package view
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,13 @@ type Page struct {
 	Notices []Message
 	// BuiltOnly hides navigation entries that don't exist yet.
 	BuiltOnly bool
+
+	// RefreshSeconds and RefreshURL make the page load RefreshURL after that
+	// many seconds: a <meta http-equiv="refresh"> in the head, no script (the
+	// UI ships none). RefreshURL is a local path; RefreshContent leaves the tag
+	// out for anything else.
+	RefreshSeconds int
+	RefreshURL     string
 }
 
 // Session is what the shell shows of the signed-in user.
@@ -191,4 +199,19 @@ func (p Page) HiddenNav() map[string]bool {
 		h["issue"] = true
 	}
 	return h
+}
+
+// RefreshContent is the content of the refresh meta tag ("10;url=/hosts/add/x"),
+// or "" when the page does not refresh or the URL is not a plain local path.
+func (p Page) RefreshContent() string {
+	u := p.RefreshURL
+	if p.RefreshSeconds <= 0 || p.RefreshSeconds > 3600 || !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") {
+		return ""
+	}
+	for _, r := range u {
+		if r <= ' ' || r == 0x7f || r == '\\' || r == '"' || r == '<' || r == '>' || r == ';' {
+			return ""
+		}
+	}
+	return strconv.Itoa(p.RefreshSeconds) + ";url=" + u
 }

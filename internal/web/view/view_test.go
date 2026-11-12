@@ -85,3 +85,21 @@ func TestFingerprintFormat(t *testing.T) {
 		t.Errorf("Fingerprint =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestRefreshContent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		seconds int
+		url     string
+		want    string
+	}{
+		{10, "/hosts/add/proxy1.homelab.lan/status", "10;url=/hosts/add/proxy1.homelab.lan/status"},
+		{0, "/x", ""}, {-1, "/x", ""}, {7200, "/x", ""}, {10, "", ""},
+		{10, "https://evil.example/", ""}, {10, "//evil.example/", ""}, {10, "javascript:alert(1)", ""},
+		{10, "/a b", ""}, {10, "/a\nb", ""}, {10, "/a;url=//evil", ""}, {10, `/a"b`, ""}, {10, "/a<b", ""}, {10, `/a\b`, ""},
+	} {
+		if got := (Page{RefreshSeconds: tc.seconds, RefreshURL: tc.url}).RefreshContent(); got != tc.want {
+			t.Errorf("RefreshContent(%d, %q) = %q, want %q", tc.seconds, tc.url, got, tc.want)
+		}
+	}
+}
