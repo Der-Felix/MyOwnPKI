@@ -59,6 +59,8 @@ func cmdDeploymentAdd(ctx context.Context, args []string, stdout, stderr io.Writ
 	ef := addEditFlags(fs, configPath, true)
 	var spec agent.DeploymentSpec
 	var names, hooks, sandboxWrite listFlag
+	var recipeName string
+	fs.StringVar(&recipeName, "recipe", "", "fill defaults for nginx, postfix, dovecot or proxmox (explicit flags win)")
 	fs.StringVar(&spec.Profile, "profile", "", "nginx or file (default: from --dir or the file flags)")
 	fs.Var(&names, "name", "certificate name, a FQDN; repeat for more (default: the host name)")
 	fs.StringVar(&spec.Challenge, "challenge", "", "webroot or standalone (default: as enrollment)")
@@ -94,6 +96,12 @@ func cmdDeploymentAdd(ctx context.Context, args []string, stdout, stderr io.Writ
 			return 1
 		}
 		spec.Hooks = append(spec.Hooks, hook)
+	}
+	if recipeName != "" {
+		if err := agent.ApplyRecipe(&spec, recipeName); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	if err := agent.AddDeployment(ctx, agent.AddOptions{EditOptions: ef.options(stdout, stderr), Spec: spec, CreateDirs: *createDirs}); err != nil {
 		_, _ = fmt.Fprintln(stderr, err)

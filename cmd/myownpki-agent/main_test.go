@@ -110,6 +110,8 @@ func TestDeploymentAndSandboxCommands(t *testing.T) {
 		{name: "add with an unknown flag", args: []string{"deployment", "add", "a", "--bogus"}, wantCode: 2},
 		{name: "add with a bad hook", args: []string{"deployment", "add", "a", "--hook", "nginx-test=nginx -t", "--config", cfg}, wantCode: 1, wantStderr: `hook "nginx-test": the first element must be an absolute path`},
 		{name: "add, flags before and after the name", args: []string{"deployment", "add", "--dir", "/etc/ssl/myownpki/a", "a", "--name", "a.homelab.lan", "--dry-run", "--config", cfg}, wantCode: 1, wantStderr: wantRefusal},
+		{name: "unknown recipe", args: []string{"deployment", "add", "a", "--recipe", "apache", "--config", cfg}, wantCode: 1, wantStderr: `unknown recipe "apache" – known: dovecot, nginx, postfix, proxmox`},
+		{name: "known recipe reaches the root check", args: []string{"deployment", "add", "a", "--recipe", "postfix", "--dry-run", "--config", cfg}, wantCode: 1, wantStderr: wantRefusal},
 		{name: "remove without a name", args: []string{"deployment", "remove", "--config", cfg}, wantCode: 2},
 		{name: "remove", args: []string{"deployment", "remove", "a", "--config", cfg}, wantCode: 1, wantStderr: wantRefusal},
 		{name: "unknown deployment subcommand", args: []string{"deployment", "frobnicate"}, wantCode: 2},

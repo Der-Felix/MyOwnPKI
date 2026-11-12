@@ -67,8 +67,13 @@ type DeploymentSpec struct {
 	ACMEDirectory string
 
 	// Recipe names the recipe the spec was filled from ("" = none); it only
-	// changes what the dry run prints.
-	Recipe string
+	// changes what is printed.
+	Recipe        string
+	recipeExample bool
+	recipeNotes   []string
+	// recipeWrites are the sandbox directories the recipe brings: the
+	// operator did not choose them, so no "wider than needed" warning.
+	recipeWrites []string
 }
 
 // AddOptions are the inputs of AddDeployment.
@@ -372,7 +377,7 @@ func AddDeployment(ctx context.Context, opts AddOptions) error {
 	if err != nil {
 		return err
 	}
-	writeDirs, err := s.checkSandboxDirs(spec.SandboxWrite)
+	writeDirs, err := s.checkSandboxDirs(spec.SandboxWrite, spec.recipeWrites)
 	if err != nil {
 		return err
 	}
@@ -407,8 +412,11 @@ func AddDeployment(ctx context.Context, opts AddOptions) error {
 	if err != nil {
 		return err
 	}
-	if spec.Recipe != "" {
-		_, _ = fmt.Fprintf(s.out, "Recipe %s is an example written from the documentation of the service – test it on a non-production host.\n", spec.Recipe)
+	if spec.recipeExample {
+		_, _ = fmt.Fprintf(s.out, "Recipe %s: example recipe, test on a non-production host – it is written from the documentation of the service and not yet verified on a live host.\n", spec.Recipe)
+		for _, n := range spec.recipeNotes {
+			_, _ = fmt.Fprintf(s.out, "  verify: %s\n", n)
+		}
 	}
 	for name, with := range reuse {
 		_, _ = fmt.Fprintf(s.out, "Hook %q: the identical hook %q exists; reusing it, so both deployments share one reload.\n", name, with)
@@ -561,7 +569,7 @@ func (s *editSession) neededDirs(d Deployment) ([]neededDir, error) {
 }
 
 // checkSandboxDirs validates --sandbox-write: absolute, not a system root, no symlink.
-func (s *editSession) checkSandboxDirs(dirs []string) ([]neededDir, error) {
+func (s *editSession) checkSandboxDirs(dirs, fromRecipe []string) ([]neededDir, error) {
 	var out []neededDir
 	for _, p := range dirs {
 		if err := checkDotDot("--sandbox-write", p); err != nil {
@@ -581,7 +589,7 @@ func (s *editSession) checkSandboxDirs(dirs []string) ([]neededDir, error) {
 			return nil, fmt.Errorf("--sandbox-write %s: %w", p, err)
 		}
 		nd := neededDir{path: dir}
-		if wideDir(dir) {
+		if wideDir(dir) && !slices.Contains(fromRecipe, p) {
 			nd.warn = fmt.Sprintf("%s is wider than needed – prefer a subdirectory such as %s", dir, narrowerThan(dir))
 		}
 		out = append(out, nd)
