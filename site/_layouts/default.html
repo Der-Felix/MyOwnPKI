@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% unless page.url == '/' %}{{ page.title | escape }} – {% endunless %}{{ site.title | escape }}</title>
+  <meta name="description" content="{{ page.description | default: site.description | strip_html | escape }}">
+  <link rel="icon" type="image/svg+xml" href="{{ '/assets/favicon.svg' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+
+  <header class="top">
+    <a class="brand" href="{{ '/' | relative_url }}">
+      <img src="{{ '/assets/logo.svg' | relative_url }}" alt="" width="32" height="32">
+      <span>MyOwnPKI <span class="brand-sub">documentation</span></span>
+    </a>
+    <a class="top-link" href="{{ site.repository_url }}">Source on GitHub</a>
+  </header>
+
+  <div class="layout">
+    <nav class="nav" aria-label="Documentation">
+      <ul>
+        {%- for item in site.data.nav %}
+        {%- assign is_current = false %}
+        {%- assign show_children = false %}
+        {%- if page.url == item.url %}{% assign is_current = true %}{% endif %}
+        {%- if item.children %}
+          {%- if is_current %}{% assign show_children = true %}{% endif %}
+          {%- for child in item.children %}{% if page.url == child.url %}{% assign show_children = true %}{% endif %}{% endfor %}
+        {%- endif %}
+        <li>
+          <a href="{{ item.url | relative_url }}"{% if is_current %} aria-current="page"{% endif %}>{{ item.title }}</a>
+          {%- if show_children %}
+          <ul>
+            {%- for child in item.children %}
+            <li><a href="{{ child.url | relative_url }}"{% if page.url == child.url %} aria-current="page"{% endif %}>{{ child.title }}</a></li>
+            {%- endfor %}
+          </ul>
+          {%- endif %}
+        </li>
+        {%- endfor %}
+      </ul>
+    </nav>
+
+    <main id="content" tabindex="-1">
+      <h1>{{ page.title }}</h1>
+      {{ content }}
+    </main>
+  </div>
+
+  <footer class="foot">
+    {%- if page.edit_path %}
+      {%- assign edit_path = page.edit_path %}
+    {%- else %}
+      {%- capture edit_path %}site/{{ page.path }}{% endcapture %}
+    {%- endif %}
+    <p>
+      <a href="{{ site.repository_url }}/edit/main/{{ edit_path }}">Edit this page on GitHub</a>
+      ·
+      <a href="{{ site.repository_url }}/issues">Report a problem</a>
+      ·
+      <a href="{{ site.repository_url }}/blob/main/SECURITY.md">Report a vulnerability</a>
+    </p>
+    <p>
+      {%- if site.data.release.version %}
+      MyOwnPKI {{ site.data.release.version }}{% if site.data.release.date %} ({{ site.data.release.date }}){% endif %} ·
+      {%- endif %}
+      <a href="{{ site.repository_url }}/releases">Releases</a> ·
+      <a href="{{ site.repository_url }}/blob/main/LICENSE">Apache License 2.0</a>
+    </p>
+    <p class="foot-note">This site is built from the <code>site/</code> directory and the operations guide in the repository. It loads nothing from other hosts.</p>
+  </footer>
+</body>
+</html>
