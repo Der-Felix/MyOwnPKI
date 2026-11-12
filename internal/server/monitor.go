@@ -32,11 +32,12 @@ var monitorWho = keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "mon
 
 // monitorSide evaluates the alert rules and keeps the alerts.
 type monitorSide struct {
-	eval   *monitor.Evaluator
-	store  *monitor.Store
-	queue  *notify.Queue
-	digest monitor.DigestOptions
-	tester *notify.Tester // the test message of the UI and the API
+	eval      *monitor.Evaluator
+	store     *monitor.Store
+	queue     *notify.Queue
+	digest    monitor.DigestOptions
+	tester    *notify.Tester     // the test message of the UI and the API
+	endpoints *monitor.Endpoints // the TLS endpoints of the UI and the API
 }
 
 // scanSide is the TLS scan (docs/PHASE3.md §10): the endpoints and the pool
@@ -75,6 +76,7 @@ func (s *Server) buildMonitor() error {
 		m.eval.Agents = a
 	}
 	m.eval.Scan, m.eval.ScanOff = s.scan.svc, sv.Off()
+	m.endpoints = &monitor.Endpoints{Service: s.scan.svc, Eval: m.eval, Clock: s.clk}
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
 	m.tester = &notify.Tester{Channels: m.queue.Channels, Server: s.opt.Hostname, Clock: s.clk, Audit: s.engine.Audit, Scope: s.engine.Scope, Tenant: store.DefaultTenant}
@@ -244,4 +246,13 @@ func (s *Server) EndpointStates(ctx context.Context) ([]monitor.EndpointState, e
 		return nil, nil
 	}
 	return s.monitor.eval.EndpointStates(ctx, s.clk.Now())
+}
+
+// EndpointAdmin is the TLS endpoints with their assessed state for the REST
+// API; nil without monitoring.
+func (s *Server) EndpointAdmin() *monitor.Endpoints {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.endpoints
 }
