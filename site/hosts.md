@@ -274,10 +274,10 @@ sudo systemctl restart myownpki-agent
 
 | Flag | Meaning |
 |---|---|
-| `--recipe nginx\|postfix\|dovecot\|proxmox` | Defaults for the service, see [Recipes]({{ '/recipes/' | relative_url }}). Every other flag overrides them. |
+| `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Defaults for the service, see [Recipes]({{ '/recipes/' | relative_url }}). Every other flag overrides them. |
 | `--name FQDN` (repeat) | Certificate names. Default: the host name of `agent.yaml`. |
-| `--profile nginx\|file`, `--dir DIR`, `--certificate`, `--chain`, `--fullchain`, `--key FILE` | Where the files go: `--dir` for the nginx profile, the file flags for the file profile |
-| `--challenge webroot\|standalone`, `--webroot DIR` | Default: what the enrollment uses |
+| `--profile nginx` or `file`, `--dir DIR`, `--certificate`, `--chain`, `--fullchain`, `--key FILE` | Where the files go: `--dir` for the nginx profile, the file flags for the file profile |
+| `--challenge webroot` or `standalone`, `--webroot DIR` | Default: what the enrollment uses |
 | `--owner`, `--group`, `--key-mode` | Local ownership and mode of the key (no rights for others) |
 | `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | Hooks: no shell, the first element is an absolute path. An identical command line is reused, so deployments of one service share one reload and one rollback group. |
 | `--check HOST:PORT` | The local TLS check; implicit TLS only, so a STARTTLS port (25, 143, 587) cannot be checked |

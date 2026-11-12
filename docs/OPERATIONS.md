@@ -1419,10 +1419,10 @@ Linux and systemd only; run it as root, **also with `--dry-run`**.
 
 | Flag | Meaning |
 |---|---|
-| `--recipe nginx\|postfix\|dovecot\|proxmox` | Fills the defaults of [§12.9](#129-recipes). Every other flag overrides it. |
-| `--profile nginx\|file` | As in `agent.yaml`. Default: `nginx` with `--dir`, `file` with the file flags. |
+| `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Fills the defaults of [§12.9](#129-recipes). Every other flag overrides it. |
+| `--profile nginx` or `file` | As in `agent.yaml`. Default: `nginx` with `--dir`, `file` with the file flags. |
 | `--name FQDN` (repeat) | Certificate names, validated like `names:`; the first one is the SNI of the local check. Default: the host name of `agent.yaml`. |
-| `--challenge webroot\|standalone`, `--webroot DIR` | Default: what `enrollment:` uses. |
+| `--challenge webroot` or `standalone`, `--webroot DIR` | Default: what `enrollment:` uses. |
 | `--dir DIR` | nginx profile: `fullchain.pem` and `privkey.pem` go here. |
 | `--certificate`, `--chain`, `--fullchain`, `--key FILE` | file profile, as `files:`. |
 | `--owner`, `--group`, `--key-mode` | As in `agent.yaml`; the key mode may not give rights to others. |
