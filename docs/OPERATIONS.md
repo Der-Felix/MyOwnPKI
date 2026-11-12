@@ -265,6 +265,15 @@ affects only proofs created afterwards: an existing confirmation neither gains n
 `step_up_valid_until` in the session API shows its actual expiry. Existing sessions upgraded from an
 older release keep the previous five-minute lifetime.
 
+The agent enrollment mode (`agent_enrollment`: `verified`, `auto` or `manual`, chapter 12) is the one tenant
+setting that needs a fresh proof: `auto` admits a host without a person, which weighs as much as approving
+an enrollment. Saving the settings with a different mode asks for the code first; saving them with the mode
+as it is, or any other setting alone, does not. `PUT /api/v1/settings` with a different `agent_enrollment`
+answers `403` `step-up-required` to a session without a fresh proof and `403` `forbidden` to an API token,
+whatever its role, and stores nothing. A script that sets the mode has to stop doing so: change it in the UI.
+The audit entry `tenant.settings` names the old and the new mode (`was_agent_enrollment`,
+`agent_enrollment`).
+
 In the web UI, a protected form that needs a fresh proof opens a confirmation page naming the action
 and its non-secret target. A correct code runs that action once; there is no need to fill in the form
 again. Downloads and one-time secrets appear in the continuation response as before. The pending
