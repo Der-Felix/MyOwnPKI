@@ -12,7 +12,7 @@ const (
 	StatePending     = "pending"     // no scan yet
 	StateOK          = "ok"          // the served leaf is the issued one and the chain is trusted
 	StateUnmanaged   = "unmanaged"   // nothing was issued for the name and the leaf is not from this PKI
-	StateOlder       = "older"       // a valid certificate of this PKI, but superseded
+	StateOlder       = "older"       // a certificate of this PKI that is superseded - or that has ended with nothing newer (the page says Expired)
 	StateForeign     = "foreign"     // not from this PKI, although the name has a certificate here
 	StateWrongName   = "wrong_name"  // from this PKI, but not for this name
 	StateRevoked     = "revoked"     // a revoked certificate of this PKI

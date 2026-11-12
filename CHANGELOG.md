@@ -22,7 +22,9 @@ live test by the owner is pending.
   the CAs of this PKI (`trusted`, `incomplete` when the endpoint does not send the intermediate,
   `untrusted`). The host must be covered by a domain, the domain's address policy applies at every scan,
   and only the ports of `monitor.scan_ports` are allowed. Limits: 100 endpoints, 4 workers, 10 seconds
-  per scan, 4 addresses per name. Only metadata of the served leaf is stored (fingerprint, serial,
+  per scan (checking the chain afterwards has 5 seconds of its own), 4 addresses per name. Scheduling
+  survives clock steps: an endpoint whose next scan lies more than twice the interval ahead is scanned
+  at once. Only metadata of the served leaf is stored (fingerprint, serial,
   clipped subject and issuer, dates, chain state, TLS version) – never the certificate, a key, the names
   in it or the resolved address. Scans, evaluation and alerts work while the server is sealed.
   `pki.db` migration 0018 (additive).
@@ -38,12 +40,14 @@ live test by the owner is pending.
 - **Endpoints page:** the new page *Endpoints* (menu *Overview*) lists every endpoint with its state,
   last scan, served fingerprint (linked to the certificate when this PKI issued it), expiry, issuer and
   last error, and has *Add an endpoint*, *Scan now* and *Remove*. Subject and issuer are shown as text.
+  A certificate of this PKI that has ended with nothing newer shows as *Expired*.
 - **REST:** `GET /api/v1/endpoints` (viewer), `POST /api/v1/endpoints` (admin; refusals are `422` with the
   field and the rule, never a resolved address), `POST /api/v1/endpoints/{endpointId}/scan` (operator;
   `202`, `429` with `Retry-After` within 60 seconds, `409` while scanning is off) and
   `DELETE /api/v1/endpoints/{endpointId}` (admin). New permissions `endpoint.manage` (admin) and
   `endpoint.scan` (operator, admin); no step-up, because they grant no trust. Audit actions
-  `endpoint.create`, `endpoint.delete` and `endpoint.scan`; refusals are audited too.
+  `endpoint.create`, `endpoint.delete` and `endpoint.scan`; refusals are audited too, and an endpoint ID that is not well-formed is "not found" after the
+  role check.
 - **Settings:** `monitor.scan_interval` (default `15m`, `5m`–`24h`, or `off`), `scan_timeout` (`10s`,
   `2s`–`30s`), `scan_ports` (`443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443`; 1–32 ports),
   `scan_max_endpoints` (`100`, 1–500), `scan_unreachable_after` (`3`, 1–10) and `scan_mismatch_after`
@@ -60,12 +64,16 @@ live test by the owner is pending.
 
 - **Stricter address guard (behavior change).** The check that decides where the server may connect is
   now one package (`internal/netguard`) shared by http-01 validation, the agent enrollment check and the
-  scan. It now also refuses the IPv6 ranges that embed an IPv4 address: IPv4-compatible (`::/96`), NAT64
-  (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4 (`2002::/16`) and Teredo (`2001::/32`), because a router or a
-  client may translate them to the embedded address – `64:ff9b::7f00:1` could reach `127.0.0.1`. **A
-  legitimate service in such a range can no longer be an http-01 target, an agent enrollment host or a
-  scan endpoint.** IPv4-mapped addresses are judged as the IPv4 address they carry. The error texts of
-  http-01 are unchanged.
+  scan. It now also refuses, under every address policy: the IPv6 ranges that embed an IPv4 address or
+  translate to one – IPv4-compatible (`::/96`), NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4
+  (`2002::/16`), Teredo (`2001::/32`) and the IPv4-translated range (`::ffff:0:0:0/96`) – because a
+  router or a client may translate them to the embedded address (`64:ff9b::7f00:1` could reach
+  `127.0.0.1`); the non-global ranges `192.0.0.0/24`, `198.18.0.0/15`, `192.88.99.0/24`, `fec0::/10`,
+  `100::/64` and `5f00::/16`; and an IPv6 address with a zone. **A legitimate service in such a range can
+  no longer be an http-01 target, an agent enrollment host or a scan endpoint.** The documentation
+  ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`) stay allowed.
+  IPv4-mapped addresses are judged as the IPv4 address they carry. The error texts of http-01 are
+  unchanged.
 - **Dependencies:** `connectrpc.com/connect` 1.21.1, `github.com/a-h/templ` 0.3.1100 (generated files
   regenerated), `go.yaml.in/yaml/v3` 3.0.6, `modernc.org/sqlite` 1.61.0 (SQLite 3.54.1) and
   `golang.org/x/net` 0.62.0.

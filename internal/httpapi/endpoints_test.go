@@ -493,3 +493,40 @@ func TestEndpointListNeedsTheTenantWideRole(t *testing.T) {
 		t.Errorf("CA-limited viewer: %d %s", r.Code, r.Body.String())
 	}
 }
+
+// TestEndpointMalformedIDChecksTheRoleFirst: a path ID that is not well-formed
+// is an unknown endpoint for whoever may remove or scan, but the role comes
+// first - a viewer is told 403, as for any other operation, not 404.
+func TestEndpointMalformedIDChecksTheRoleFirst(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.endpointDomain(t, "homelab.lan", "192.0.2.0/24")
+	admin, viewer, operator, caAdmin, nobody, anon := alertClients(t, v)
+	_ = endpointID(t, admin, "proxy.homelab.lan", 443) // one endpoint that must survive
+	for name, bad := range map[string]string{
+		"a space": "a%20b", "a dot": "x.y", "over-long": strings.Repeat("a", 65), "control": "ep_%1b%5b31m", "bidi": "ep_%e2%80%ae1",
+	} {
+		for op, tc := range map[string]struct {
+			method, suffix string
+			denied         map[string]*client
+		}{
+			"delete": {http.MethodDelete, "", map[string]*client{"viewer": viewer, "operator": operator, "caadmin": caAdmin, "nobody": nobody}},
+			"scan":   {http.MethodPost, "/scan", map[string]*client{"viewer": viewer, "caadmin": caAdmin, "nobody": nobody}},
+		} {
+			for who, c := range tc.denied {
+				if r := c.do(t, tc.method, "/endpoints/"+bad+tc.suffix, nil); r.Code != http.StatusForbidden || r.problemType() != "forbidden" {
+					t.Errorf("%s %s as %s: %d %s, want 403", op, name, who, r.Code, r.Body.String())
+				}
+			}
+			if r := admin.do(t, tc.method, "/endpoints/"+bad+tc.suffix, nil); r.Code != http.StatusNotFound || r.problemType() != "not-found" {
+				t.Errorf("%s %s as admin: %d %s, want 404", op, name, r.Code, r.Body.String())
+			}
+			if r := anon.do(t, tc.method, "/endpoints/"+bad+tc.suffix, nil); r.Code != http.StatusUnauthorized {
+				t.Errorf("%s %s anonymous: %d, want 401", op, name, r.Code)
+			}
+		}
+	}
+	if got := len(endpointList(t, admin.do(t, http.MethodGet, "/endpoints", nil))); got != 1 {
+		t.Errorf("%d endpoints left, want the one", got)
+	}
+}

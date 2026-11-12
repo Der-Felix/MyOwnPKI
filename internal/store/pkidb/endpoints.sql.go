@@ -141,16 +141,20 @@ func (q *Queries) InsertEndpoint(ctx context.Context, arg InsertEndpointParams) 
 }
 
 const listDueEndpoints = `-- name: ListDueEndpoints :many
-SELECT id, host, port, sni, source, created_at, created_by, next_scan_at, scan_requested_at, last_scan_at, last_ok_at, fail_streak, last_error_kind, last_error, fingerprint, serial, subject, issuer, not_before, not_after, chain_len, chain_state, tls_version, same_count, fingerprint_since FROM endpoints WHERE next_scan_at <= ? ORDER BY next_scan_at, id LIMIT ?
+SELECT id, host, port, sni, source, created_at, created_by, next_scan_at, scan_requested_at, last_scan_at, last_ok_at, fail_streak, last_error_kind, last_error, fingerprint, serial, subject, issuer, not_before, not_after, chain_len, chain_state, tls_version, same_count, fingerprint_since FROM endpoints WHERE next_scan_at <= ? OR next_scan_at > ? ORDER BY next_scan_at, id LIMIT ?
 `
 
 type ListDueEndpointsParams struct {
-	NextScanAt string
-	Limit      int64
+	NextScanAt   string
+	NextScanAt_2 string
+	Limit        int64
 }
 
+// Due: the time has come, or it lies beyond the horizon (now plus twice the
+// interval) - no interval and jitter put it that far ahead, so the clock must
+// have been ahead when the scan was claimed and has stepped back since.
 func (q *Queries) ListDueEndpoints(ctx context.Context, arg ListDueEndpointsParams) ([]Endpoint, error) {
-	rows, err := q.db.QueryContext(ctx, listDueEndpoints, arg.NextScanAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listDueEndpoints, arg.NextScanAt, arg.NextScanAt_2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

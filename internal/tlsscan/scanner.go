@@ -138,7 +138,7 @@ func (s *Scanner) Dispatch(ctx context.Context) error {
 		return nil
 	}
 	now := s.Clock.Now().UTC().Truncate(time.Second)
-	claimed, err := s.Svc.claimDue(ctx, now, free,
+	claimed, err := s.Svc.claimDue(ctx, now, now.Add(2*s.Svc.Settings.Interval), free,
 		func(id string) bool { s.mu.Lock(); defer s.mu.Unlock(); return s.running[id] },
 		func() time.Time { return s.nextScan(now) })
 	if err != nil {
@@ -333,7 +333,12 @@ func (s *Scanner) probe(ctx context.Context, ep Endpoint) (Result, error) {
 		NotBefore: leaf.NotBefore.UTC(), NotAfter: leaf.NotAfter.UTC(),
 		ChainLen: min(len(certs), 1+MaxIntermediate), TLSVersion: tls.VersionName(state.Version),
 	}
-	res.Served.ChainState, err = s.chainState(ctx, leaf, inter)
+	// The scan's deadline bounds the dial and the handshake. The trust anchors
+	// come from the database, which has its own budget: a handshake that ended
+	// with the deadline in sight still gets a result. Close still cancels it.
+	cctx, cancel := context.WithTimeout(s.ctx, ChainTimeout)
+	defer cancel()
+	res.Served.ChainState, err = s.chainState(cctx, leaf, inter)
 	return res, err
 }
 

@@ -17,8 +17,11 @@ SELECT * FROM endpoints WHERE id = ?;
 -- name: DeleteEndpoint :execrows
 DELETE FROM endpoints WHERE id = ?;
 
+-- Due: the time has come, or it lies beyond the horizon (now plus twice the
+-- interval) - no interval and jitter put it that far ahead, so the clock must
+-- have been ahead when the scan was claimed and has stepped back since.
 -- name: ListDueEndpoints :many
-SELECT * FROM endpoints WHERE next_scan_at <= ? ORDER BY next_scan_at, id LIMIT ?;
+SELECT * FROM endpoints WHERE next_scan_at <= ? OR next_scan_at > ? ORDER BY next_scan_at, id LIMIT ?;
 
 -- A scan is claimed by moving its next time forward; a crash cannot rescan
 -- at once. The WHERE makes a concurrent claim lose.

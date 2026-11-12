@@ -53,7 +53,7 @@ func severityStatus(severity string) view.Status {
 
 // endpointState is the state column: the words of docs/PHASE3.md §10.2 with
 // the fixed status colors, and a short qualifier that says what is wrong.
-func endpointState(s monitor.EndpointState) admin.Cell {
+func endpointState(s monitor.EndpointState, now time.Time) admin.Cell {
 	ep, as := s.Endpoint, s.Assessment
 	switch as.State {
 	case tlsscan.StateOK:
@@ -64,6 +64,15 @@ func endpointState(s monitor.EndpointState) admin.Cell {
 	case tlsscan.StateUnmanaged:
 		return admin.Cell{Text: "Not issued by this PKI", Status: view.StatusInfo, NoWrap: true}
 	case tlsscan.StateOlder:
+		// Nothing newer exists and the certificate has ended: not "an older
+		// certificate" but an expired one - the expiry alert says the same.
+		if as.Newest == nil && !ep.NotAfter.After(now) {
+			status := view.StatusCrit
+			if as.Expiry != nil {
+				status = severityStatus(as.Expiry.Severity)
+			}
+			return admin.Cell{Text: "Expired", Status: status, Rel: "no newer certificate was issued", NoWrap: true}
+		}
 		return admin.Cell{Text: "Wrong certificate", Status: view.StatusWarn, Rel: "an older certificate of this PKI", NoWrap: true}
 	case tlsscan.StateForeign:
 		return admin.Cell{Text: "Wrong certificate", Status: view.StatusWarn, Rel: "not issued by this PKI", NoWrap: true}
@@ -125,7 +134,7 @@ func (c *rc) endpointRow(s monitor.EndpointState, now time.Time, manage, scan bo
 	if tlsscan.KnownKind(ep.LastErrorKind) {
 		lastError = admin.Cell{Text: ep.LastErrorKind}
 	}
-	row := []admin.Cell{target, endpointState(s), lastScan, fingerprint, expires, issuer, lastError}
+	row := []admin.Cell{target, endpointState(s, now), lastScan, fingerprint, expires, issuer, lastError}
 	if manage {
 		row = append(row, admin.Cell{Text: orDash(ep.CreatedBy), NoWrap: true})
 	}

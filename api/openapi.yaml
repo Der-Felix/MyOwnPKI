@@ -2448,7 +2448,8 @@ paths:
         qualified DNS name or an IP address that a **domain** of this PKI covers, the domain's
         address policy applies, and the port must be in `monitor.scan_ports` of the server's
         configuration (default 443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443).
-        Loopback, link-local, multicast, unspecified and reserved addresses are never scanned.
+        Loopback, link-local, multicast, unspecified, reserved and other not globally reachable
+        addresses (also the IPv6 forms that embed an IPv4 address) are never scanned.
         `sni` is optional: a DNS host is its own SNI, an IP host sends none, and the name given
         here is the one the certificate is expected for. A trailing dot is dropped and the name
         lower-cased. Refusals are 422 with the field and the rule, never an address that was
@@ -4144,8 +4145,9 @@ components:
           description: |
             `pending`: not scanned yet. `ok`: the served certificate is the one issued for the
             name and its chain is trusted. `unmanaged`: nothing was issued for the name by this
-            PKI and the served certificate is not one of its own (no alert). `older`: a valid
-            but superseded certificate of this PKI is served. `foreign`: the name has a
+            PKI and the served certificate is not one of its own (no alert). `older`: a
+            superseded certificate of this PKI is served, or one that has ended with nothing newer
+            issued (then `expiry_severity` is set). `foreign`: the name has a
             certificate here, but another CA's is served. `wrong_name`: a certificate of this
             PKI that does not cover the name. `revoked`: a revoked certificate of this PKI.
             `chain`: the right certificate with an incomplete or untrusted chain.
