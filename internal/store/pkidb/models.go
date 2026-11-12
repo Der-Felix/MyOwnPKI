@@ -328,6 +328,34 @@ type Domain struct {
 	UpdatedAt         string
 }
 
+type Endpoint struct {
+	ID               string
+	Host             string
+	Port             int64
+	Sni              sql.NullString
+	Source           string
+	CreatedAt        string
+	CreatedBy        string
+	NextScanAt       string
+	ScanRequestedAt  sql.NullString
+	LastScanAt       sql.NullString
+	LastOkAt         sql.NullString
+	FailStreak       int64
+	LastErrorKind    sql.NullString
+	LastError        sql.NullString
+	Fingerprint      sql.NullString
+	Serial           sql.NullString
+	Subject          sql.NullString
+	Issuer           sql.NullString
+	NotBefore        sql.NullString
+	NotAfter         sql.NullString
+	ChainLen         sql.NullInt64
+	ChainState       sql.NullString
+	TlsVersion       sql.NullString
+	SameCount        int64
+	FingerprintSince sql.NullString
+}
+
 type ImportJob struct {
 	ID         string
 	Kind       string

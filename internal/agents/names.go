@@ -77,3 +77,9 @@ func MatchesAny(patterns []string, name string) bool {
 	}
 	return false
 }
+
+// CheckDNSName checks a host name that is already lower case and has no
+// trailing dot, by the rules of CheckHostname: a fully qualified DNS name,
+// letters, digits and hyphens, no wildcard, no IP address. The TLS scan
+// (internal/tlsscan) shares it so that both accept the same names.
+func CheckDNSName(h string) error { return checkDNSName(h) }

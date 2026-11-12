@@ -39,17 +39,19 @@ type Permission string
 
 // Tenant permissions.
 const (
-	ReadPKI      Permission = "pki.read"           // CAs, certificates, CRL status
-	ReadAudit    Permission = "audit.read"         // the tenant audit log: user names and IPs are personal data
-	IssueCert    Permission = "certificate.issue"  // also renew
-	RevokeCert   Permission = "certificate.revoke" // step-up
-	DownloadKey  Permission = "key.download"       // a server-generated private key; step-up
-	ManageCA     Permission = "ca.manage"          // create, import, renew, retire, update, revoke, install; step-up
-	UploadCRL    Permission = "crl.upload"         // the offline root's CRL; step-up
-	ManageTenant Permission = "tenant.manage"      // tenant settings
-	ManageAgents Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
-	RenewAgent   Permission = "agent.renew"        // request renewal of a locally configured deployment
-	TestNotify   Permission = "notification.test"  // send a test message through the configured channels; no step-up (it changes nothing)
+	ReadPKI         Permission = "pki.read"           // CAs, certificates, CRL status
+	ReadAudit       Permission = "audit.read"         // the tenant audit log: user names and IPs are personal data
+	IssueCert       Permission = "certificate.issue"  // also renew
+	RevokeCert      Permission = "certificate.revoke" // step-up
+	DownloadKey     Permission = "key.download"       // a server-generated private key; step-up
+	ManageCA        Permission = "ca.manage"          // create, import, renew, retire, update, revoke, install; step-up
+	UploadCRL       Permission = "crl.upload"         // the offline root's CRL; step-up
+	ManageTenant    Permission = "tenant.manage"      // tenant settings
+	ManageAgents    Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
+	RenewAgent      Permission = "agent.renew"        // request renewal of a locally configured deployment
+	TestNotify      Permission = "notification.test"  // send a test message through the configured channels; no step-up (it changes nothing)
+	ManageEndpoints Permission = "endpoint.manage"    // add and remove TLS scan endpoints; the server then connects to them; no step-up (grants no trust)
+	ScanEndpoint    Permission = "endpoint.scan"      // scan an endpoint that is already entered, now
 )
 
 // Instance permissions: instance admins only.
@@ -60,8 +62,8 @@ const (
 
 var rolePermissions = map[Role][]Permission{
 	Viewer:   {ReadPKI},
-	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent},
-	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent, TestNotify},
+	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent, ScanEndpoint},
+	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent, TestNotify, ManageEndpoints, ScanEndpoint},
 }
 
 var instancePermissions = []Permission{Unseal, ManageUsers}
