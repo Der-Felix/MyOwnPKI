@@ -146,7 +146,7 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 ### Web UI
 - Login: local users (Argon2id) with **passkey/WebAuthn or TOTP mandatory**; optional **OIDC** (Authentik, Keycloak, Entra ID)
 - Optional **mTLS client certificate** for the admin listener (issued by the own CA)
-- **Step-up auth** (fresh 2FA) for: key download, revocation, CA operations, permission changes
+- **Step-up auth** (fresh 2FA) for: key download, revocation, CA operations, permission changes, changing the agent enrollment mode
 - **RBAC**: roles admin / operator / viewer, scoped per tenant, CA, domain, agent group
 - Strict **CSP** without inline JS, HSTS, cookies `HttpOnly; Secure; SameSite=Strict`, CSRF tokens
 - Rate limits, account lockout, IP allowlist per listener
@@ -253,6 +253,7 @@ ZIP including deployment guide · CRL · CA bundle · encrypted backup
   | `verified` (default) | Join token **and** passed check → approved; only one of them → waits for approval |
   | `manual` | Always manual approval in the web UI (like `salt-key -A`) |
 
+  - Changing the mode needs step-up (as approving an enrollment does) and is never possible with an API token: `auto` admits hosts without a person
   - If no check is possible (no DNS record, port 80 closed) → agent goes to the approval queue
   - The server performs the check itself (fetches from the agent via HTTP or checks the TXT record)
 - **Deploy profiles:** path, owner, mode, format (PEM, P12, JKS, Windows certificate store) + reload hook; the existing `GUIDE.txt` recipes (nginx, Apache, Traefik, Caddy, HAProxy, Proxmox, TrueNAS, UniFi, Docker, OpenVPN, strongSwan, IIS) become built-in profiles

@@ -46,7 +46,8 @@ const (
 	DownloadKey     Permission = "key.download"       // a server-generated private key; step-up
 	ManageCA        Permission = "ca.manage"          // create, import, renew, retire, update, revoke, install; step-up
 	UploadCRL       Permission = "crl.upload"         // the offline root's CRL; step-up
-	ManageTenant    Permission = "tenant.manage"      // tenant settings
+	ManageTenant    Permission = "tenant.manage"      // tenant settings; the enrollment mode also needs EnrollMode
+	EnrollMode      Permission = "agent.enrollment"   // change the agent enrollment mode (auto admits hosts without a person); step-up
 	ManageAgents    Permission = "agent.manage"       // join tokens, enrollment approvals, agent names, disable, revoke; step-up
 	RenewAgent      Permission = "agent.renew"        // request renewal of a locally configured deployment
 	TestNotify      Permission = "notification.test"  // send a test message through the configured channels; no step-up (it changes nothing)
@@ -63,13 +64,13 @@ const (
 var rolePermissions = map[Role][]Permission{
 	Viewer:   {ReadPKI},
 	Operator: {ReadPKI, IssueCert, RevokeCert, DownloadKey, RenewAgent, ScanEndpoint},
-	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, ManageAgents, RenewAgent, TestNotify, ManageEndpoints, ScanEndpoint},
+	Admin:    {ReadPKI, ReadAudit, IssueCert, RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageTenant, EnrollMode, ManageAgents, RenewAgent, TestNotify, ManageEndpoints, ScanEndpoint},
 }
 
 var instancePermissions = []Permission{Unseal, ManageUsers}
 
 // stepUp: permissions that need a fresh second factor (security.md).
-var stepUp = []Permission{RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageUsers, ManageAgents}
+var stepUp = []Permission{RevokeCert, DownloadKey, ManageCA, UploadCRL, ManageUsers, ManageAgents, EnrollMode}
 
 // StepUpWindow is the default when a principal has no per-proof duration.
 const StepUpWindow = 5 * time.Minute
@@ -240,6 +241,7 @@ var stepUpActions = map[Permission]string{
 	ManageAgents: "manage agents",
 	RenewAgent:   "renew agent deployments",
 	ManageUsers:  "manage users",
+	EnrollMode:   "change the agent enrollment mode",
 }
 
 // TokenStepUpError refuses an action that needs step-up to an API token. It
