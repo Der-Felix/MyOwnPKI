@@ -30,6 +30,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
+	"github.com/Der-Felix/MyOwnPKI/internal/tlsscan"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/notice"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -80,12 +81,26 @@ type AppDeps struct {
 	Alerts AlertSource
 	// Notifier tests the notification channels (v0.3.3); nil hides the button.
 	Notifier NotifyTester
+	// Endpoints are the TLS scan endpoints (v0.3.4); nil hides the page.
+	Endpoints EndpointAdmin
 }
 
 // AlertSource is what the UI reads of the monitoring: the open alerts and
 // those resolved in the last 7 days, if who may read them.
 type AlertSource interface {
 	List(ctx context.Context, who keys.Who, now time.Time) (open, resolved []monitor.Alert, err error)
+}
+
+// EndpointAdmin is what the UI uses of the TLS scan: the endpoints with their
+// assessed state, and the actions. The service checks the roles and writes the
+// audit entries.
+type EndpointAdmin interface {
+	List(ctx context.Context, who keys.Who) ([]monitor.EndpointState, error)
+	Create(ctx context.Context, who keys.Who, req tlsscan.Request) (*tlsscan.Endpoint, error)
+	Delete(ctx context.Context, who keys.Who, id string) error
+	ScanNow(ctx context.Context, who keys.Who, id string) error
+	// Settings are the monitor.scan_* keys: the ports, the limit, off.
+	Settings() tlsscan.Settings
 }
 
 // NotifyTester sends the test message through the configured channels (the
@@ -142,6 +157,10 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("POST /step-up", a.signedIn(a.stepUp))
 
 	mux.HandleFunc("GET /{$}", a.signedIn(a.dashboard))
+	mux.HandleFunc("GET /endpoints", a.signedIn(a.endpointsPage))
+	a.protected(mux, "POST /endpoints", a.endpointCreate, "host", "port", "sni")
+	a.protected(mux, "POST /endpoints/scan", a.endpointScan, "id")
+	a.protected(mux, "POST /endpoints/delete", a.endpointDelete, "id")
 	mux.HandleFunc("GET /alerts", a.signedIn(a.alertsPage))
 	a.protected(mux, "POST /alerts/test", a.alertsTest)
 	mux.HandleFunc("GET /certificates", a.signedIn(a.certificateList))
@@ -490,6 +509,9 @@ func (c *rc) page(title, section string, crumbs ...view.Crumb) view.Page {
 	}
 	if c.a.d.Alerts == nil || !c.may(authz.ReadPKI, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "alerts")
+	}
+	if c.a.d.Endpoints == nil || !c.may(authz.ReadPKI, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "endpoints")
 	}
 	if !c.may(authz.ReadAudit, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "audit")

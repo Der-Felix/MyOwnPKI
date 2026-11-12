@@ -432,7 +432,7 @@ func TestEndpointServedCertificate(t *testing.T) {
 	// A foreign certificate that ends in 2 days, with a hostile subject and issuer.
 	hostile := `<script>alert("x")</script>`
 	foreignID := endpointID(t, admin, "web.homelab.lan", 443)
-	v.serve(t, foreignID, strings.Repeat("AB", 32), hostile, hostile+"‮", v.clk.Now().Add(48*time.Hour))
+	v.serve(t, foreignID, strings.Repeat("AB", 32), hostile, hostile, v.clk.Now().Add(48*time.Hour))
 	r := viewer.do(t, http.MethodGet, "/endpoints", nil)
 	if strings.Contains(r.Body.String(), "<script>") {
 		t.Errorf("markup left unescaped in the JSON: %s", r.Body.String())

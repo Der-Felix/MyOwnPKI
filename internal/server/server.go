@@ -765,7 +765,7 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(),
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(), Endpoints: s.endpointAdmin(),
 		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Release),
 		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Release,
 	}})

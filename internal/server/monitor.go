@@ -256,3 +256,12 @@ func (s *Server) EndpointAdmin() *monitor.Endpoints {
 	}
 	return s.monitor.endpoints
 }
+
+// endpointAdmin is the same as the UI's interface – nil (not a typed nil)
+// without monitoring.
+func (s *Server) endpointAdmin() web.EndpointAdmin {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.endpoints
+}

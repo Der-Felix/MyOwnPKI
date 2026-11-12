@@ -68,6 +68,10 @@ var alertKinds = map[string]string{
 	monitor.KindAgentSilent:      "Agent silent",
 	monitor.KindAgentCertificate: "Agent certificate",
 	monitor.KindDeployFailed:     "Deployment failed",
+	monitor.KindScanMismatch:     "Wrong certificate served",
+	monitor.KindScanExpiry:       "Served certificate expires",
+	monitor.KindScanUnreachable:  "Endpoint unreachable",
+	monitor.KindScanChain:        "Chain problem",
 }
 
 func alertKind(kind string) string {
@@ -123,7 +127,7 @@ func (a *app) alertsPage(c *rc) {
 		sections = append(sections, s)
 	}
 	p := c.page("Alerts", "alerts")
-	p.Description = "What needs an admin: certificates and CA certificates that end soon, revocation lists, a sealed server, silent agents and failed deployments. Checked every minute."
+	p.Description = "What needs an admin: certificates and CA certificates that end soon, revocation lists, a sealed server, silent agents, failed deployments and TLS endpoints that serve the wrong certificate or do not answer. Checked every minute."
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(p, admin.DetailData{Messages: c.messages(), Sections: sections}))
 }
 

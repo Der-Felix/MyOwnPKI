@@ -67,6 +67,7 @@ func (e *Endpoints) ScanNow(ctx context.Context, who keys.Who, id string) error 
 	return e.Service.ScanNow(ctx, who, id)
 }
 
-// ScanOff reports monitor.scan_interval: off – endpoints can be entered and
-// removed, but nothing connects.
-func (e *Endpoints) ScanOff() bool { return e.Service.Settings.Off() }
+// Settings are the monitor.scan_* keys the scan runs with (the allowed ports,
+// the limit of endpoints, scanning off) – the page shows them next to the add
+// form.
+func (e *Endpoints) Settings() tlsscan.Settings { return e.Service.Settings }

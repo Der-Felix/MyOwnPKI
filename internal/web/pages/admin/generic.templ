@@ -166,6 +166,7 @@ templ field(f Field) {
 // Cell is one table cell.
 type Cell struct {
 	Text, Href, Rel string
+	Title           string // hover text (a full fingerprint, the exact time); escaped like every text
 	Status          view.Status // set: the text is a status
 	Mono, Num       bool
 	NoWrap          bool
@@ -297,7 +298,12 @@ templ tableBody(d TableData) {
 }
 
 templ tableCell(c Cell) {
-	<td class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap), templ.KV("break", c.Break) }>
+	<td
+		class={ templ.KV("num", c.Num), templ.KV("mono", c.Mono), templ.KV("nowrap", c.NoWrap), templ.KV("break", c.Break) }
+		if c.Title != "" {
+			title={ c.Title }
+		}
+	>
 		if c.Status != "" {
 			@components.Status(c.Status, c.Text)
 		}

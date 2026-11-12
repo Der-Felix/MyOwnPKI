@@ -133,8 +133,8 @@ func (a *API) createEndpoint(c *call) error {
 		Port int    `json:"port"`
 		SNI  string `json:"sni"`
 	}
-	if err := c.decode(&req); err != nil {
-		return err
+	if derr := c.decode(&req); derr != nil {
+		return derr
 	}
 	ep, err := s.Create(c.ctx(), c.who(), tlsscan.Request{Host: req.Host, Port: req.Port, SNI: req.SNI})
 	if err != nil {
