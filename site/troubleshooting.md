@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, notifications, the TLS scan, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, the Salt formula, notifications, the TLS scan, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -122,7 +122,7 @@ The full table is
 | `myownpki-agent: command not found`, from `salt … cmd.run`, `sudo` or cron | The program is in `/usr/local/bin`, and root's `PATH` for that caller does not contain it (common with Salt's `cmd.run` and with `sudo` on Red Hat-like systems) | Call it by its **absolute path**: `/usr/local/bin/myownpki-agent …` |
 | The enrollment waits: "waiting for an admin to approve it in the web UI (Agents) – …" | No valid join token, or the check failed; the text says which | Approve it in *Enrollment requests*, then run `setup` again (it polls) or `systemctl enable --now myownpki-agent` |
 | …"the join token expired" / "the join token was used already" / "unknown join token" / "the join token is not for …" | A guided token is valid **15 minutes**, **once**, and only for the exact host name; the token was already used, or the name differs | Create a new token (*Agents → Add host*, or *Join tokens*) and write the file again. A token is also used up when the agent then waits in the queue. For a pass see [the table below](#add-host-passes-and-deployment-add). |
-| `read token file: permissions must be exactly 0600` / `not a regular file` / `token file is empty` | The token file has the wrong mode or content | `chmod 0600` the regular file; a file written by Salt needs `mode: '0600'` |
+| `read token file: permissions must be exactly 0600` / `not a regular file` / `token file is empty` | The token file has the wrong mode or content | `chmod 0600` the regular file; a file written by Salt needs `mode: '0600'` (the [Salt formula]({{ '/hosts/salt/' | relative_url }}) writes it that way) |
 | `no domain covers … – an admin of the PKI must add one` | The host name is not under an ACME domain | *ACME → Domains*: add or extend the domain |
 | `root certificate SHA-256 mismatch: got …` | The value given to `--root-sha256` is not the SHA-256 of the **DER** form of this root | Compare with the authenticated UI: the SHA-256 of `openssl x509 -in root.pem -outform DER`, as `sha256sum` prints it |
 | `root file must contain exactly one PEM CERTIFICATE and no trailing data` | `--ca-bundle` holds a chain or extra text | Give only the root certificate |
@@ -175,6 +175,22 @@ assistant shows the stages. See [Adding hosts]({{ '/hosts/' | relative_url }}) f
 | `The unit is not installed (run setup first) – files written, systemctl skipped.` | **Not an error:** `deployment add` ran before `setup` | Run `setup`; it keeps the file |
 | `hint: hook "nginx-test" runs nginx, which writes its log files …` | A hook runs nginx and `sandbox.write` has no log directory | `--sandbox-write /var/log/nginx`, or use `--recipe nginx` |
 | A STARTTLS port as `--check` never succeeds | The check is an implicit-TLS handshake | Use an implicit-TLS port (443, 465, 993, 8006) or leave `--check` out |
+
+## Salt formula
+
+Since v0.3.6. The page [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) has the full list of
+refusals and what they mean.
+
+| Symptom or message | Likely cause | Fix |
+|---|---|---|
+| The only state is `myownpki-agent-refused` (`test=True` shows a generic text) | The formula checked the pillar and cannot use it; it installs nothing then | `salt 'minion-01.homelab.lan' state.show_highstate` prints the reason in the name of the state; fix the pillar |
+| `unknown pillar key myownpki:agent:…` | A typo, or a key the formula does not have | Compare with `pillar.example` in `deploy/salt/myownpki/` |
+| `config_source and deployments/absent are mutually exclusive` | The pillar sets both owners of `agent.yaml` | Keep `deployments` (and `absent`) or `config_source` |
+| `myownpki-agent-package-verified` fails: `SHA-256 of … does not match package.sha256.<arch>; not installing` | The package file on the master is not the one whose hash is in the pillar | Compare with the admin UI, replace the file, apply again. Nothing was installed |
+| `setup` prints `Enrollment is pending: …` and the service is disabled | No pass in the pillar, or the pass did not count (the text says why) | An admin approves the host (*Agents → Enrollment requests*); then `state.apply myownpki` again. The formula never starts the service itself |
+| A changed option of a deployment has no effect | The formula adds a deployment only when its name is not in `deployment list` | Put the name in `absent`, apply, then add it back with the new options; or use `config_source` |
+| `/root/myownpki-join-token` is still on a host that is enrolled | The host waited and was approved later; `setup` deletes the file only when it admits the host in that run | `rm -f /root/myownpki-join-token`; remove `enrollment_pass` from the pillar |
+| `agent.crt` checks fail or `setup` runs on every apply | A `config_source` sets a `state_dir` other than `/var/lib/myownpki-agent` | Keep the default state directory |
 
 ## Deployments and nginx
 

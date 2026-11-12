@@ -500,6 +500,12 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.5 to v0.3.6: no migration, no configuration change and no change to the server or the agent
+code. The release adds the Salt formula in the repository ([§12.10](#1210-rolling-out-with-salt));
+nothing uses it until you copy it to a Salt master. Update the server first, as always. With the
+formula, updating the agents is a change of `version` and `package.sha256` in the pillar and a
+`state.apply`: on an enrolled host it installs the verified package and runs `setup` again.
+
 From v0.3.4 to v0.3.5: pki.db migration 0019 adds the columns `kind`, `max_uses`, `use_count`,
 `revoked_at` and `revoked_by` to the join tokens (the enrollment pass, [§12.8](#128-enrollment-passes)).
 It is additive: every existing token stays a single-use token, a used one counts as one use, and no
@@ -1122,6 +1128,7 @@ Since v0.3.5 you do not have to write a deployment by hand: `myownpki-agent depl
 [§12.9](#129-recipes) has ready-made ones for nginx, Postfix, Dovecot and Proxmox VE. Do not mix the
 two ways for the same file in a configuration tool: either an admin uses `deployment add`, or Salt
 renders the whole file and then runs `sandbox sync`, because a rendered file overwrites what `add` wrote.
+The Salt formula ([§12.10](#1210-rolling-out-with-salt)) offers both and refuses the mix.
 
 An nginx profile with webroot enrollment and ACME:
 
@@ -1552,7 +1559,8 @@ disabling them is a separate, visible decision. A pass nobody used can also be w
 *From automation.* An admin creates the pass in the UI with the second factor; the tool only consumes
 it. **An API token can never create or revoke a pass**, whatever its role (`403`): that takes a person
 with a fresh second factor, and tokens have roles, not scopes, so there is no narrower permission to
-hand to a script. Give automation a **viewer** token that reads the result. A roll-out:
+hand to a script. Give automation a **viewer** token that reads the result. A roll-out (with Salt, the
+formula of [§12.10](#1210-rolling-out-with-salt) does steps 2 and 3 from a pillar):
 
 1. Create the pass: label `salt rollout 2026-11`, names `*.homelab.lan`, 10 uses, 24 hours. Copy the
    secret.
@@ -1628,6 +1636,46 @@ To verify on a test host (and note what differed from this page):
 None of the three should need a group, as far as the documentation says: the daemons read their keys
 as root. A service that reads its key as an unprivileged user takes `--group` and `--key-mode 0640`
 (for example `ssl-cert` on Debian). That is a claim to verify on each host.
+
+### 12.10 Rolling out with Salt
+
+Since v0.3.6 the repository has a Salt formula, [`deploy/salt/myownpki/`](../deploy/salt/myownpki), that puts the pieces of
+[§12.7](#127-adding-a-host) and [§12.8](#128-enrollment-passes) into one `state.apply myownpki`. It is
+not part of the release archives: copy the directory `myownpki/` from the tag you install into a
+`file_roots` directory of the master, or fetch it with gitfs at that tag. The page for administrators,
+with the commands, is [Rolling out with Salt](https://der-felix.github.io/MyOwnPKI/hosts/salt/); the
+formula's own [README](../deploy/salt/myownpki/README.md) lists every state and rule. In short:
+
+- **Pillar `myownpki:agent`.** Required: `version`, `server`, `acme_directory`, `root_source`,
+  `root_sha256` and `package.sha256` (a map of `amd64` and `arm64` to the SHA-256 of the package). Optional:
+  `package.source` (default `salt://myownpki/files/{name}`) and `package.format` (`auto`, `deb`, `rpm`),
+  `webroot`, `low_ports`, `enrollment_pass`, `config_source`, `deployments` and `absent`. The hashes come
+  from the authenticated admin UI, not from the files being rolled out.
+- **Verified package.** Salt ignores `source_hash` for `salt://` sources, so the formula stages the package
+  in `/var/cache/myownpki-agent`, compares its SHA-256 with the pillar (the state
+  `myownpki-agent-package-verified` fails the run on a mismatch, on every apply) and installs only from
+  that local file.
+- **Enrollment.** `enrollment_pass` is written to `/root/myownpki-join-token` (0600, not shown in any
+  output) only while `/var/lib/myownpki-agent/agent.crt` does not exist, and `setup --token-file` uses it.
+  Without a pass the host waits for one approval and the next apply finishes the job. The formula never
+  enables or starts the unit; `setup` does when the host is admitted, and the restart is
+  `systemctl try-restart` only. A host that waited and is approved later keeps the pass file; delete it
+  and take the pass out of the pillar after the roll-out.
+- **Deployments.** `deployments` are applied with `deployment add`, guarded by `deployment list`; a
+  changed option of an existing deployment is **not** applied (remove it through `absent` first).
+  `config_source` (Salt renders the whole file, then `sandbox sync`) and `deployments` are mutually
+  exclusive: one owner of `agent.yaml` ([§12.3](#123-agentyaml-and-deployment-profiles)). A `state_dir`
+  other than `/var/lib/myownpki-agent` breaks the formula's `agent.crt` checks.
+- **Updates.** A new package on an enrolled host runs `setup` again (the state
+  `myownpki-agent-setup-update`), which is the update step of [§9](#9-upgrading). Update the server first.
+- **Fails closed.** A missing required key, a missing hash for the minion's architecture, an unknown key,
+  option or format, a pass that is not a string and similar mistakes render one failing state,
+  `myownpki-agent-refused`, and nothing is installed. `state.show_highstate` prints the reason.
+
+**What is tested.** The CI job `salt formula` renders every pillar in `deploy/salt/test/cases` and
+applies it with `test=True` under Salt 3008.5. **Not tested:** a real apply that installs the package and
+enrolls an agent against a server, other Salt versions, and the installation of an `rpm` package. Try
+the formula on one minion before you roll out.
 
 ## 13. Monitoring and notifications
 

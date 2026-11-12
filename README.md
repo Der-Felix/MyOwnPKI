@@ -63,7 +63,7 @@ agent; the rest of this list follows up to v1.0:
 ## Documentation
 
 The documentation site has guides for the daily work: installation, upgrades, adding hosts (the agent,
-also with Salt), monitoring, best practices and troubleshooting. The operations guide
+also with the Salt formula), monitoring, best practices and troubleshooting. The operations guide
 ([docs/OPERATIONS.md](docs/OPERATIONS.md)) is part of it. <https://der-felix.github.io/MyOwnPKI/>
 
 ## Install

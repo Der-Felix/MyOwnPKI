@@ -8,7 +8,7 @@ A host gets its certificate in one of two ways. Either it runs an **ACME client*
 ACME server of MyOwnPKI, or it runs the **agent**, which uses ACME inside and adds deployment,
 reload, rollback and reporting. This page covers both and then the agent in detail. Ready-made
 settings for nginx, Postfix, Dovecot and Proxmox VE are on [Recipes]({{ '/recipes/' | relative_url }}).
-Rolling the agent out to many machines with Salt is on its own page:
+Rolling the agent out to many machines is done with the Salt formula (since v0.3.6); it has its own page:
 [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}).
 
 * TOC
@@ -171,6 +171,10 @@ sudo /usr/local/bin/myownpki-agent setup \
   --webroot /var/www/html
 ```
 
+With Salt you do not run this yourself: the formula keeps the pass in the pillar, writes the token file only
+while the host has no agent certificate and calls `setup --token-file` (see
+[Rolling out with Salt]({{ '/hosts/salt/' | relative_url }})).
+
 When the pass does not count, the host is not lost: it waits in *Enrollment requests* and `setup` prints
 why (see [Troubleshooting]({{ '/troubleshooting/' | relative_url }}#agents-and-enrollment)).
 
@@ -300,7 +304,10 @@ lists name, profile, names, targets, hooks and check (it also runs without root)
 unless you pass `--prune-paths`, and it never touches deployed files or the agent's state.
 
 Use **one owner** for `agent.yaml`: either an admin with `deployment add`, or a configuration tool that
-renders the whole file and then runs `sandbox sync`. A rendered file overwrites what `add` wrote.
+renders the whole file and then runs `sandbox sync`. A rendered file overwrites what `add` wrote. The
+[Salt formula]({{ '/hosts/salt/' | relative_url }}) offers both and refuses to mix them: the pillar has
+either `deployments` (it calls `deployment add`) or `config_source` (it renders the file and runs
+`sandbox sync`).
 
 ## agent.yaml
 
