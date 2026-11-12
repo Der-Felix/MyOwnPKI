@@ -59,10 +59,10 @@ func (a *app) agentList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Enrollment requests, Join tokens and Install agent.",
+	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Add host, Enrollment requests and Join tokens.",
 		Columns: []admin.Column{{Label: "Host"}, {Label: "Status"}, {Label: "Last seen"}, {Label: "Version"}, {Label: "System"}, {Label: "Admitted"}}}
 	if c.may(authz.ManageAgents, "") {
-		d.Commands = []admin.Command{{Label: "Install agent", Href: "/agents/install", Primary: true}}
+		d.Commands = []admin.Command{{Label: "Add host", Href: hostAddPath, Primary: true}, {Label: "Install agent", Href: "/agents/install"}}
 	}
 	for _, ag := range list {
 		versionCell := admin.Cell{Text: orDash(ag.Version), Mono: true}
