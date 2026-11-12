@@ -51,7 +51,7 @@ code can make a token fresh. Such a request answers `403` with the problem type 
 - revoking certificates, and downloading or exporting private keys;
 - creating, renewing, retiring and revoking CAs, and uploading a root's CRL;
 - managing users;
-- managing agents: creating join tokens, approving or denying enrollments, disabling or revoking an
+- managing agents: creating or revoking join tokens and enrollment passes, approving or denying enrollments, disabling or revoking an
   agent. (Reading them is allowed.)
 - changing the agent enrollment mode: `PUT /settings` with a different `agent_enrollment` (any other
   setting, or the same mode, works with a token);
@@ -91,7 +91,7 @@ everything its roles allow, after the step-up.
 | certificates | `GET /certificates`, `/certificates/{id}/download/{format}`, `…/renew`, `…/revoke` | viewer reads; operator issues, renews and revokes (revoking needs the second factor) |
 | imports | legacy `pki.sh` import, external certificates | admin |
 | audit | `GET /audit`, `POST /audit/verify` | per operation, see the OpenAPI file |
-| agents | `GET /agents`, `/agent-enrollments`, `/agent-join-tokens`, `…/deployments/{name}/renew` | viewer reads, operator renews, admin manages |
+| agents | `GET /agents` and `/agent-enrollments` (both with an optional `?hostname=`), `/agent-join-tokens` (join tokens and enrollment passes, no secrets), `GET /agent-install` (the facts for installing the agent without a browser), `…/deployments/{name}/renew` | viewer reads, operator renews, admin manages (creating, revoking and approving need the second factor, so never a token) |
 | monitoring | `GET /alerts`, `POST /notifications/test` | viewer reads, admin tests |
 
 The OpenAPI file has the exact paths, parameters and the role each operation needs (`x-required-role`),
@@ -109,6 +109,12 @@ The admitted agents and their deployments:
 
 ```bash
 curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" https://pki.homelab.lan:9443/api/v1/agents
+```
+
+The agent of one host, for example after a roll-out:
+
+```bash
+curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" "https://pki.homelab.lan:9443/api/v1/agents?hostname=minion-01.homelab.lan"
 ```
 
 The first 20 certificates:

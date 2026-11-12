@@ -12,6 +12,8 @@
   children:
     - title: Rolling out with Salt
       url: /hosts/salt/
+- title: Recipes
+  url: /recipes/
 - title: Monitoring
   url: /monitoring/
 - title: TLS scan

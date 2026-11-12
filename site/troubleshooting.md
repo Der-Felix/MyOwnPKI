@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, notifications, the TLS scan, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, notifications, the TLS scan, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -121,7 +121,7 @@ The full table is
 |---|---|---|
 | `myownpki-agent: command not found`, from `salt … cmd.run`, `sudo` or cron | The program is in `/usr/local/bin`, and root's `PATH` for that caller does not contain it (common with Salt's `cmd.run` and with `sudo` on Red Hat-like systems) | Call it by its **absolute path**: `/usr/local/bin/myownpki-agent …` |
 | The enrollment waits: "waiting for an admin to approve it in the web UI (Agents) – …" | No valid join token, or the check failed; the text says which | Approve it in *Enrollment requests*, then run `setup` again (it polls) or `systemctl enable --now myownpki-agent` |
-| …"the join token expired" / "the join token was used already" / "unknown join token" / "the join token is not for …" | A guided token is valid **15 minutes**, **once**, and only for the exact host name; the token was already used, or the name differs | Create a new token (*Agents → Install agent*, or *Join tokens*) and write the file again. A token is also used up when the agent then waits in the queue. |
+| …"the join token expired" / "the join token was used already" / "unknown join token" / "the join token is not for …" | A guided token is valid **15 minutes**, **once**, and only for the exact host name; the token was already used, or the name differs | Create a new token (*Agents → Add host*, or *Join tokens*) and write the file again. A token is also used up when the agent then waits in the queue. For a pass see [the table below](#add-host-passes-and-deployment-add). |
 | `read token file: permissions must be exactly 0600` / `not a regular file` / `token file is empty` | The token file has the wrong mode or content | `chmod 0600` the regular file; a file written by Salt needs `mode: '0600'` |
 | `no domain covers … – an admin of the PKI must add one` | The host name is not under an ACME domain | *ACME → Domains*: add or extend the domain |
 | `root certificate SHA-256 mismatch: got …` | The value given to `--root-sha256` is not the SHA-256 of the **DER** form of this root | Compare with the authenticated UI: the SHA-256 of `openssl x509 -in root.pem -outform DER`, as `sha256sum` prints it |
@@ -129,7 +129,7 @@ The full table is
 | `--webroot must name an existing directory` | The directory does not exist | Create it, or use standalone |
 | The agent is listed as **silent** in the UI (and an `agent_silent` alert) | Three reports (15 minutes) are missing: the service is down, the host cannot reach `server` on 8444, the agent's proxy is wrong, the clock is far off, or the server's agent listener certificate expired while sealed | On the host: `systemctl status myownpki-agent`, `journalctl -u myownpki-agent -n 100`, `myownpki-agent status`, and test `openssl s_client -connect pki.homelab.lan:8444 -CAfile root.pem </dev/null`. The agent **ignores** `HTTPS_PROXY`; set `proxy:` in `agent.yaml` if it needs one. Check `timedatectl`. |
 | TLS or host name errors to the server | `ca_bundle` is not the root of the listener's chain, or `server` is not a DNS name in the listener's certificate, or the listener still has its bootstrap certificate | Compare `ca_bundle` with the root; use the name from `agent.base_url`; unseal the server |
-| **`permission denied`** when the agent writes a certificate, a key or a webroot file | The systemd sandbox: the directory is not in `ReadWritePaths` of the unit | Add the directory to `paths` in `agent.yaml` **and** to `10-paths.conf` ([next table](#deployments-and-nginx)) |
+| **`permission denied`** when the agent writes a certificate, a key or a webroot file | The systemd sandbox: the directory is not in `ReadWritePaths` of the unit | Add the directory to `paths` in `agent.yaml` (`deployment add` does it for you), then `myownpki-agent sandbox sync` to bring `10-paths.conf` in step, and restart ([next tables](#deployments-and-nginx)) |
 | Standalone: `challenge standalone: port :80 is in use or not allowed (…) – with a web server on port 80 use challenge: webroot` | A web server holds port 80, or the service may not bind a port below 1024 | Use `challenge: webroot`, or stop what holds the port (`ss -ltnp 'sport = :80'`) and install `20-low-ports.conf` (`setup --low-ports`) |
 | `myownpki-agent config check` lists problems | See the messages below | Fix them, then restart the service |
 | `paths: "…": an absolute path without ..` / `… not under one of paths – the agent writes only there` | A target or webroot is outside `paths` | Add its directory to `paths` |
@@ -140,14 +140,50 @@ The full table is
 | `agent … is revoked – it can't enroll again` | The agent was revoked or disabled | Create a new agent identity ([Adding hosts]({{ '/hosts/' | relative_url }}#removing-a-host)) |
 | Rate limited | More than 60 reports or 120 watches per 10 minutes from one agent | Look for a second process or a broken loop on the host |
 
+## Add host, passes and deployment add
+
+Since v0.3.5. The commands print the messages below themselves; the progress page of the *Add host*
+assistant shows the stages. See [Adding hosts]({{ '/hosts/' | relative_url }}) for how they work.
+
+| Symptom or message | Likely cause | Fix |
+|---|---|---|
+| `Kept in 10-paths.conf (agent.yaml does not explain them): /var/log/nginx` | **Not an error.** The drop-in has an entry that `agent.yaml` does not explain, for example one you added by hand. `setup`, `deployment add` and `sandbox sync` keep it. | `myownpki-agent sandbox sync --adopt` records it under `sandbox.write`, so that `agent.yaml` explains it; `--prune` removes it from the drop-in |
+| `Added to 10-paths.conf: …` | **Not an error.** The drop-in lacked a directory that `agent.yaml` needs; it was appended. | Restart the agent (`systemctl restart myownpki-agent`) |
+| `waiting for an admin to approve it in the web UI (Agents) – the enrollment pass has no uses left (10 of 10) – ask an admin for a new one, …` | The pass is **used up**; every enrollment that presented it took a use, also one that then waited | An admin creates a new pass, or approves this host under *Enrollment requests* |
+| … `the pass expired` / `the pass was revoked` | The pass is past its validity (at most 7 days), or an admin revoked it | A new pass, or approve the host in the UI |
+| … `the pass is not for minion-01.homelab.lan` | The host name matches none of the names of the pass | Use a pass for that name, or approve the host in the UI |
+| … `an agent for minion-01.homelab.lan exists – a pass admits new hosts only; ask an admin for a single-use token` | The host already has an agent (an active or a disabled one), and a pass never replaces a host | An admin creates a single-use token for it (*Agents → Add host*), or approves the request after reading the reason; to start over, revoke the old agent ([Removing a host]({{ '/hosts/' | relative_url }}#removing-a-host)) |
+| … `unknown join token` | The secret is not one this server knows: a typo, a token of another server, or one that was withdrawn | Check the file `/root/myownpki-join-token`; create a new one |
+| Creating a pass is refused: `names: no domain covers … – an admin of the PKI must add one first (Domains)` | A name of the pass is not under an ACME domain | *ACME → Domains*: add the domain first |
+| `403` when a script creates or revokes a pass | **By design:** an API token never satisfies the second factor, whatever its role | An admin does it in the UI; give the script a viewer token that reads |
+| Add host: *Host enrolled* stays **waiting for the host** | Nothing has arrived. The commands were not run, ran on the wrong host, or the host cannot reach `server` on 8444. | Run the blocks as root on the host; `journalctl -u myownpki-agent -n 100` and `systemctl status myownpki-agent`; test port 8444 |
+| Add host: **checking** for longer than a minute | The server cannot fetch the check file from the host: DNS, port 80, the webroot | [ACME and http-01](#acme-and-http-01); the same path is used |
+| Add host: **waiting for your approval** | The host has no valid secret, or the check failed; the row names which, with the source address | An admin with a fresh second factor presses *Approve* if the host is expected, *Refuse* if not |
+| Add host: **refused** or **expired** | An admin refused it, or nobody decided in time | Run `setup` on the host again (a new token if the first one was used) |
+| Add host: **waiting for the first report** | The agent is admitted but has not reported yet; `deployment add` was not run, or the service is disabled | `systemctl enable --now myownpki-agent`; run the `deployment add` block |
+| Add host: **silent** | Three reports are missing | As for a silent agent ([Agents and enrollment](#agents-and-enrollment)) |
+| Add host: a deployment is **failed** or **rolled back** | The test or reload hook failed; the row shows the agent's last error | Read the error; [Deployments and nginx](#deployments-and-nginx); fix, then *Renew now* |
+| Add host: the page does not reload any more | It stops when the agent is online and every deployment is deployed | Nothing to fix: the certificate is in place |
+| `deployment add must run as root; nothing was changed` | Not root (also with `--dry-run`) | `sudo` |
+| `agent.yaml is not valid yet – run "myownpki-agent config check" and fix it first; nothing was changed` | The existing file fails the checks of `run` | Fix what `config check` lists, then add the deployment |
+| `deployment "nginx" exists – pick another name or run "deployment remove nginx" first` | A deployment of that name is in `agent.yaml` | Choose another name, or remove the old one |
+| `--dir /etc: too broad – the agent may write only where "paths" allows; use a subdirectory such as /etc/ssl/myownpki` | `--dir`, `--webroot` or `--sandbox-write` names a system directory (`/`, `/etc`, `/var`, `/home` and others) | Use a subdirectory |
+| `/etc/ssl/myownpki does not exist – create it, or pass --create-dirs` | The directory the agent must add to `paths` is missing | `install -d -m 0755 DIR`, or `--create-dirs` |
+| `agent.yaml has no acme_directory – pass --acme-directory https://pki.homelab.lan/acme/directory` | A deployment needs an ACME directory and neither the file nor the flag has one | Add `--acme-directory` (or set `acme_directory`) |
+| `hook "nginx-test": the first element must be an absolute path` | A `--hook` command such as `nginx -t` | `--hook nginx-test='/usr/sbin/nginx -t'` |
+| `agent.yaml uses anchors, aliases or several documents – edit it by hand and run config check` | The editor cannot change such a file without damaging it | Edit the file by hand |
+| `The unit is not installed (run setup first) – files written, systemctl skipped.` | **Not an error:** `deployment add` ran before `setup` | Run `setup`; it keeps the file |
+| `hint: hook "nginx-test" runs nginx, which writes its log files …` | A hook runs nginx and `sandbox.write` has no log directory | `--sandbox-write /var/log/nginx`, or use `--recipe nginx` |
+| A STARTTLS port as `--check` never succeeds | The check is an implicit-TLS handshake | Use an implicit-TLS port (443, 465, 993, 8006) or leave `--check` out |
+
 ## Deployments and nginx
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | A deployment shows `rolled_back` or `failed`; `myownpki-agent status` prints `deployment …: rolled_back (…)` | The new certificate was written, but the test or reload hook failed (for example `nginx -t` found an error). The agent **put the old files and certificate back** and reloaded; the service is as before, only the renewal did not happen. `failed` means the step did not finish at all. | Read the error on the agent's page, in `myownpki-agent status` and in `journalctl -u myownpki-agent` (the last stderr lines of the hook are in it). Fix the cause, then *Renew now*. Failures back off instead of retrying in a loop. A `deploy_failed` alert stays open until a report succeeds. |
 | `nginx -t` fails with `bind() … Permission denied` on port 443 under the agent | The hooks run inside the sandbox, and `nginx -t` opens the listen sockets | Install the low-ports drop-in (`setup --low-ports`) even in webroot mode |
-| `nginx -t` fails with `Read-only file system` | nginx writes to a directory that is not in `ReadWritePaths` (its logs, or temporary directories below `/var/cache/nginx` or `/var/lib/nginx`) | Add `/var/log/nginx` and the directories it names to `10-paths.conf`, then `systemctl daemon-reload` and restart |
-| A new `paths` entry still gives `permission denied` | `10-paths.conf` was not updated, or `daemon-reload` was not run | Make the drop-in list exactly the state directory, the web roots and the parents of your targets, then `systemctl daemon-reload && systemctl restart myownpki-agent`. See what systemd applies with `systemctl show myownpki-agent -p ReadWritePaths`. |
+| `nginx -t` fails with `Read-only file system` | nginx writes to a directory that is not in `ReadWritePaths` (its logs, or temporary directories below `/var/cache/nginx` or `/var/lib/nginx`) | Add `/var/log/nginx` and the directories it names to `sandbox.write` in `agent.yaml` (`deployment add --sandbox-write DIR`, or `--recipe nginx`), run `myownpki-agent sandbox sync` and restart. A hand-made entry in `10-paths.conf` is kept; `sandbox sync --adopt` records it. |
+| A new `paths` entry still gives `permission denied` | `paths` was edited by hand and `10-paths.conf` was not brought in step, or `daemon-reload` was not run | `myownpki-agent config check` says whether the drop-ins match; `myownpki-agent sandbox sync` writes them. Then `systemctl restart myownpki-agent`. See what systemd applies with `systemctl show myownpki-agent -p ReadWritePaths`. |
 | A hook with `sudo` does nothing | `NoNewPrivileges=yes` | The agent runs as root already; remove `sudo` |
 | The renewed certificate is on disk but the site serves the old one | A `check` is set and no reload happened, or nginx does not use the agent's files | Check that the server block points to the `fullchain.pem` and `privkey.pem` in `dir`; look at `check` |
 
