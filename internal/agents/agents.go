@@ -98,11 +98,13 @@ type Service struct {
 	// AgentPredecessor returns the tenant default for agent deployments.
 	AgentPredecessor func(ctx context.Context) (predecessor.Policy, error)
 	Checker          Checker
-	Clock            clock.Clock
-	Log              *slog.Logger
-	Wake             func()
-	Rand             io.Reader                                  // nil = crypto/rand
-	Sleep            func(context.Context, time.Duration) error // nil = clock.Sleep
+	// Install serves the install facts (InstallFacts); nil = no agent distribution.
+	Install *InstallSource
+	Clock   clock.Clock
+	Log     *slog.Logger
+	Wake    func()
+	Rand    io.Reader                                  // nil = crypto/rand
+	Sleep   func(context.Context, time.Duration) error // nil = clock.Sleep
 
 	limitOnce     sync.Once
 	limits        *limiter

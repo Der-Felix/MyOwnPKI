@@ -73,6 +73,7 @@ func (s *Server) buildAgents() error {
 			return *v.AgentPredecessor, nil
 		},
 		Checker: acme.NewHTTP01Checker(resolver, s.log), Clock: s.clk, Log: s.log, Wake: s.wakeUp,
+		Install: &agents.InstallSource{Dist: agentdist.New(cfg.Agent.PackageDir, s.opt.Release), BaseURL: cfg.Agent.BaseURL, TLSIssuer: cfg.Agent.TLSIssuer, ACMEDirectory: s.acmeDirectory, Clock: s.clk},
 	}}
 	s.jobs.add(jobAgentCAs, agentCAsEvery, agentCAsEvery, func(ctx context.Context) error { s.refreshAgentCAs(ctx); return nil })
 	return nil

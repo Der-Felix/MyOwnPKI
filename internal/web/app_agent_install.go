@@ -1,13 +1,8 @@
 package web
 
 import (
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -164,47 +159,8 @@ func (a *app) agentOlder(ag agents.Agent) bool {
 }
 
 func (a *app) agentTLSTrust(c *rc) (agentTrust, error) {
-	cas, err := a.d.Engine.CAs(c.r.Context(), c.who())
-	if err != nil {
-		return agentTrust{}, err
-	}
-	var issuer *ca.CAInfo
-	for i := range cas {
-		if cas[i].Name == a.d.AgentTLSIssuer {
-			issuer = &cas[i]
-			break
-		}
-	}
-	if issuer == nil {
-		return agentTrust{}, ca.ErrNotFound
-	}
-	chain, err := a.d.Engine.CAChain(c.r.Context(), c.who(), issuer.ID)
-	if err != nil || len(chain) == 0 {
-		return agentTrust{}, errors.Join(ca.ErrNotFound, err)
-	}
-	rootDER := chain[len(chain)-1]
-	root, err := x509.ParseCertificate(rootDER)
-	if err != nil || !root.IsCA || root.CheckSignatureFrom(root) != nil {
-		return agentTrust{}, errors.New("agent TLS issuer chain has no valid self-signed root")
-	}
-	for i := range cas {
-		if cas[i].Kind != ca.KindRoot {
-			continue
-		}
-		for _, generation := range cas[i].Generations {
-			fingerprint := strings.ReplaceAll(strings.ToLower(generation.Fingerprint), ":", "")
-			sum := sha256.Sum256(rootDER)
-			if generation.Generation > 0 && fingerprint == hex.EncodeToString(sum[:]) {
-				rootURL := fmt.Sprintf("%s/ca/%s/%d.pem", strings.TrimRight(cas[i].BaseURL, "/"), cas[i].Name, generation.Generation)
-				u, parseErr := url.Parse(rootURL)
-				if parseErr != nil || u.Scheme != "http" || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
-					return agentTrust{}, errors.New("agent TLS root has no exact public HTTP PEM URL")
-				}
-				return agentTrust{rootSHA256: fingerprint, rootSHA1: generation.FingerprintSHA1, rootURL: rootURL}, nil
-			}
-		}
-	}
-	return agentTrust{}, ca.ErrNotFound
+	t, err := agents.TLSTrust(c.r.Context(), a.d.Engine, c.who(), a.d.AgentTLSIssuer)
+	return agentTrust{rootSHA256: t.SHA256, rootSHA1: t.SHA1, rootURL: t.URL}, err
 }
 
 func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) ([]admin.Section, error) {
