@@ -205,12 +205,21 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /agents/install", a.signedIn(a.agentInstallPage))
 	a.protected(mux, "POST /agents/install", a.agentInstall, "hostname", "arch", "format", "mode", "webroot", "token")
 	mux.HandleFunc("GET /agents/{id}/update", a.signedIn(a.agentUpdatePage))
+	mux.HandleFunc("GET /hosts/add", a.signedIn(a.hostAddPage))
+	mux.HandleFunc("POST /hosts/add", a.signedIn(a.hostAddNext))
+	a.protected(mux, "POST /hosts/add/commands", a.hostAddShow, "hostname", "service", "challenge", "webroot", "names", "format", "arch", "admission")
+	mux.HandleFunc("GET /hosts/add/{host}", a.signedIn(a.hostAddProgress))
+	mux.HandleFunc("GET /hosts/add/{host}/status", a.session(a.hostAddProgress, true))
+	a.protected(mux, "POST /hosts/add/{host}/approve", a.hostAddDecide, "id")
+	a.protected(mux, "POST /hosts/add/{host}/deny", a.hostAddDecide, "id")
 	mux.HandleFunc("GET /agents/enrollments", a.signedIn(a.enrollmentList))
 	a.protected(mux, "POST /agents/enrollments/approve", a.enrollmentDecide, "id")
 	a.protected(mux, "POST /agents/enrollments/deny", a.enrollmentDecide, "id")
 	mux.HandleFunc("GET /agents/tokens", a.signedIn(a.joinTokens))
 	a.protected(mux, "POST /agents/tokens", a.joinTokenCreate, "label", "names", "hours")
 	a.protected(mux, "POST /agents/tokens/delete", a.joinTokenDelete, "id")
+	a.protected(mux, "POST /agents/tokens/pass", a.joinPassCreate, "label", "names", "uses", "hours")
+	a.protected(mux, "POST /agents/tokens/revoke", a.joinTokenRevoke, "id")
 	mux.HandleFunc("GET /agents/{id}", a.signedIn(a.agentDetail))
 	mux.HandleFunc("GET /agents/{id}/deployments", a.session(a.agentDeployments, true))
 	mux.HandleFunc("GET /agents/{id}/deployments/{name}/renew", a.signedIn(a.agentRenewPage))
@@ -513,6 +522,9 @@ func (c *rc) page(title, section string, crumbs ...view.Crumb) view.Page {
 	}
 	if c.a.d.Endpoints == nil || !c.may(authz.ReadPKI, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "endpoints")
+	}
+	if c.a.d.Agents == nil || !c.may(authz.ReadPKI, "") {
+		p.Session.Hidden = append(p.Session.Hidden, hostAddNavKey)
 	}
 	if !c.may(authz.ReadAudit, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "audit")

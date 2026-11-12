@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.4
+v=0.3.5
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -499,6 +499,33 @@ From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`)
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+From v0.3.4 to v0.3.5: pki.db migration 0019 adds the columns `kind`, `max_uses`, `use_count`,
+`revoked_at` and `revoked_by` to the join tokens (the enrollment pass, [§12.8](#128-enrollment-passes)).
+It is additive: every existing token stays a single-use token, a used one counts as one use, and no
+certificate, agent or enrollment changes. Nothing needs to be configured. **Update the server first.**
+An agent of v0.3.4 keeps reporting and nothing changes on it, but `deployment`, `sandbox sync`,
+`setup --acme-directory` and the `sandbox:` key of `agent.yaml` need the v0.3.5 agent
+([§12.7](#127-adding-a-host)).
+
+**Run `setup` once on every existing agent** (*Agents → Update* shows the commands) to get the
+drop-in fixes. On a host that was set up before v0.3.5 the update now behaves like this:
+
+- `10-paths.conf` is no longer rewritten from `agent.yaml` alone. An entry you added by hand,
+  typically `/var/log/nginx` for nginx hooks, **stays**, and `setup` says so: `Kept in 10-paths.conf
+  (agent.yaml does not explain them): /var/log/nginx`. Directories that `agent.yaml` needs and the
+  file lacks are appended (`Added to 10-paths.conf: …`). `myownpki-agent sandbox sync --adopt` writes
+  the kept entries into the `sandbox:` block of `agent.yaml`, so that the file explains them.
+- `20-low-ports.conf` stays when `setup` is run without `--low-ports` and enrollment uses webroot.
+  v0.3.4 removed it then, although the nginx hooks need it. A standalone challenge of a deployment
+  now also counts as a reason to install it, not only the enrollment's.
+- A file that already holds everything is not rewritten, and an `20-low-ports.conf` that differs from
+  the packaged one is not overwritten (`setup` says so).
+
+Going back to v0.3.4 means the backup from step 1, because v0.3.4 refuses the newer `pki.db`; a
+v0.3.4 agent binary also refuses an `agent.yaml` that has a `sandbox:` block (remove the block first).
+One setting changed its rules in this release: switching the agent enrollment mode needs a fresh
+second factor and no API token can do it (§4, *Step-up confirmation lifetime*).
 
 From v0.3.3 to v0.3.4: pki.db migration 0018 adds the table for the TLS scan's endpoints; it is
 additive and changes no certificate. Nothing needs to be configured: the scan starts with no endpoint
@@ -980,11 +1007,14 @@ bounded. Set `MYOWNPKI_AGENT_PACKAGE_DIR` instead of editing YAML when using env
 
 ### 12.2 Guided and verified installation
 
-The default is *Agents → Install agent*. An admin chooses the exact host FQDN, Linux architecture,
-package format and standalone/webroot enrollment, then confirms with a fresh second factor. The
-result contains the complete root download/fingerprint check, verified package and `checksums.txt`
-downloads, package-manager or tarball installation, and `myownpki-agent setup` commands. Run them as
-root on the target host, not on the PKI server.
+Since v0.3.5 the default is *Agents → Add host*, the assistant of [§12.7](#127-adding-a-host): it asks
+for the service as well, shows the same verified install and `setup` commands plus the
+`deployment add` command, and follows the host until its certificate is deployed. The page described
+in the rest of this section, *Agents → Install agent*, is unchanged and still available. An admin
+chooses the exact host FQDN, Linux architecture, package format and standalone/webroot enrollment,
+then confirms with a fresh second factor. The result contains the complete root download/fingerprint
+check, verified package and `checksums.txt` downloads, package-manager or tarball installation, and
+`myownpki-agent setup` commands. Run them as root on the target host, not on the PKI server.
 
 The root SHA-256 and package SHA-256 shown in that authenticated response are independent expected
 values. The downloaded certificate and `checksums.txt` never supply their own authorization values:
@@ -1005,6 +1035,14 @@ the same root check and a `setup` command for a host where the package or tarbal
 installed: it writes the token file, detects the installed format, and passes `--hostname` for a
 token with one exact name (otherwise `hostname -f`, which must match one of the patterns).
 
+What admits a host is the tenant's enrollment mode (*Administration → Tenant settings*,
+`agent_enrollment`). In `verified`, the default, a host needs a valid token (or pass, [§12.8](#128-enrollment-passes))
+**and** a passed http-01 check; with only one of the two it waits in *Enrollment requests* for an
+admin. `auto` admits a host that has either (a pass always needs the check), so a machine that answers port 80 for a name below one
+of your domains gets in without a person; `manual` always waits. Because `auto` weighs as much as an
+approval, **changing the mode needs a fresh second factor** and an API token can never change it
+(§4, *Step-up confirmation lifetime*).
+
 Download the root PEM independently and compare its fingerprint with the authenticated admin UI.
 `setup` requires this expected value and checks SHA-256 over the certificate DER, not the PEM text.
 The root file must contain exactly one self-signed CA certificate:
@@ -1018,15 +1056,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.4
+v=0.3.5
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.4_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.5_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.4_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.4_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.5_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.5_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1079,6 +1117,11 @@ release.
 
 The file is `/etc/myownpki-agent/agent.yaml`, state is `/var/lib/myownpki-agent` (0700, files 0600).
 After editing, run `/usr/local/bin/myownpki-agent config check` and `systemctl restart myownpki-agent`.
+Since v0.3.5 you do not have to write a deployment by hand: `myownpki-agent deployment add`
+([§12.7](#127-adding-a-host)) adds it to this file and adjusts the systemd drop-ins in one step, and
+[§12.9](#129-recipes) has ready-made ones for nginx, Postfix, Dovecot and Proxmox VE. Do not mix the
+two ways for the same file in a configuration tool: either an admin uses `deployment add`, or Salt
+renders the whole file and then runs `sandbox sync`, because a rendered file overwrites what `add` wrote.
 
 An nginx profile with webroot enrollment and ACME:
 
@@ -1170,19 +1213,43 @@ not write secrets to stderr**, even with this filtering.
 
 The systemd unit runs as root because configured owners and `systemctl reload` need it, but with
 `ProtectSystem=strict`, `NoNewPrivileges=yes`, private `/tmp`, restricted address families and
-`@system-service` system calls. Its base writable path is only the state directory. Setup
-adds the configured paths to `10-paths.conf`. Whenever you add or change `paths`, update that
-drop-in to contain **exactly the state, webroot and deployment parent directories**, then run
-`systemctl daemon-reload` and restart. When a hook runs nginx, also add `/var/log/nginx`, because
-`nginx -t` opens its log files:
+`@system-service` system calls. Its base writable path is only the state directory. The drop-in
+`10-paths.conf` lists what else it may write: `state_dir`, every entry of `paths`, and the optional
+`sandbox.write` list. **Since v0.3.5 the agent keeps that file in step with `agent.yaml` for you**:
+`setup`, `deployment add`, `deployment remove` and `sandbox sync` ([§12.7](#127-adding-a-host)) write
+it, so editing it by hand is the exception. A file written by the agent looks like this:
 
 ```ini
+# Written by myownpki-agent from agent.yaml (state_dir, paths, sandbox.write).
+# Entries you add here by hand are kept; "myownpki-agent sandbox sync" shows them.
 [Service]
 ReadWritePaths=/var/lib/myownpki-agent /var/www/html /etc/nginx/myownpki /var/log/nginx
 ```
 
-If `nginx -t` reports `Read-only file system` for its temporary directories, add those directories
-to `10-paths.conf` as well (for example the `/var/cache/nginx` and `/var/lib/nginx` subdirectories).
+`paths` is what the **agent** may write (certificates, keys, webroot files). Directories that only a
+**hook** writes go into the optional `sandbox:` block, which affects nothing but `ReadWritePaths`:
+
+```yaml
+sandbox:
+  write: [/var/log/nginx]   # directories the hooks write; added to 10-paths.conf
+  low_ports: true           # 20-low-ports.conf; unset: derived (see below)
+```
+
+`nginx -t` opens its log files, so a hook that runs nginx needs `/var/log/nginx` there;
+`deployment add --recipe nginx` sets it. If `nginx -t` reports `Read-only file system` for its
+temporary directories, add them too (`--sandbox-write`, for example the `/var/cache/nginx` and
+`/var/lib/nginx` subdirectories). The agent refuses system roots such as `/`, `/etc`, `/var` or
+`/home` as `--sandbox-write`, `--dir` or `--webroot` ([§12.7](#127-adding-a-host)). `config check`
+prints the effective list and whether the drop-ins on disk match it.
+
+**What the agent does with a file it finds.** An entry in `10-paths.conf` that `agent.yaml` does not
+explain stays; the commands report it as `Kept in 10-paths.conf (agent.yaml does not explain them):
+…`. `sandbox sync --adopt` records such entries under `sandbox.write`; `sandbox sync --prune`
+drops them. Entries `agent.yaml` needs and the file lacks are appended (`Added to 10-paths.conf: …`).
+A file that already holds everything is not rewritten, comments and other directives included. A
+path with white space, quotes or `%` is refused before anything is written, because systemd would
+split or expand it. If you do edit the file by hand, keep the `[Service]` section, run
+`systemctl daemon-reload` and restart the agent.
 
 Do not make `/etc`, `/var` or `/` writable. The sandbox prevents writes outside the allowed paths
 and thereby contains filesystem mistakes in the agent. It is **not a security boundary against
@@ -1193,7 +1260,11 @@ no commands from the server and runs hooks only from the root-owned `agent.yaml`
 Standalone mode needs the packaged `agent-low-ports.conf` drop-in for `CAP_NET_BIND_SERVICE`.
 The nginx test and reload hooks need it too, **also in webroot mode**: `nginx -t` opens the
 configured listen sockets, so a listener on port 443 otherwise fails with `bind() ... Permission
-denied`. Install it from the release archive and restart the agent:
+denied`. The agent installs it as `20-low-ports.conf` when `sandbox.low_ports` is `true`, when the
+enrollment **or any deployment** uses the standalone challenge, or when you pass `--low-ports` to
+`setup` or `deployment add` (the recipe `nginx` does). It removes the file only when you set
+`sandbox.low_ports: false` explicitly; otherwise it leaves the file as found, and a file that differs
+from the packaged one is not overwritten. To install it by hand from the release archive:
 
 ```bash
 sudo install -d -m 0755 /etc/systemd/system/myownpki-agent.service.d
@@ -1203,7 +1274,6 @@ sudo systemctl daemon-reload
 sudo systemctl restart myownpki-agent
 ```
 
-For a new installation, `myownpki-agent setup --low-ports` installs the same drop-in explicitly.
 Hooks run inside this sandbox. In v0.3.0, hooks using `sudo` or another user switch do not work
 with `NoNewPrivileges=yes`.
 
@@ -1246,8 +1316,10 @@ three missed reports. An open renewal on a silent agent stays pending and can be
   policy. In webroot mode the directory must exist and be below `paths`.
 - **Name refused:** the ACME server checks every name against *Names it may order* at order and
   issuance. Add the exact name or a suitable `*.suffix` pattern; the UI marks uncovered names.
-- **Permission or sandbox errors:** compare `ReadWritePaths` with every target and webroot. Include
-  `/var/log/nginx` for nginx hooks. Hooks with `sudo` are unsupported.
+- **Permission or sandbox errors:** `myownpki-agent config check` prints the effective `ReadWritePaths`
+  and says whether the drop-ins match; if they differ, run `myownpki-agent sandbox sync` (§12.7). A
+  hook that writes somewhere other than `paths` needs that directory in `sandbox.write` (nginx:
+  `/var/log/nginx`). Hooks with `sudo` are unsupported.
 - **Deployment rolled back:** inspect the original and rollback errors. The old files and leaf are
   restored when possible; fix configuration/material before the next attempt.
 - **Rate limited:** reports and watches are limited per agent to 60 and 120 calls per 10 minutes;
@@ -1273,6 +1345,289 @@ The `acme-<directory-hash>` files must be removed together because the old ACME 
 the revoked agent ID. Keep `deployments.json`, `deployment-journal.json`, `deploy-backup-*` and
 `webroot-files.json`: they carry deployment history, rollback data and crash cleanup state. Delete
 those only as part of a separate, manually verified reset of deployment state.
+
+### 12.7 Adding a host
+
+Four things take a new host from "nothing installed" to "certificate deployed": the *Add host*
+assistant in the UI, the commands `deployment add|list|remove` and `sandbox sync` on the host, the
+recipes ([§12.9](#129-recipes)) and, for a roll-out by a tool, the enrollment pass
+([§12.8](#128-enrollment-passes)). They change nothing about the trust model: the agent still takes
+no commands from the server, every path, hook and name comes from the root-owned `agent.yaml`, and
+the UI only produces commands for **a person or a script on the host** to run.
+
+**The Add host assistant.** *Agents → Add host* is the page `/hosts/add`. It is also a button on the
+agent list and an entry in the *Agents* group of the menu, while agents are on and your role can read
+them.
+
+1. **Answers.** The host name (one exact, fully qualified, lower-case name that a domain of this PKI
+   covers), the service (nginx, Postfix, Dovecot, Proxmox VE, or *certificate files only*), the http-01
+   challenge (webroot with its directory, or standalone), up to four more certificate names (optional)
+   and the agent package (`deb`, `rpm` or tarball with the architecture, or *already installed*).
+   Nothing is stored for the assistant.
+2. **Admission.** The page checks every name against the domains (a name with no domain, or a domain
+   without http-01, is refused), shows the tenant's enrollment mode and a table of the three ways to be
+   admitted:
+
+   | Way | What it is | Approval after the host enrolled |
+   |---|---|---|
+   | Single-use token | Made now for the host and the extra names: works once, valid 15 minutes, its names become the names the agent may order. Creating it needs an **admin and a fresh second factor**. | none in `verified` and `auto`, once the host passed the check |
+   | An existing enrollment pass | Offered when an active pass covers the host (shown by label and uses, never its secret) and the host has no agent. The host gets its own name only, so it is not offered with extra names. | none in `verified` and `auto`, once the host passed the check |
+   | No secret | The host enrolls and waits in *Enrollment requests*. | one approval by an admin |
+
+   In `manual` mode every way waits for an approval; in `auto` mode a host that passes the check is
+   admitted whatever it brings. Extra certificate names need the token.
+3. **Commands, shown once** (the answer to the form, `no-store`, never in a URL or on a later page): the
+   token-file block (a here-document for a token, a `read -s` prompt for a pass, which the page never
+   knows), the verified root and package download with `setup`, the `deployment add` block, and a last
+   line, `/usr/local/bin/myownpki-agent deployment list`. Run them as root on the host. The `deployment
+   add` block first makes the parent directory of the certificate files with `install -d -m 0755`, then
+   runs, for example for nginx with a webroot:
+
+   ```bash
+   /usr/local/bin/myownpki-agent deployment add 'nginx' \
+     --recipe nginx \
+     --name 'proxy1.homelab.lan' \
+     --challenge webroot --webroot '/var/www/acme' \
+     --acme-directory 'https://pki.homelab.lan/acme/directory' \
+     --restart
+   ```
+
+   The deployment is named after the service (`nginx`, `postfix`, `dovecot`, `proxmox`), or `files` for
+   *certificate files only* (`--dir /etc/ssl/myownpki/<host> --key-mode 0600`, no hook). If `setup`
+   ends with *Enrollment is pending*, the service stays disabled: after the approval run `systemctl
+   enable --now myownpki-agent`.
+4. **Progress.** `/hosts/add/<host>` follows the host and reloads itself every 10 seconds until the agent
+   is online and every deployment is deployed:
+
+   | Row | States |
+   |---|---|
+   | Host enrolled | waiting for the host, checking, waiting for your approval (with the source address, the secret it brought, the check result and the **Approve** and **Refuse** buttons), refused, expired, admitted, agent revoked |
+   | Agent online | waiting for the first report, online (last seen, version), silent, disabled |
+   | Certificate for deployment *name* | pending, deployed (serial, expiry, link to the certificate), failed or rolled back (the agent's last error, cut to 300 characters and shown as text) |
+
+   The first visit counts as activity of your session; the automatic reloads, which use a separate
+   `/status` route, do not keep it alive.
+
+*Who may do what.* Anyone who can read the PKI tenant-wide (viewer and up) can open the assistant, get
+the commands for *No secret* or *an existing pass* and watch the progress. Creating the single-use
+token and approving or refusing an enrollment need an admin and a fresh second factor
+(`agent.manage`); to everybody else those controls are not offered or answer `403`. The ordinary
+*Enrollment requests* page keeps working as before.
+
+**`deployment add NAME`** adds one deployment to `agent.yaml` and makes the systemd drop-ins match.
+Linux and systemd only; run it as root, **also with `--dry-run`**.
+
+| Flag | Meaning |
+|---|---|
+| `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Fills the defaults of [§12.9](#129-recipes). Every other flag overrides it. |
+| `--profile nginx` or `file` | As in `agent.yaml`. Default: `nginx` with `--dir`, `file` with the file flags. |
+| `--name FQDN` (repeat) | Certificate names, validated like `names:`; the first one is the SNI of the local check. Default: the host name of `agent.yaml`. |
+| `--challenge webroot` or `standalone`, `--webroot DIR` | Default: what `enrollment:` uses. |
+| `--dir DIR` | nginx profile: `fullchain.pem` and `privkey.pem` go here. |
+| `--certificate`, `--chain`, `--fullchain`, `--key FILE` | file profile, as `files:`. |
+| `--owner`, `--group`, `--key-mode` | As in `agent.yaml`; the key mode may not give rights to others. |
+| `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | Define hooks and refer to them. The command is split on spaces and quotes, there is **no shell**, and the first element must be an absolute path. A command line that exists already is reused under its name, so deployments of one service share one reload and one rollback group. |
+| `--check HOST:PORT` | Local TLS check. It is an **implicit-TLS** handshake, so STARTTLS ports (25, 143, 587) cannot be checked. |
+| `--sandbox-write DIR` (repeat), `--low-ports` | Extra directories the hooks may write; `CAP_NET_BIND_SERVICE` for the hooks. Both are recorded in the `sandbox:` block of `agent.yaml`. |
+| `--acme-directory URL` | Required when `agent.yaml` has none (`setup --acme-directory` writes it into a new file). |
+| `--create-dirs` | Create missing directories instead of stopping. |
+| `--dry-run` | Print a unified diff of `agent.yaml` and both drop-ins; write nothing. |
+| `--restart` | Restart `myownpki-agent` afterwards. Without it the command prints `Apply it with: systemctl restart myownpki-agent`. |
+| `--config FILE` | Another `agent.yaml`. |
+
+Before it writes anything the command checks that `agent.yaml` parses and is valid now, that the name
+is new, everything `config check` checks (names, targets under `paths`, hooks that exist, the key
+mode), and that each directory it adds to `paths` is the parent of a target (for the nginx profile the
+parent of `--dir`, which the agent creates) or a webroot, exists (or `--create-dirs`) and has no
+symbolic link on its way. These system directories are refused for `--dir`, `--webroot`,
+`--sandbox-write` and the parent of a target: `/`, `/etc`, `/usr`, `/var`, `/boot`, `/dev`, `/proc`,
+`/sys`, `/run`, `/root`, `/home`, `/tmp`, `/bin`, `/sbin`, `/lib*`, `/opt`, `/srv`, `/mnt`, and
+anything below `/proc`, `/sys` or `/dev`. A wide but legitimate directory such as `/etc/nginx` is
+accepted with a warning that names a narrower one; `config check` shows the same list as warnings. A
+hook that runs `nginx`, `apachectl`, `apache2ctl` or `haproxy` prints a hint when its log directory
+(`--sandbox-write`) or `--low-ports` is missing.
+
+It writes the two drop-ins first and `agent.yaml` second, so that a crash in between leaves a wider
+sandbox, never a missing one; if the second write fails, the drop-ins are put back. The previous file
+is kept as `agent.yaml.bak`. Comments and the order of keys in `agent.yaml` stay (blank lines inside a
+block do not). A file with anchors, aliases, merge keys or several documents is refused. The command
+runs `systemctl daemon-reload` when a drop-in changed and never restarts the agent unless you pass
+`--restart`. On a host where the unit is not installed yet it writes the files and says so.
+
+| You see | Because |
+|---|---|
+| `deployment add must run as root; nothing was changed` | Not root, also with `--dry-run` |
+| `agent.yaml is not valid yet – run "myownpki-agent config check" and fix it first; nothing was changed` | The file fails the same check as `run` |
+| `deployment "nginx" exists – pick another name or run "deployment remove nginx" first` | The name is taken |
+| `--dir /etc: too broad – the agent may write only where "paths" allows; use a subdirectory such as /etc/ssl/myownpki` | A system directory |
+| `/etc/ssl/myownpki does not exist – create it, or pass --create-dirs` | A directory it must add to `paths` is missing |
+| `agent.yaml has no acme_directory – pass --acme-directory https://pki.homelab.lan/acme/directory` | Neither the file nor the flag has one |
+| `hook "nginx-test": the first element must be an absolute path` | A hook command such as `nginx -t` |
+| `agent.yaml uses anchors, aliases or several documents – edit it by hand and run config check` | The editor cannot keep such a file intact |
+| `The unit is not installed (run setup first) – files written, systemctl skipped.` | Not an error: no `setup` ran on this host yet |
+
+**`deployment list`** prints name, profile, names, targets, hooks and check of every deployment; it
+only reads, so it also runs without root. **`deployment remove NAME`** removes the deployment from
+`agent.yaml` (written first, the drop-ins second: a crash must never leave a deployment without its
+sandbox) and recomputes the drop-ins. It keeps `paths` unless you pass `--prune-paths`, never touches
+deployed files, certificates or the agent's state, and takes `--dry-run`, `--restart` and `--config`.
+Delete the files by hand if you do not need them.
+
+**`sandbox sync [--dry-run] [--adopt|--prune]`** recomputes `10-paths.conf` and `20-low-ports.conf`
+from `agent.yaml` without changing a deployment. It is what a configuration tool runs after it has
+rendered the file. An entry of `10-paths.conf` that `agent.yaml` does not explain is **kept** and
+reported (`Kept in 10-paths.conf (agent.yaml does not explain them): /var/log/nginx`); `--adopt` writes
+such entries under `sandbox.write` in `agent.yaml`, so that the file explains them, and `--prune` drops
+them from the drop-in. The two exclude each other. `sandbox sync` has no `--restart`: run
+`systemctl restart myownpki-agent` yourself.
+
+**Existing hosts.** Nothing changes on a host until you run `setup` (the *Update* commands) or one of
+the commands above. Then `setup` keeps a hand-made `ReadWritePaths` entry and an installed
+`20-low-ports.conf`, says `Kept in 10-paths.conf …` and `Added to 10-paths.conf: …` for what it kept and
+what it appended, and does not overwrite a `20-low-ports.conf` that differs from the packaged file. The
+details are in [§9](#9-upgrading) and [§12.3](#123-agentyaml-and-deployment-profiles). To bring an old
+host to the new model, look first, then let the file explain the entries:
+
+```bash
+/usr/local/bin/myownpki-agent sandbox sync --dry-run
+```
+
+```bash
+/usr/local/bin/myownpki-agent sandbox sync --adopt
+```
+
+### 12.8 Enrollment passes
+
+A single-use join token enrolls one host. For a roll-out by Salt, Ansible, a script or CI there is the
+**enrollment pass**: one secret that lets a bounded number of hosts enroll **without anybody opening
+the UI for each one**. It is a kind of join token (the same table, the same `--token-file`; the secret
+starts with `mjp_` instead of `mjt_`); nothing changes in the agent or its protocol.
+
+Create it under *Agents → Join tokens → New enrollment pass* (admin and a fresh second factor), or with
+`POST /api/v1/agent-join-tokens` and `"kind": "pass"` from a signed-in session:
+
+| Field | Rule |
+|---|---|
+| Label | Required, at most 64 characters. It says on the list and in the audit log what the pass is for. |
+| Host names | 1 to 5, each an exact name or `*.suffix`. **A domain of this PKI must cover each one**; otherwise the creation is refused and names the pattern. |
+| Hosts it may admit | 2 to 25, default 10. A larger fleet takes two passes. |
+| Valid for | Up to 7 days, default 24 hours (the UI and the API take whole hours, 1 to 168). |
+
+The secret appears once, in the answer to the form (or the `201` of the API), and only its SHA-256 is
+stored. **What a use needs.** A host is admitted by a pass only when all of these hold:
+
+- the pass is active: not revoked, not used up, not expired;
+- the host name matches one of its names (`*.homelab.lan` matches `minion-01.homelab.lan` and names
+  deeper below the suffix, never the bare suffix);
+- the server's http-01 check of the host passed. This is required **in every mode** (in `auto` a passed
+  check admits anyway; in `manual` everything waits for an admin), so a pass alone is never enough;
+- the host has **no agent** that is not revoked (an active or a disabled one counts). A pass admits new
+  hosts only; replacing a host stays a human act, with a single-use token or the approval queue.
+
+A pass grants the host its **own name only**, not the pattern. Another name takes the single-use token
+of the assistant or an admin on the agent page.
+
+An enrollment that presents a valid pass takes one use, **also when it then waits in the queue**; a host
+that enrolls again takes another. When the pass does not count, the enrollment is not lost: it waits in
+*Enrollment requests* and `setup` prints the reason, for example `waiting for an admin to approve it in
+the web UI (Agents) – the enrollment pass has no uses left (10 of 10) – ask an admin for a new one, a
+passed check`. The reasons:
+
+| Text | Cause |
+|---|---|
+| `the enrollment pass has no uses left (10 of 10) – ask an admin for a new one` | Used up |
+| `the pass expired` / `the pass was revoked` | Expired, or revoked |
+| `the pass is not for minion-01.homelab.lan` | The host name matches none of its names |
+| `an agent for minion-01.homelab.lan exists – a pass admits new hosts only; ask an admin for a single-use token` | The host already has an agent |
+| `unknown join token` | The secret is not one this server knows (a typo, another server, a withdrawn pass) |
+
+*The list.* Each pass shows its state as `active 3 of 10`, `used up 10 of 10`, `expired …` or
+`revoked …`, and below it the hosts it admitted or queued with where their enrollment stands.
+**Revoke** (admin and second factor; `POST /api/v1/agent-join-tokens/{id}/revoke`, which answers `409`
+for a pass that cannot admit anybody any more) ends its use at once. It does **not** touch the
+enrollments and agents the pass already produced: they stay, listed with their state, and refusing or
+disabling them is a separate, visible decision. A pass nobody used can also be withdrawn
+(`DELETE /api/v1/agent-join-tokens/{id}`); a used one stays as a record.
+
+*From automation.* An admin creates the pass in the UI with the second factor; the tool only consumes
+it. **An API token can never create or revoke a pass**, whatever its role (`403`): that takes a person
+with a fresh second factor, and tokens have roles, not scopes, so there is no narrower permission to
+hand to a script. Give automation a **viewer** token that reads the result. A roll-out:
+
+1. Create the pass: label `salt rollout 2026-11`, names `*.homelab.lan`, 10 uses, 24 hours. Copy the
+   secret.
+2. Put it into the encrypted store of your tool. The tool writes `/root/myownpki-join-token` (mode
+   **exactly 0600**) on a host only if the host has no `/var/lib/myownpki-agent/agent.crt` yet, then
+   runs `myownpki-agent setup … --token-file /root/myownpki-join-token`. `setup` deletes the file when
+   it newly gets admission; a host that stays pending keeps it.
+3. Render `agent.yaml` (or run `deployment add`) and `sandbox sync`. Never both for one file.
+4. Check with a viewer token:
+
+   ```bash
+   curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" "https://pki.homelab.lan:9443/api/v1/agents?hostname=minion-01.homelab.lan"
+   ```
+
+   `GET /api/v1/agent-enrollments?hostname=…` shows the host while it waits, `GET
+   /api/v1/agent-join-tokens` the pass with its uses and hosts, and `GET /api/v1/agent-install` the
+   facts a script needs without a browser (server URL, ACME directory, the root with its SHA-256, the
+   package files with their SHA-256; nothing in it is secret; `404` while the server has no packages).
+5. Afterwards remove the pass from the store, and revoke it if it is not used up.
+
+**The trade-off.** A pass admits actors without a person looking at each one. A leaked pass admits at
+most as many more hosts as it has uses left, only for names that match, only if the server can fetch the
+check file under that name (an attacker needs DNS or port 80 for it), never replaces an existing agent,
+gives each host its own name only and dies at its expiry. Still, treat it like a key: short validity,
+few uses, remove it after the roll-out. **If it leaks**, revoke it (second factor), read the list of
+hosts it admitted, refuse the pending ones you do not know and disable or revoke the agents you do not
+know.
+
+*Audit.* `agent.token.create` (kind, maximum uses, names, expiry), `agent.token.revoke`, and the
+`agent.enroll` entry of every enrollment, which names `token_id`, `token_kind`, the use (`3 of 10`), the
+reason when the pass did not count, and the source address. The secret is in no entry and no log line.
+
+### 12.9 Recipes
+
+`deployment add --recipe NAME` fills the files, owner, hooks, local check and sandbox of a service; a
+flag you pass wins, and `--dry-run` shows what the recipe expands to. **Only the nginx recipe rests on a
+setup the CI job (the agent end-to-end test) has run; the `--recipe` command itself is new in this
+release. The Postfix, Dovecot and Proxmox VE recipes are examples, written from the documentation of
+each service and not yet run on a live host. Test them on a non-production host first**;
+`deployment add` says so itself and lists what to verify.
+
+| Recipe | Files | Owner, key mode | Hooks | Local check | Sandbox |
+|---|---|---|---|---|---|
+| `nginx` | nginx profile: `fullchain.pem` and `privkey.pem` in `/etc/ssl/myownpki/<deployment name>` | root, `0600` | `nginx-test` = `/usr/sbin/nginx -t`, `nginx-reload` = `/usr/bin/systemctl reload nginx` | `127.0.0.1:443` | write `/var/log/nginx`, low ports |
+| `postfix` | file profile: `/etc/ssl/myownpki/postfix/fullchain.pem` and `privkey.pem` | root:root, `0600` | `postfix-test` = `/usr/sbin/postfix check`, `postfix-reload` = `/usr/bin/systemctl reload postfix` | none | none |
+| `dovecot` | file profile: `/etc/ssl/myownpki/dovecot/fullchain.pem` and `privkey.pem` | root:root, `0600` | `dovecot-test` = `/usr/bin/doveconf -n`, `dovecot-reload` = `/usr/bin/systemctl reload dovecot` | `127.0.0.1:993` | none |
+| `proxmox` | file profile: `/etc/ssl/myownpki/pve/fullchain.pem` and `privkey.pem` | root:root, `0600` | `proxmox-install` as the reload hook, no test hook: `/usr/bin/pvenode cert set /etc/ssl/myownpki/pve/fullchain.pem /etc/ssl/myownpki/pve/privkey.pem --force 1 --restart 1` | `127.0.0.1:8006` | write `/etc/pve` |
+
+The parent directory of the files must exist before the command (the assistant makes it for you):
+`install -d -m 0755 /etc/ssl/myownpki` for nginx, `/etc/ssl/myownpki/postfix`, `…/dovecot` or
+`…/pve` for the others, or pass `--create-dirs`. The service must be pointed at the files; the agent
+does not edit its configuration:
+
+- **Postfix**, `main.cf`, Postfix 3.4 and later: `smtpd_tls_chain_files =
+  /etc/ssl/myownpki/postfix/privkey.pem, /etc/ssl/myownpki/postfix/fullchain.pem` (older:
+  `smtpd_tls_cert_file` and `smtpd_tls_key_file`). The recipe has no local check, because the agent
+  checks implicit TLS only; add `--check 127.0.0.1:465` when `master.cf` has a `submissions` listener.
+- **Dovecot** 2.3: `ssl_cert = </etc/ssl/myownpki/dovecot/fullchain.pem` and
+  `ssl_key = </etc/ssl/myownpki/dovecot/privkey.pem`; 2.4: `ssl_server_cert_file` and
+  `ssl_server_key_file` (no `<`).
+- **Proxmox VE**: the agent does **not** write into `/etc/pve`, a FUSE file system that takes neither
+  `chown` nor `chmod`; `pvenode` validates the files, installs them and restarts `pveproxy`, and a
+  rollback runs it again on the restored files. Run one agent per node.
+
+To verify on a test host (and note what differed from this page):
+
+| Recipe | Verify |
+|---|---|
+| Postfix | `postfix check` runs inside the sandbox without writing; no group is needed (the key is read before Postfix drops privileges); new connections use the new certificate after the reload |
+| Dovecot | A reload makes new connections use the new certificate; which `doveconf` option is a syntax-only test on your version |
+| Proxmox VE | The `pvenode cert set` syntax of your version; that `pvenode` works under the sandbox (it writes `/etc/pve`); `https://<node>:8006` serves the new certificate |
+
+None of the three should need a group, as far as the documentation says: the daemons read their keys
+as root. A service that reads its key as an unprivileged user takes `--group` and `--key-mode 0640`
+(for example `ssl-cert` on Debian). That is a claim to verify on each host.
 
 ## 13. Monitoring and notifications
 

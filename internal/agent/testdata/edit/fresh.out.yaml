@@ -1,0 +1,28 @@
+# Written by myownpki-agent setup; this file is preserved on later runs.
+server: "https://pki.homelab.lan:8444"
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: "proxy1.homelab.lan"
+acme_directory: "https://pki.homelab.lan/acme/directory"
+state_dir: "@ROOT@/state"
+log_level: "info"
+enrollment:
+  challenge: "webroot"
+  webroot: "@ROOT@/www"
+hooks:
+  nginx-test: ["@ROOT@/bin/nginx", "-t"]
+  nginx-reload: ["@ROOT@/bin/systemctl", "reload", "nginx"]
+paths: ["@ROOT@/www", "@ROOT@/ssl"]
+sandbox:
+  write:
+    - "@ROOT@/log-a"
+  low_ports: true
+deployments:
+  - name: "proxy"
+    profile: "nginx"
+    names: ["proxy1.homelab.lan"]
+    challenge: "webroot"
+    webroot: "@ROOT@/www"
+    dir: "@ROOT@/ssl/proxy"
+    test_hook: "nginx-test"
+    reload_hook: "nginx-reload"
+    check: "127.0.0.1:443"

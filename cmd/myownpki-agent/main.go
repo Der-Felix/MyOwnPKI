@@ -7,6 +7,10 @@
 //	myownpki-agent run                          the service (systemd)
 //	myownpki-agent status                       what the agent knows about itself
 //	myownpki-agent config check                 check agent.yaml
+//	myownpki-agent deployment add NAME [flags]  add a deployment and widen the sandbox to match (root)
+//	myownpki-agent deployment list              show the deployments of agent.yaml
+//	myownpki-agent deployment remove NAME       remove a deployment (root)
+//	myownpki-agent sandbox sync                 recompute the systemd drop-ins from agent.yaml (root)
 //	myownpki-agent --version
 //
 // Released for Linux; it builds for Windows, macOS and FreeBSD too.
@@ -48,7 +52,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n", binary)
+		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n"+
+			"       %s deployment add NAME [flags] | list | remove NAME [--prune-paths]\n"+
+			"       %s sandbox sync [--dry-run] [--adopt | --prune]\n", binary, binary, binary)
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -78,6 +84,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(rest) > 1 && rest[1] == "check" {
 			return cmdConfigCheck(rest[2:], stdout, stderr)
 		}
+	case "deployment":
+		if len(rest) > 1 {
+			switch rest[1] {
+			case "add":
+				return cmdDeploymentAdd(ctx, rest[2:], stdout, stderr)
+			case "list":
+				return cmdDeploymentList(rest[2:], stdout, stderr)
+			case "remove":
+				return cmdDeploymentRemove(ctx, rest[2:], stdout, stderr)
+			}
+		}
+	case "sandbox":
+		if len(rest) > 1 && rest[1] == "sync" {
+			return cmdSandboxSync(ctx, rest[2:], stdout, stderr)
+		}
 	}
 	fs.Usage()
 	return 2
@@ -104,6 +125,7 @@ func cmdSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&opts.PackageFormat, "package-format", "tarball", "installed package format: deb, rpm or tarball")
 	fs.StringVar(&opts.Webroot, "webroot", "", "existing webroot for enrollment http-01; default standalone")
 	fs.StringVar(&opts.Hostname, "hostname", "", "exact FQDN to prove at enrollment (default: host FQDN)")
+	fs.StringVar(&opts.ACMEDirectory, "acme-directory", "", "https URL of the ACME directory, written into a new agent.yaml")
 	fs.BoolVar(&opts.LowPorts, "low-ports", false, "allow the service to bind ports below 1024")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
@@ -237,7 +259,18 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "Config file: %s\n\n  hostname      %s\n  server        %s\n  enrollment    %s %s\n  deployments   %d\n  hooks         %d\n  paths         %s\n\nConfiguration is valid.\n",
+	_, _ = fmt.Fprintf(stdout, "Config file: %s\n\n  hostname      %s\n  server        %s\n  enrollment    %s %s\n  deployments   %d\n  hooks         %d\n  paths         %s\n",
 		*path, cfg.Hostname, cfg.Server, cfg.Enrollment.Challenge, cfg.Enrollment.Webroot, len(cfg.Deployments), len(cfg.Hooks), strings.Join(cfg.Paths, ", "))
+	// The drop-ins are information here: a laptop without the unit, or an
+	// unreadable directory, must not make a valid agent.yaml fail the check.
+	if sandbox, sandboxErr := agent.DescribeDropins(cfg, agent.DefaultDropinDir); sandboxErr != nil {
+		_, _ = fmt.Fprintf(stdout, "  sandbox       cannot be checked: %v\n", sandboxErr)
+	} else {
+		_, _ = fmt.Fprint(stdout, sandbox)
+	}
+	for _, w := range cfg.Warnings() {
+		_, _ = fmt.Fprintln(stdout, "  warning      ", w)
+	}
+	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0
 }

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -58,10 +59,10 @@ func (a *app) agentList(c *rc) {
 		c.fail(err)
 		return
 	}
-	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Enrollment requests, Join tokens and Install agent.",
+	d := admin.TableData{Messages: c.messages(), Empty: "No agents yet – see Add host, Enrollment requests and Join tokens.",
 		Columns: []admin.Column{{Label: "Host"}, {Label: "Status"}, {Label: "Last seen"}, {Label: "Version"}, {Label: "System"}, {Label: "Admitted"}}}
 	if c.may(authz.ManageAgents, "") {
-		d.Commands = []admin.Command{{Label: "Install agent", Href: "/agents/install", Primary: true}}
+		d.Commands = []admin.Command{{Label: "Add host", Href: hostAddPath, Primary: true}, {Label: "Install agent", Href: "/agents/install"}}
 	}
 	for _, ag := range list {
 		versionCell := admin.Cell{Text: orDash(ag.Version), Mono: true}
@@ -170,15 +171,7 @@ func (a *app) agentDeploymentTable(c *rc, ag *agents.Agent) admin.TableData {
 		lastSeen = ag.ApprovedAt
 	}
 	for _, d := range ag.Deployments {
-		status := view.StatusNeutral
-		switch d.State {
-		case "deployed":
-			status = view.StatusOK
-		case "failed":
-			status = view.StatusCrit
-		case "rolled_back":
-			status = view.StatusWarn
-		}
+		status := deploymentStatus(d.State)
 		serial := admin.Cell{Text: orDash(d.Serial), Mono: true}
 		if d.CertificateID != "" {
 			serial.Href = "/certificates/" + d.CertificateID
@@ -471,16 +464,30 @@ func (a *app) joinTokens(c *rc) {
 	}
 	t := &admin.TableData{Title: "Tokens", Empty: "No join tokens yet.",
 		Columns: []admin.Column{{Label: "Label"}, {Label: "For"}, {Label: "Status"}, {Label: "Expires"}, {Label: "Created by"}}}
+	passes := &admin.TableData{Title: "Passes", Empty: "No enrollment passes yet.",
+		Columns: []admin.Column{{Label: "Label"}, {Label: "For"}, {Label: "State"}, {Label: "Expires"}, {Label: "Created by"}, {Label: "Action"}}}
+	hosts := &admin.TableData{Title: "Hosts the passes admitted", Empty: "No host has used a pass yet.",
+		Columns: []admin.Column{{Label: "Pass"}, {Label: "Host"}, {Label: "Enrollment"}, {Label: "When"}}}
 	var unused []admin.Option
 	now := a.now()
+	mayManage := c.may(authz.ManageAgents, "")
 	for _, j := range list {
+		if j.Kind == agents.KindPass {
+			passes.Rows = append(passes.Rows, a.passRow(c, j, now, mayManage))
+			for _, h := range j.Hosts {
+				hosts.Rows = append(hosts.Rows, passHostRow(j, h))
+			}
+			continue
+		}
 		st := admin.Cell{Text: "unused", Status: view.StatusOK}
-		switch {
-		case !j.UsedAt.IsZero():
+		switch j.State(now) {
+		case agents.TokenUsedUp:
 			st = admin.Cell{Text: "used " + dateTime(j.UsedAt), Status: view.StatusNeutral}
-		case !now.Before(j.ExpiresAt):
+		case agents.TokenExpired:
 			st = admin.Cell{Text: "expired", Status: view.StatusNeutral}
-		default:
+		case agents.TokenRevoked:
+			st = admin.Cell{Text: "revoked " + dateTime(j.RevokedAt), Status: view.StatusWarn}
+		case agents.TokenActive:
 			unused = append(unused, admin.Option{Value: j.ID, Label: orDash(j.Label) + " – " + strings.Join(j.Patterns, ", ")})
 		}
 		t.Rows = append(t.Rows, []admin.Cell{{Text: orDash(j.Label)}, {Text: strings.Join(j.Patterns, ", "), Mono: true, Break: true}, st,
@@ -490,7 +497,7 @@ func (a *app) joinTokens(c *rc) {
 		"A join token lets one host enroll; in the mode verified it is needed together with a passed check. It works once, expires, and only for hosts whose name matches.",
 		"Its secret is shown once, together with the setup commands for the host (" + agentdist.BinaryPath + " setup --token-file FILE).",
 	}}}
-	if c.may(authz.ManageAgents, "") {
+	if mayManage {
 		forms := []admin.FormData{c.form(admin.FormData{
 			Title: "New token", Action: "/agents/tokens", Submit: "Create token",
 			Fields: []admin.Field{
@@ -506,21 +513,76 @@ func (a *app) joinTokens(c *rc) {
 		sections = append(sections, admin.Section{Forms: forms})
 	}
 	sections = append(sections, admin.Section{Table: t})
+
+	// The enrollment pass: a separate section, because it is another kind of
+	// trust – one secret that admits several hosts.
+	pass := admin.Section{Title: "Enrollment passes", Text: []string{
+		"An enrollment pass lets Salt, Ansible, a script or CI enroll several hosts without anybody opening this page for each one. It admits at most the number of hosts you set, whose name matches one of its names, and only after the host proves its name by the http-01 check (in every enrollment mode, and never in manual mode). It grants the host its own name only, not the pattern, and it is refused for a host that already has an agent. It stops at its expiry (at most 7 days) or when you revoke it.",
+		"The trade-off: a leaked pass admits at most that many hosts matching its names until it expires – every one of them can then ask for its own name. Keep it in an encrypted store, remove it after the roll-out and revoke it at once if it leaks. Revoking leaves the hosts it admitted as they are; they are listed below, so you can refuse or disable the ones you do not know.",
+		"API tokens cannot create or revoke a pass, however high their role: it takes you and a fresh second factor. Give automation a viewer token to check the result.",
+	}}
+	if mayManage {
+		pass.Forms = []admin.FormData{c.form(admin.FormData{
+			Title: "New enrollment pass", Action: "/agents/tokens/pass", Submit: "Create pass",
+			Fields: []admin.Field{
+				{ID: "label", Label: "Label", Required: true, Hint: "What it is for, e.g. salt rollout 2026-11. Shown on the list and in the audit log."},
+				{ID: "names", Label: "Host names", Type: "textarea", Rows: 3, Required: true, Hint: "One to 5 lines, an exact name or *.suffix. A domain of this PKI must cover each of them."},
+				{ID: "uses", Label: "Hosts it may admit", Type: "number", Value: strconv.Itoa(agents.DefaultPassUses), Hint: "2 to 25. A larger fleet takes two passes."},
+				{ID: "hours", Label: "Valid for hours", Type: "number", Value: "24", Hint: "1 to 168 (7 days)."},
+			},
+		})}
+	}
+	sections = append(sections, pass, admin.Section{Table: passes}, admin.Section{Table: hosts})
 	p := c.page("Join tokens", "join-tokens")
-	p.Description = "Single-use tokens for enrolling hosts. Creating one needs a fresh second factor."
+	p.Description = "Single-use tokens and enrollment passes for enrolling hosts. Creating either needs a fresh second factor."
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(p, admin.DetailData{Messages: c.messages(), Sections: sections}))
+}
+
+// passRow is one line of the pass table: its state with the uses taken, and
+// for an active pass a Revoke button (admins only).
+func (a *app) passRow(c *rc, j agents.JoinToken, now time.Time, mayManage bool) []admin.Cell {
+	uses := strconv.Itoa(j.UseCount) + " of " + strconv.Itoa(j.MaxUses)
+	var st admin.Cell
+	switch j.State(now) {
+	case agents.TokenActive:
+		st = admin.Cell{Text: "active " + uses, Status: view.StatusOK}
+	case agents.TokenUsedUp:
+		st = admin.Cell{Text: "used up " + uses, Status: view.StatusNeutral}
+	case agents.TokenExpired:
+		st = admin.Cell{Text: "expired " + uses, Status: view.StatusNeutral}
+	case agents.TokenRevoked:
+		st = admin.Cell{Text: "revoked " + uses, Status: view.StatusWarn, Title: "by " + j.RevokedBy + " on " + dateTime(j.RevokedAt)}
+	}
+	action := admin.Cell{}
+	if mayManage && j.Usable(now) {
+		action.Posts = []admin.PostCommand{{Action: "/agents/tokens/revoke", CSRF: c.sess.CSRFToken, Label: "Revoke", Command: true, Danger: true,
+			Fields: []admin.PostField{{Name: "id", Value: j.ID}}}}
+	}
+	return []admin.Cell{{Text: orDash(j.Label)}, {Text: strings.Join(j.Patterns, ", "), Mono: true, Break: true}, st,
+		{Text: dateTime(j.ExpiresAt), NoWrap: true}, {Text: j.CreatedBy}, action}
+}
+
+// passHostRow is one use of a pass: the host and where its enrollment stands.
+func passHostRow(j agents.JoinToken, h agents.PassHost) []admin.Cell {
+	state := admin.Cell{Text: strings.ReplaceAll(h.State, "_", " "), Status: view.StatusNeutral}
+	switch h.State {
+	case agents.StateAdmitted:
+		state.Status = view.StatusOK
+	case agents.StatePending, agents.StateWaitingForCheck:
+		state.Status = view.StatusWarn
+	}
+	host := admin.Cell{Text: h.Hostname, Mono: true, Break: true}
+	if h.AgentID != "" {
+		host.Href = "/agents/" + h.AgentID
+	}
+	return []admin.Cell{{Text: orDash(j.Label)}, host, state, {Text: dateTime(h.At), NoWrap: true}}
 }
 
 func (a *app) joinTokenCreate(c *rc) {
 	if a.agentsOff(c, "Join tokens", "join-tokens") {
 		return
 	}
-	var names []string
-	for _, line := range strings.FieldsFunc(c.r.PostFormValue("names"), func(r rune) bool { return r == '\n' || r == ',' || r == ' ' || r == '\r' }) {
-		if line = strings.TrimSpace(line); line != "" {
-			names = append(names, line)
-		}
-	}
+	names := splitNames(c.r.PostFormValue("names"))
 	hours, err := strconv.Atoi(strings.TrimSpace(c.r.PostFormValue("hours")))
 	if err != nil || hours < 1 || hours > 720 {
 		c.refused(agents.ErrInvalid, "/agents/tokens")
@@ -543,7 +605,7 @@ func (a *app) joinTokenCreate(c *rc) {
 			"Write the token to a root-only file and run " + agentdist.BinaryPath + " setup --token-file FILE as described in docs/OPERATIONS.md (Agent).",
 		}})
 	} else {
-		sections = append(sections, a.joinTokenHostSection(trust, jt.Patterns, secret))
+		sections = append(sections, a.joinTokenHostSection(trust, jt.Patterns, secret, false))
 	}
 	c.once(c.page("New join token", "join-tokens", crumbs...), admin.DetailData{Sections: sections})
 }
@@ -557,4 +619,81 @@ func (a *app) joinTokenDelete(c *rc) {
 		return
 	}
 	c.done("/agents/tokens", "Join token withdrawn.")
+}
+
+// joinPassCreate creates an enrollment pass. Like a join token it needs the
+// admin role and a fresh second factor (the route is protected, the service
+// checks again), and its secret is shown once, in this answer, never cached.
+func (a *app) joinPassCreate(c *rc) {
+	if a.agentsOff(c, "Join tokens", "join-tokens") {
+		return
+	}
+	names := splitNames(c.r.PostFormValue("names"))
+	uses, usesErr := strconv.Atoi(strings.TrimSpace(c.r.PostFormValue("uses")))
+	hours, hoursErr := strconv.Atoi(strings.TrimSpace(c.r.PostFormValue("hours")))
+	if usesErr != nil || hoursErr != nil || uses < agents.MinPassUses || uses > agents.MaxPassUses || hours < 1 || hours > int(agents.MaxPassTTL/time.Hour) {
+		c.refused(fmt.Errorf("%w: uses 2 to 25 and hours 1 to 168, as whole numbers", agents.ErrInvalid), "/agents/tokens")
+		return
+	}
+	secret, jt, err := a.d.Agents.CreateEnrollmentPass(c.r.Context(), c.who(), c.r.PostFormValue("label"), names, uses, time.Duration(hours)*time.Hour)
+	if err != nil {
+		c.refused(err, "/agents/tokens")
+		return
+	}
+	crumbs := []view.Crumb{{Label: "Join tokens", Href: "/agents/tokens"}}
+	sections := []admin.Section{
+		{Text: []string{
+			"Copy the pass now – it is not shown again. It admits up to " + strconv.Itoa(jt.MaxUses) + " hosts for " + strings.Join(jt.Patterns, ", ") + " until " + dateTime(jt.ExpiresAt) +
+				", each only after its http-01 check passed, and each with its own host name only. Revoke it under Join tokens if it leaks.",
+		}, KV: []view.KV{{Key: "Enrollment pass", Value: secret}}},
+	}
+	// The pass exists now; a missing root must not cost its only display.
+	if trust, trustErr := a.agentTLSTrust(c); trustErr != nil {
+		a.log.WarnContext(c.r.Context(), "enrollment pass: no agent TLS root for the setup command", slog.Any("error", trustErr))
+		sections = append(sections, admin.Section{Title: "On each host", Text: []string{
+			"Write the pass to a root-only file and run " + agentdist.BinaryPath + " setup --token-file FILE as described in docs/OPERATIONS.md (Agent).",
+		}})
+	} else {
+		sections = append(sections, a.joinTokenHostSection(trust, jt.Patterns, secret, true))
+	}
+	c.once(c.page("New enrollment pass", "join-tokens", crumbs...), admin.DetailData{Sections: sections})
+}
+
+// joinTokenRevoke ends the use of a token or pass at once; what it already
+// produced stays and is listed on the page.
+func (a *app) joinTokenRevoke(c *rc) {
+	if a.agentsOff(c, "Join tokens", "join-tokens") {
+		return
+	}
+	if err := a.d.Agents.RevokeJoinToken(c.r.Context(), c.who(), c.r.PostFormValue("id")); err != nil {
+		c.refused(err, "/agents/tokens")
+		return
+	}
+	c.done("/agents/tokens", "Revoked. It admits nobody any more; the hosts it admitted are unchanged and listed below.")
+}
+
+// splitNames reads host names or patterns from a text area: one per line,
+// commas and spaces separate too.
+func splitNames(s string) []string {
+	var names []string
+	for _, line := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == ',' || r == ' ' || r == '\r' }) {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
+// deploymentStatus maps the state of a deployment to its fixed status color,
+// as the agent page and the Add host progress page show it.
+func deploymentStatus(state string) view.Status {
+	switch state {
+	case "deployed":
+		return view.StatusOK
+	case "failed":
+		return view.StatusCrit
+	case "rolled_back":
+		return view.StatusWarn
+	}
+	return view.StatusNeutral
 }

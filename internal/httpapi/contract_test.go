@@ -30,6 +30,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Der-Felix/MyOwnPKI/api"
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth/passkeytest"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -978,6 +979,26 @@ func TestContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, pass, err := v.agents.CreateEnrollmentPass(t.Context(), console, "contract pass", []string{"*.homelab.lan"}, 3, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := t.TempDir()
+	dist := agentdist.New(packages, "0.3.5")
+	for _, f := range agentdist.Formats {
+		for _, a := range agentdist.Arches {
+			name, _ := dist.Name(f, a)
+			if werr := os.WriteFile(filepath.Join(packages, name), []byte("package "+name), 0o600); werr != nil {
+				t.Fatal(werr)
+			}
+		}
+	}
+	if werr := os.WriteFile(filepath.Join(packages, agentdist.Checksums), []byte("sums"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	install := &agents.InstallSource{Dist: dist, BaseURL: "https://pki.homelab.lan:8444", TLSIssuer: "issuing", Clock: v.clk,
+		ACMEDirectory: func() string { return "https://pki.homelab.lan/acme/directory" }}
+	v.agents.Install = install
 	tokens, _ := v.agents.ListJoinTokens(t.Context(), console)
 	usedTokenID := ""
 	for _, jt := range tokens {
@@ -1017,6 +1038,11 @@ func TestContract(t *testing.T) {
 		{op: "withdrawAgentDeployment", as: rootview, path: agentPath + "/deployments/proxy/renew", want: 403, note: "no-read"},
 		{op: "withdrawAgentDeployment", as: anon, path: agentPath + "/deployments/proxy/renew", want: 401, note: "no-session"},
 		{op: "listAgents", as: viewer, want: 200},
+		{op: "listAgents", as: viewer, path: "/agents?hostname=proxy1.homelab.lan", want: 200},
+		{op: "listAgents", as: viewer, path: "/agents?hostname=not%20a%20host", want: 400, kind: "bad-request"},
+		{op: "getAgentInstall", as: viewer, want: 200},
+		{op: "getAgentInstall", as: anon, want: 401, note: "no-session"},
+		{op: "getAgentInstall", as: rootview, want: 403, kind: "forbidden"},
 		{op: "listAgents", as: anon, want: 401, note: "no-session"},
 		{op: "getAgent", as: viewer, path: agentPath, want: 200},
 		{op: "getAgent", as: viewer, path: "/agents/agt_nothere", want: 404, kind: "not-found"},
@@ -1039,6 +1065,8 @@ func TestContract(t *testing.T) {
 		{op: "enableAgent", as: anon, path: agentPath + "/enable", want: 401, note: "no-session"},
 		{op: "listAgentEnrollments", as: viewer, want: 200},
 		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?state=all", want: 200},
+		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?hostname=proxy2.homelab.lan", want: 200},
+		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?hostname=x", want: 400, kind: "bad-request"},
 		{op: "listAgentEnrollments", as: viewer, path: "/agent-enrollments?state=bad", want: 400, kind: "bad-request"},
 		{op: "listAgentEnrollments", as: anon, want: 401, note: "no-session"},
 		{op: "approveAgentEnrollment", as: admin, path: "/agent-enrollments/" + approveID + "/approve", want: 204},
@@ -1054,6 +1082,18 @@ func TestContract(t *testing.T) {
 		{op: "listAgentJoinTokens", as: anon, want: 401, note: "no-session"},
 		{op: "createAgentJoinToken", as: admin, body: map[string]any{"label": "web", "names": []string{"web1.homelab.lan"}, "valid_hours": 2}, want: 201},
 		{op: "createAgentJoinToken", as: admin, body: map[string]any{"label": "web"}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "rollout", "names": []string{"*.homelab.lan"}, "max_uses": 4, "valid_hours": 3}, want: 201},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "defaults", "names": []string{"minion-01.homelab.lan"}}, want: 201},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "no domain", "names": []string{"*.nodomain.lan"}}, want: 422, kind: "policy-violation", detail: "invalid request: names: no domain covers *.nodomain.lan"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "names": []string{"*.homelab.lan"}}, want: 422, kind: "policy-violation"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"*.homelab.lan"}, "max_uses": 26}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"*.homelab.lan"}, "max_uses": 1}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"*.homelab.lan"}, "valid_hours": 169}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"a.homelab.lan", "b.homelab.lan", "c.homelab.lan", "d.homelab.lan", "e.homelab.lan", "f.homelab.lan"}}, want: 422, kind: "policy-violation"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "other", "names": []string{"*.homelab.lan"}}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"names": []string{"web9.homelab.lan"}, "max_uses": 5}, want: 400, kind: "bad-request"},
+		{op: "createAgentJoinToken", as: viewer, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"*.homelab.lan"}}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "createAgentJoinToken", as: anon, body: map[string]any{"kind": "pass", "label": "x", "names": []string{"*.homelab.lan"}}, want: 401, note: "no-session"},
 		{op: "createAgentJoinToken", as: admin, body: map[string]any{"names": []string{"*"}}, want: 422, kind: "policy-violation"},
 		{op: "createAgentJoinToken", as: viewer, body: map[string]any{"names": []string{"web2.homelab.lan"}}, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "createAgentJoinToken", as: anon, body: map[string]any{"names": []string{"web2.homelab.lan"}}, want: 401, note: "no-session"},
@@ -1062,6 +1102,13 @@ func TestContract(t *testing.T) {
 		{op: "deleteAgentJoinToken", as: rootview, path: "/agent-join-tokens/" + unused.ID, want: 403, note: "no-read"},
 		{op: "deleteAgentJoinToken", as: anon, path: "/agent-join-tokens/" + unused.ID, want: 401, note: "no-session"},
 		{op: "deleteAgentJoinToken", as: admin, path: "/agent-join-tokens/" + unused.ID, want: 204},
+		{op: "revokeAgentJoinToken", as: viewer, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "revokeAgentJoinToken", as: rootview, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 403, note: "no-read"},
+		{op: "revokeAgentJoinToken", as: anon, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 401, note: "no-session"},
+		{op: "revokeAgentJoinToken", as: admin, path: "/agent-join-tokens/jtk_doesnotexist0000000/revoke", want: 404, kind: "not-found"},
+		{op: "revokeAgentJoinToken", as: admin, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 200},
+		{op: "revokeAgentJoinToken", as: admin, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 409, kind: "conflict"},
+		{op: "listAgentJoinTokens", as: viewer, want: 200},
 		{op: "revokeAgent", as: viewer, path: agentPath + "/revoke", want: 403, kind: "forbidden", note: "low-role"},
 		{op: "revokeAgent", as: rootview, path: agentPath + "/revoke", want: 403, note: "no-read"},
 		{op: "revokeAgent", as: anon, path: agentPath + "/revoke", want: 401, note: "no-session"},
@@ -1084,6 +1131,8 @@ func TestContract(t *testing.T) {
 		{op: "denyAgentEnrollment", as: admin, path: "/agent-enrollments/" + denyID + "/deny", want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "createAgentJoinToken", as: admin, body: map[string]any{"names": []string{"web3.homelab.lan"}}, want: 403, kind: "step-up-required", note: "step-up"},
 		{op: "deleteAgentJoinToken", as: admin, path: "/agent-join-tokens/" + usedTokenID, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "revokeAgentJoinToken", as: admin, path: "/agent-join-tokens/" + pass.ID + "/revoke", want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "createAgentJoinToken", as: admin, body: map[string]any{"kind": "pass", "label": "late", "names": []string{"*.homelab.lan"}}, want: 403, kind: "step-up-required", note: "step-up"},
 	} {
 		run(cc)
 	}

@@ -37,8 +37,9 @@ const (
 	ActionEnable      = "agent.enable"       //
 	ActionRevoke      = "agent.revoke"       // its certificates on the CRL, cut off
 	ActionNames       = "agent.names"        // a name added or removed
-	ActionTokenCreate = "agent.token.create" // a join token made (shown once)
+	ActionTokenCreate = "agent.token.create" // a join token or pass made (shown once)
 	ActionTokenDelete = "agent.token.delete" // an unused join token withdrawn
+	ActionTokenRevoke = "agent.token.revoke" // #nosec G101 -- an action name (ends a join token or pass at once), not a credential
 )
 
 // Limits (docs/PHASE3.md §6.1).
@@ -97,11 +98,13 @@ type Service struct {
 	// AgentPredecessor returns the tenant default for agent deployments.
 	AgentPredecessor func(ctx context.Context) (predecessor.Policy, error)
 	Checker          Checker
-	Clock            clock.Clock
-	Log              *slog.Logger
-	Wake             func()
-	Rand             io.Reader                                  // nil = crypto/rand
-	Sleep            func(context.Context, time.Duration) error // nil = clock.Sleep
+	// Install serves the install facts (InstallFacts); nil = no agent distribution.
+	Install *InstallSource
+	Clock   clock.Clock
+	Log     *slog.Logger
+	Wake    func()
+	Rand    io.Reader                                  // nil = crypto/rand
+	Sleep   func(context.Context, time.Duration) error // nil = clock.Sleep
 
 	limitOnce     sync.Once
 	limits        *limiter

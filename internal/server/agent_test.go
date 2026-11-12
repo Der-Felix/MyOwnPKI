@@ -41,6 +41,7 @@ type agentEnv struct {
 	rootDER []byte
 	files   sync.Map // check token -> content, served like a webroot
 	webroot string   // or a real webroot directory (the agent writes into it)
+	hosts   sync.Map // more host names that resolve to the test host (name -> true)
 }
 
 func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
@@ -114,7 +115,7 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 			return d.DialContext(ctx, network, host.Listener.Addr().String())
 		},
 		func(_ context.Context, host string) ([]netip.Addr, error) {
-			if host == "proxy1.homelab.lan" {
+			if _, extra := e.hosts.Load(host); host == "proxy1.homelab.lan" || extra {
 				return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
 			}
 			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}

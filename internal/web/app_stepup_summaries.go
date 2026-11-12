@@ -78,8 +78,20 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		summary = "Create join token " + orDash(entry.form["label"]) + " for " + strings.Join(strings.Fields(entry.form["names"]), ", ") + "; valid for " + entry.form["hours"] + " hours"
 	case "POST /agents/install":
 		summary = "Prepare guided agent installation for exact host " + entry.form["hostname"]
+	case "POST /hosts/add/commands":
+		summary = "Create a one-use join token for " + entry.form["hostname"] + " and show the Add host commands"
+	case "POST /hosts/add/{host}/approve", "POST /hosts/add/{host}/deny":
+		verb := "Approve enrollment"
+		if strings.HasSuffix(entry.action, "/deny") {
+			verb = "Refuse enrollment"
+		}
+		summary = verb + " for " + a.enrollmentName(c, entry.form["id"])
 	case "POST /agents/tokens/delete":
 		summary = "Withdraw join token " + a.joinTokenName(c, entry.form["id"])
+	case "POST /agents/tokens/pass":
+		summary = "Create enrollment pass " + orDash(entry.form["label"]) + " for " + strings.Join(strings.Fields(entry.form["names"]), ", ") + "; admits up to " + entry.form["uses"] + " hosts; valid for " + entry.form["hours"] + " hours"
+	case "POST /agents/tokens/revoke":
+		summary = "Revoke join token or pass " + a.joinTokenName(c, entry.form["id"])
 	case "POST /agents/{id}/names":
 		verb := "Add"
 		if entry.form["action"] == "remove" {

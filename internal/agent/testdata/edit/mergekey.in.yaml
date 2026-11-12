@@ -1,0 +1,7 @@
+server: https://pki.homelab.lan:8444
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: proxy1.homelab.lan
+state_dir: "@ROOT@/state"
+acme_directory: https://pki.homelab.lan/acme/directory
+enrollment: {<<: {challenge: standalone}}
+deployments: []

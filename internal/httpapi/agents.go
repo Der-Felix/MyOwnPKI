@@ -139,20 +139,44 @@ func toEnrollmentJSON(e agents.Enrollment) enrollmentJSON {
 }
 
 type joinTokenJSON struct {
-	ID        string     `json:"id"`
-	Label     string     `json:"label"`
-	Names     []string   `json:"names"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	UsedAt    *time.Time `json:"used_at"`
-	UsedBy    string     `json:"used_by"`
-	CreatedBy string     `json:"created_by"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID        string              `json:"id"`
+	Label     string              `json:"label"`
+	Kind      string              `json:"kind"`
+	Names     []string            `json:"names"`
+	MaxUses   int                 `json:"max_uses"`
+	UseCount  int                 `json:"use_count"`
+	State     string              `json:"state"`
+	ExpiresAt time.Time           `json:"expires_at"`
+	UsedAt    *time.Time          `json:"used_at"`
+	UsedBy    string              `json:"used_by"`
+	RevokedAt *time.Time          `json:"revoked_at"`
+	RevokedBy string              `json:"revoked_by"`
+	CreatedBy string              `json:"created_by"`
+	CreatedAt time.Time           `json:"created_at"`
+	Hosts     []joinTokenHostJSON `json:"hosts"`
 }
 
-func toJoinTokenJSON(j agents.JoinToken) joinTokenJSON {
-	out := joinTokenJSON{ID: j.ID, Label: j.Label, Names: j.Patterns, ExpiresAt: j.ExpiresAt, UsedBy: j.UsedBy, CreatedBy: j.CreatedBy, CreatedAt: j.CreatedAt}
-	if !j.UsedAt.IsZero() {
-		out.UsedAt = &j.UsedAt
+// joinTokenHostJSON is one use of a pass: the host that presented it.
+type joinTokenHostJSON struct {
+	Hostname     string    `json:"hostname"`
+	EnrollmentID string    `json:"enrollment_id"`
+	State        string    `json:"state"`
+	AgentID      *string   `json:"agent_id"`
+	At           time.Time `json:"at"`
+}
+
+func toJoinTokenJSON(j agents.JoinToken, now time.Time) joinTokenJSON {
+	out := joinTokenJSON{
+		ID: j.ID, Label: j.Label, Kind: j.Kind, Names: j.Patterns, MaxUses: j.MaxUses, UseCount: j.UseCount, State: string(j.State(now)),
+		ExpiresAt: j.ExpiresAt, UsedAt: timeOrNil(j.UsedAt), UsedBy: j.UsedBy, RevokedAt: timeOrNil(j.RevokedAt), RevokedBy: j.RevokedBy,
+		CreatedBy: j.CreatedBy, CreatedAt: j.CreatedAt, Hosts: []joinTokenHostJSON{},
+	}
+	for _, h := range j.Hosts {
+		row := joinTokenHostJSON{Hostname: h.Hostname, EnrollmentID: h.Enrollment, State: h.State, At: h.At}
+		if h.AgentID != "" {
+			row.AgentID = &h.AgentID
+		}
+		out.Hosts = append(out.Hosts, row)
 	}
 	return out
 }
@@ -170,12 +194,19 @@ func (a *API) listAgents(c *call) error {
 	if err != nil {
 		return err
 	}
+	host, err := hostnameQuery(c)
+	if err != nil {
+		return err
+	}
 	list, err := s.ListAgents(c.ctx(), c.who())
 	if err != nil {
 		return err
 	}
 	out := make([]agentJSON, 0, len(list))
 	for i := range list {
+		if host != "" && list[i].Hostname != host {
+			continue
+		}
 		full, gerr := s.GetAgent(c.ctx(), c.who(), list[i].ID)
 		if gerr != nil {
 			return gerr
@@ -185,6 +216,20 @@ func (a *API) listAgents(c *call) error {
 		out = append(out, row)
 	}
 	return c.reply(http.StatusOK, out)
+}
+
+// hostnameQuery reads the optional ?hostname= filter of the agent lists: a
+// fully qualified name, compared exactly after lower-casing.
+func hostnameQuery(c *call) (string, error) {
+	raw := c.r.URL.Query().Get("hostname")
+	if raw == "" {
+		return "", nil
+	}
+	host, err := agents.CheckHostname(raw)
+	if err != nil {
+		return "", badRequest("/hostname", "a fully qualified host name such as proxy1.homelab.lan")
+	}
+	return host, nil
 }
 
 func pathID(c *call, name string) string {
@@ -386,12 +431,19 @@ func (a *API) listAgentEnrollments(c *call) error {
 	default:
 		return badRequest("/state", "open or all")
 	}
+	host, err := hostnameQuery(c)
+	if err != nil {
+		return err
+	}
 	list, err := s.ListEnrollments(c.ctx(), c.who(), open)
 	if err != nil {
 		return err
 	}
 	out := make([]enrollmentJSON, 0, len(list))
 	for _, e := range list {
+		if host != "" && e.Hostname != host {
+			continue
+		}
 		out = append(out, toEnrollmentJSON(e))
 	}
 	return c.reply(http.StatusOK, out)
@@ -431,9 +483,10 @@ func (a *API) listAgentJoinTokens(c *call) error {
 	if err != nil {
 		return err
 	}
+	now := a.d.Clock.Now()
 	out := make([]joinTokenJSON, 0, len(list))
 	for _, j := range list {
-		out = append(out, toJoinTokenJSON(j))
+		out = append(out, toJoinTokenJSON(j, now))
 	}
 	return c.reply(http.StatusOK, out)
 }
@@ -444,9 +497,11 @@ func (a *API) createAgentJoinToken(c *call) error {
 		return err
 	}
 	var req struct {
+		Kind       string   `json:"kind"`
 		Label      string   `json:"label"`
 		Names      []string `json:"names"`
 		ValidHours int      `json:"valid_hours"`
+		MaxUses    int      `json:"max_uses"`
 	}
 	if derr := c.decode(&req); derr != nil {
 		return derr
@@ -454,10 +509,27 @@ func (a *API) createAgentJoinToken(c *call) error {
 	if len(req.Names) == 0 {
 		return badRequest("/names", "required: the names or patterns the hostname must match")
 	}
-	if req.ValidHours < 0 || req.ValidHours > 720 {
-		return badRequest("/valid_hours", "1 to 720")
+	switch req.Kind {
+	case "", agents.KindToken:
+		if req.MaxUses != 0 {
+			return badRequest("/max_uses", "only an enrollment pass has more than one use")
+		}
+		if req.ValidHours < 0 || req.ValidHours > 720 {
+			return badRequest("/valid_hours", "1 to 720")
+		}
+	case agents.KindPass:
+		if req.MaxUses != 0 && (req.MaxUses < agents.MinPassUses || req.MaxUses > agents.MaxPassUses) {
+			return badRequest("/max_uses", "%d to %d", agents.MinPassUses, agents.MaxPassUses)
+		}
+		if req.ValidHours < 0 || req.ValidHours > int(agents.MaxPassTTL/time.Hour) {
+			return badRequest("/valid_hours", "1 to %d for a pass", int(agents.MaxPassTTL/time.Hour))
+		}
+	default:
+		return badRequest("/kind", "token or pass")
 	}
-	secret, jt, err := s.CreateJoinToken(c.ctx(), c.who(), req.Label, req.Names, time.Duration(req.ValidHours)*time.Hour)
+	secret, jt, err := s.CreateToken(c.ctx(), c.who(), agents.NewToken{
+		Kind: req.Kind, Label: req.Label, Patterns: req.Names, TTL: time.Duration(req.ValidHours) * time.Hour, MaxUses: req.MaxUses,
+	})
 	if err != nil {
 		return err
 	}
@@ -465,7 +537,69 @@ func (a *API) createAgentJoinToken(c *call) error {
 	return c.reply(http.StatusCreated, struct {
 		joinTokenJSON
 		Secret string `json:"secret"`
-	}{toJoinTokenJSON(*jt), secret})
+	}{toJoinTokenJSON(*jt, a.d.Clock.Now()), secret})
+}
+
+func (a *API) revokeAgentJoinToken(c *call) error {
+	s, err := a.agentsOn(c)
+	if err != nil {
+		return err
+	}
+	id := pathID(c, "joinTokenId")
+	if id == "" {
+		return agents.ErrNotFound
+	}
+	if rerr := s.RevokeJoinToken(c.ctx(), c.who(), id); rerr != nil {
+		return rerr
+	}
+	list, err := s.ListJoinTokens(c.ctx(), c.who())
+	if err != nil {
+		return err
+	}
+	for _, j := range list {
+		if j.ID == id {
+			return c.reply(http.StatusOK, toJoinTokenJSON(j, a.d.Clock.Now()))
+		}
+	}
+	return agents.ErrNotFound
+}
+
+type installPackageJSON struct {
+	Name   string `json:"name"`
+	Format string `json:"format"`
+	Arch   string `json:"arch"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+	URL    string `json:"url"`
+}
+
+// getAgentInstall answers with what a script needs to install the agent
+// without a browser: the independent values of the guided installation.
+func (a *API) getAgentInstall(c *call) error {
+	s, err := a.agentsOn(c)
+	if err != nil {
+		return err
+	}
+	f, err := s.InstallFacts(c.ctx(), c.who())
+	if errors.Is(err, agents.ErrNotFound) {
+		return c.problem(http.StatusNotFound, "not-found", "no agent distribution on this server (agent packages or the agent TLS root are missing)", nil)
+	} else if err != nil {
+		return err
+	}
+	out := struct {
+		ServerURL     string               `json:"server_url"`
+		ACMEDirectory *string              `json:"acme_directory"`
+		AgentVersion  string               `json:"agent_version"`
+		Root          map[string]string    `json:"root"`
+		Packages      []installPackageJSON `json:"packages"`
+	}{ServerURL: f.ServerURL, AgentVersion: f.Version, Root: map[string]string{"sha256": f.Root.SHA256, "sha1": f.Root.SHA1, "url": f.Root.URL}, Packages: []installPackageJSON{}}
+	if f.ACMEDirectory != "" {
+		out.ACMEDirectory = &f.ACMEDirectory
+	}
+	for _, p := range f.Packages {
+		out.Packages = append(out.Packages, installPackageJSON{Name: p.Name, Format: p.Format, Arch: p.Arch, Size: p.Size, SHA256: p.SHA256, URL: p.URL})
+	}
+	return c.reply(http.StatusOK, out)
 }
 
 func (a *API) deleteAgentJoinToken(c *call) error {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.3.4
+  version: 0.3.5
   summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
     v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy
@@ -920,8 +920,12 @@ paths:
       tags: [agents]
       operationId: listAgents
       summary: List the admitted agents
-      description: By hostname. Pending enrollments are under `/agent-enrollments`.
+      description: |
+        By hostname. Pending enrollments are under `/agent-enrollments`. With `hostname` only the
+        agents of exactly that host name (a script that rolled out a host asks for it here).
       x-required-role: viewer
+      parameters:
+        - $ref: "#/components/parameters/HostnameFilter"
       responses:
         "200":
           description: Agents
@@ -930,6 +934,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Agent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -1274,9 +1279,11 @@ paths:
       summary: List enrollments – the approval queue
       description: |
         `state=open` (default): the enrollments that wait – for the check file or for an admin.
-        `state=all`: the last 200 of any state.
+        `state=all`: the last 200 of any state. With `hostname` only the enrollments of exactly that
+        host name.
       x-required-role: viewer
       parameters:
+        - $ref: "#/components/parameters/HostnameFilter"
         - name: state
           in: query
           description: "open or all"
@@ -1330,11 +1337,14 @@ paths:
     get:
       tags: [agents]
       operationId: listAgentJoinTokens
-      summary: List join tokens (without their secrets)
+      summary: List join tokens and enrollment passes (without their secrets)
+      description: |
+        Newest first. A pass lists the hosts it admitted or queued, so an admin who revokes it can
+        see what it produced. The secret is never in a list.
       x-required-role: viewer
       responses:
         "200":
-          description: Join tokens, newest first
+          description: Join tokens and passes, newest first
           content:
             application/json:
               schema:
@@ -1345,10 +1355,22 @@ paths:
     post:
       tags: [agents]
       operationId: createAgentJoinToken
-      summary: Create a join token
+      summary: Create a join token or an enrollment pass
       description: |
-        Single-use, for hosts whose name matches one of `names`, valid for `valid_hours` (1 to 720,
-        default 24). The secret is in this answer only; the server keeps its SHA-256.
+        `kind: token` (default): single-use, for hosts whose name matches one of `names`, valid for
+        `valid_hours` (1 to 720, default 24); its names become the allowed names of the agent.
+
+        `kind: pass`: an enrollment pass for roll-outs by Salt, Ansible or CI. It admits up to
+        `max_uses` hosts (2 to 25, default 10) whose name matches one of 1 to 5 `names`, each name
+        covered by a domain (otherwise `422` names the pattern), valid for `valid_hours` (1 to 168,
+        default 24). A label is required. It admits a host only together with a passed http-01
+        check (in every enrollment mode, and never in manual mode), grants the host name only and
+        not the pattern, and is refused for a host that already has an agent. A leaked pass admits
+        at most `max_uses` hosts matching the names until it expires or is revoked.
+
+        The secret is in this answer only; the server keeps its SHA-256. Creating either kind needs
+        the admin role and a fresh second factor, so **no API token can create one** - give
+        automation a viewer token that reads, and hand it the secret.
       x-required-role: admin
       x-step-up: true
       requestBody:
@@ -1360,6 +1382,8 @@ paths:
       responses:
         "201":
           description: Created – the only time the secret is shown
+          headers:
+            Cache-Control: { description: "no-store", schema: { type: string, enum: [no-store] } }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JoinTokenCreated" }
@@ -1376,8 +1400,8 @@ paths:
     delete:
       tags: [agents]
       operationId: deleteAgentJoinToken
-      summary: Withdraw an unused join token
-      description: A used token stays as a record (409).
+      summary: Withdraw a join token or pass nobody has used
+      description: A used one stays as a record (409); revoke it instead.
       x-required-role: admin
       x-step-up: true
       responses:
@@ -1386,6 +1410,53 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /agent-join-tokens/{joinTokenId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/JoinTokenId"
+    post:
+      tags: [agents]
+      operationId: revokeAgentJoinToken
+      summary: Revoke a join token or enrollment pass
+      description: |
+        Ends use at once. It does not touch the enrollments and agents the token already produced:
+        they stay and are listed on the token, so an admin can refuse or disable them (separate,
+        visible decisions). A token that can no longer admit anybody (revoked, used up or
+        expired) answers 409.
+      x-required-role: admin
+      x-step-up: true
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JoinToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /agent-install:
+    get:
+      tags: [agents]
+      operationId: getAgentInstall
+      summary: The facts for installing the agent without a browser
+      description: |
+        The independent values the guided installation shows: the server address for `setup --server`,
+        the ACME directory, the root the agents trust (the SHA-256 of its DER is the only authority;
+        the URL is plain HTTP on purpose) and the package files of this release with their
+        SHA-256. Nothing in it is secret. `404` while the server has no agent packages or no agent
+        TLS root.
+      x-required-role: viewer
+      responses:
+        "200":
+          description: Install facts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentInstall" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /presets:
     get:
@@ -2517,6 +2588,13 @@ components:
       required: true
       schema: { $ref: "#/components/schemas/ID" }
 
+    HostnameFilter:
+      description: "Only this host name (exact, case-insensitive): a fully qualified name such as proxy1.homelab.lan"
+      name: hostname
+      in: query
+      required: false
+      schema: { type: string, maxLength: 253 }
+
     JoinTokenId:
       description: "ID of the join token"
       name: joinTokenId
@@ -3096,50 +3174,117 @@ components:
         decided_by: { type: string }
 
     JoinToken:
-      description: "A join token without its secret"
+      description: "A join token or enrollment pass without its secret"
       type: object
-      required: [id, label, names, expires_at, used_at, used_by, created_by, created_at]
+      required: [id, label, kind, names, max_uses, use_count, state, expires_at, used_at, used_by, revoked_at, revoked_by, created_by, created_at, hosts]
       additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
         label: { type: string }
+        kind: { type: string, enum: [token, pass] }
         names: { type: array, items: { type: string } }
+        max_uses: { type: integer, description: "1 for a token, 2 to 25 for a pass" }
+        use_count: { type: integer, description: "Enrollments that presented it validly, including ones that then wait in the queue" }
+        state:
+          type: string
+          enum: [active, used_up, expired, revoked]
+          description: "As of this answer; revoked wins over used_up, used_up over expired"
         expires_at: { type: string, format: date-time }
-        used_at: { type: [string, "null"], format: date-time }
-        used_by: { type: string, description: "The enrollment that used it" }
+        used_at: { type: [string, "null"], format: date-time, description: "When the last use was taken" }
+        used_by: { type: string, description: "The enrollment of the last use" }
+        revoked_at: { type: [string, "null"], format: date-time }
+        revoked_by: { type: string }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
+        hosts:
+          description: "The enrollments a pass admitted or queued, oldest first; empty for a token and for an unused pass"
+          type: array
+          items: { $ref: "#/components/schemas/JoinTokenHost" }
+
+    JoinTokenHost:
+      description: "One use of a pass"
+      type: object
+      required: [hostname, enrollment_id, state, agent_id, at]
+      additionalProperties: false
+      properties:
+        hostname: { type: string }
+        enrollment_id: { $ref: "#/components/schemas/ID" }
+        state: { type: string, enum: [waiting_for_check, pending_approval, admitted, denied, expired], description: "Where the enrollment stands now" }
+        agent_id: { type: [string, "null"], description: "The agent, once admitted" }
+        at: { type: string, format: date-time }
 
     JoinTokenCreate:
-      description: "A new join token"
+      description: "A new join token or enrollment pass"
       type: object
       required: [names]
       additionalProperties: false
       properties:
-        label: { type: string, maxLength: 64 }
+        kind: { type: string, enum: [token, pass], description: "Default token" }
+        label: { type: string, maxLength: 64, description: "Required for a pass" }
         names:
-          description: "The hostname must match one: an exact name or *.suffix"
+          description: "The hostname must match one: an exact name or *.suffix. A pass takes 1 to 5, each covered by a domain"
           type: array
           minItems: 1
           maxItems: 20
           items: { type: string, maxLength: 255 }
-        valid_hours: { type: integer, minimum: 1, maximum: 720, description: "Default 24" }
+        valid_hours: { type: integer, minimum: 1, maximum: 720, description: "Default 24; a pass: at most 168 (7 days)" }
+        max_uses: { type: integer, minimum: 2, maximum: 25, description: "Pass only; default 10" }
 
     JoinTokenCreated:
-      description: "A new join token with its secret, shown once"
+      description: "A new join token or pass with its secret, shown once"
       type: object
-      required: [id, label, names, expires_at, used_at, used_by, created_by, created_at, secret]
+      required: [id, label, kind, names, max_uses, use_count, state, expires_at, used_at, used_by, revoked_at, revoked_by, created_by, created_at, hosts, secret]
       additionalProperties: false
       properties:
         id: { $ref: "#/components/schemas/ID" }
         label: { type: string }
+        kind: { type: string, enum: [token, pass] }
         names: { type: array, items: { type: string } }
+        max_uses: { type: integer }
+        use_count: { type: integer }
+        state: { type: string, enum: [active, used_up, expired, revoked] }
         expires_at: { type: string, format: date-time }
         used_at: { type: [string, "null"], format: date-time }
         used_by: { type: string }
+        revoked_at: { type: [string, "null"], format: date-time }
+        revoked_by: { type: string }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
-        secret: { type: string, pattern: "^mjt_[A-Za-z0-9_-]{43}$", description: "Shown once – give it to myownpki-agent setup --token-file" }
+        hosts:
+          type: array
+          items: { $ref: "#/components/schemas/JoinTokenHost" }
+        secret: { type: string, pattern: "^mj[tp]_[A-Za-z0-9_-]{43}$", description: "Shown once - mjt_ for a token, mjp_ for a pass; give it to myownpki-agent setup --token-file" }
+
+    AgentInstall:
+      description: "What a script needs to install the agent without a browser"
+      type: object
+      required: [server_url, acme_directory, agent_version, root, packages]
+      additionalProperties: false
+      properties:
+        server_url: { type: string, description: "For setup --server (agent.base_url)" }
+        acme_directory: { type: [string, "null"], description: "For setup --acme-directory; null while ACME is off" }
+        agent_version: { type: string, description: "The agent release that matches this server" }
+        root:
+          type: object
+          required: [sha256, sha1, url]
+          additionalProperties: false
+          properties:
+            sha256: { type: string, description: "Lower-case hex of the DER; the only authority for trusting the root" }
+            sha1: { type: string, description: "Display only (the Windows certificate dialog)" }
+            url: { type: string, description: "Plain HTTP PEM of the root; accepted only after the SHA-256 matches" }
+        packages:
+          type: array
+          items:
+            type: object
+            required: [name, format, arch, size, sha256, url]
+            additionalProperties: false
+            properties:
+              name: { type: string }
+              format: { type: string, enum: [deb, rpm, tarball, checksums] }
+              arch: { type: string, description: "amd64 or arm64; empty for checksums" }
+              size: { type: integer }
+              sha256: { type: string, description: "Lower-case hex" }
+              url: { type: string }
 
     TenantSettings:
       description: "Settings of the tenant"

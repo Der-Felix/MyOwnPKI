@@ -76,7 +76,7 @@ func newAgentsUIEnvVersion(t *testing.T, version string) (*uiEnv, *agents.Servic
 	h, err := NewHandler(Options{Logger: slog.New(slog.NewJSONHandler(&v.logs, nil)), App: &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: settings, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read, Agents: svc,
-		AgentDist: dist, AgentBaseURL: "https://pki.homelab.lan:8444", AgentTLSIssuer: "issuing", ServerVersion: version,
+		AgentDist: dist, AgentBaseURL: "https://pki.homelab.lan:8444", AgentTLSIssuer: "issuing", ServerVersion: version, ACMEDirectory: testACMEDirectory,
 	}})
 	if err != nil {
 		t.Fatal(err)

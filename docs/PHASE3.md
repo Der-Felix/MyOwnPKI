@@ -1159,3 +1159,276 @@ under `-race` and the fake clock, without `time.Sleep`.
   failed`.
 - **No ADR changes.** The plan fits ADR-06 (one transaction, one database), ADR-10/18/19 and ADR-12;
   it adds one package (`internal/netguard`), no dependency and no protocol change.
+
+---
+
+## 11. Agent and host onboarding: v0.3.5
+
+Today a new host takes a dozen manual steps: install the package, run `setup`, wait for an approval,
+then hand-edit `agent.yaml` (hooks, `paths`, deployments, `acme_directory`) and hand-edit the systemd
+drop-in `10-paths.conf` so that the sandbox lets the agent write what `agent.yaml` allows – and a
+mistake in either shows up only as `Read-only file system` after the first failed renewal. v0.3.5
+removes the hand work (PLAN §10.1, owner 2026-11-08): `myownpki-agent deployment add` writes both
+files in one step, an *Add host* assistant in the UI walks an admin from "new FQDN" to "certificate
+deployed", Salt, Ansible, scripts and CI get a path that needs no browser on the host side, and the
+docs carry recipes for Postfix, Dovecot and Proxmox VE.
+
+Goal of v0.3.5, measured on the live installation: **(a)** a fresh VM (`minion-01.homelab.lan`) goes
+from "nothing installed" to "agent enrolled, first certificate deployed and served" through the
+assistant with two pasted command blocks and one approval; **(b)** the same VM, rolled
+out from the Salt master with an enrollment pass in the pillar, is enrolled and has its certificate
+**without anyone opening the UI for that host**; **(c)** a host with an agent of an older release keeps
+working and its hand-made `/var/log/nginx` entry in `10-paths.conf` survives an update.
+
+Where this plan differs from the text above it (the code decides – every line was read, none run):
+
+- **API tokens cannot create join tokens.** PLAN §10.1 (rows v0.3.5 and "v1.0 contains") and §14
+  "Release sequence" say the automation path uses "the existing API tokens: create join tokens, read
+  agents and deployments". That is wrong. `agent.manage` is in the `stepUp` list of
+  `internal/authz/authz.go`, and `Principal.Check` returns `TokenStepUpError` for a token **before** it
+  looks at roles, so even a token with the admin role gets `403` on `createAgentJoinToken`,
+  `approveAgentEnrollment`, `changeAgentNames`, `disableAgent` and `revokeAgent` (PLAN §14 decision on
+  tokens; `api/openapi.yaml` header, `x-step-up`). §11.2 designs the automation path from that fact.
+- **API tokens have roles, not scopes.** The skill's `security.md` says "scoped (tenant, actions)";
+  PLAN §14 correctly says "roles ≤ the owner's" and §6.5 lists scopes as backlog. `api_tokens`
+  (system.db 0008) stores `roles_json`; `auth.AuthenticateToken` builds a `Principal` from role
+  bindings only. So there is no existing "narrow" permission to hand to a script, and a token with the
+  admin role also holds
+  `tenant.manage` – which has no step-up and can set the enrollment mode (§11.3).
+- **A join token's patterns become the agent's allowed names.** `agents.initialNames`
+  (`internal/agents/enroll.go`) copies every pattern of the admitting token into `agent_names` with
+  source `token`. For a single-use token for one host that is the point; for a token or pass with
+  `*.homelab.lan` it would give every admitted host the right to order any name below the domain. The
+  pass of §11.2 therefore grants the host name only.
+- **`setup` owns the drop-ins and rewrites them.** `agent.Setup` (`internal/agent/setup.go`) writes
+  `10-paths.conf` as `state_dir` plus `paths` on **every** run, so the `/var/log/nginx` entry that
+  OPERATIONS §12.3 tells an admin to add by hand is lost at the next `setup` run (the *Update agent*
+  commands run `setup`). It also **removes** `20-low-ports.conf` whenever `--low-ports` is not given
+  and enrollment is not standalone (`needLowPort`), although OPERATIONS §12.3 says nginx hooks need it
+  in webroot mode. And `needLowPort` ignores the `challenge` of deployments. PHASE3 §6.6 says "the
+  install script adds nginx's log directory"; `setup` does not. Step 30 pins this with failing tests
+  first and fixes it.
+- **A fresh `agent.yaml` cannot hold a deployment.** `renderSetupConfig` writes no `acme_directory`,
+  and `Config.Validate` requires one as soon as there is a deployment. Today the admin adds it by hand.
+- **The UI ships no htmx script.** `web/web.go` embeds only `styles/*.css`; CSP is `script-src 'self'`
+  with no script. The `hx-get`/`hx-trigger="every 3s"` attributes in `pages/admin/generic.templ`
+  (`DetailData.RefreshURL`, used by the agent page) are inert. PHASE3 §9.1 step 24 already says "htmx is
+  not shipped yet". The assistant therefore uses plain forms and a `<meta http-equiv="refresh">`.
+- **`agent.yaml` is written 0644, not 0600** (PHASE3 §1.3 says 0600): `renderSetupConfig` writes no
+  secret, the token file is the secret. Unchanged; noted so nobody "fixes" it by accident.
+- **Migration numbers.** `pki.db` is at 0017 here; v0.3.4 (§10) reserves 0018 for `endpoints`. This
+  release needs 0019, `internal/store/schema/pki/0019_enrollment_pass.sql`.
+- **`site/` is not in this branch.** It arrived with PR #28 on `main`, after `release/v0.3.4` forked.
+  Step 33 starts by merging `origin/main` into `release/v0.3.5`.
+- **Unmerged fix.** `fix/agent-absolute-path` (`3b755ba`) makes every generated command call
+  `/usr/local/bin/myownpki-agent` (root's `PATH` often lacks `/usr/local/bin`). Step 32 builds on it; it
+  must be merged first, or the assistant generates the bare name the fix removes.
+
+### 11.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 30 | 0.3.5 | **`myownpki-agent deployment add`, `list`, `remove` and `sandbox sync`**, in three commits. (a) *One model of the sandbox.* `agent.Config` gains the optional block `sandbox: {write: [dirs], low_ports: bool}` (§11.2); `RenderDropins(cfg, existing)` in `internal/agent` derives `10-paths.conf` (`state_dir`, `paths`, `sandbox.write`) and decides `20-low-ports.conf`; `Setup` calls it instead of its own string. The three bugs of the list above are pinned by failing tests first: a manual `/var/log/nginx` entry survives, `20-low-ports.conf` survives, a standalone *deployment* makes the capability needed. `setup` gets `--acme-directory URL` (written into a new `agent.yaml`). `sandbox sync [--dry-run] [--adopt\|--prune]` recomputes both drop-ins from `agent.yaml` (what a Salt run calls after it rendered the file). (b) *The editor and the commands.* `internal/agent/edit.go` changes `agent.yaml` through the `yaml.Node` API of the existing `go.yaml.in/yaml/v3` (no new dependency): comments and key order stay, `deployments: []` becomes a block, new hooks and `paths` entries are appended; the result is parsed with `ParseConfig` (the same `Validate` as `run` and `config check`) **before** anything is written. `deployment add NAME` takes the flags of §11.2; it writes the drop-ins first and `agent.yaml` second (a crash in between leaves a wider sandbox, never a missing one), restores the drop-in bytes when the second write fails, keeps the previous file as `agent.yaml.bak`, runs `systemctl daemon-reload` when a drop-in changed and prints the one restart command (or does it with `--restart`). `--dry-run` prints a unified diff of all three files and writes nothing. `list` prints name, profile, names, targets, hooks and check; `remove NAME` removes the deployment and recomputes the drop-ins (it keeps `paths` unless `--prune-paths`, and never touches deployed files or state). (c) *Recipes.* `internal/recipe` (data only, no imports, so the server can use it without linking lego) holds nginx, Postfix, Dovecot and Proxmox VE (§11.2); `deployment add --recipe NAME` fills defaults, explicit flags win, `--dry-run` shows the expansion and prints "example recipe, test on a non-production host" for the three non-nginx ones. *Built:* three commits as planned. (a) `internal/agent/dropin.go`: `RenderDropins` **merges** instead of rewriting: an entry found in `10-paths.conf` that `agent.yaml` does not explain is kept and reported (`Kept in 10-paths.conf …`), missing entries are appended to the last `ReadWritePaths=` line, nothing is removed except by `--prune` or by the paths `deployment remove --prune-paths` has just taken out of `agent.yaml`; a file that already holds everything is not rewritten (byte for byte, comments and other directives included); `20-low-ports.conf` is written for `sandbox.low_ports: true`, any standalone challenge (enrollment **or** deployment) or `--low-ports`, removed only by an explicit `false`, otherwise left as found – a file that differs from the packaged one is **not overwritten** (a note says so); a path with white space, quotes or `%` is refused before anything is written (systemd would split or expand it); `setup --acme-directory`, and `config check` prints the effective sandbox, whether the drop-ins match and warnings for system directories. The three bugs have failing tests that were written first (`setup_sandbox_test.go`). (b) `edit.go` (the `yaml.Node` editor), `deployment.go`, `diff.go`, `paths_policy.go`, `cmd/myownpki-agent/deployment.go`. (c) `internal/recipe` and `--recipe`. **Deviations and choices:** `sandbox sync --adopt|--prune` and `list` come with (b); `--sandbox-write` and `--low-ports` are recorded in the `sandbox:` block of `agent.yaml` so that `setup` and `sandbox sync` keep them; `deployment remove` writes `agent.yaml` first and the drop-ins second (the opposite of `add`: a crash must never leave a deployment without its sandbox); blank lines: yaml.v3 drops them, the ones between top-level blocks are put back, the ones inside a block are not; new scalars follow the quoting of the file (plain names and profiles when `hostname:` is plain, paths and command lines always quoted); a directory that becomes writable may not have a symbolic link on its way (the loader's own check follows links, ReadWritePaths would too); a recipe hook is defined only when the deployment refers to it; sandbox directories of a recipe are added to those of the operator; all commands except `list` need root, also with `--dry-run`; `sandbox sync` has no `--restart`. **Not built here:** the Linux CI extension (agent end-to-end job running `deployment add --recipe nginx`, `systemd-analyze verify`, restart under real systemd) and `go test -race` (no C compiler on the development machine); the recipes remain unverified examples until step 33 | Table tests with a temp root and a fake `systemctl` (the `setupSystemd` seam of `setup.go`); **golden files** for the YAML round trip (comments, flow lists, an empty `deployments: []`, hooks and `paths` already present, a file with anchors/aliases/merge keys or two documents is refused with "edit it by hand"); `Validate` problems are reported before a byte is written; a second `add` of the same name is refused; `--dry-run` writes nothing (file tree compared before and after); failure injection on the second write restores the drop-in; every recipe passes `deployment add --recipe X --dry-run` followed by `config check` in a temp root; paths refused: `/`, `/etc`, `/usr`, `/var`, `/root`, `/home`, `..`, relative, a symlink out of the root; non-root run changes nothing; **setup regression**: a pre-v0.3.5 host whose `10-paths.conf` has `/var/log/nginx` and whose `20-low-ports.conf` exists keeps both through `setup`, `sandbox sync` and `deployment add`; `go test -race`; Linux CI: the agent end-to-end job runs `deployment add --recipe nginx` on the real nginx container, `systemd-analyze verify`, restarts the unit under real systemd and sees the certificate served |
+| 31 | 0.3.5 | **The automation path: the enrollment pass** (§11.2 decides it), in four commits. (a) *Schema and service.* `pki.db` migration 0019 adds `kind`, `max_uses`, `use_count`, `revoked_at`, `revoked_by` to `join_tokens` (additive; existing rows become `kind = 'token'`, `max_uses = 1`, `use_count` 1 where `used_at` is set). `agents.CreateJoinToken` takes a kind; one conditional `UPDATE` consumes a use atomically (`UseJoinToken` in `queries/pki/agents.sql`); `checkToken`, `admits` and `initialNames` in `enroll.go` follow the pass rules; `DeleteJoinToken` deletes only `use_count = 0`; new `RevokeJoinToken`. sqlc regenerates `pkidb`. (b) *REST, spec first.* `createAgentJoinToken` accepts `kind`, `max_uses`; `listAgentJoinTokens` and the schemas gain the new fields; new `revokeAgentJoinToken` (`POST /agent-join-tokens/{joinTokenId}/revoke`, admin, `x-step-up`); `hostname` filter on `listAgents` and `listAgentEnrollments`; **install facts** `getAgentInstall` (`GET /agent-install`, viewer): server URL, ACME directory, root SHA-256 and URL, and the manifest of package files with SHA-256, built by the code that builds the guided commands today (`agentTLSTrust`, `agentdist`) moved into a shared function. (c) *UI.* *Agents → Join tokens* gets the pass form (label, names, uses, hours), a state column (`active 3 of 10`, `used up`, `expired`, `revoked`), a *Revoke* button, and per pass the list of hosts it admitted; the step-up summary in `app_stepup_summaries.go`. (d) *Pinning tests of the contract:* an API token with the admin role gets `403` on creating a pass. *Built:* the pinning tests first (`internal/httpapi/agent_pass_test.go`: a token of every role gets `403` on creating, withdrawing and revoking a token or pass and on deciding an enrollment; a session without a fresh second factor gets `step-up-required`), then (a) `0019_enrollment_pass.sql` and `internal/agents`: `CreateToken(NewToken)` with `CreateEnrollmentPass` and the unchanged `CreateJoinToken` as wrappers, `UseJoinToken` as one conditional `UPDATE … RETURNING use_count, max_uses` inside the transaction of the enrollment and its audit entry, `RevokeJoinToken`, `ListJoinTokens` with the hosts of each pass, the rules in `checkToken`/`admits`/`admitBy`/`initialNames`, audit action `agent.token.revoke`; (b) REST as specified plus `agents.TLSTrust` (moved out of the web package) and `agents.InstallSource`/`Service.InstallFacts` behind `getAgentInstall`; (c) the *Enrollment passes* section on *Join tokens* with the routes `POST /agents/tokens/pass` and `POST /agents/tokens/revoke`; (d) an end-to-end test with the real agent (`TestEnrollmentPassEndToEnd`, `internal/server`). **Deviations and choices:** `CreateJoinToken` keeps its signature (many call sites); the kind goes in through `CreateToken`. A pass is also refused for a host whose agent is *disabled* (the plan says active): somebody switched it off on purpose, and a pass must not bring the host back under a new identity; a revoked agent does not count. The same check runs again inside the transaction that creates the agent, so two enrollments for one new name cannot both be admitted (the second is queued with the reason, its use stays spent). The audit has no extra actions for use, exhaustion or a late attempt: `agent.enroll` carries `token_id`, `token_kind`, `use` (“3 of 10”) and `token_problem`, as the plan's audit row says. The refusal reasons are told to whoever holds the secret, as the single-use token does today (an unknown secret only says “unknown join token”). `revokeAgentJoinToken` answers `200` with the token and `409` for one that cannot admit anybody any more. `valid_hours` above 168 and `max_uses` outside 2–25 are `400` (schema); a pattern no domain covers, a missing label or more than five names are `422`. `getAgentInstall` is served by the agent service (`Service.Install`, set by the server next to the checker) and hashes the package files at most once a minute. The end-to-end test calls `Agent.Enroll(token)` instead of `agent.Setup` (the token-file handling has its own tests in `internal/agent`). `stepUpActions` lost its `RenewAgent` entry. **Not built here:** `go test -race` (no C compiler on the development machine) | Fake-clock and `-race` tests in `internal/agents` with real SQLite: 20 concurrent enrollments on a pass of 5 uses give exactly 5 valid and 15 "no uses left", none lost on a restart in between; expiry to the second; revoke ends use at once; pattern match exact and wildcard (one label or more below the suffix, never the bare suffix); a host with an active agent is refused by a pass (goes to the queue naming why); a pass admits only after a passed check in every mode (`auto`, `verified`), never in `manual`; the admitted agent has `agent_names` = its host name only; a single-use token behaves exactly as before (existing tests unchanged); the audit entry of an enrollment names the pass and the use number, never the secret (grep over the whole audit and log output); `createAgentJoinToken` via a token with the admin role is `403`, via a session without a fresh second factor is `step-up-required`, via a session with one is `201`; viewer token lists passes (no secret) and reads agents and enrollments; contract test (every spec operation has a route and the reverse); `task lint:api`; migration test from the 0018 database; **an end-to-end test**: pass created, two `agent.Setup` runs with `--token-file` in temp roots admitted with the fake checker, third refused, pass revoked, fourth refused |
+| 32 | 0.3.5 | **The *Add host* assistant.** *Agents → Install agent* becomes *Add host* (same route `/agents/install`, the button on the agent list is renamed) with four steps shown by the existing `.steps` component. (1) *Form:* host FQDN, architecture, package format, enrollment http-01 mode and webroot (as today), **service** (`nginx`, `postfix`, `dovecot`, `proxmox`, or "agent only"), certificate names (the host name by default), admission (one-use token or "none: I approve it in the UI"). (2) *Commands, shown once* (the POST result, as today): the independent values, the token file, install + `setup` (with `--acme-directory`), then `deployment add --recipe …` with the names, then the restart. (3) *Progress page* `GET /agents/add/{hostname}`: whether an enrollment is waiting (host, source address, check result, token valid; *Approve* and *Refuse* for an admin), the agent once admitted (status, last seen, version), each deployment with state, serial, expiry and last error; refreshes every 5 seconds through `<meta http-equiv="refresh">` on the passive route `/agents/add/{hostname}/status` (new `view.Page.Refresh`, `layout/app.templ`); the first view counts as activity, the refreshes do not. (4) *Done:* the certificate is deployed. Step-up is the existing machinery: `a.protected` routes with allowlisted fields and entries in `actionSummary` (`app_stepup_summaries.go`) *Built:* the assistant is a new set of pages under `/hosts/add` plus the entry *Add host* in the *Agents* group of the navigation (hidden when agents are off or the role cannot read them) and an *Add host* command on the agent list. *Install agent* (`/agents/install`) is **unchanged**: the plan above says to turn it into the assistant under the same route and a progress page at `/agents/add/{hostname}`, but `GET /agents/add/{host}` collides with `GET /agents/{id}/update` and `GET /agents/{id}/deployments` in the mux (neither pattern is more specific, registration panics), so the routes are `GET /hosts/add` (step 1), `POST /hosts/add` (step 2, no side effect, answers with the page like the certificate wizard), `POST /hosts/add/commands` (`a.protected`, fields `hostname service challenge webroot names format arch admission`), `GET /hosts/add/{host}` (progress, active route) and `GET /hosts/add/{host}/status` (the same page on a passive route, so the reloads do not keep the session alive), and `POST /hosts/add/{host}/approve|deny` (`a.protected`, field `id`, back to the progress page); step 33 decides whether *Install agent* goes. Step 1 asks host name, service (nginx, Postfix, Dovecot, Proxmox VE, *certificate files only*), challenge (standalone or webroot, with the port-80 explanation), webroot, more certificate names (up to four, default none) and the agent package (deb, rpm, tarball or already installed). Step 2 shows the domain check in words for every name (no domain, or a domain without http-01, is refused), the tenant's enrollment mode, and a table of the ways to be admitted with the approval each needs; the choice (a select) is *single-use token* (admins only, 15 minutes, names = host plus extras, second factor), *an existing enrollment pass* that covers the host (shown by label and uses, never its secret: the commands ask for it on the host with `read -s`; not offered for extra names or a host that has an agent) or *no secret* (one approval). The commands page is the answer to `POST /hosts/add/commands`, `no-store`: the token file block, the verified root plus optional package lines plus `setup` (the block of `joinTokenHostSection`, now built by `hostSetupCommands`, byte-identical for the existing pages; `--webroot` is added for the webroot challenge), the `deployment add` block, and `/usr/local/bin/myownpki-agent deployment list`. The progress page walks *Host enrolled* (nothing yet, checking, waiting for your approval with the facts and the Approve and Refuse buttons for `agent.manage`, refused, expired, admitted), *Agent online* (first report, online with last seen, silent, disabled) and one row per deployment (`pending`, `deployed` with serial, expiry and a link, `failed`, `rolled back` with the agent's last error clipped to 300 characters and escaped), and reloads every **10 seconds** (not 5) through `view.Page.RefreshSeconds/RefreshURL` and a `<meta http-equiv="refresh">` in the shell until the agent is online and every deployment is deployed. `admin.DetailData` and `admin.FormData` gained `Steps`. **Shared code and checks:** `internal/agentpath` (standard library only) holds the system-directory list and `agent` delegates to it, so the server refuses the same directories without linking the agent; `agent.ParseDeploymentAdd` is the one place that defines the flags of `deployment add` (the command calls it); `agent.DryRunDeploymentAdd(cmd, DryRunHost)` runs a parsed command through `AddDeployment` as a dry run without root, with absolute paths mapped below a temporary root (a `..` stays visible; the system-root rule works on the path text and is therefore covered by `internal/agentpath`'s own test). The central test runs **every generated line** (each service, both challenges, with and without extra names, and every hostile form value that survives validation) under bash with a mock agent, reads the arguments with `ParseDeploymentAdd` into what the plan says, and dry-runs them on a host set up for the plan. **Choices where the plan was silent:** the cautious variant for viewers and operators: they see all pages, but token and pass creation is not offered and the POST answers `403`; `install -d -m 0755` for the parent of the certificate directory instead of `--create-dirs` (which would also create a mistyped webroot); `--restart` on the line, and `systemctl enable myownpki-agent` named in the text for a host that stayed pending (setup leaves the unit disabled); extra names only with the token (a pass or no secret grants the host name only); `--acme-directory` on the line, not on `setup`; no `style`, script or htmx anywhere. **Not built here:** screenshots (milestone only), a run on the Linux CI, `go test -race`. | Handler tests: only `agent.manage` reaches the form and the POST, viewers and operators get 403, the progress page needs the tenant-wide `pki.read` and shows no button without `agent.manage`; **the token appears exactly once** (the POST response, `Cache-Control: no-store`), never in a URL, a redirect, the progress page, a log line or an action summary; hostile input (`$(reboot)`, quotes, newlines, `<script>` in the host, names, webroot) is refused by validation or `shellQuote`d, and a pending enrollment with a hostile hostname renders as text; every generated `deployment add` line is executed against `agent.AddDeployment` with `--dry-run` in a temp root (the recipe table cannot drift from the CLI); the approve button works through the step-up continuation of v0.3.1 exactly once; the progress page walks through "nothing yet", "waiting", "admitted", "deployment failed" and "deployed" with the fake clock; the refresh meta is present only on the progress pages; no inline style, no undefined CSS class (the UI tests); screenshots of step 1 and 3, light and dark, with `task screenshots` at the milestone only |
+| 33 | 0.3.5 | **Docs, recipes and release.** (a) Merge `origin/main` (brings `site/`) and `fix/agent-absolute-path`. (b) OPERATIONS: §12.2 (join token text: tokens, pass, who may create what), §12.3 (the sandbox paragraphs now describe `deployment add`, `sandbox sync` and the `sandbox:` block; hand-editing the drop-in becomes the exception), new §12.7 *Adding a host* (assistant, `deployment add`, the pass, a Salt or CI roll-out, what to do when a pass leaks), new §12.8 pointing to the recipes, an upgrade paragraph in §9 ("From v0.3.4 to v0.3.5: `pki.db` migration 0019, additive; agents need no update; a v0.3.5 agent is needed for `deployment add`"). (c) The public site: `site/hosts.md` (guided installation becomes *Add host*, `agent.yaml` and sandbox sections use `deployment add`), **new `site/hosts/recipes.md`** (nginx, Postfix, Dovecot, Proxmox VE: the exact commands of §11.2, marked as examples) with a child entry in `site/_data/nav.yml`, `site/hosts/salt.md` (the section "The limit of v0.3.3" is replaced by the pass; the hand-written `10-paths.conf` state is replaced by `sandbox sync`), `site/cli.md`, `site/api.md`, `site/security.md` and `site/best-practices.md` (automation tokens are viewer tokens; why a pass and not a token), `site/troubleshooting.md`, `site/upgrade.md`; prose that names a version (`grep -n "0\.3\." site`). (d) CHANGELOG 0.3.5; version bump to 0.3.5 in the files of commit `6a8016d` ("docs: prepare v0.3.3 release": `CHANGELOG.md`, `README.md`, `deploy/docker-compose.yml`, `deploy/install-agent.sh`, `deploy/install.sh`, `docs/RELEASING.md`, `test/install/agent_functions_test.sh`) plus the `v=0.3.x` and `_0.3.x_` examples in `docs/OPERATIONS.md` (§2.1 and §12.2; `site/` reads the version from `CHANGELOG.md` through `scripts/ci/site-prepare.sh`); PLAN §10.1 and this file marked as built. (e) The live test below *Built:* five commits on `release/v0.3.5`, **not released** (the owner decides about merge and tag; the live test below is pending, so the changelog says so). (a) `origin/main` merged first (v0.3.4, the enrollment-mode fix of PR #32, `fix/agent-absolute-path`). (b) OPERATIONS: §12.7 *Adding a host* (the assistant, `deployment add|list|remove`, `sandbox sync`, what existing hosts see), §12.8 *Enrollment passes* and §12.9 *Recipes* are new instead of one §12.7 and a pointer; §12.2 names *Add host* and the three enrollment modes (the second factor for changing the mode is said there and in §4), §12.3 describes the sandbox model, §12.5 points at `sandbox sync`, §9 has "From v0.3.4 to v0.3.5". (c) The site: `site/hosts.md` (assistant, pass, `deployment add`, `setup --acme-directory`, the sandbox section rewritten), `site/hosts/salt.md` (the section "The limit of v0.3.4" is replaced by the pass, the state file uses `--token-file` and `sandbox sync`, still "an example to adapt" and the formula still v0.3.6), **`site/recipes.md`** with a top-level navigation entry (the plan said `site/hosts/recipes.md` as a child of *Adding hosts*; a page of its own is easier to find and to link from the assistant), `troubleshooting.md`, `upgrade.md`, `best-practices.md`, `cli.md`, `api.md`, `security.md`, `index.md`. (d) CHANGELOG 0.3.5 **without a date** and with the compare links, as `4f5f7fc` had them; the Security entry of PR #32 moved from Unreleased into it; the version bump in the files of `5b43551` (README, compose, both install scripts, RELEASING, the agent installer test, the version examples of OPERATIONS, `api/openapi.yaml`); `site/` takes the version from the dated changelog sections, so it shows 0.3.4 until the dating commit. PLAN and CLAUDE.md still say "in progress". **Docs against code:** the pass forms and the API take whole hours, 1 to 168, so the service floor of 5 minutes cannot be asked for; *Withdraw* on the Join tokens page lists tokens only, a pass nobody used is withdrawn through the API (`DELETE`); the progress page reloads every 10 seconds, not the 5 of the first draft; the assistant lives under `/hosts/add`, not `/agents/add`; viewers and operators get the commands for *no secret* or a pass (no second factor is asked for those, nothing secret is created); the nginx recipe's directory is `/etc/ssl/myownpki/<deployment name>`. **Not done and not verifiable here:** none of the commands was run in a throw-away container or VM, so the recipes stay unverified examples (the pages say so, with what to verify); the Salt sketch was not run against Salt; Jekyll was not built, only `site-check.sh`; `go test -race` and the Linux CI jobs (agent end-to-end, image, install) did not run on this machine. | `task check`, `task ci:local` (every SKIP line reported), `scripts/ci/site-check.sh` (nav, links), Linux CI incl. the agent end-to-end and image jobs, the live test below; every command in the recipes is run once in a throw-away container or VM and the result (worked, needed a change) is written into the recipe page |
+
+**Live test for the owner** (names are examples; use a test host for the service steps):
+
+1. Update the server to v0.3.5 (`myownpki db status`: `pki.db` at 0019). An agent of v0.3.4 keeps
+   reporting; nothing changes on it.
+2. Update one agent with *Agents → Update*. On a host whose `10-paths.conf` has `/var/log/nginx` and
+   whose `20-low-ports.conf` exists, both survive: `cat /etc/systemd/system/myownpki-agent.service.d/10-paths.conf`.
+3. On that host: `myownpki-agent deployment add test --recipe nginx --name proxy.homelab.lan --dry-run`
+   shows the diff of `agent.yaml` and both drop-ins; run it without `--dry-run`, then
+   `systemctl restart myownpki-agent`. The agent page shows the deployment and a deployed certificate;
+   `myownpki-agent config check` is valid. `myownpki-agent deployment remove test` undoes it.
+4. **Assistant:** *Agents → Add host* for a fresh VM (`minion-01.homelab.lan`), service nginx, token.
+   Paste the two blocks as root on the VM; the progress page shows the agent, then the certificate
+   (compare the serial with `openssl s_client -connect minion-01.homelab.lan:443`). Repeat without a
+   token: the progress page shows the waiting enrollment, one click and the second factor admit it.
+5. **Pass:** *Join tokens → New enrollment pass*: `*.homelab.lan`, 3 uses, 1 hour. With a *viewer* API
+   token `POST /api/v1/agent-join-tokens` answers `403`. Put the pass in a file on two minions and run
+   `setup --token-file` from the Salt master (`salt -t 180 … cmd.run`): both are admitted without a
+   click (mode `verified`). A third minion outside the pattern waits in the queue; a fourth minion after
+   the pass is used up is told "no uses left". The pass page lists the two hosts. Revoke the pass; the
+   audit log shows create, three uses and revoke, never the secret.
+6. **Recipes:** run the Postfix, Dovecot and Proxmox recipes on test hosts and write down every
+   difference from the page (a different path, a missing group, a hook that needs another directory in
+   `sandbox.write`).
+7. **Negative:** `deployment add` with `--dir /etc`, a name twice, a hook with a relative path and
+   without root: each is refused with the message of §11.2 and `agent.yaml` is unchanged
+   (`diff agent.yaml agent.yaml.bak`).
+
+### 11.2 Rules and defaults
+
+**Decisions** (the owner is asleep: the cautious variant; `(owner may change)` marks real choices):
+
+| Question | Default | Why |
+|---|---|---|
+| How does automation get hosts admitted | **Two paths.** Baseline **A**: enrollment without a token plus one approval per host (works today, needs no secret in Salt). Automation path **B**: an admin creates a bounded **enrollment pass** with the second factor; Salt, Ansible, scripts and CI only consume it. `(owner may change)` | See the options table below. A needs a person per host, B a person per roll-out |
+| Narrower API-token permission (**C**) | **Rejected** | See the options table |
+| Is the pass a new object | **No: a kind of join token** (`kind = 'pass'`), same table, same hash lookup, same `Enroll` field. No change to the agent, the protocol or `agent.proto` | Five columns and one `UPDATE` instead of a second table with the same lookup, expiry, audit and list. The differences are four rules in `enroll.go`, written down below |
+| Pass limits | label required; 1–5 name patterns (exact or `*.suffix`, at least two labels below the TLD as `CheckPattern` enforces); **2–25 uses, default 10**; validity **5 minutes to 7 days, default 24 hours**; constants in `internal/agents`, no configuration key. `(owner may change)` | A roll-out needs a few hours; 7 days is the longest a forgotten pass can live. A larger fleet takes two passes |
+| Every pattern must be covered by a domain | Yes: creation is refused (`422`, naming the pattern) when `ca.Engine.DomainFor` finds no domain for the exact name, or for `x.<suffix>` of a wildcard. `(owner may change)` | The enrollment check needs a domain (`agents.check`); a pass for names no domain covers could never admit anyone |
+| What a pass grants the host | **The host name only** (source `hostname`). The patterns decide who may enroll, not what the host may order | Otherwise one leaked pass for `*.homelab.lan` would give N hosts the right to order everything below the domain (`initialNames`). Extra names: the single-use token of the assistant (its names become `agent_names`) or an admin on the agent page. `(owner may change)` |
+| Does a pass replace the proof of control | **No.** A pass admits only together with a **passed http-01 check, in every mode** (in `auto` a passed check admits anyway; in `manual` everything waits for an admin) | `admits` lets a plain token admit in `auto`. A pass is multi-use and lives in a pillar; it must not be enough on its own |
+| A pass for a host that already has an active agent | **Refused** (the enrollment waits in the queue, the reason is in `token_problem`): "an agent for this host exists – a pass admits new hosts only; ask an admin for a single-use token" | `agents_hostname` is a plain index (`0011_agents.sql`), so nothing else stops a second identity for the same name. Replacing a host stays a human act. `(owner may change)` |
+| What counts as a use | One enrollment that presented a valid pass, including one that then waits in the queue (as a join token today). A host that enrolls again uses another one | Simple, atomic, auditable |
+| Secret | `mjp_` plus 256 random bits (`mjt_` stays for tokens), shown once in the create response, only the SHA-256 is stored | A scanner and a person can tell a pass from a token; `Enroll` does not check the prefix |
+| Who creates and revokes | tenant **admin with a fresh second factor** (`agent.manage`, unchanged). **No new permission, no change in `authz`**: a token still never satisfies it | This is the design: a person with the second factor admits a new kind of actor, the automation uses what it was handed |
+| Who reads | `pki.read` (viewer and up, tokens included): kind, patterns, uses, state, hosts admitted. Never the secret | As the join token list today |
+| Revoke | Ends use at once. It does **not** touch enrollments or agents the pass already produced: the pass page lists them with their state so an admin can refuse or disable them. A pass with `use_count = 0` can also be deleted; a used one stays as a record. `(owner may change)` | Revoking must be safe to do in a hurry; disabling hosts is a separate, visible decision |
+| Audit | `agent.token.create` (kind, max uses, patterns, expiry), `agent.token.revoke` (new action), and the existing `agent.enroll` entry of every enrollment gains `token_id`, `token_kind` and `use` ("3 of 10"), with the source address it already has. Refusals name the reason (`expired`, `no uses left`, `revoked`, `not for this host`, `active agent exists`). The secret is in no entry and no log line | "Every use audited and counted" |
+| API for status | A **viewer** API token reads `GET /agents?hostname=…`, `GET /agent-enrollments?hostname=…`, `GET /agent-join-tokens`, `GET /agent-install`. The docs say: give automation a viewer token and nothing more. `(owner may change)` | A token with the admin role also holds `tenant.manage` (§11.3) |
+| The assistant | Admin only (`agent.manage`), as today's install page; the progress page for `pki.read`, its buttons for `agent.manage` with step-up; no state is stored for it | The page that shows a token must be as strict as the page that creates one |
+| `deployment add` and the sandbox | Explicit flags; a recipe is a convenience that `--dry-run` expands. Existing `10-paths.conf` entries that `agent.yaml` does not explain are **kept** and reported (`sandbox sync --adopt` writes them into `sandbox.write`, `--prune` drops them). Missing directories are an error unless `--create-dirs`. Daemon reload is automatic, **restart is not** (`--restart`). `agent.yaml.bak` keeps the previous file. `(owner may change)` | Nothing the operator wrote is lost silently, nothing is widened silently, a running agent is not restarted by surprise |
+| One owner of `agent.yaml` | Either the admin and `deployment add`, or Salt rendering the whole file and then `sandbox sync`. Never both | A rendered file overwrites what `add` wrote |
+
+**The options for the automation path** (the question of the owner, with what the code shows):
+
+| | What | Verdict and trade-off |
+|---|---|---|
+| **A** | No secret: `setup` without a token, the host proves its name by http-01 and lands in *Enrollment requests*; an admin approves it once (`approveAgentEnrollment`, step-up). Works today in the default mode `verified` (`admits`: no token and a passed check is not enough). The assistant's progress page makes the approval one click | **Baseline.** Nothing secret in Salt and nothing to leak, but a person per host. Right for a handful of hosts and for replacing a host. Tenant mode `auto` removes the person (a passed check alone admits), at the price that anyone who can answer port 80 for a name below a domain is admitted – documented, not recommended |
+| **B** | **Enrollment pass** (above). The admin creates it once with the second factor; Salt holds it for the roll-out | **Automation path.** A leaked pass admits at most N more hosts, only for names matching the pattern, only if the server can fetch the check file from that name (an attacker needs DNS or port 80 for it), never replaces an existing agent, grants the host name only, and dies in at most 7 days or on revoke. Still an actor admitted without a person looking at it – that is the trade-off, bounded by N, the pattern and the lifetime |
+| B′ | A batch of single-use tokens, one exact host name each, created by an admin in one step | Tighter (each secret names its host) and needs no migration, but the host list must be known when the admin has the second factor at hand, which does not fit "a CI job creates a VM". Can be added later as a UI form on top of the existing tokens |
+| **C** | A narrower API-token permission that creates join tokens without step-up | **Rejected.** The code shows nothing that bounds it: `createJoinToken` takes 1–20 arbitrary patterns and up to 30 days, checks no domain, and the patterns become `agent_names`. A token with that right on a Salt master would let a compromised master mint actors with names of its choice. Tokens have roles, not scopes (list above), so it would also be a new permission model |
+
+**The pass in a roll-out** (what the docs show):
+
+1. *Join tokens → New enrollment pass*: label `salt rollout 2026-11`, names `*.homelab.lan`, 10 uses,
+   24 hours. Copy the secret.
+2. Put it in the encrypted pillar. The state writes `/root/myownpki-join-token` (mode 0600) only
+   `unless` `/var/lib/myownpki-agent/agent.crt` exists, and runs
+   `myownpki-agent setup … --token-file /root/myownpki-join-token` (`setup` deletes the file when it
+   newly obtains admission; a pending host keeps it).
+3. Salt then renders `agent.yaml` (or runs `deployment add`) and `sandbox sync`.
+4. Check with a viewer token: `GET /api/v1/agents?hostname=minion-01.homelab.lan`.
+5. Afterwards remove the pass from the pillar. If it ever leaked: revoke it (admin, second factor),
+   read the list of hosts it admitted, disable or revoke any you do not know.
+
+**What changes where** (the checklist for review):
+
+| Area | Change |
+|---|---|
+| `internal/authz` | **Nothing new.** `ManageAgents` stays in `stepUp`; a test pins that a token cannot create or revoke a pass. Housekeeping: `stepUpActions` has an entry for `RenewAgent`, which is not a step-up permission; remove it |
+| Schema | `pki.db` 0019 `0019_enrollment_pass.sql`: `ALTER TABLE join_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'token' CHECK (kind IN ('token', 'pass'))`, `max_uses INTEGER NOT NULL DEFAULT 1 CHECK (max_uses BETWEEN 1 AND 25)`, `use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0)`, `revoked_at TEXT`, `revoked_by TEXT`; then `UPDATE join_tokens SET use_count = 1 WHERE used_at IS NOT NULL`. `used_at` and `used_by` stay as they are and are set when the **last** use is taken, so the existing `CHECK ((used_at IS NULL) = (used_by IS NULL))` and every reader of a single-use token keep working. No other database. ASCII only |
+| `internal/agents` | `CreateJoinToken(kind, maxUses)`, `RevokeJoinToken`, the rules in `checkToken`/`admits`/`initialNames`, `UseJoinToken` as one conditional update (`use_count < max_uses AND revoked_at IS NULL AND expires_at > ?`) |
+| OpenAPI | Additive, `x-required-role` and `x-step-up` as listed in step 31; secret pattern `^mj[tp]_[A-Za-z0-9_-]{43}$`; new problems `422` for a pattern no domain covers |
+| Audit actions | new `agent.token.revoke`; `agent.token.create` and `agent.enroll` carry more detail; nothing else |
+| UI | Join tokens page (pass form, state, revoke, hosts); *Add host* (steps and progress page); `view.Page.Refresh`; no new navigation entry (v0.3.4 adds *Endpoints*; this release adds none) |
+| Agent | `deployment`, `sandbox sync`, `setup --acme-directory`, the `sandbox:` key. **No protocol change.** An older agent binary refuses an `agent.yaml` with `sandbox:` (`KnownFields`), which matters only when someone downgrades; the OPERATIONS upgrade paragraph says so |
+| Alerts, config, permissions elsewhere | none |
+
+**`myownpki-agent deployment add NAME`** (Linux, root, systemd; `list` also runs elsewhere):
+
+| Flag | Meaning |
+|---|---|
+| `--recipe nginx\|postfix\|dovecot\|proxmox` | defaults from `internal/recipe`; every other flag overrides |
+| `--profile nginx\|file` | as in `agent.yaml` |
+| `--name FQDN` (repeat) | certificate names, validated like `names:`; the first one is the SNI of the local check |
+| `--challenge webroot\|standalone`, `--webroot DIR` | default: what `enrollment:` uses |
+| `--dir DIR` (nginx profile) | `fullchain.pem` and `privkey.pem` go here |
+| `--certificate`, `--chain`, `--fullchain`, `--key` FILE (file profile) | as `files:` |
+| `--owner`, `--group`, `--key-mode` | as in `agent.yaml`; the key mode may not give rights to others |
+| `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | defines hooks (split on spaces and quotes, **no shell**, first element absolute) and references them; an identical command line that already exists is reused under its name, so deployments of one service share one reload and one rollback group |
+| `--check HOST:PORT` | local TLS check; it is an **implicit-TLS** handshake (`checkServed` uses `tls.Dialer`), so STARTTLS ports (25, 143, 587) cannot be checked |
+| `--sandbox-write DIR` (repeat), `--low-ports` | extra directories hooks may write; `CAP_NET_BIND_SERVICE` |
+| `--acme-directory URL` | required when `agent.yaml` has none |
+| `--create-dirs`, `--dry-run`, `--restart`, `--config FILE` | as described in the decisions table |
+
+What it validates **before writing**: root; `agent.yaml` parses and is valid now; the name is new;
+everything `Config.Validate` checks (names are FQDNs, targets lie under `paths`, distinct, outside
+`state_dir` and `ca_bundle`, hooks exist, the key mode); every directory it adds to `paths` is the
+**parent** of a target (for the nginx profile the parent of `dir`, which the agent creates) or a
+webroot, exists (or `--create-dirs`) and is not one of the system roots `/`, `/etc`, `/usr`, `/var`,
+`/boot`, `/dev`, `/proc`, `/sys`, `/run`, `/root`, `/home`, `/tmp`, `/bin`, `/sbin`, `/lib*`, `/opt`,
+`/srv`, `/mnt` or below `/proc`, `/sys`, `/dev` (a wide but legitimate directory such as `/etc/nginx` is
+accepted with a warning that names a narrower one). The same list becomes a **warning** of
+`config check`, not an error, so no existing configuration stops working. A hook whose executable is
+`nginx`, `apachectl`, `apache2ctl` or `haproxy` prints a hint when `--sandbox-write` (its log
+directory) or `--low-ports` is missing, because those hooks fail without them (OPERATIONS §12.3). It
+writes only `agent.yaml`, `agent.yaml.bak` and the two drop-ins in the unit's `.service.d` directory,
+atomically (temp file in the same directory, `fsync`, rename, as `atomicSetupFile`).
+
+**The `sandbox:` block** (optional, additive):
+
+```yaml
+sandbox:
+  write: [/var/log/nginx]   # directories that hooks (not the agent) write; only ReadWritePaths gets them
+  low_ports: true           # 20-low-ports.conf; unset: derived (standalone anywhere) or left as found
+```
+
+`10-paths.conf` is then exactly `state_dir`, `paths`, `sandbox.write` and the entries kept from the
+file as found. `20-low-ports.conf` is written when `low_ports` is true or any challenge is standalone,
+removed only when `low_ports: false` is set explicitly. `config check` prints the effective result and
+whether the drop-ins on disk match it.
+
+**The recipes** (`internal/recipe`; the site page carries the full text; **all are examples written
+from the documentation of each service and not yet run on a live host – step 33 verifies them**):
+
+| Recipe | Profile and files | Owner, mode | Hooks | Check | Sandbox | To verify |
+|---|---|---|---|---|---|---|
+| nginx | nginx, `dir` below `/etc/ssl/myownpki` | root, key 0600 | test `/usr/sbin/nginx -t`, reload `/usr/bin/systemctl reload nginx` | `127.0.0.1:443` | write `/var/log/nginx`, low ports | known from OPERATIONS §12.3 and the CI job |
+| postfix | file: `/etc/ssl/myownpki/postfix/fullchain.pem`, `…/privkey.pem`; `main.cf`: `smtpd_tls_chain_files = /etc/ssl/myownpki/postfix/privkey.pem, /etc/ssl/myownpki/postfix/fullchain.pem` (Postfix 3.4 and later; older: `smtpd_tls_cert_file`, `smtpd_tls_key_file`) | root:root, key 0600 | test `/usr/sbin/postfix check`, reload `/usr/bin/systemctl reload postfix` | only with an implicit-TLS listener (`submissions` on 465 in `master.cf`); none otherwise | none expected | that `postfix check` runs inside the sandbox without writing; that no group is needed (the key is read before Postfix drops privileges) |
+| dovecot | file: `/etc/ssl/myownpki/dovecot/fullchain.pem`, `…/privkey.pem`; config 2.3: `ssl_cert = </…/fullchain.pem`, `ssl_key = </…/privkey.pem`; 2.4: `ssl_server_cert_file`, `ssl_server_key_file` (no `<`) | root:root, key 0600 | test `/usr/bin/doveconf -n`, reload `/usr/bin/systemctl reload dovecot` | `127.0.0.1:993` (implicit TLS) | none expected | that a reload makes new connections use the new certificate; the exact `doveconf` option for a syntax-only test |
+| proxmox | file: `/etc/ssl/myownpki/pve/fullchain.pem`, `…/privkey.pem` (the agent does **not** write into `/etc/pve`, a FUSE file system that takes neither `chown` nor `chmod`) | root:root, key 0600 | reload `/usr/bin/pvenode cert set /etc/ssl/myownpki/pve/fullchain.pem /etc/ssl/myownpki/pve/privkey.pem --force 1 --restart 1` (it validates, installs and restarts `pveproxy`; a rollback re-runs it on the restored files) | `127.0.0.1:8006` | write `/etc/pve` | the `pvenode` syntax of the installed version; that `pvenode` works under the sandbox; one agent per node |
+
+Names: the recipe's certificate name is the host name unless `--name` says more (more names need the
+token of the assistant, as above). Group memberships: none of the three needs one **as far as the
+documentation says** because the daemons read their keys as root; a service that reads its key as an
+unprivileged user takes `--group` and `--key-mode 0640` (for example `ssl-cert` on Debian). That is a
+claim to verify on each host, and the recipe page says so.
+
+**Error messages** (one line each, with the next step; tested):
+
+| Case | Message |
+|---|---|
+| not root | `deployment add must run as root; nothing was changed` |
+| invalid file | `agent.yaml is not valid yet – run "myownpki-agent config check" and fix it first; nothing was changed` |
+| name exists | `deployment "proxy" exists – pick another name or run "deployment remove proxy" first` |
+| too broad | `--dir /etc: too broad – the agent may write only where "paths" allows; use a subdirectory such as /etc/ssl/myownpki` |
+| directory missing | `/etc/ssl/myownpki does not exist – create it, or pass --create-dirs` |
+| no ACME directory | `agent.yaml has no acme_directory – pass --acme-directory https://pki.homelab.lan/acme/directory` |
+| YAML features | `agent.yaml uses anchors, aliases or several documents – edit it by hand and run config check` |
+| hook | `hook "nginx-test": the first element must be an absolute path` |
+| no unit yet | `the unit is not installed (run setup first) – files written, systemctl skipped` |
+| pass: used up | `the enrollment pass has no uses left (10 of 10) – ask an admin for a new one` |
+| pass: other | `the pass expired`, `the pass was revoked`, `the pass is not for <host>`, `an agent for <host> exists – a pass admits new hosts only` |
+
+**Test strategy.** No real hosts, no real DNS: names are `homelab.lan`, addresses `192.0.2.x`
+(`minion-01.homelab.lan`, `pki.homelab.lan`). The agent commands run against a temp root with the
+unit directory, `agent.yaml` and `paths` inside it and the `setupSystemd` seam replaced by a recorder,
+as the `setup` tests do; the real `systemctl` appears only in the Linux CI job that already boots
+systemd (`scripts/ci/agent-package-systemd.sh`, `agent-e2e-*`). The server side uses
+`internal/testinstance` with the fake checker and `clock.Fake`, no `time.Sleep`, everything under
+`-race`. The pass is exercised through the same `Service` the API and the UI call. The UI tests are
+the existing ones (inline styles, undefined classes, hostile text). Docs are checked by
+`site-check.sh` and by running each documented command once.
+
+### 11.3 Not in v0.3.5
+
+- **Server-assigned deployments** (the server tells the agent what to deploy inside local limits). This
+  **needs an ADR change** (ADR-10: the agent takes no commands from the server; PLAN §6.2, "After
+  v1.0"). Nothing here designs it: the assistant and the pass only produce commands and secrets for a
+  **person or a script on the host** to run, and every path, hook and name still comes from the local,
+  root-owned `agent.yaml`.
+- **Windows and FreeBSD agent**, and `deployment add` on them (they only compile).
+- **The Salt formula** (v0.3.6): it will call `deployment add`, `sandbox sync` and `setup --token-file`
+  with the pass of this release; `site/hosts/salt.md` stays "an example to adapt" until then.
+- **dns-01 in the agent** (v0.3.7), the Apache and HAProxy profiles (v0.3.11).
+- **Step-up for loosening `agent_enrollment`.** `tenant.Store.Set` needs only `tenant.manage`, which
+  has no step-up, so an API token with the admin role can switch the tenant to `auto` or set
+  `step_up_minutes` to 60. This plan keeps automation at the viewer role, but the hole is real and
+  independent of onboarding: propose it as its own `fix/enrollment-mode-step-up` (the settings form
+  would become an `a.protected` route with the continuation of v0.3.1). Not built here.
+- **Granting extra names through a pass**, **pass per hostname list (B′)**, **a bulk "Add hosts"
+  form**, **pass usage alerts** and **a revoke that also refuses the pass's open enrollments**.
+- **Automatic refresh of the agent page.** Its inert `hx-get` stays; a `Page.Refresh` for it is a
+  one-line follow-up once step 32 has added the field.
+- **`--recipe` for services other than the four**, and any recipe as a built-in profile (PLAN §6.2's
+  list stays a roadmap).
+- **No ADR changes.** The plan fits ADR-05 (spec first), ADR-06 (the pass is in `pki.db`, one
+  transaction per database), ADR-10 and ADR-11 (no change to the channel or the keys), ADR-12, ADR-17,
+  ADR-18 (the pass is a join token; the proof of control stays required) and ADR-19 (issuance is still
+  ACME); it adds one tiny package (`internal/recipe`), no dependency and no protocol change.

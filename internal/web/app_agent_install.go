@@ -1,13 +1,8 @@
 package web
 
 import (
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -164,47 +159,8 @@ func (a *app) agentOlder(ag agents.Agent) bool {
 }
 
 func (a *app) agentTLSTrust(c *rc) (agentTrust, error) {
-	cas, err := a.d.Engine.CAs(c.r.Context(), c.who())
-	if err != nil {
-		return agentTrust{}, err
-	}
-	var issuer *ca.CAInfo
-	for i := range cas {
-		if cas[i].Name == a.d.AgentTLSIssuer {
-			issuer = &cas[i]
-			break
-		}
-	}
-	if issuer == nil {
-		return agentTrust{}, ca.ErrNotFound
-	}
-	chain, err := a.d.Engine.CAChain(c.r.Context(), c.who(), issuer.ID)
-	if err != nil || len(chain) == 0 {
-		return agentTrust{}, errors.Join(ca.ErrNotFound, err)
-	}
-	rootDER := chain[len(chain)-1]
-	root, err := x509.ParseCertificate(rootDER)
-	if err != nil || !root.IsCA || root.CheckSignatureFrom(root) != nil {
-		return agentTrust{}, errors.New("agent TLS issuer chain has no valid self-signed root")
-	}
-	for i := range cas {
-		if cas[i].Kind != ca.KindRoot {
-			continue
-		}
-		for _, generation := range cas[i].Generations {
-			fingerprint := strings.ReplaceAll(strings.ToLower(generation.Fingerprint), ":", "")
-			sum := sha256.Sum256(rootDER)
-			if generation.Generation > 0 && fingerprint == hex.EncodeToString(sum[:]) {
-				rootURL := fmt.Sprintf("%s/ca/%s/%d.pem", strings.TrimRight(cas[i].BaseURL, "/"), cas[i].Name, generation.Generation)
-				u, parseErr := url.Parse(rootURL)
-				if parseErr != nil || u.Scheme != "http" || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
-					return agentTrust{}, errors.New("agent TLS root has no exact public HTTP PEM URL")
-				}
-				return agentTrust{rootSHA256: fingerprint, rootSHA1: generation.FingerprintSHA1, rootURL: rootURL}, nil
-			}
-		}
-	}
-	return agentTrust{}, ca.ErrNotFound
+	t, err := agents.TLSTrust(c.r.Context(), a.d.Engine, c.who(), a.d.AgentTLSIssuer)
+	return agentTrust{rootSHA256: t.SHA256, rootSHA1: t.SHA1, rootURL: t.URL}, err
 }
 
 func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) ([]admin.Section, error) {
@@ -217,25 +173,9 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 		return nil, err
 	}
 	rootPath := agentRootPath
-	packagePath := "/root/" + artifact.Name
-	base := strings.TrimRight(a.d.AgentBaseURL, "/")
-	packageURL := base + agentdist.BasePath + artifact.Name
-	sumsURL := base + agentdist.BasePath + agentdist.Checksums
 	var commands strings.Builder
 	writeRootCheck(&commands, trust)
-	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output %s %s\n", rootPath, packagePath, shellQuote(packageURL))
-	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output /root/checksums.txt %s\n", rootPath, shellQuote(sumsURL))
-	fmt.Fprintf(&commands, "printf '%%s  %%s\\n' %s %s | sha256sum --check - || { echo \"package checksum does not match the UI value – nothing installed\" >&2; exit 1; }\n", shellQuote(artifact.SHA256), packagePath)
-	switch in.format {
-	case "deb":
-		fmt.Fprintf(&commands, "apt-get install -y %s\n", packagePath)
-	case "rpm":
-		fmt.Fprintf(&commands, "dnf install -y %s\n", packagePath)
-	case "tarball":
-		commands.WriteString("install -d -m 0700 /root/myownpki-agent-package\n")
-		fmt.Fprintf(&commands, "tar -xzf %s -C /root/myownpki-agent-package\n", packagePath)
-		fmt.Fprintf(&commands, "install -m 0755 /root/myownpki-agent-package/myownpki-agent %s\n", agentdist.BinaryPath)
-	}
+	commands.WriteString(a.packageInstallLines(artifact, in.format))
 	// The absolute path: root's PATH may lack /usr/local/bin.
 	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format %s --hostname %s",
 		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), rootPath, shellQuote(trust.rootSHA256), in.format, shellQuote(in.hostname))
@@ -266,6 +206,32 @@ func (a *app) guidedInstallSections(c *rc, in agentInstallInput, secret string) 
 	return sections, nil
 }
 
+// packageInstallLines downloads the package and its checksums over HTTPS with
+// the verified root, compares the package with the SHA-256 shown in the UI and
+// installs it. It runs inside the subshell of writeRootCheck, after the root
+// was accepted.
+func (a *app) packageInstallLines(artifact agentdist.Artifact, format string) string {
+	var commands strings.Builder
+	packagePath := "/root/" + artifact.Name
+	base := strings.TrimRight(a.d.AgentBaseURL, "/")
+	packageURL := base + agentdist.BasePath + artifact.Name
+	sumsURL := base + agentdist.BasePath + agentdist.Checksums
+	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output %s %s\n", agentRootPath, packagePath, shellQuote(packageURL))
+	fmt.Fprintf(&commands, "curl --fail --silent --show-error --cacert %s --output /root/checksums.txt %s\n", agentRootPath, shellQuote(sumsURL))
+	fmt.Fprintf(&commands, "printf '%%s  %%s\\n' %s %s | sha256sum --check - || { echo \"package checksum does not match the UI value – nothing installed\" >&2; exit 1; }\n", shellQuote(artifact.SHA256), packagePath)
+	switch format {
+	case "deb":
+		fmt.Fprintf(&commands, "apt-get install -y %s\n", packagePath)
+	case "rpm":
+		fmt.Fprintf(&commands, "dnf install -y %s\n", packagePath)
+	case "tarball":
+		commands.WriteString("install -d -m 0700 /root/myownpki-agent-package\n")
+		fmt.Fprintf(&commands, "tar -xzf %s -C /root/myownpki-agent-package\n", packagePath)
+		fmt.Fprintf(&commands, "install -m 0755 /root/myownpki-agent-package/myownpki-agent %s\n", agentdist.BinaryPath)
+	}
+	return commands.String()
+}
+
 // Files the generated commands write on the host.
 const (
 	agentRootPath  = "/root/myownpki-root.pem"
@@ -292,24 +258,47 @@ func tokenFileCommands(secret string) string {
 // the verified root and setup. Setup, not enroll: on a fresh package or
 // tarball host only setup writes agent.yaml and installs the unit. A token
 // for one exact name fixes --hostname; with patterns the host's FQDN must
-// match one of them.
-func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret string) admin.Section {
+// match one of them. A pass (pass = true) is for several hosts, so every host
+// names itself.
+func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret string, pass bool) admin.Section {
 	hostname := `"$(hostname -f)"`
-	if len(patterns) == 1 && !strings.Contains(patterns[0], "*") {
+	if !pass && len(patterns) == 1 && !strings.Contains(patterns[0], "*") {
 		hostname = shellQuote(patterns[0])
 	}
-	var commands strings.Builder
-	writeRootCheck(&commands, trust)
-	// The installed format, so that update links suggest the right one later.
-	commands.WriteString("if dpkg -s myownpki-agent >/dev/null 2>&1; then format=deb; elif rpm -q myownpki-agent >/dev/null 2>&1; then format=rpm; else format=tarball; fi\n")
-	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format \"$format\" --hostname %s --token-file %s )\n",
-		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), agentRootPath, shellQuote(trust.rootSHA256), hostname, agentTokenPath)
-	return admin.Section{Title: "On the host", Text: []string{
-		"Run as root on the host after installing the agent package or tarball; Agents → Install agent does both for one exact host. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here.",
-	}, KV: []view.KV{{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true}},
-		Pre: []admin.Pre{{Title: "Write the root-only token file", Text: tokenFileCommands(secret)}, {Title: "Verify the root and run setup", Text: commands.String()}}}
+	setup := a.hostSetupCommands(trust, hostname, "", "", true)
+	title, intro := "On the host", "Run as root on the host after installing the agent package or tarball; Agents → Install agent does both for one exact host. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here."
+	if pass {
+		title = "On each host"
+		intro = "Run as root on every host after installing the agent package or tarball; a Salt state, an Ansible task or a script can run the same two blocks. setup deletes the pass file once the host is admitted; a host that still waits keeps it. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here."
+	}
+	return admin.Section{Title: title, Text: []string{intro}, KV: []view.KV{{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true}},
+		Pre: []admin.Pre{{Title: "Write the root-only token file", Text: tokenFileCommands(secret)}, {Title: "Verify the root and run setup", Text: setup}}}
 }
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+// hostSetupCommands is the second block of a host: the verified root, the
+// optional package lines (installLines, already complete lines), and setup.
+// hostname is a ready shell word (quoted, or "$(hostname -f)" for a pass).
+// Setup, not enroll: on a fresh package or tarball host only setup writes
+// agent.yaml and installs the unit. webroot ("" = standalone) is quoted here;
+// withToken adds the token file the first block wrote.
+func (a *app) hostSetupCommands(trust agentTrust, hostname, webroot, installLines string, withToken bool) string {
+	var commands strings.Builder
+	writeRootCheck(&commands, trust)
+	commands.WriteString(installLines)
+	// The installed format, so that update links suggest the right one later.
+	commands.WriteString("if dpkg -s myownpki-agent >/dev/null 2>&1; then format=deb; elif rpm -q myownpki-agent >/dev/null 2>&1; then format=rpm; else format=tarball; fi\n")
+	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format \"$format\" --hostname %s",
+		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), agentRootPath, shellQuote(trust.rootSHA256), hostname)
+	if webroot != "" {
+		fmt.Fprintf(&commands, " --webroot %s", shellQuote(webroot))
+	}
+	if withToken {
+		commands.WriteString(" --token-file " + agentTokenPath)
+	}
+	commands.WriteString(" )\n")
+	return commands.String()
 }

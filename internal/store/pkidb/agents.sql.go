@@ -84,10 +84,10 @@ func (q *Queries) DeleteAgentName(ctx context.Context, arg DeleteAgentNameParams
 }
 
 const deleteJoinToken = `-- name: DeleteJoinToken :execrows
-DELETE FROM join_tokens WHERE id = ? AND used_at IS NULL
+DELETE FROM join_tokens WHERE id = ? AND use_count = 0
 `
 
-// Only an unused token can be withdrawn; a used one stays as a record.
+// Only a token that was never used can be withdrawn; a used one stays as a record.
 func (q *Queries) DeleteJoinToken(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteJoinToken, id)
 	if err != nil {
@@ -249,7 +249,7 @@ func (q *Queries) GetEnrollment(ctx context.Context, id string) (AgentEnrollment
 }
 
 const getJoinToken = `-- name: GetJoinToken :one
-SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at FROM join_tokens WHERE id = ?
+SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at, kind, max_uses, use_count, revoked_at, revoked_by FROM join_tokens WHERE id = ?
 `
 
 func (q *Queries) GetJoinToken(ctx context.Context, id string) (JoinToken, error) {
@@ -265,12 +265,17 @@ func (q *Queries) GetJoinToken(ctx context.Context, id string) (JoinToken, error
 		&i.UsedBy,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.RevokedAt,
+		&i.RevokedBy,
 	)
 	return i, err
 }
 
 const getJoinTokenByHash = `-- name: GetJoinTokenByHash :one
-SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at FROM join_tokens WHERE token_hash = ?
+SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at, kind, max_uses, use_count, revoked_at, revoked_by FROM join_tokens WHERE token_hash = ?
 `
 
 func (q *Queries) GetJoinTokenByHash(ctx context.Context, tokenHash string) (JoinToken, error) {
@@ -286,6 +291,11 @@ func (q *Queries) GetJoinTokenByHash(ctx context.Context, tokenHash string) (Joi
 		&i.UsedBy,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.RevokedAt,
+		&i.RevokedBy,
 	)
 	return i, err
 }
@@ -406,8 +416,8 @@ func (q *Queries) InsertEnrollment(ctx context.Context, arg InsertEnrollmentPara
 
 const insertJoinToken = `-- name: InsertJoinToken :exec
 
-INSERT INTO join_tokens (id, token_hash, label, name_patterns, expires_at, created_by, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO join_tokens (id, token_hash, label, name_patterns, expires_at, created_by, created_at, kind, max_uses)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertJoinTokenParams struct {
@@ -418,6 +428,8 @@ type InsertJoinTokenParams struct {
 	ExpiresAt    string
 	CreatedBy    string
 	CreatedAt    string
+	Kind         string
+	MaxUses      int64
 }
 
 // Agents, enrollments, join tokens and agent names (v0.3.0, internal/agents).
@@ -432,6 +444,8 @@ func (q *Queries) InsertJoinToken(ctx context.Context, arg InsertJoinTokenParams
 		arg.ExpiresAt,
 		arg.CreatedBy,
 		arg.CreatedAt,
+		arg.Kind,
+		arg.MaxUses,
 	)
 	return err
 }
@@ -623,7 +637,7 @@ func (q *Queries) ListEnrollments(ctx context.Context, limit int64) ([]AgentEnro
 }
 
 const listJoinTokens = `-- name: ListJoinTokens :many
-SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at FROM join_tokens ORDER BY created_at DESC, id
+SELECT id, token_hash, label, name_patterns, expires_at, used_at, used_by, created_by, created_at, kind, max_uses, use_count, revoked_at, revoked_by FROM join_tokens ORDER BY created_at DESC, id
 `
 
 func (q *Queries) ListJoinTokens(ctx context.Context) ([]JoinToken, error) {
@@ -645,6 +659,11 @@ func (q *Queries) ListJoinTokens(ctx context.Context) ([]JoinToken, error) {
 			&i.UsedBy,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.Kind,
+			&i.MaxUses,
+			&i.UseCount,
+			&i.RevokedAt,
+			&i.RevokedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -714,12 +733,77 @@ func (q *Queries) ListOpenEnrollments(ctx context.Context) ([]AgentEnrollment, e
 	return items, nil
 }
 
+const listPassEnrollments = `-- name: ListPassEnrollments :many
+SELECT e.token_id, e.id, e.hostname, e.state, e.agent_id, e.created_at
+FROM agent_enrollments e JOIN join_tokens t ON t.id = e.token_id
+WHERE t.kind = 'pass'
+ORDER BY e.created_at, e.id
+`
+
+type ListPassEnrollmentsRow struct {
+	TokenID   sql.NullString
+	ID        string
+	Hostname  string
+	State     string
+	AgentID   sql.NullString
+	CreatedAt string
+}
+
+// The enrollments each pass admitted (or queued): one per use, oldest first.
+func (q *Queries) ListPassEnrollments(ctx context.Context) ([]ListPassEnrollmentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPassEnrollments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPassEnrollmentsRow{}
+	for rows.Next() {
+		var i ListPassEnrollmentsRow
+		if err := rows.Scan(
+			&i.TokenID,
+			&i.ID,
+			&i.Hostname,
+			&i.State,
+			&i.AgentID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queueEnrollment = `-- name: QueueEnrollment :exec
 UPDATE agent_enrollments SET state = 'pending_approval' WHERE id = ? AND state = 'waiting_for_check'
 `
 
 func (q *Queries) QueueEnrollment(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, queueEnrollment, id)
+	return err
+}
+
+const queueEnrollmentWithProblem = `-- name: QueueEnrollmentWithProblem :exec
+UPDATE agent_enrollments SET state = 'pending_approval', token_valid = 0, token_problem = ?
+WHERE id = ? AND state = 'waiting_for_check'
+`
+
+type QueueEnrollmentWithProblemParams struct {
+	TokenProblem sql.NullString
+	ID           string
+}
+
+// A pass whose host got an active agent in the meantime: the use stays spent
+// (the enrollment still names the pass), the enrollment waits for an admin
+// and says why.
+func (q *Queries) QueueEnrollmentWithProblem(ctx context.Context, arg QueueEnrollmentWithProblemParams) error {
+	_, err := q.db.ExecContext(ctx, queueEnrollmentWithProblem, arg.TokenProblem, arg.ID)
 	return err
 }
 
@@ -755,6 +839,26 @@ func (q *Queries) ReadmitAgent(ctx context.Context, arg ReadmitAgentParams) erro
 		arg.ID,
 	)
 	return err
+}
+
+const revokeJoinToken = `-- name: RevokeJoinToken :execrows
+UPDATE join_tokens SET revoked_at = ?1, revoked_by = ?2
+WHERE id = ?3 AND revoked_at IS NULL AND use_count < max_uses AND expires_at > ?1
+`
+
+type RevokeJoinTokenParams struct {
+	Now sql.NullString
+	By  sql.NullString
+	ID  string
+}
+
+// Revoking ends use at once; it only applies to a token that can still admit.
+func (q *Queries) RevokeJoinToken(ctx context.Context, arg RevokeJoinTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeJoinToken, arg.Now, arg.By, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setAgentACMEThumbprint = `-- name: SetAgentACMEThumbprint :exec
@@ -866,21 +970,33 @@ func (q *Queries) TouchAgent(ctx context.Context, arg TouchAgentParams) error {
 	return err
 }
 
-const useJoinToken = `-- name: UseJoinToken :execrows
-UPDATE join_tokens SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL
+const useJoinToken = `-- name: UseJoinToken :one
+UPDATE join_tokens SET use_count = use_count + 1,
+    used_at = CASE WHEN use_count + 1 >= max_uses THEN ?1 ELSE used_at END,
+    used_by = CASE WHEN use_count + 1 >= max_uses THEN ?2 ELSE used_by END
+WHERE id = ?3 AND use_count < max_uses AND revoked_at IS NULL AND expires_at > ?1
+RETURNING use_count, max_uses
 `
 
 type UseJoinTokenParams struct {
-	UsedAt sql.NullString
-	UsedBy sql.NullString
-	ID     string
+	Now        sql.NullString
+	Enrollment sql.NullString
+	ID         string
 }
 
-// A token is used exactly once: the condition makes a second use a no-op.
-func (q *Queries) UseJoinToken(ctx context.Context, arg UseJoinTokenParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, useJoinToken, arg.UsedAt, arg.UsedBy, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+type UseJoinTokenRow struct {
+	UseCount int64
+	MaxUses  int64
+}
+
+// One use of a token or pass. The conditions ARE the rule (no use left, revoked,
+// expired): the update takes a use only while all of them hold, in the
+// transaction that stores the enrollment and its audit entry, so concurrent
+// enrollments cannot spend a use twice. used_at and used_by are set with the
+// last use. No row = nothing was taken.
+func (q *Queries) UseJoinToken(ctx context.Context, arg UseJoinTokenParams) (UseJoinTokenRow, error) {
+	row := q.db.QueryRowContext(ctx, useJoinToken, arg.Now, arg.Enrollment, arg.ID)
+	var i UseJoinTokenRow
+	err := row.Scan(&i.UseCount, &i.MaxUses)
+	return i, err
 }

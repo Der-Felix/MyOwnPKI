@@ -239,7 +239,6 @@ var stepUpActions = map[Permission]string{
 	ManageCA:     "manage CAs",
 	UploadCRL:    "upload CRLs",
 	ManageAgents: "manage agents",
-	RenewAgent:   "renew agent deployments",
 	ManageUsers:  "manage users",
 	EnrollMode:   "change the agent enrollment mode",
 }

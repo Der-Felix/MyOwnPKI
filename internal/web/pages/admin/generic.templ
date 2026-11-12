@@ -37,6 +37,7 @@ type Pre struct {
 // FormData is a form with its fields.
 type FormData struct {
 	Messages  []view.Message
+	Steps     []components.Step // a wizard step line above the form
 	Title     string // a heading above the form (in sections)
 	Intro     []string
 	Pre       []Pre
@@ -53,6 +54,9 @@ type FormData struct {
 // FormPage renders a page with one form.
 templ FormPage(p view.Page, d FormData) {
 	@layout.App(p) {
+		if len(d.Steps) > 0 {
+			@components.Steps(d.Steps)
+		}
 		@components.Messages(d.Messages)
 		@Form(d)
 	}
@@ -361,6 +365,7 @@ type Section struct {
 // DetailData is a detail page: commands and sections.
 type DetailData struct {
 	Messages []view.Message
+	Steps    []components.Step // a wizard step line above the sections
 	Commands []Command
 	Sections []Section
 }
@@ -368,6 +373,9 @@ type DetailData struct {
 // DetailPage renders sections of key/value lists, tables and forms.
 templ DetailPage(p view.Page, d DetailData) {
 	@layout.App(p) {
+		if len(d.Steps) > 0 {
+			@components.Steps(d.Steps)
+		}
 		@components.Messages(d.Messages)
 		if len(d.Commands) > 0 {
 			@components.CommandBar("Commands") {

@@ -104,6 +104,10 @@ fresh second factor, so it cannot revoke, download keys or manage CAs, users or 
 token per use, the *viewer* role for anything that only reads, a short validity, and delete the token
 when the script is gone. How: [REST API]({{ '/reference/api/' | relative_url }}).
 
+An API token can **never** create an agent join token or an enrollment pass, even with the admin role,
+and a token with the admin role is more than a script needs. Give a roll-out tool a *viewer* token to
+check the result and let a person with the second factor make the pass (below).
+
 ### Keep the admin listener private
 
 The web UI and API belong on an admin network, never on the internet: set `admin.listen` and
@@ -162,10 +166,26 @@ host serves with what it deployed. How: [agent.yaml]({{ '/hosts/' | relative_url
 
 ### Keep paths and hooks small
 
-`paths` is the only place where the agent may write apart from its state directory, and the drop-in
-`10-paths.conf` must list exactly the same directories. Hooks are argument lists with absolute paths: no
+`paths` is the only place where the agent may write apart from its state directory; the agent derives the
+drop-in `10-paths.conf` from it (v0.3.5 and later), so the two cannot drift apart. Hooks are
+argument lists with absolute paths: no
 shell, no `sudo`, and no secrets in their stderr. How:
 [The systemd sandbox]({{ '/hosts/' | relative_url }}#the-systemd-sandbox-and-paths).
+
+### Keep an enrollment pass short, small and temporary
+
+A pass lets hosts enroll without a person looking at each one. Make it for the roll-out only: a validity of
+a day or less, as many uses as you have hosts, names no wider than needed. It grants each host its own name
+only, and only after the server's http-01 check passed, but a leaked pass still admits as many more hosts as
+it has uses left. Keep it in an encrypted store, remove it after the roll-out and **revoke it** if it is not
+used up; if it ever leaks, revoke it at once and read the list of hosts it admitted. How:
+[the enrollment pass]({{ '/hosts/' | relative_url }}#the-enrollment-pass-for-roll-outs).
+
+### Let the agent write the sandbox, and try unverified recipes on a test host
+
+`deployment add` and `sandbox sync` keep `agent.yaml` and the systemd drop-ins in step, so use them instead
+of editing `10-paths.conf` by hand. The Postfix, Dovecot and Proxmox VE recipes are unverified examples: run
+them on a non-production host first. How: [Recipes]({{ '/recipes/' | relative_url }}).
 
 ### Know what happens to the old certificate
 

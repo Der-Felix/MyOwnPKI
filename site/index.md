@@ -23,7 +23,10 @@ may change the API, the configuration or the database schema; the
 - **Web UI and REST API** with roles, a second factor for every user, and a hash-chained audit log.
   The API is described in an OpenAPI file.
 - **Agent** (`myownpki-agent`, Linux): optional. It gets a certificate by ACME, writes it for nginx
-  or into plain files, reloads the service and rolls back when the reload fails.
+  or into plain files, reloads the service and rolls back when the reload fails. An *Add host*
+  assistant takes a new host from its name to a deployed certificate, an enrollment pass lets Salt or a
+  script enroll many hosts, and [recipes]({{ '/recipes/' | relative_url }}) cover nginx, Postfix,
+  Dovecot and Proxmox VE (the last three are unverified examples).
 - **Monitoring:** the server checks itself every minute and tells you by e-mail or webhook when a
   certificate or a CA is about to expire, a CRL goes stale, the server is sealed or an agent is
   silent.
@@ -61,6 +64,7 @@ when you want the server to see what is deployed where and to renew on a button.
 | Install the server | [Installation]({{ '/install/' | relative_url }}) |
 | Update to a new release | [Upgrade]({{ '/upgrade/' | relative_url }}) |
 | Get certificates onto a host, with or without the agent | [Adding hosts]({{ '/hosts/' | relative_url }}) |
+| Set up nginx, Postfix, Dovecot or Proxmox VE with the agent | [Recipes]({{ '/recipes/' | relative_url }}) |
 | Roll the agent out with Salt | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
 | Be told when something expires or breaks | [Monitoring]({{ '/monitoring/' | relative_url }}) |
 | Check that a host really serves the certificate it should | [TLS scan]({{ '/tls-scan/' | relative_url }}) |

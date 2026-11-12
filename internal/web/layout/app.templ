@@ -43,6 +43,7 @@ var nav = []navGroup{
 	}},
 	{"Agents", []navItem{
 		{Key: "agents", Label: "Agents", Href: "/agents", Real: true},
+		{Key: "add-host", Label: "Add host", Href: "/hosts/add", Real: true},
 		{Key: "enrollment", Label: "Enrollment requests", Href: "/agents/enrollments", Real: true},
 		{Key: "join-tokens", Label: "Join tokens", Href: "/agents/tokens", Real: true},
 	}},
@@ -64,6 +65,9 @@ templ App(p view.Page) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<meta name="color-scheme" content="light dark"/>
+			if p.RefreshContent() != "" {
+				<meta http-equiv="refresh" content={ p.RefreshContent() }/>
+			}
 			<title>{ p.Title } – MyOwnPKI</title>
 			<link rel="icon" href="/favicon.ico" sizes="32x32"/>
 			<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml"/>

@@ -68,7 +68,21 @@ type Config struct {
 	Enrollment  Enrollment          `yaml:"enrollment"`
 	Hooks       map[string][]string `yaml:"hooks"`
 	Paths       []string            `yaml:"paths"`
+	Sandbox     Sandbox             `yaml:"sandbox"`
 	Deployments []Deployment        `yaml:"deployments"`
+}
+
+// Sandbox is the part of the systemd sandbox that agent.yaml cannot derive
+// by itself (docs/PHASE3.md §11.2). Together with state_dir and paths it
+// decides the drop-ins 10-paths.conf and 20-low-ports.conf.
+type Sandbox struct {
+	// Write lists directories that hooks (not the agent) write, for example
+	// /var/log/nginx for "nginx -t". Only ReadWritePaths gets them.
+	Write []string `yaml:"write"`
+	// LowPorts is the 20-low-ports.conf drop-in (CAP_NET_BIND_SERVICE).
+	// Unset: written when any challenge is standalone, otherwise left as
+	// found. false removes it; true writes it.
+	LowPorts *bool `yaml:"low_ports"`
 }
 
 // Enrollment says how the enrollment check is answered.
@@ -207,6 +221,21 @@ func (c *Config) Validate() error {
 			add("hooks: %s: a command line whose first element is an absolute path, e.g. [\"/usr/sbin/nginx\", \"-t\"]", name)
 		}
 	}
+	sandbox := make([]string, 0, len(c.Sandbox.Write))
+	for _, p := range c.Sandbox.Write {
+		cp := filepath.Clean(p)
+		switch {
+		case !filepath.IsAbs(p) || slices.Contains(strings.Split(filepath.ToSlash(p), "/"), ".."):
+			add("sandbox.write: %q: an absolute path without ..", p)
+		case cp == string(filepath.Separator) || cp == filepath.VolumeName(cp)+string(filepath.Separator):
+			add("sandbox.write: %q: not the whole file system", p)
+		case !unitPathSafe(cp):
+			add("sandbox.write: %q: %s", p, errUnitPath)
+		default:
+			sandbox = append(sandbox, cp)
+		}
+	}
+	c.Sandbox.Write = sandbox
 	switch c.Enrollment.Challenge {
 	case ChallengeStandalone:
 	case ChallengeWebroot:
@@ -336,4 +365,36 @@ func checkHost(h string) error {
 		}
 	}
 	return nil
+}
+
+// checkACMEDirectory: the https URL of an ACME directory.
+func checkACMEDirectory(s string) error {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return errors.New("want the https URL of the ACME directory, e.g. https://pki.homelab.lan/acme/directory")
+	}
+	return nil
+}
+
+// Warnings are things "config check" should mention although the file is
+// valid: they never stop the agent (an old configuration keeps working).
+func (c *Config) Warnings() []string {
+	var out []string
+	if c.Sandbox.LowPorts != nil && !*c.Sandbox.LowPorts && lowPortsWanted(&Config{Enrollment: c.Enrollment, Deployments: c.Deployments}, false) == lowPortsYes {
+		out = append(out, "sandbox.low_ports is false, but a standalone challenge binds port 80 – it fails without CAP_NET_BIND_SERVICE")
+	}
+	for _, e := range []struct {
+		field string
+		dirs  []string
+	}{{"paths", c.Paths}, {"sandbox.write", c.Sandbox.Write}} {
+		for _, p := range e.dirs {
+			switch {
+			case broadDir(p):
+				out = append(out, fmt.Sprintf("%s: %s is a system directory – the agent may write everything below it; use a subdirectory such as %s", e.field, p, narrowerThan(p)))
+			case wideDir(p):
+				out = append(out, fmt.Sprintf("%s: %s is wider than a certificate directory needs; prefer a subdirectory such as %s", e.field, p, narrowerThan(p)))
+			}
+		}
+	}
+	return out
 }

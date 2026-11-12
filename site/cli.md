@@ -49,11 +49,14 @@ variable `MYOWNPKI_AGENT_CONFIG` change it. The agent ignores `HTTPS_PROXY` and 
 
 | Command | What it does |
 |---|---|
-| `setup --server URL --ca-bundle FILE --root-sha256 HEX` with `--token-file FILE`, `--package-format deb`, `rpm` or `tarball`, `--webroot DIR`, `--hostname FQDN`, `--low-ports` | Writes the configuration, the systemd unit and its drop-ins, enrolls the host, and only then enables and starts the service. Run as root. Every option is explained in [Adding hosts]({{ '/hosts/' | relative_url }}#manual-installation-from-a-package). |
+| `setup --server URL --ca-bundle FILE --root-sha256 HEX` with `--token-file FILE` (a join token or an enrollment pass), `--package-format deb`, `rpm` or `tarball`, `--webroot DIR`, `--hostname FQDN`, `--acme-directory URL`, `--low-ports` | Writes the configuration, the systemd unit and its drop-ins (keeping what you added by hand), enrolls the host, and only then enables and starts the service. Run as root. Every option is explained in [Adding hosts]({{ '/hosts/' | relative_url }}#manual-installation-from-a-package). |
+| `deployment add NAME` with `--recipe nginx`, `postfix`, `dovecot` or `proxmox`, `--name FQDN`, `--dir DIR` or `--fullchain`, `--key`, `--webroot DIR`, `--hook`, `--check`, `--sandbox-write DIR`, `--low-ports`, `--acme-directory URL`, `--create-dirs`, `--dry-run`, `--restart` | Adds a deployment to `agent.yaml` and makes the systemd drop-ins match, in one step. `--dry-run` shows a diff and writes nothing. Run as root; needs agent 0.3.5. Every flag is in [Adding hosts]({{ '/hosts/' | relative_url }}#adding-a-deployment-deployment-add); the recipes are on [Recipes]({{ '/recipes/' | relative_url }}). |
+| `deployment list`, `deployment remove NAME` with `--prune-paths`, `--dry-run`, `--restart` | Lists the deployments of `agent.yaml` (no root needed), or removes one and recomputes the drop-ins. Deployed files and the agent's state are not touched. |
+| `sandbox sync` with `--dry-run`, `--adopt` or `--prune` | Recomputes `10-paths.conf` and `20-low-ports.conf` from `agent.yaml`. Entries it cannot explain are kept and reported; `--adopt` records them under `sandbox.write`, `--prune` drops them. |
 | `enroll --token-file FILE` | Enrolls this host once. `setup` calls it for you. |
 | `run` | The service. systemd starts it. |
 | `status` | The agent's identity, the enrollment state and every deployment with its last error. |
-| `config check` | Checks `agent.yaml` and names every problem. |
+| `config check` | Checks `agent.yaml`, names every problem, and shows the effective sandbox and whether the drop-ins match it. |
 
 ## myownpki-ctl
 

@@ -4,7 +4,7 @@
 # Guide: docs/OPERATIONS.md §2. Download it, check it, then run it – never
 # pipe it into a shell:
 #
-#   v=0.3.4
+#   v=0.3.5
 #   curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 #   curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 #   sha256sum --check --ignore-missing checksums.txt
@@ -36,7 +36,7 @@
 set -euo pipefail
 
 # The release this script belongs to; release.yml refuses a tag that differs.
-DEFAULT_VERSION=0.3.4
+DEFAULT_VERSION=0.3.5
 
 REPO=Der-Felix/MyOwnPKI
 SIGNER="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/v"
