@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, notifications, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, notifications, the TLS scan, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -175,6 +175,37 @@ Is a channel configured (`config check`)? Can the service user read the files? D
 | `proxyconnect` or `Forbidden` from a proxy (webhook) | `HTTPS_PROXY` points to a proxy that refuses the destination, or `NO_PROXY` should list it. The variables are read when the server starts. |
 | Messages stop after a change of channel | The server was restarted and is sealed again; the checks run while sealed, but unseal anyway |
 | `notification dropped after the last retry – the alerts are still on the dashboard` in the log | Five delivery attempts failed over about two and a half hours. Fix the channel; open alerts come again at the next reminder, a dropped *resolved* message is lost. |
+
+## TLS scan
+
+Start with the *Last error* column of the *Endpoints* page (or `last_error_kind` in the API); it is
+always one of the words below. Then try the same from the server
+([operations guide §14.10]({{ '/reference/operations/' | relative_url }}#1410-when-something-does-not-work)):
+
+```bash
+openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </dev/null
+```
+
+| Symptom or error | Likely cause | Fix |
+|---|---|---|
+| `dns` | The name does not resolve from the server, or has no address | `getent hosts NAME` on the server. With split DNS set `acme.resolver` to the server that knows the name. |
+| `timed out` | Nothing answered within `scan_timeout`: the host is down, or a firewall drops the packets | Check route and firewall from the server to the host and port. Raise `scan_timeout` (up to 30 s) only if the host really is slow. |
+| `connection refused` | The host answers and nothing listens on that port | Start the service, or correct the port |
+| `could not connect` | Another network failure: no route, network unreachable, a reset | The same checks as for a timeout; `log.level: debug` names the address that failed |
+| `TLS handshake failed` | The port is not TLS from the first byte (plain HTTP, SSH, a STARTTLS port), or the service speaks only TLS 1.0 or 1.1, or no cipher suite matches | `openssl s_client` shows which. A STARTTLS service cannot be scanned: remove the endpoint. Enable TLS 1.2 on the service. |
+| `no certificate` | The handshake worked, but the server presented none | Rare (anonymous or pre-shared keys); the scan cannot judge such a service |
+| `client certificate required` | The service demands a client certificate and the scan presents none | The endpoint cannot be scanned and raises no alert: remove it, or scan a listener without client authentication |
+| `refused by the address policy` | Every address of the name is in a range that is never scanned, or private on a *public only* domain | Look at what the name resolves to; correct DNS or the domain's address setting |
+| `no domain covers the host` | The domain was removed or narrowed after the endpoint was added | Restore the domain or remove the endpoint |
+| `port is not in monitor.scan_ports` | The port list was changed after the endpoint was added | Put the port back (restart) or remove the endpoint |
+| Adding is refused: `no domain covers this host` | No domain matches the host | Create a domain for it, or let an existing one include subdomains |
+| Adding is refused: `port … is not in the list of scannable ports` | The port is not in `monitor.scan_ports` | Use a listed port, or extend the list in `config.yaml` and restart |
+| Adding is refused: `this address range is never scanned` | The IP address is loopback, link-local, multicast, reserved, or an IPv6 form that embeds an IPv4 address | Use the host's name or another address |
+| *Scan now* is missing, or answers `409` | `monitor.scan_interval: off` | Set an interval and restart |
+| *Scan now* answers `429` | One request per endpoint and 60 seconds | Wait for the time in `Retry-After` |
+| *Not issued by this PKI*, but the name has a certificate here | The endpoint is an IP address without an SNI, or the certificate names something else | Add the endpoint again with the SNI |
+| *Wrong certificate* right after a renewal, but no alert | The state shows at once; the alert waits for two scans and `scan_mismatch_after` (1 hour) | Reload the service on the host, then *Scan now* |
+| The state stays *Pending* | The first scans failed fewer than `scan_unreachable_after` times, or scanning is off | Read *Last error* |
 
 ## Containers
 

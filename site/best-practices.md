@@ -126,6 +126,14 @@ Alerts exist from the first start, but they only wake you if a channel is config
 webhook, send a test, run the end-to-end check once, and watch `/healthz` from outside, because a server
 that is down tells nobody. How: [Monitoring]({{ '/monitoring/' | relative_url }}).
 
+### Scan the endpoints you rely on
+
+An alert that a certificate was renewed does not tell you that the web server picked it up. Enter the
+services whose outage you would notice first, such as the reverse proxy, the mail server and the
+directory, as endpoints, and the server tells you when one still serves an old certificate, runs out, is
+down or sends an incomplete chain. Give an IP address an SNI, keep `monitor.scan_interval` at its default,
+and start with a handful of endpoints. How: [TLS scan]({{ '/tls-scan/' | relative_url }}).
+
 ### Keep time right
 
 Validity periods, CRL update times, the second factor and ACME all compare clocks. Run NTP on the server

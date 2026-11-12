@@ -13,7 +13,8 @@ The checks and the messages **work while the server is sealed**. That is the poi
 alert is "the server is sealed", and a sealed server cannot decrypt anything. For that reason the
 channels live in the configuration file and their secrets in files next to it, not in the database.
 Without a channel nothing breaks; the alerts still open and show in the UI, only nobody is told.
-This is the condensed version of
+Since v0.3.4 the server can also check what a host really serves; that is the
+[TLS scan]({{ '/tls-scan/' | relative_url }}). This page is the condensed version of
 [operations guide chapter 13]({{ '/reference/operations/' | relative_url }}#13-monitoring-and-notifications).
 
 * TOC
@@ -215,6 +216,7 @@ message.
 | `agent_silent` | an active agent that reported before has not reported | after 1 hour | after 24 hours |
 | `agent_certificate` | an active agent's own certificate has less than 48 hours left | – | always |
 | `deploy_failed` | the last report of a deployment is `failed` or `rolled_back` | always | – |
+| `scan_mismatch`, `scan_expiry`, `scan_unreachable`, `scan_chain` | the TLS scan finds that an endpoint you entered serves the wrong or an expiring certificate, is down, or sends an incomplete chain (v0.3.4) | see [TLS scan]({{ '/tls-scan/' | relative_url }}#the-alerts) | see [TLS scan]({{ '/tls-scan/' | relative_url }}#the-alerts) |
 
 An alert changes its severity while it is open and closes by itself at the next check once the cause is
 gone. Details are in the
@@ -251,7 +253,8 @@ monitor:
 | `monitor.agent_silent_after` | `1h` | 10m to 24h |
 | `monitor.repeat_every` | `24h` | 1h to 168h |
 
-A value outside its range makes the server refuse to start and `config check` fail, naming the key.
+A value outside its range makes the server refuse to start and `config check` fail, naming the key. The
+keys of the TLS scan (`monitor.scan_*`) are on the [TLS scan]({{ '/tls-scan/' | relative_url }}#settings) page.
 
 ## How messages behave
 

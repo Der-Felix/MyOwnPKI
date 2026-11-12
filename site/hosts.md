@@ -24,8 +24,9 @@ agent out to many machines with Salt is on its own page:
 | Good for | Hosts that already run an ACME client; other operating systems | Linux hosts with nginx or plain files that should be managed from one place |
 
 Level 1 needs no agent at all: point the client at the ACME directory and trust your root
-([operations guide §10]({{ '/reference/operations/' | relative_url }}#10-acme-server)). The rest of this
-page is about the agent.
+([operations guide §10]({{ '/reference/operations/' | relative_url }}#10-acme-server)). To have the
+server also check what such a host really serves (level 2), enter it as an endpoint: see
+[TLS scan]({{ '/tls-scan/' | relative_url }}). The rest of this page is about the agent.
 
 ## What the server needs first
 
