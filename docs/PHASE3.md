@@ -932,3 +932,230 @@ notify:
 
 The TLS scan (v0.3.4), notification settings in the UI, per-user subscriptions, more channels
 (Slack, Teams, ntfy – the webhook covers them through a relay), and silencing single alerts.
+
+---
+
+## 10. TLS scan: v0.3.4
+
+v0.3.3 tells you when a certificate is about to expire *in the database*. It cannot tell you that
+the certificate renewed last night never reached the web server. The TLS scan closes that gap
+(integration level 2, PLAN §6.3a): the server connects to the TLS endpoints an admin entered,
+reads the certificate each one **serves**, and compares it with what this PKI issued for that name.
+This section replaces the step 26 row of §9.1 and the draft `endpoints` table of §1.2.
+
+Goal of v0.3.4, measured on the live installation: an endpoint that serves a certificate of this PKI
+shows as *OK* with the right fingerprint; when it is pointed at an **older** certificate, one
+`scan_mismatch` alert and one notification follow within one scan interval (plus the confirmation
+and grace times of §10.2); when the right certificate is back, the alert resolves with a second
+message. A host that is only rebooting produces nothing.
+
+Where this plan differs from the text above it (the code decides):
+
+- **Agents do not report an address.** The protocol carries `check_configured`, a boolean
+  (`proto/myownpki/agent/v1/agent.proto`, `DeploymentReport.CheckConfigured` in
+  `internal/agents/report.go`). The `check` address in `agent.yaml` is `host:port` as seen *from the
+  host* (validated in `internal/agent/config.go`, typically `127.0.0.1:443`), which means nothing to
+  the server. So §9.1 step 26 ("the deployments agents report") and `source = agent` of §1.2 are
+  **not built** in v0.3.4 (§10.3). The protocol stays as it is.
+- **Migration numbers are per database kind** (`internal/store/schema/<kind>/`). `system.db` is at
+  0014 (the alerts), `pki.db` is at 0017. The endpoints live in `pki.db`, so the file is
+  `internal/store/schema/pki/0018_endpoints.sql`, not 0015.
+- **No automatic scan of SANs** (Q8) stays; `source = certificate` of §1.2 is dropped.
+
+### 10.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 26 | 0.3.4 | **Endpoints and scanner**, in three commits. (a) `internal/netguard`: the address policy and the resolve-once dial of `internal/acme/validate.go` (`allowedAddr`, `policyDial`, `cgnat`) move into a shared package that http-01, the agent enrollment check (`acme.HTTP01Checker`) and the scan all call; the port rule (80/443) stays in `acme`, the scan has its own. (b) `pki.db` migration 0018 `endpoints` (§10.2), `internal/tlsscan`: store, `Service` (create, list, delete, scan now, with `authz`, audit through the `pki.db` outbox and the limits), sqlc queries. (c) `Scanner` and its job: a dispatcher every 30 seconds hands due endpoints to a pool of 4 workers and returns at once; per scan: resolve once through `acme.resolver`, the address policy of the covering domain, one TCP connection, a TLS handshake with `InsecureSkipVerify` only to *collect* the chain, close. The chain is then verified **separately** against this PKI's CAs (`ca.Engine.TrustAnchors`, new, read-only) and stored as `trusted`, `incomplete` or `untrusted`. The `monitor:` keys `scan_interval`, `scan_timeout`, `scan_ports`, `scan_max_endpoints` go into `internal/config` (`Monitor`, `envFields` in `env.go`, validation), `deploy/config.example.yaml`, tests and `cmd/myownpki/config.go` (`printMonitoring`). *Built (3 commits):* (a) `netguard.Dialer` takes the port rule as `CheckPort` (nil refuses every port) and the cap and timeout per address, `Allowed` also refuses an address with a zone, `NewResolver`, `NetProblem` and `DNSProblem` moved too; `acme.policyDial` is a thin wrapper that keeps the 80/443 rule and the old texts. (b) Migration 0018 as in §10.2; the permissions `endpoint.manage` (admin) and `endpoint.scan` (operator, admin) are added here and not in step 28 because the service checks them; `agents.CheckDNSName` is the shared name check, plus a punycode check for `xn--` labels; `Engine.TrustAnchors` leaves out revoked CA generations. (c) `monitor.scan_unreachable_after` and `scan_mismatch_after` are built here with the other keys (`config.Monitor.Scan()`, kept apart from `Values()`); the job `tls-scan` is registered only when `scan_interval` is not `off`; a finished worker looks for more due endpoints itself, so a backlog does not wait for the 30-second tick; a scan keeps the last good data when it fails; one more error kind, `could not connect`, and the refusals are `refused by the address policy`, `no domain covers the host` and `port is not in monitor.scan_ports`; a TLS 1.2 server that rejects the missing client certificate after its chain (`handshake failure`, `bad certificate`) is `client certificate required`; `go test -race` was not run on the Windows machine (no C compiler), CI does. 
+ | `netguard` table tests (loopback, link-local, multicast, unspecified, reserved incl. broadcast, private under `public`, CGNAT, IPv4-mapped IPv6, IPv6 zone; each embedding and translated range with its edges: `::/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, `2002::/16`, Teredo, `::ffff:0:0:0/96`; each non-global range with its edges; the documentation ranges stay allowed) and the **unchanged** `internal/acme` validation tests still green; a rebinding test (a second lookup would answer 127.0.0.1, the connection still goes to the first, checked address); scanner tests against a local TLS server (right, older, foreign, expired, wrong name, leaf-only chain, client certificate required, plain HTTP on the port, accepts TCP and never answers, closed port) with the network edges injected; `go test -race`; a scan runs while the keyring is sealed; closing the server stops running scans |
+| 27 | 0.3.4 | **Evaluation.** `internal/tlsscan` holds the pure function `Assess` (endpoint, what the PKI issued for the name, now: state); `internal/monitor/scan.go` feeds it from the certificates the evaluator already loads (valid ones, the superseded rule of `nameSet` in `certificates()`, `evaluate.go`) plus a fingerprint lookup for a served certificate that is not in the expected set (`ca.Engine.CertificateByFingerprint`, new, read-only, same 404 rule as `Certificate`, over the existing sqlc query `GetCertificateByFingerprint`). The kinds `scan_mismatch`, `scan_expiry`, `scan_unreachable`, `scan_chain` (§10.2) become findings of `Evaluator.Evaluate`; `alerts` (system.db) needs no migration (`kind` has no CHECK). Thresholds are `monitor:` keys with ranges. Resolve on recovery; digests and channels are unchanged (`notify` is not touched; the kinds travel as free text). The dashboard figure *Open alerts* counts them with no change (`alertNumber` counts every open alert); the dashboard's message list (`alertMessages`) keeps its allowlist and does not show them. *Built (2 commits):* `tlsscan.Assess(endpoint, Input{Current, Known}, Params, now)` returns the state and the alarms already past confirmation (2 successful scans of one fingerprint) and grace; `monitor/scan.go` builds the expected set and the `Known` lookup and writes the texts. Decisions where §10.2 was silent: failed scans below `scan_unreachable_after` keep the state of the last good scan; once the streak is reached the state is `unreachable` for every failure kind but only the kinds that count (§10.2) open the alert; `older`, `foreign` and `wrong_name` open `scan_mismatch` only when the expected set is not empty (the grace time needs the newest certificate); `revoked` wins over the IP-without-SNI rule; `scan_expiry` is left out when the served certificate has its `cert_expiry` finding; with `scan_interval: off` the scan findings are not produced and the alerts resolve. `Evaluator.EndpointStates` (and `Server.EndpointStates`) give the page and the API the same assessment per endpoint that the alerts use. 
+ | Fake-clock tests per kind: nothing before the confirmation scan; `scan_mismatch` opens only after the grace time and a second scan of the same fingerprint and resolves with the next good scan; `scan_unreachable` opens at the Nth consecutive failure and not for a reboot; no duplicates across runs; an unmanaged name gives state `unmanaged` and no `scan_mismatch`; wildcard and IP endpoints; a deleted endpoint resolves its alerts; one digest with a mismatch opened and another alert resolved in the same run |
+| 28 | 0.3.4 | **REST and UI.** `api/openapi.yaml` first: `listEndpoints`, `createEndpoint`, `deleteEndpoint`, `scanEndpoint` (tag `monitoring`; `x-required-role` viewer, admin, admin, operator), the `Endpoint` schema, the new `Alert.kind` values. Handlers in `internal/httpapi/endpoints.go`, routes in `routes.go` (`signedIn`), a `WaitError`-style 429 with `Retry-After` for scan now (as `notify.WaitError` in `problem.go`). Page *Endpoints* (`internal/web/app_endpoints.go`, built from `admin.DetailPage`, `TableData` and `FormData` like *Alerts*; nav entry under Overview in `layout/app.templ`, `Real: true`, hidden without `pki.read` or when monitoring is off, as *Alerts*): add form, table with state, served fingerprint, expiry, issuer, last scan and error, a *Scan now* and a *Remove* button per row (plain POST forms that end in 303). New permissions `endpoint.manage` (admin) and `endpoint.scan` (operator, admin) in `internal/authz`; audit actions `endpoint.create`, `endpoint.delete`, `endpoint.scan`; labels for the four kinds in `alertKinds` (`internal/web/app_alerts.go`). *Built (2 commits, after a netguard fix that closed the IPv6 forms embedding an IPv4 address):* the API commit holds the spec and the handlers together, so that every commit passes `TestEverySpecOperationIsServed`; `monitor.Endpoints` joins the endpoint service (role check, audit) with `Evaluator.EndpointStates`, so the page, the API and the alerts show one state (`listEndpoints` first asks the service whether the caller may read, then assesses only what it returned). The responses: `Endpoint` with `state` (the `tlsscan.State*`), `expiry_severity` (the `scan_expiry` alarm), the error kind and a `served` object (fingerprint, `certificate_id` when this PKI issued it, serial, clipped subject and issuer, dates, chain state, TLS version, how long it has been served); `created_by` only for roles with `endpoint.manage`, in the API and on the page. Refusals of the service are **422** `policy-violation` with `errors[0].field` as a JSON pointer (`/host`, `/port`, `/sni`) and the rule; a malformed body is 400, a body over 4 KiB is 413 (and the 413 text now names the limit of the route), duplicate, limit and scanning off are 409, scan now twice is 429 with `Retry-After`; `scanEndpoint` answers **202** without a body. The handlers do not audit: the service does, refusals included. The page (`internal/web/app_endpoints.go`) uses `admin.DetailPage` and `TableData`; `admin.Cell` got a `Title` (hover text), the only change to a shared template. Plain POST forms (`/endpoints`, `/endpoints/scan`, `/endpoints/delete`) end in 303 and a flash message; the UI ships no htmx script and none was added. Decisions where §10.2 was silent: the states `pending` and `refused` are shown as *Pending* and *Refused*; the four wrong-certificate states share the word *Wrong certificate* with a short qualifier (older certificate of this PKI, not issued by this PKI, not valid for this name, revoked); *Expiring* replaces *OK* only while the served certificate is fine otherwise (any other state keeps its word and the *Expires* cell takes the status color); with `scan_interval: off` the page shows one sentence and no *Scan now*, but add and remove still work; the dashboard's message list stays as step 27 left it and does not show the scan alerts (the *Open alerts* figure counts them). The suite runs on the real engine; the served-certificate rows are written with SQL, as the scanner would.
+ | Contract tests (every operation of the spec has a route and the reverse); `task lint:api`; role tests (viewer reads, operator scans but cannot add, admin adds, a role limited to one CA gets 403); the validation table below; audit entries incl. denied ones; scan now answers 429 inside 60 seconds; a hostile served subject (`<script>`) renders as text; the page renders with and without monitoring; no inline styles or undefined classes (the UI tests) |
+| 29 | 0.3.4 | **Docs and release.** OPERATIONS chapter 14 "TLS scan" (set-up, each state and alert with what to do, ports and limits, troubleshooting, the end-to-end check below), a pointer row in §13.6, an upgrade paragraph in OPERATIONS §9 ("From v0.3.3 to v0.3.4: pki.db migration 0018, additive"); CHANGELOG 0.3.4; version bump to 0.3.4 in the files of commit `6a8016d` ("docs: prepare v0.3.3 release": `CHANGELOG.md`, `README.md`, `deploy/docker-compose.yml`, `deploy/install-agent.sh`, `deploy/install.sh`, `docs/RELEASING.md`, `test/install/agent_functions_test.sh`) and the `v=0.3.3` examples in `docs/OPERATIONS.md`; PLAN §10.1 and this file marked as built. *Built (6 commits, no product code):* OPERATIONS chapter 14 (14.1–14.11: what a scan does, requirements, set-up in the UI and with curl, the page and every state, the alerts, settings, limits and storage, the never-scanned ranges, roles and audit, troubleshooting per error kind, the end-to-end check above), a pointer row in §13.6, a pointer in §13.7 and the introduction of chapter 13, the upgrade paragraph in §9, and notes in §10.5 and §10.9 that the address guard is shared. CHANGELOG 0.3.4 dated 2026-11-12 with the compare links; **the two agent bullets of commit `3b755ba` ("Agent commands with an absolute path" and "Join token page runs setup") moved from 0.3.3 to 0.3.4 Fixed**, because they were merged into the 0.3.3 section after the tag and v0.3.3's published release notes never had them. The version bump is the file list of `6a8016d` plus the `v=` and package file name examples in OPERATIONS, the version in the heading of `site/hosts/salt.md` (the join-token limit still holds) and `info.version` of `api/openapi.yaml` (0.2.0 to 0.3.4; no test pins it). The public site has the page `site/tls-scan.md`, an entry in the navigation, index (level 2 is *Available*), monitoring, troubleshooting, upgrade, best practices, hosts and API pointers; the version on the home page comes from the changelog data. Stale statements fixed: OPERATIONS §12.6 (`sudo sh -c 'cd … && rm …'`), CONTRIBUTING (PHASE3 is the current plan), the PLAN status line (v0.3.4 is **not** marked as released). Where the text follows the code and not the plan: a mismatch is confirmed by two scans of one fingerprint *counted from before the renewal*, so an endpoint that served the old certificate for weeks alerts at the first evaluation after `scan_mismatch_after`; the error vocabulary and the counted kinds include `could not connect`; *Unreachable* is also the state of a `client certificate required` endpoint after the threshold, with no alert; the message of the `422` for an IP in a never-scanned range still lists only unspecified, loopback, link-local, multicast and reserved addresses and does not name the NAT64, 6to4, Teredo and IPv4-compatible ranges (a text to fix in code, not changed here). *Live test by the owner pending.* | `task check`, `task ci:local` (every SKIP line reported), Linux CI incl. the image job, the live test below |
+
+**Live test for the owner** (names are examples; set `monitor.scan_interval: 5m` for the test):
+
+1. `myownpki config check` shows the *TLS scan* rows. Restart the service.
+2. *Endpoints*: add `proxy.homelab.lan`, port 443, a host that serves a certificate of this PKI. Within
+   a minute the state is **OK**; compare the shown fingerprint with
+   `openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </dev/null | openssl x509 -noout -fingerprint -sha256`.
+3. **Older certificate:** on that host switch the service to a previous certificate of the same name
+   (the agent's backup, or one issued earlier) and reload. The newer certificate must be older than
+   `scan_mismatch_after` (default 1 hour). After two scans: `scan_mismatch` (warning) on *Alerts*
+   and one e-mail or webhook message.
+4. **Fix:** put the current certificate back and reload. The next scan resolves the alert; the
+   second message says *resolved*.
+5. **Unreachable:** stop the service. After 3 failed scans: `scan_unreachable`. A restart within two
+   scans (a reboot) produces nothing. Start it again: resolved.
+6. **Unmanaged:** add an endpoint that serves a certificate of another CA for a name this PKI never
+   issued: state *Not issued by this PKI*, no `scan_mismatch`.
+7. **Guard:** adding `127.0.0.1` port 443 and `proxy.homelab.lan` port 22 is refused; both attempts
+   are in the audit log. Seal the server: the *Last scan* column keeps moving.
+8. Remove the test endpoints; their alerts resolve within a minute.
+
+### 10.2 Rules and defaults
+
+**How a scan works.** One TCP connection per endpoint and scan, one TLS handshake, then close. The
+server sends the ClientHello and what the handshake requires, **no application data and no HTTP
+request** – so there are no redirects to follow, no request to forge and no body to limit. The
+connection uses `InsecureSkipVerify` only because its purpose is to *collect* whatever the endpoint
+serves (`#nosec G402` with the reason, as in `http01`). Trust is decided afterwards: the leaf and the
+served intermediates are verified with `x509.Verify` against the root CAs of this PKI at the injected
+time, key usage server authentication. If that fails, a second run adds this PKI's own
+intermediates: success means the endpoint forgets to send them (`incomplete`), failure means the
+chain does not lead to this PKI (`untrusted`). A leaf that has expired is verified at its last valid
+second so that expiry does not hide a chain problem (expiry has its own alert). The hostname is not
+part of `Verify`; the name comparison is `Assess`' job.
+
+**Decisions** (the owner is asleep: the cautious variant; `(owner may change)` marks real choices):
+
+| Question | Default | Why |
+|---|---|---|
+| Who may add or remove endpoints | tenant **admin**, permission `endpoint.manage`, no step-up, audited; an API token may | It makes the server connect to chosen hosts, so it sits at the level of domains and agents. It grants no trust and changes no certificate, so no step-up (like `notification.test`), and a script that registers endpoints is wanted for v0.3.5/6. The check uses a tenant-wide resource, so a role limited to one CA cannot. `(owner may change)` |
+| Who may read | tenant-wide `pki.read` (viewer and up) | Endpoints name the hosts of the whole tenant, like alerts (`monitor.Store.List`) |
+| Who may scan now | operator and admin, permission `endpoint.scan`; once per endpoint and 60 seconds, kept in the row so it survives a restart | Scanning an endpoint that is already entered adds no new target. `(owner may change)` |
+| Which hosts | the host must be covered by a **domain** (`ca.Engine.DomainFor`: DNS names by name, IPs by the domain's IP ranges), and the **address policy of that domain** applies at every scan, not only when the endpoint is added | The rule the agent enrollment already follows (§3 step 2). Creating a domain needs `ca.manage` with step-up (`Engine.CreateDomain`), so an API token or an admin without a fresh second factor cannot widen the set of reachable hosts. `(owner may change)` |
+| What the guard always refuses | under every policy: unspecified, loopback, link-local (incl. 169.254.0.0/16, fe80::/10), multicast, an IPv6 address with a zone, 0.0.0.0/8 and 240.0.0.0/4 (incl. the broadcast address); the IPv6 ranges that embed an IPv4 address or translate to one, **as whole ranges** – `::/96`, NAT64 `64:ff9b::/96` and `64:ff9b:1::/48`, 6to4 `2002::/16`, Teredo `2001::/32` and the IPv4-translated `::ffff:0:0:0/96` (IPv4-mapped `::ffff:a.b.c.d` is the exception: it is unmapped and judged as its IPv4 address); and the non-global ranges 192.0.0.0/24, 198.18.0.0/15, 192.88.99.0/24, fec0::/10, 100::/64 and 5f00::/16. The documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32) stay allowed. Under policy `public` also RFC 1918, fc00::/7 and 100.64.0.0/10. Private ranges are allowed under `internal` (the default) | One implementation (`internal/netguard`), one set of tests. A translated address could reach 127.0.0.1 (`64:ff9b::7f00:1`, `::ffff:0:7f00:1`) although it looks global, and no TLS endpoint of anybody lives in these ranges, so they are refused whole instead of parsed one by one. The documentation ranges stay open because tests and examples use them as stand-ins for public addresses. The server cannot scan its own 127.0.0.1, but its LAN address is allowed: a bare handshake gives nothing a client does not get anyway |
+| Ports | only those in `monitor.scan_ports`; default `443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443` (TLS from the first byte); 1–65535, at most 32 entries; an endpoint's own port only, nothing derived or followed | A tenant admin cannot turn the server into a port scanner; widening the list is a decision of whoever edits the configuration on the server. STARTTLS ports (25, 143, 587) need protocol bytes and are out (§10.3) |
+| Number of endpoints | `monitor.scan_max_endpoints`, default **100** (1–500); beyond it adding is refused with 409 | Bounds work and memory; the order of `agents.MaxDeployments` |
+| Host syntax | a fully qualified DNS name by the rules of `agents.CheckHostname`/`checkDNSName` (lower case, at least two labels, letters, digits, hyphen, no wildcard, a trailing dot is trimmed; the check is shared, not copied) or an IP literal (IPv6 without brackets, no zone, IPv4-mapped is unmapped) | Attacker-style input is rejected at the door, with a table test; the guard is the second wall (`localhost` falls out by syntax, `127.0.0.1` by the guard) |
+| SNI | optional per endpoint. Empty: a DNS host is sent as SNI; an IP host sends **no** SNI (RFC 6066 forbids IP literals). Set: that name is sent, and it is the name the certificate is expected for | An IP endpoint with virtual hosts needs a name. The SNI is a validated DNS name and never a connect target |
+| IPv6 | supported. The resolver's A and AAAA answers are checked one by one in its order; at most **4** addresses are tried per scan, 3 seconds each, inside the endpoint timeout; no Happy Eyeballs | The guard tries every address today; the cap is new for the scan (a `MaxTries` field) so a name with 50 records cannot hold a worker |
+| Timeout | `monitor.scan_timeout`, default **10 s** (2–30 s), for resolve, connect and handshake together. The work after the handshake (reading the trust anchors from `pki.db` and verifying the chain) has its **own budget of 5 s** (`ChainTimeout`), derived from the scanner's context so that `Close()` still cancels it | As `validateTimeout`. A handshake that ends with the deadline in sight must not leave the chain check without time: that would end every scan in an error and store no result |
+| Interval and jitter | `monitor.scan_interval`, default **15 m** (5 m–24 h, or `off`); the next scan of an endpoint is the interval plus a random 0–10 % (injectable source); a new endpoint is scanned at the next dispatch | 15 minutes finds a stuck deployment the same morning for one handshake per endpoint; jitter keeps 100 endpoints from firing together after a restart. `off` is for operators who forbid outbound connections; the page then says so |
+| Concurrency and memory | dispatcher every 30 s; **4** workers; an endpoint in flight is skipped; its `next_scan_at` moves forward when it is claimed, so a crash cannot rescan at once; an endpoint whose `next_scan_at` lies beyond now + 2 × interval counts as due too (the clock stepped back, for example a VM that booted with a wrong time), so it never stays silent; `Close()` cancels and waits (as `acme.Server.Close`); a handshake message is bounded by `crypto/tls` (64 KiB); only the leaf and 8 intermediates are looked at | The scheduler (`scheduler.runDue`, `internal/server/jobs.go`) is **one goroutine** that runs the jobs one after the other: a scan inside `runDue` would stall the CRL, ACME and alert jobs. So the job only dispatches |
+| Sealed server | scans, evaluation and alerts run while sealed | Nothing is decrypted: the scan needs no key, and the certificates and CA certificates it compares are public data in `pki.db` (as in §9.1 step 22). A sealed server that still reports a lapsed deployment is the point |
+| What is stored | per endpoint: host, port, SNI, source, created by and at, next and last scan, last success, failure streak, error **kind** with a fixed short message, and of the served leaf: SHA-256 fingerprint, serial, subject, issuer (each clipped to 256 bytes, valid UTF-8, control characters replaced), not before and after, chain length, chain state, TLS version, and how many consecutive scans saw this fingerprint. **Never** the DER, a public key, a SAN list or the resolved address (the address goes to the log) | Metadata is enough to compare and show; nothing private is on the wire anyway |
+| Error text | a fixed vocabulary (`dns`, `refused by the address policy`, `timed out`, `connection refused`, `TLS handshake failed`, `no certificate`, `client certificate required`), reusing the idea of `netProblem`/`dnsProblem` in `acme`; what the remote end said is never stored, quoted or logged; anything unmapped is clipped to 200 bytes; templ escapes on output. **Subject and issuer of a served certificate go to the page and the API only, never into an alert's `detail`**, which travels to e-mail and webhook | A remote host chooses its own certificate text and error bytes: attacker input (security.md "Untrusted input") |
+| Names never issued by this PKI | state **`unmanaged`**: the page says *Not issued by this PKI*, **no `scan_mismatch`**; `scan_unreachable` and `scan_expiry` still apply. An IP endpoint without SNI is `unmanaged` too (this PKI's certificates rarely carry IP SANs); the page hints to set an SNI | Alerting about a certificate nobody here manages is noise; but the admin entered the endpoint, so a dead or expiring certificate on it is still worth a message. `(owner may change)` |
+| Wildcards | a certificate matches an endpoint name by RFC 6125 rules: one leftmost label, so `*.homelab.lan` covers `proxy.homelab.lan`, not `a.b.homelab.lan` or `homelab.lan`; an endpoint host is never itself a wildcard | A wildcard certificate is a normal answer for a name |
+| Clock | `Scanner`, `Service` and `Assess` take a `clock.Clock` or `now`; `tls.Config.Time` and `x509.VerifyOptions.CurrentTime` come from it; real timeouts are `context` deadlines as in `validate.go` | Project rule: injectable clock, `time.Now` is a lint error |
+| Logs | one `scan` line at `Info` when an endpoint's state changes (ok to unreachable, …) with host, port and kind; each scan at `Debug`; never a subject or a remote message | A scan every 15 minutes per endpoint must not fill the log |
+
+**What "the issued one" means.** For an endpoint name N (the SNI, else the host), the *expected set* is
+every certificate of the PKI that is valid now (not revoked, not expired, `not_before` ≤ now), is not
+an agent identity certificate (`HideAgentCertificates`), covers N and is **not superseded**: no other
+valid certificate with the same normalized name set ends later (`nameSet` in `evaluate.go`). Two
+certificates with different name sets (an exact one and a wildcard one) are both current. The served
+leaf's SHA-256 fingerprint is compared with the set (`CertificateInfo.Fingerprint`, upper-case hex).
+
+**States** (computed by `tlsscan.Assess`; the page, the API and the alerts show the same one):
+
+| State | Meaning | Alert |
+|---|---|---|
+| `pending` | no scan yet | – |
+| `ok` | the served leaf is in the expected set and the chain is `trusted` | – |
+| `unmanaged` | the expected set is empty and the served leaf is not a certificate of this PKI | – (page only) |
+| `older` | the served leaf is a certificate of this PKI that is superseded – or that has ended with nothing newer. The page words the second case **Expired** ("no newer certificate was issued", in the color of the expiry alert); the state stays `older`, so the API vocabulary has no new value | `scan_mismatch` for a superseded one (it needs a newer certificate to wait for); an ended one is `scan_expiry` |
+| `foreign` | the expected set is not empty and the served leaf is not from this PKI | `scan_mismatch` |
+| `wrong_name` | the served leaf is from this PKI but does not cover N | `scan_mismatch` |
+| `revoked` | the served leaf is a revoked certificate of this PKI | `scan_mismatch`, critical |
+| `chain` | the leaf is right but the chain is `incomplete` or `untrusted` | `scan_chain` |
+| `unreachable` | the last scans failed | `scan_unreachable` |
+| `refused` | no domain covers the host any more, or the guard refuses the address | – (the page says why; not an outage) |
+
+**Alerts** (key `kind:endpoint id`, subject `host:port`, `href` `/endpoints`; they follow the rules of
+§9.2: one row per condition, severity may rise, resolves when the cause is gone):
+
+| Alert | Opens when | Warning | Critical |
+|---|---|---|---|
+| `scan_mismatch` | state `older`, `foreign` or `wrong_name` seen by **2 consecutive scans** (same fingerprint) and the newest certificate of the expected set is older than `scan_mismatch_after` (measured from its `created_at`, so the minutes between a renewal and its deployment stay silent); state `revoked` needs only the 2 scans, no grace | `older`, `foreign`, `wrong_name` | `revoked` |
+| `scan_expiry` | the served leaf ends within the `monitor.expiry_days` thresholds, or has ended, and it is not a certificate whose `cert_expiry:<id>` finding exists in the same run (that alert already says it) | ≤ 14 days | ≤ 3 days or expired |
+| `scan_unreachable` | `scan_unreachable_after` consecutive failed scans (kinds `dns`, `timed out`, `connection refused`, `TLS handshake failed`, `no certificate`) | from the Nth failure | down for 24 hours |
+| `scan_chain` | state `chain` seen by 2 consecutive scans, only when the served leaf is a certificate of this PKI | always | – |
+
+`scan_expiry` reuses the pair `monitor.expiry_days` rather than adding keys: the question is the same
+("how long until clients refuse it") and a second pair of numbers would drift. It is a separate kind
+from `cert_expiry` because it is about what is *served*: it is the only expiry alert for a foreign or
+superseded certificate that is still in use, and the served certificate is the one that causes the
+outage.
+
+**Configuration** (`monitor:`, strings like every key; `MYOWNPKI_MONITOR_SCAN_*`; all shown by
+`config check`; out-of-range values fail `config check` and the start, as today):
+
+| Key | Default | Allowed |
+|---|---|---|
+| `scan_interval` | `15m` | `5m`–`24h`, or `off` |
+| `scan_timeout` | `10s` | `2s`–`30s` |
+| `scan_ports` | `443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443` | 1–32 ports, 1–65535 |
+| `scan_max_endpoints` | `100` | 1–500 |
+| `scan_unreachable_after` | `3` | 1–10 failed scans |
+| `scan_mismatch_after` | `1h` | `5m`–`24h` |
+
+**Data** (`pki.db` 0018, additive). The table is per tenant like the agents' tables. The scanner writes
+results there in one transaction; the evaluator reads them and writes alerts to `system.db` in
+another – no transaction spans two databases (ADR-06), and audit entries for add and remove go
+through the outbox of `pki.db` in the same transaction.
+
+```
+endpoints
+  id TEXT PK (prefix ep)
+  host TEXT, port INTEGER, sni TEXT NULL            -- UNIQUE (host, port, COALESCE(sni, ''))
+  source TEXT CHECK (source IN ('manual', 'agent')) -- 'agent' is a seam: nothing writes it yet
+  created_at, created_by
+  next_scan_at, scan_requested_at NULL
+  last_scan_at NULL, last_ok_at NULL, fail_streak INTEGER, last_error_kind NULL, last_error NULL
+  fingerprint NULL, serial NULL, subject NULL, issuer NULL, not_before NULL, not_after NULL,
+  chain_len NULL, chain_state NULL CHECK (chain_state IN ('trusted', 'incomplete', 'untrusted')),
+  tls_version NULL, same_count INTEGER, fingerprint_since NULL
+```
+
+The SQL file and the queries (`internal/store/queries/pki/endpoints.sql`) are ASCII only; `sqlc`
+regenerates `pkidb`.
+
+**Validation table for `createEndpoint`** (attacker-style input, one test row each): `localhost`,
+`127.0.0.1`, `[::1]`, `0.0.0.0`, `169.254.169.254`, `fe80::1%eth0`, `::ffff:127.0.0.1`,
+`::ffff:0:7f00:1`, `64:ff9b::7f00:1`, `198.18.0.1`, `a b`,
+`*.homelab.lan`, `-x.homelab.lan`, a 254-character name, an empty host, `xn--` garbage,
+`http://proxy.homelab.lan`, port `0`, `22`, `80`, `65536`, `-1`, a duplicate, the 101st endpoint, a host
+no domain covers, a body larger than 4 KiB; `proxy.homelab.lan.` is accepted and stored without the dot.
+Every refusal names the field and the rule, never an address that was resolved.
+
+**Endpoint IDs in requests.** The ID of the scan and remove calls (path of the REST API, field of the UI
+forms) is attacker input. It must match `^[0-9A-Za-z_-]{1,64}$`; anything else is "not found", but only
+**after** the role check, so a caller without the role gets 403 and never learns anything from the
+order. A denied or failed request with such an ID is audited with the target type `endpoint` alone; the
+ID that was asked for goes into `details.id`, cleaned (control and format characters replaced) and
+clipped to 64 bytes. The audit log shows target IDs to admins and ships them to a SIEM, so an ID that is
+not well-formed never becomes one. A "not found" itself is not audited.
+
+**Test strategy.** No real hosts and no real DNS: names are `homelab.lan`, addresses `192.0.2.x`. A
+local TLS server (`net.Listen("tcp", "127.0.0.1:0")` with `crypto/tls`) serves a certificate; the
+network edges are replaced the way `acme.Server.SetNetwork` does it – `dial` connects to that
+listener and `lookupIP` answers `192.0.2.10` – while the address policy, the port rule and
+everything around them run unchanged. Certificates come from the real engine of
+`internal/testinstance` (`Engine.Issue`; a renewal for the *older* case; revocation; a second
+throw-away CA generated in the test for *foreign*; `clock.Fake` advanced for *expired*, which the page words *Expired*), so the
+comparison runs on real rows. The failure servers are small goroutines: leaf only, wrong name,
+requires a client certificate, plain HTTP, accepts and stays silent, closed port. Two more cases: a
+connection whose close after a finished handshake is held back past the deadline still stores a result
+and logs no error (the chain check has its own budget), and an endpoint whose next scan lies beyond
+twice the interval is scanned at the next dispatch (fake clock stepped back). The ID cases of the
+validation table run through the service, the REST API and the UI forms: a viewer gets 403 and a clean
+audit entry, an admin gets "not found". Everything runs
+under `-race` and the fake clock, without `time.Sleep`.
+
+### 10.3 Not in v0.3.4
+
+- **Endpoints reported by agents.** The agent reports no host:port (top of this section), and
+  extending the Connect-RPC protocol (a field in `agent.proto`, agent and server in step) changes a
+  released protocol. A later candidate: a button on a deployment that pre-fills the add form with the
+  deployment's first name and port 443, still an admin's decision. `source = 'agent'` exists in the
+  table so that this needs no table rebuild.
+- **Automatic scan of the names in issued certificates** (Q8): the server would connect to hosts
+  nobody asked it to check.
+- **STARTTLS protocols** (SMTP, IMAP, POP3, LDAP): they need protocol bytes before the handshake,
+  against "nothing beyond the ClientHello". A different feature.
+- **A network or port scan to discover unmanaged endpoints** (PLAN §6.5): this release scans what an
+  admin entered.
+- **mTLS endpoints** are read only as far as the handshake gives the certificate (TLS 1.3 shows it
+  before the server rejects us); no client certificate is ever presented.
+- **Scan history, charts, per-endpoint settings** (interval, thresholds), silencing one endpoint, an
+  import of endpoints from a file and a CSV export. The *Analysis* page of v0.3.8 (orphaned
+  certificates "not served anywhere") can read the stored last result.
+- **OCSP stapling, protocol versions, cipher suites and key sizes of the endpoint.** The handshake
+  accepts TLS 1.2 and 1.3 only; a server that speaks TLS 1.0/1.1 only is reported as `TLS handshake
+  failed`.
+- **No ADR changes.** The plan fits ADR-06 (one transaction, one database), ADR-10/18/19 and ADR-12;
+  it adds one package (`internal/netguard`), no dependency and no protocol change.

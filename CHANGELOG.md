@@ -7,6 +7,107 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-12
+
+TLS scan: the server connects to the TLS endpoints you enter, reads the certificate each one serves and
+tells you when it is not the one this PKI issued – the renewal that never reached the web server. The
+live test by the owner is pending.
+
+### Added
+
+- **TLS scan (integration level 2):** an admin enters the endpoints that matter (host, port, optional
+  SNI); the server connects to each one every 15 minutes, reads the certificate it serves and compares
+  it with what this PKI issued for the name. A scan is one TCP connection and one TLS handshake, then
+  close: no HTTP request, no client certificate, TLS 1.2 and 1.3. The chain is judged afterwards against
+  the CAs of this PKI (`trusted`, `incomplete` when the endpoint does not send the intermediate,
+  `untrusted`). The host must be covered by a domain, the domain's address policy applies at every scan,
+  and only the ports of `monitor.scan_ports` are allowed. Limits: 100 endpoints, 4 workers, 10 seconds
+  per scan (checking the chain afterwards has 5 seconds of its own), 4 addresses per name. Scheduling
+  survives clock steps: an endpoint whose next scan lies more than twice the interval ahead is scanned
+  at once. Only metadata of the served leaf is stored (fingerprint, serial,
+  clipped subject and issuer, dates, chain state, TLS version) – never the certificate, a key, the names
+  in it or the resolved address. Scans, evaluation and alerts work while the server is sealed.
+  `pki.db` migration 0018 (additive).
+- **Scan alerts:** `scan_mismatch` (the endpoint serves an older, a foreign or a wrong-name certificate,
+  seen by two scans in a row once the newest certificate for the name is `scan_mismatch_after` old;
+  a revoked certificate is critical after two scans, with no waiting time), `scan_expiry` (the served
+  certificate ends within the `monitor.expiry_days` thresholds, unless `cert_expiry` already reports
+  it), `scan_unreachable` (after `scan_unreachable_after` failed scans in a row, so a reboot stays quiet;
+  critical after 24 hours) and `scan_chain` (incomplete or untrusted chain). A name this PKI never issued
+  shows *Not issued by this PKI* and raises no mismatch. The text of an alert never holds subject or
+  issuer of the served certificate, which the remote host chooses. They count in the dashboard's *Open
+  alerts* figure and reach e-mail and webhook like every alert.
+- **Endpoints page:** the new page *Endpoints* (menu *Overview*) lists every endpoint with its state,
+  last scan, served fingerprint (linked to the certificate when this PKI issued it), expiry, issuer and
+  last error, and has *Add an endpoint*, *Scan now* and *Remove*. Subject and issuer are shown as text.
+  A certificate of this PKI that has ended with nothing newer shows as *Expired*.
+- **REST:** `GET /api/v1/endpoints` (viewer), `POST /api/v1/endpoints` (admin; refusals are `422` with the
+  field and the rule, never a resolved address), `POST /api/v1/endpoints/{endpointId}/scan` (operator;
+  `202`, `429` with `Retry-After` within 60 seconds, `409` while scanning is off) and
+  `DELETE /api/v1/endpoints/{endpointId}` (admin). New permissions `endpoint.manage` (admin) and
+  `endpoint.scan` (operator, admin); no step-up, because they grant no trust. Audit actions
+  `endpoint.create`, `endpoint.delete` and `endpoint.scan`; refusals are audited too, and an endpoint ID that is not well-formed is "not found" after the
+  role check.
+- **Settings:** `monitor.scan_interval` (default `15m`, `5m`–`24h`, or `off`), `scan_timeout` (`10s`,
+  `2s`–`30s`), `scan_ports` (`443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443`; 1–32 ports),
+  `scan_max_endpoints` (`100`, 1–500), `scan_unreachable_after` (`3`, 1–10) and `scan_mismatch_after`
+  (`1h`, `5m`–`24h`), each also as `MYOWNPKI_MONITOR_SCAN_*`. Out-of-range values fail `config check` and
+  the start. `config check` shows the TLS scan rows.
+- **Operations guide:** chapter 14, *TLS scan* – set-up in the UI and with `curl`, every state and what to
+  do, the alerts, settings, limits, the address ranges that are never scanned, roles, a troubleshooting
+  table and an end-to-end check – and an upgrade paragraph for v0.3.3 to v0.3.4.
+- **Documentation site:** the guides, the operations guide, the release notes and the example
+  configuration are published at <https://der-felix.github.io/MyOwnPKI/>, built from `site/` and the
+  repository files by GitHub Pages; it has a page for the TLS scan.
+
+### Changed
+
+- **Stricter address guard (behavior change).** The check that decides where the server may connect is
+  now one package (`internal/netguard`) shared by http-01 validation, the agent enrollment check and the
+  scan. It now also refuses, under every address policy: the IPv6 ranges that embed an IPv4 address or
+  translate to one – IPv4-compatible (`::/96`), NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4
+  (`2002::/16`), Teredo (`2001::/32`) and the IPv4-translated range (`::ffff:0:0:0/96`) – because a
+  router or a client may translate them to the embedded address (`64:ff9b::7f00:1` could reach
+  `127.0.0.1`); the non-global ranges `192.0.0.0/24`, `198.18.0.0/15`, `192.88.99.0/24`, `fec0::/10`,
+  `100::/64` and `5f00::/16`; and an IPv6 address with a zone. **A legitimate service in such a range can
+  no longer be an http-01 target, an agent enrollment host or a scan endpoint.** The documentation
+  ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`) stay allowed.
+  IPv4-mapped addresses are judged as the IPv4 address they carry. The error texts of http-01 are
+  unchanged.
+- **Dependencies:** `connectrpc.com/connect` 1.21.1, `github.com/a-h/templ` 0.3.1100 (generated files
+  regenerated), `go.yaml.in/yaml/v3` 3.0.6, `modernc.org/sqlite` 1.61.0 (SQLite 3.54.1) and
+  `golang.org/x/net` 0.62.0.
+
+### Fixed
+
+- **Agent commands with an absolute path:** the guided installation and update commands ended with
+  a bare `myownpki-agent setup …`, which failed with `command not found` where root's `PATH` lacks
+  `/usr/local/bin` (seen on Debian 13), although the package had been installed. Every command the
+  UI generates for root – guided install and update for deb, rpm and tarball, and the new join
+  token page – now calls `/usr/local/bin/myownpki-agent`, as does the agent's "not enrolled" log
+  hint and docs/OPERATIONS.md. Packages, tarball and the systemd unit already use that path; a test
+  keeps them in line.
+- **Join token page runs setup:** the page of a new join token showed `enroll` and
+  `systemctl enable --now`, which cannot work on a fresh package or tarball host – only `setup` writes
+  `agent.yaml` and installs the unit (`Unit myownpki-agent.service does not exist`). The page now
+  shows the token file (by here-doc, not as an argument), the root download with its SHA-256 check and
+  `setup` with the detected package format, like the guided installation.
+
+### Upgrade notes
+
+- No action is needed: migration 0018 is additive, and the scan connects nowhere until an admin enters
+  an endpoint. A restart leaves the server sealed, as always. To keep the server from ever connecting to
+  the endpoints, set `monitor.scan_interval: off`.
+- Roles: tenant admins add and remove endpoints, operators and admins scan now, viewers read. A role
+  limited to one CA cannot see the endpoints, as with alerts.
+- If a service of yours lives in an IPv6 range of the stricter address guard (NAT64, 6to4, Teredo,
+  IPv4-compatible), http-01 validation and agent enrollment for it now fail with an address-policy
+  error; use an address outside those ranges.
+- Container installations need no new variables; the defaults of the `MYOWNPKI_MONITOR_SCAN_*` keys apply.
+  Add the variables only to change them (operations guide, §14.6).
+- Going back to v0.3.3 means restoring the backup from before the update: v0.3.3 refuses the newer
+  `pki.db`.
+
 ## [0.3.3] - 2026-11-12
 
 Monitoring: the server checks itself every minute, shows what needs an admin on a new Alerts page
@@ -64,18 +165,6 @@ and tells you by e-mail or webhook – also while it is sealed.
 
 ### Fixed
 
-- **Agent commands with an absolute path:** the guided installation and update commands ended with
-  a bare `myownpki-agent setup …`, which failed with `command not found` where root's `PATH` lacks
-  `/usr/local/bin` (seen on Debian 13), although the package had been installed. Every command the
-  UI generates for root – guided install and update for deb, rpm and tarball, and the new join
-  token page – now calls `/usr/local/bin/myownpki-agent`, as does the agent's "not enrolled" log
-  hint and docs/OPERATIONS.md. Packages, tarball and the systemd unit already use that path; a test
-  keeps them in line.
-- **Join token page runs setup:** the page of a new join token showed `enroll` and
-  `systemctl enable --now`, which cannot work on a fresh package or tarball host – only `setup` writes
-  `agent.yaml` and installs the unit (`Unit myownpki-agent.service does not exist`). The page now
-  shows the token file (by here-doc, not as an argument), the root download with its SHA-256 check and
-  `setup` with the detected package format, like the guided installation.
 - **Agent packages in the container image:** the image carries the agent packages under
   `/opt/myownpki/agent-dist`, but nothing pointed `agent.package_dir` there, so a container served
   none of them. The image now sets `MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist`.
@@ -484,7 +573,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.0...v0.3.1

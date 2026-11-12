@@ -128,6 +128,9 @@ type Server struct {
 	// Monitoring (v0.3.3): alert rules and alerts.
 	monitor *monitorSide
 
+	// The TLS scan (v0.3.4): endpoints and the scanner pool.
+	scan *scanSide
+
 	closeOnce sync.Once
 }
 
@@ -723,6 +726,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if s.acme != nil {
 			s.acme.Close() // running validations finish before the databases close
 		}
+		if s.scan != nil {
+			s.scan.scanner.Close() // running scans are canceled and finish before the databases close
+		}
 		if err := s.ring.Seal(sctx, systemWho); err != nil {
 			errs = append(errs, fmt.Errorf("seal: %w", err))
 			s.log.Error("seal at shutdown", slog.Any("error", err))
@@ -753,13 +759,13 @@ func (s *Server) buildHTTP(demo bool) error {
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk, Log: s.log,
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, Tenant: store.DefaultTenant,
-		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(), ACME: s.acme, Alerts: s.Alerts(), Notify: s.Notifier(),
+		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(), ACME: s.acme, Alerts: s.Alerts(), Notify: s.Notifier(), Endpoints: s.EndpointAdmin(),
 	})
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(),
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(), Endpoints: s.endpointAdmin(),
 		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Release),
 		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Release,
 	}})

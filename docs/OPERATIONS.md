@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.3
+v=0.3.4
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -491,6 +491,18 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.3 to v0.3.4: pki.db migration 0018 adds the table for the TLS scan's endpoints; it is
+additive and changes no certificate. Nothing needs to be configured: the scan starts with no endpoint
+and connects nowhere until an admin enters one ([chapter 14](#14-tls-scan)), the new `monitor.scan_*`
+keys have defaults, and the permissions `endpoint.manage` (admin) and `endpoint.scan` (operator, admin)
+come with the built-in roles. **One behavior change:** the address guard that http-01 validation, the
+agent enrollment check and the scan share now refuses more ranges outright: the IPv6 forms that embed
+or translate to an IPv4 address (NAT64, IPv4-compatible, 6to4, Teredo, IPv4-translated), an address with
+a zone, and the non-global ranges `192.0.0.0/24`, `198.18.0.0/15`, `192.88.99.0/24`, `fec0::/10`,
+`100::/64` and `5f00::/16` (the full list is in §14.8; the documentation ranges stay allowed). A service
+that really lives in such a range can no longer be an http-01 target or an enrollment host. Going back to v0.3.3 means the backup from step 1, because
+v0.3.3 refuses the newer database.
+
 From v0.3.2 to v0.3.3: system.db migration 0014 adds the tables for alerts and queued
 notifications; it is additive and changes no certificate. No configuration change is needed. Alerts
 start with the first check, one minute after the start, and the server tells nobody until you
@@ -714,7 +726,7 @@ ACME issues for a name only when a **domain** covers it (*ACME → Domains*). A 
 | Wildcards | `*.homelab.lan` – proven by dns-01 only; off by default |
 | Approval | *open*: any account that passes the challenge. *approved accounts* (default): a new account waits in *ACME → Accounts* until an admin approves it, or brings an EAB key. *new names*: the first certificate for a name waits in *ACME → New names* |
 | Preset, validity | The certificate's profile (must allow serverAuth); 90 days by default, never beyond the CA |
-| Addresses http-01 may reach | *internal networks too* (homelab) or *public only* – loopback and link-local are never reached |
+| Addresses http-01 may reach | *internal networks too* (homelab) or *public only* – some ranges are never reached under either setting (loopback, link-local and more; the full list is in §14.8; the agent enrollment check and the TLS scan follow the same setting) |
 | IP ranges | Which IP addresses may be in certificates (http-01 only) |
 
 An **EAB key** (*ACME → EAB keys*, external account binding) lets one client skip the approval
@@ -818,7 +830,7 @@ The **validator** – the part of MyOwnPKI that checks a challenge – connects 
 | `rejectedIdentifier: no domain covers …` | No domain for the name, or a wildcard on a domain without wildcards | *ACME → Domains* |
 | `unauthorized: account … waits for approval` | Approval level *approved accounts* | *ACME → Accounts*, or an EAB key |
 | `connection: … could not be reached` | The client's port 80 is closed for the PKI host, or the name resolves elsewhere | `acme.resolver`, firewall; the server log has the address |
-| `connection: … address policy … refuses` | The name resolves to loopback or link-local, or to a private address on a *public only* domain | The domain's address setting |
+| `connection: … address policy … refuses` | The name resolves to a range that is never reached (loopback, link-local and others; the list is in §14.8), or to a private address on a *public only* domain | The domain's address setting |
 | `incorrectResponse: … answered with status 404` | The client's web server doesn't serve `/.well-known/acme-challenge/` | The client's http-01 mode (standalone, webroot) |
 | `dns: … has no TXT record` | The TXT record went to another zone than the resolver reads | Split DNS (10.7) |
 | `rateLimited` | A limit of 10.8 | Wait for `Retry-After`, or raise the limit |
@@ -997,15 +1009,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.3
+v=0.3.4
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.3_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.4_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.3_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.3_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.4_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.4_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1243,9 +1255,7 @@ identity and account binding:
 
 ```bash
 sudo systemctl stop myownpki-agent
-cd /var/lib/myownpki-agent
-sudo rm -f agent.json agent.key agent.crt pending.key enrollment.json
-sudo rm -f acme-*.key acme-*.json
+sudo sh -c 'cd /var/lib/myownpki-agent && rm -f agent.json agent.key agent.crt pending.key enrollment.json acme-*.key acme-*.json'
 sudo /usr/local/bin/myownpki-agent enroll --token-file /root/myownpki-join-token
 sudo systemctl start myownpki-agent
 ```
@@ -1259,7 +1269,8 @@ those only as part of a separate, manually verified reset of deployment state.
 
 Since v0.3.3 the server watches itself. **Every minute** it checks the certificates, the CAs and
 their CRLs, the seal state and the agents against the thresholds in §13.7 and keeps one **alert** per
-condition. The alerts are on the *Alerts* page, in the dashboard's *Needs attention* block and in
+condition. Since v0.3.4 it also looks at the TLS endpoints you entered, to see what each one really
+serves ([chapter 14](#14-tls-scan)). The alerts are on the *Alerts* page, in the dashboard's *Needs attention* block and in
 `GET /api/v1/alerts`. If you configure **e-mail** or a **webhook**, a change also goes out as a
 message: **one digest** for everything that happened in that minute (not one mail per certificate), a
 **reminder** every `repeat_every` while an alert stays open, and a last message when the problem is
@@ -1593,6 +1604,7 @@ that the mail server or receiver accepts the message.
 | `agent_silent` | an active agent that reported before has not reported | after 1 hour | after 24 hours |
 | `agent_certificate` | an active agent's own certificate has less than 48 hours left | – | always |
 | `deploy_failed` | the last report of a deployment is `failed` or `rolled_back` | always | – |
+| `scan_mismatch`, `scan_expiry`, `scan_unreachable`, `scan_chain` | the TLS scan finds that an endpoint you entered serves the wrong or an expiring certificate, is down, or sends an incomplete chain (v0.3.4; thresholds and what to do in [§14.5](#145-the-alerts)) | see §14.5 | see §14.5 |
 
 Warning and critical thresholds are configurable where §13.7 lists a key. An alert changes its
 severity while it is open (warning → critical sends a new message, critical → warning stays quiet)
@@ -1676,6 +1688,8 @@ monitor:
 | `monitor.sealed_after` | `10m` | 1m–1h | `MYOWNPKI_MONITOR_SEALED_AFTER` |
 | `monitor.agent_silent_after` | `1h` | 10m–24h | `MYOWNPKI_MONITOR_AGENT_SILENT_AFTER` |
 | `monitor.repeat_every` | `24h` | 1h–168h | `MYOWNPKI_MONITOR_REPEAT_EVERY` |
+
+The keys of the TLS scan (`monitor.scan_*`) are in [§14.6](#146-settings).
 
 Durations are written like `10m`, `1h` or `168h`. The server refuses to start, and `config check`
 fails, with a message naming the key when a value is outside its range. Not configurable: the
@@ -1810,3 +1824,471 @@ account.
 
 If step 2 doesn't happen after about twelve minutes, go through §13.10. If you only want to know that
 the channels work, the test of §13.5 is enough and seals nothing.
+
+## 14. TLS scan
+
+Since v0.3.4 the server can check what a host **actually serves**. The alerts of
+[chapter 13](#13-monitoring-and-notifications) know what this PKI issued, so `cert_expiry` closes as
+soon as the replacement certificate is issued – it cannot tell you that the replacement never reached
+the web server. The TLS scan closes that gap. You enter the TLS endpoints you rely on, for example
+`proxy.homelab.lan:443`. The server connects to each one every 15 minutes, reads the certificate it
+presents and compares it with what this PKI issued for that name. A host that keeps serving the old
+certificate after a renewal, a service that is down, a certificate that runs out, a chain that lacks
+the intermediate CA: each becomes an alert, with the same digest, reminder and resolve messages as in
+chapter 13.
+
+This is level 2 of the three ways to connect a host (level 1 is an ACME client alone, level 3 the
+agent). An ACME client or anything else puts the certificate on the host, the scan only watches, and
+nothing is installed there. The agent's own check (`check` in `agent.yaml`, §12.3) looks from the host
+at the local service; the scan looks from the server, the way a client sees it.
+
+### 14.1 What it does, and what it does not
+
+A scan is **one TCP connection and one TLS handshake**, then the connection closes. The server sends
+its ClientHello and what the handshake needs, nothing else: **no HTTP request, no data, no client
+certificate**. TLS 1.2 and 1.3 are accepted. So a scan has no redirect to follow and no request that
+could change anything on the host.
+
+The handshake takes whatever certificate the endpoint presents, even a wrong one: that is the point,
+because otherwise a wrong certificate would only show as "handshake failed" and you could not see what
+is served. **Whether to trust it is decided afterwards, by the server itself.** It checks the served
+certificate and the intermediates the endpoint sent against the root CAs of this PKI (key usage server
+authentication). The result is the chain state: `trusted`, `incomplete` (it leads to this PKI only with
+this PKI's own intermediates, so the endpoint forgot to send them) or `untrusted` (it does not lead
+here). An expired certificate is checked as of its last valid second, so that expiry does not hide a
+chain problem – expiry has its own alert. The host name is compared separately.
+
+| The scan does | The scan does not |
+|---|---|
+| read the leaf certificate and the first 8 intermediates the endpoint sends | send an HTTP request, follow a redirect or log in |
+| compare the leaf with the certificates this PKI issued for the name | present a client certificate; an endpoint that requires one is read only as far as the handshake allows (§14.10) |
+| judge the chain against the CAs of this PKI | speak STARTTLS (ports 25, 143, 587 and similar), or check OCSP stapling, cipher suites or key sizes |
+| run while the server is sealed | discover hosts: it scans only what an admin entered, never the names inside issued certificates |
+
+What the host sees is an ordinary TLS client that connects and leaves after the handshake. A service
+that logs every connection shows one line per scan; some services also log that the client sent no
+request.
+
+### 14.2 Requirements
+
+- **Monitoring is on** (chapter 13). The scan needs no notification channel, but without one nobody
+  is told.
+- **A domain covers the host.** In *ACME → Domains* a domain must match the host name you enter: the
+  domain's own name, or a name below it when the domain includes subdomains; an IP address must lie in
+  one of the domain's IP ranges (§10.5). Creating a domain needs a fresh second factor, so an API
+  token, or an admin without one, cannot widen the set of hosts the server may connect to. The rule
+  is checked for the **host**, the address the server connects to; the SNI only chooses the name.
+- **The address policy of that domain applies**: when the endpoint is added (for an IP address) and
+  at **every scan** (for the addresses a name resolves to). It is *internal networks too* (the default)
+  or *public only*. Some ranges are never scanned under either setting (§14.8).
+- **The port is in `monitor.scan_ports`** (§14.6). The default list is the ports where TLS starts with
+  the first byte: 443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883 and 9443.
+- **The server can reach the host:** DNS (names are resolved by `acme.resolver` if you set it, which
+  is what you want for split DNS, else by the system's resolver) and an outbound TCP connection to the
+  port. The scan connects directly and **does not use the proxy variables** of §13.3.
+- **Roles:** tenant admins add and remove endpoints, operators and admins scan now, viewers read
+  (§14.9).
+
+### 14.3 Set up
+
+1. Check the configuration. `config check` shows the scan under *Alert thresholds*:
+
+   ```bash
+   sudo -u myownpki /usr/local/bin/myownpki config check --config /etc/myownpki/config.yaml
+   ```
+
+   ```text
+   TLS scan         every 15m, timeout 10s
+   scan ports       443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443
+   scan limits      100 endpoints, unreachable after 3 failed scans, mismatch after 1h
+   ```
+
+   The defaults need no change. The keys are in §14.6; a change needs a restart, and a restart leaves
+   the server sealed, as always.
+
+2. Make sure a domain covers the host (*ACME → Domains*, §10.5). The domain `homelab.lan` with
+   subdomains covers `proxy.homelab.lan`.
+
+3. Open *Endpoints* (menu *Overview*), fill in *Add an endpoint* and press *Add endpoint*:
+
+   | Field | What to enter |
+   |---|---|
+   | Host | A fully qualified name such as `proxy.homelab.lan`, or an IP address (IPv6 without brackets). Lower case, no scheme, path, port or wildcard; a trailing dot is dropped. |
+   | Port | One of the scan ports; `443` is prefilled. |
+   | SNI (optional) | The name to send in the handshake and to expect the certificate for. Empty: a name is its own SNI; an **IP address sends none**, so give one when you enter an IP. Use it too for a host with several names behind one address: one endpoint per name. |
+
+4. The first scan runs at the next dispatch, within 30 seconds. Reload the page after a minute: the
+   state should read **OK**, with the SHA-256 fingerprint of the served certificate. Compare it with
+   what the host really presents:
+
+   ```bash
+   openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
+   ```
+
+   The fingerprint of an OK endpoint links to the certificate in the UI.
+
+Adding is audited as `endpoint.create`, refusals too (§14.9). *Remove* ends the scans, and the alerts
+of the endpoint resolve within a minute. *Scan now* scans at once (§14.4).
+
+**Through the REST API.** The calls need an API token with the tenant role named in the table (*My
+account → New API token*; the secret starts with `mop_` and is shown once). No second factor is needed
+for these calls, because they grant no trust and change no certificate.
+
+| Call | Role | Answer |
+|---|---|---|
+| `GET /api/v1/endpoints` | viewer | `200`, a list |
+| `POST /api/v1/endpoints` | admin | `201` with the endpoint |
+| `POST /api/v1/endpoints/{id}/scan` | operator | `202`, no body; the scan runs in the background |
+| `DELETE /api/v1/endpoints/{id}` | admin | `204` |
+
+```bash
+export MYOWNPKI_TOKEN=mop_…
+```
+
+```bash
+curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" -H "Content-Type: application/json" -d '{"host": "proxy.homelab.lan", "port": 443}' https://pki.homelab.lan:9443/api/v1/endpoints
+```
+
+```bash
+curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" https://pki.homelab.lan:9443/api/v1/endpoints
+```
+
+```json
+[
+  {
+    "id": "ep_01k9x3d5m7q2w8h4r6t0v1y2z3",
+    "host": "proxy.homelab.lan",
+    "port": 443,
+    "sni": null,
+    "name": "proxy.homelab.lan",
+    "source": "manual",
+    "created_at": "2026-11-12T09:00:00Z",
+    "created_by": "admin",
+    "state": "ok",
+    "expiry_severity": null,
+    "next_scan_at": "2026-11-12T09:16:12Z",
+    "last_scan_at": "2026-11-12T09:01:04Z",
+    "last_ok_at": "2026-11-12T09:01:04Z",
+    "fail_streak": 0,
+    "last_error_kind": null,
+    "served": {
+      "fingerprint": "6B1F…C0A2",
+      "certificate_id": "crt_01k9x…",
+      "serial": "04A1…",
+      "subject": "CN=proxy.homelab.lan",
+      "issuer": "CN=issuing",
+      "not_before": "2026-11-10T08:00:00Z",
+      "not_after": "2027-02-08T08:00:00Z",
+      "chain_len": 2,
+      "chain_state": "trusted",
+      "tls_version": "TLS 1.3",
+      "seen_count": 3,
+      "seen_since": "2026-11-12T09:01:04Z"
+    }
+  }
+]
+```
+
+The fingerprints and IDs in the example are shortened. `state` is one of the words of §14.4 in lower
+case: `pending`, `ok`, `unmanaged`, `older`, `foreign`, `wrong_name`, `revoked`, `chain`, `unreachable`
+or `refused`. `served` is `null` before the first successful scan, and `expiry_severity` is `warning` or
+`critical` while the served certificate is within the expiry thresholds. `created_by` is only present for
+roles that may add endpoints. `subject` and `issuer` are chosen by the remote host: treat them as
+untrusted text in your own scripts. A refusal is `422` with the field and the rule (`errors[0].field` is
+`/host`, `/port` or `/sni`), a malformed body `400` and a body over 4 KiB `413`; a duplicate, the limit
+and a switched-off scan are `409`; *scan now* twice within 60 seconds is `429` with `Retry-After`. The
+full description is in `api/openapi.yaml`.
+
+### 14.4 The Endpoints page
+
+The table has one row per endpoint:
+
+| Column | Shows |
+|---|---|
+| Endpoint | `host:port`, and the SNI under it if one is set |
+| State | one of the words below, with the fixed status colors |
+| Last scan | how long ago, for example *5 minutes ago* (the exact time on hover); *Not yet* before the first scan |
+| Certificate (SHA-256) | the first 16 characters of the served certificate's fingerprint (all of it on hover), linked to the certificate when this PKI issued it |
+| Expires | the end of the served certificate, in the status color while it is within the `monitor.expiry_days` thresholds |
+| Issuer | the issuer the served certificate names (the subject on hover). Chosen by the remote host: shown as plain text |
+| Last error | the kind of the last failed scan (§14.10), `–` when the last scan worked |
+| Added by | who added it – only for roles that may add endpoints |
+
+*Scan now* (operators and admins) makes the endpoint due at once; the result shows within a minute. It
+works once per endpoint and 60 seconds. *Remove* (admins) deletes the endpoint. Both are plain forms and
+end on the page with a message.
+
+The **state** is computed when the page loads, from the last scan and the certificates as they are now –
+the page, the API and the alerts always show the same one. A renewal therefore changes the state of an
+endpoint that still serves the old certificate at once, before the next scan; the alert waits for its
+confirmation (§14.5).
+
+| State on the page | Meaning | Alert | What to do |
+|---|---|---|---|
+| **Pending** – not scanned yet | The endpoint is new, or its first scans failed fewer times than `scan_unreachable_after` | – | Wait a minute. If it stays, read *Last error* and §14.10; check that scanning is not off. |
+| **OK** | The served certificate is the one this PKI issued for the name (current, not superseded) and the chain is trusted | – | Nothing. |
+| **Expiring** (warning or critical) | As OK, but the served certificate ends within the `monitor.expiry_days` thresholds | `scan_expiry` | The host does not renew. Fix the renewal: ACME client or agent (§10.9, §12.5). |
+| **Not issued by this PKI** | This PKI never issued a certificate for this name, and the served one is not from this PKI | – | Nothing is wrong as far as this PKI can tell (a router with its own certificate, a service of another CA). Remove the endpoint if it has no meaning for you; set an SNI for an IP address. |
+| **Wrong certificate** – an older certificate of this PKI | The endpoint serves a certificate of this PKI that a newer one has superseded (it may still be valid, or have ended) | `scan_mismatch` | The renewal did not reach the host: reload the service, or check the deployment (agent page, ACME client log, hook). |
+| **Expired** – no newer certificate was issued | The endpoint serves a certificate of this PKI that has ended, and this PKI has issued nothing newer for the name. The color is that of the expiry alert. The state word in the API is `older`, as for a superseded certificate | `scan_expiry` (critical), unless `cert_expiry` already reports it | The certificate was never renewed. Issue one and deploy it (ACME client or agent, §10.9, §12.5). A certificate that was renewed but not deployed is *Wrong certificate* above. |
+| **Wrong certificate** – not issued by this PKI | This PKI issued a certificate for the name, but the endpoint serves another CA's – often a self-signed default after a reinstall | `scan_mismatch` | Point the service at the certificate of this PKI. |
+| **Wrong certificate** – not valid for this name | The served certificate is from this PKI but does not cover the name (another host's certificate, a wildcard of a different level) | `scan_mismatch` | Point the service at the certificate issued for this name. |
+| **Wrong certificate** – revoked (critical) | The endpoint serves a revoked certificate of this PKI | `scan_mismatch`, critical | Replace it at once; clients that check revocation reject it. |
+| **Chain problem** – the intermediate CA is not sent, or the chain does not lead to this PKI | The right certificate, but the chain is `incomplete` or `untrusted` | `scan_chain` | Configure the service with the full chain (`fullchain.pem`, not the leaf alone) from this PKI. |
+| **Unreachable** – *N* scans failed | The last *N* scans failed; *N* has reached `scan_unreachable_after` | `scan_unreachable`, except for *client certificate required* | Read *Last error* and §14.10. A service that is only rebooting never gets here. |
+| **Refused** – not scanned | No domain covers the host any more, or the address policy or the port list refuses it. Not an outage | – | *Last error* says which. Restore the domain or the port, or remove the endpoint. |
+
+**Why a name this PKI never issued is "Not issued by this PKI" and not a mismatch.** The scan compares
+what is served with what this PKI **issued** for the name. For a name nothing was issued for, there is
+nothing to compare, and an alert about a certificate nobody here manages would be noise. You entered the
+endpoint, so a dead service (`scan_unreachable`) or an expiring certificate (`scan_expiry`) on it still
+alerts. An endpoint entered by IP address without an SNI is in this state too: the address says nothing
+about a name. The page then asks you to add it again with an SNI.
+
+**What "issued for the name" means.** The expected set is every certificate of this PKI that is valid
+now (not revoked, not expired, already valid), is not an agent identity certificate, covers the name and
+is **not superseded**: no other valid certificate with the same set of names ends later (the rule of
+`cert_expiry`, §13.6). A wildcard certificate covers one label, as RFC 6125 says: `*.homelab.lan` covers
+`proxy.homelab.lan`, not `a.b.homelab.lan` or `homelab.lan`. A wildcard and an exact certificate for the
+same name are both current. The served leaf is recognized by its SHA-256 fingerprint.
+
+### 14.5 The alerts
+
+The scan adds four alert kinds to chapter 13. They are on the *Alerts* page (as *Wrong certificate
+served*, *Served certificate expires*, *Endpoint unreachable* and *Chain problem*), count in the *Open
+alerts* figure of the dashboard, are in `GET /api/v1/alerts`, and go out through the channels like any
+other alert. The dashboard's *Needs attention* block does not list them. Each alert is named after
+`host:port` and links to the *Endpoints* page. They follow the rules of §13.6: one alert per condition,
+severity may rise, and it resolves by itself at the next evaluation – so a message that says *resolved*
+follows within a minute of the next good scan, or of removing the endpoint.
+
+| Alert | Opens when | Warning | Critical |
+|---|---|---|---|
+| `scan_mismatch` | the state is *an older certificate* (a newer one exists), *not issued by this PKI* or *not valid for this name*, **two scans in a row saw the same certificate**, and the newest certificate for the name is at least `scan_mismatch_after` old (counted from its creation). *Expired* never opens it: there is no newer certificate to wait for | always | – |
+| `scan_mismatch` (revoked) | the state is *revoked* and two scans in a row saw it; no waiting time | – | always |
+| `scan_expiry` | the served certificate ends within `monitor.expiry_days` or has ended, unless that certificate has its own `cert_expiry` alert | 14 days left | 3 days left, or expired |
+| `scan_unreachable` | `scan_unreachable_after` scans in a row failed with *dns*, *timed out*, *connection refused*, *could not connect*, *TLS handshake failed* or *no certificate* | from that failure on | down for 24 hours |
+| `scan_chain` | the right certificate is served with an incomplete or untrusted chain, seen by two scans in a row, and it is a certificate of this PKI | always | – |
+
+What the rules are for:
+
+- **Two scans and a waiting time** keep a deployment that is half through quiet. A renewal creates the
+  new certificate first, and the host picks it up some minutes later; `scan_mismatch_after` (default 1
+  hour) is the time a deployment may take. The count of scans includes the time before the renewal: an
+  endpoint that served the old certificate for weeks has been seen many times, so its alert opens at the
+  first evaluation after the waiting time. A mismatch also needs a current certificate for the name: if
+  there is none (the old one ran out and nothing replaced it), `cert_expiry` is the alert.
+- **A failed scan keeps the last good data.** Below `scan_unreachable_after` failures the state stays what
+  the last good scan said, so a host that reboots, or one failed scan, produces nothing. With the default
+  interval of 15 minutes, three failures take about half an hour. The 24 hours until critical are
+  counted from the last good scan (from the day the endpoint was added, if it never worked).
+- **`scan_expiry` shares the thresholds of `cert_expiry`** (`monitor.expiry_days`): the question is the
+  same – how long until clients refuse it. It is its own kind because it is about what is **served**: it
+  is the only expiry alert for a certificate of another CA, or a superseded one, that is still in use.
+- **Refusals are no outage.** An endpoint that the address policy or the port list refuses is shown as
+  *Refused* and raises no alert.
+
+The text of an alert holds only what the server wrote itself: the endpoint, serials, fingerprints, dates
+and the kind of error. **The subject and issuer of a served certificate never go into an alert,** so an
+e-mail or webhook carries nothing a remote host chose. An example:
+
+```text
+NEW
+
+  [warning] proxy.homelab.lan:443
+  proxy.homelab.lan:443 serves an older certificate of this PKI (serial 04A1…, ends 2026-11-13 09:00 UTC) instead of the newest one for proxy.homelab.lan (serial 07C2…, issued 2026-11-11 08:00 UTC) – the renewal did not reach it. Reload the service or check the deployment.
+  https://pki.homelab.lan:9443/endpoints
+```
+
+**Scanning off.** With `monitor.scan_interval: off` no scan alert is produced and the open ones resolve.
+The endpoints stay, you can still add and remove them, and the page says that scanning is off.
+
+### 14.6 Settings
+
+In `config.yaml` (restart to apply; `deploy/config.example.yaml` has them with comments):
+
+```yaml
+monitor:
+  scan_interval: 15m
+  scan_timeout: 10s
+  scan_ports: "443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443"
+  scan_max_endpoints: 100
+  scan_unreachable_after: 3
+  scan_mismatch_after: 1h
+```
+
+| Key | Default | Allowed | Environment variable |
+|---|---|---|---|
+| `monitor.scan_interval` | `15m` | `5m`–`24h`, or `off` to never connect | `MYOWNPKI_MONITOR_SCAN_INTERVAL` |
+| `monitor.scan_timeout` | `10s` | `2s`–`30s`; resolve, connect and handshake of one scan together (judging the chain afterwards has its own 5 seconds, §14.7) | `MYOWNPKI_MONITOR_SCAN_TIMEOUT` |
+| `monitor.scan_ports` | `443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443` | 1 to 32 different ports from 1 to 65535, comma-separated | `MYOWNPKI_MONITOR_SCAN_PORTS` |
+| `monitor.scan_max_endpoints` | `100` | 1–500 | `MYOWNPKI_MONITOR_SCAN_MAX_ENDPOINTS` |
+| `monitor.scan_unreachable_after` | `3` | 1–10 failed scans in a row | `MYOWNPKI_MONITOR_SCAN_UNREACHABLE_AFTER` |
+| `monitor.scan_mismatch_after` | `1h` | `5m`–`24h` | `MYOWNPKI_MONITOR_SCAN_MISMATCH_AFTER` |
+
+The thresholds of `scan_expiry` are `monitor.expiry_days` (§13.7). A value outside its range makes the
+server refuse to start and `config check` fail, naming the key, as in §13.7. The port list is a decision
+for whoever edits the configuration on the server: a tenant admin cannot turn the server into a port
+scanner by adding endpoints on other ports. STARTTLS ports (25, 143, 587) are not supported, because they
+need protocol bytes before the handshake. In a container set the variables in the Compose file (§13.3);
+the defaults need none.
+
+Each endpoint is scanned every `scan_interval` plus a random 0–10 %, so that 100 endpoints do not all fire
+together after a restart. If the clock of the server steps back (a VM that booted with a wrong time and
+then set it right), an endpoint whose next scan lies more than twice the interval ahead counts as due, so
+a wrong clock does not leave endpoints silent. Not configurable: the 4 workers, the 30-second dispatch, the 60 seconds between
+two *Scan now* of one endpoint and the 24 hours after which an unreachable endpoint turns critical.
+
+### 14.7 What is stored, and the limits
+
+Per endpoint the server keeps, in `pki.db`: host, port, SNI, who added it and when, the time of the next
+and the last scan and of the last success, how many scans failed in a row, the **kind** of the last error
+with a fixed short message, and about the served leaf: the SHA-256 fingerprint, serial, subject, issuer
+(each clipped to 256 bytes, valid UTF-8, control characters replaced), start and end, how many
+certificates the endpoint sent, the chain state, the TLS version, and how many scans in a row saw this
+fingerprint and since when. **It never stores the certificate itself, a public key, the list of names or
+the address a name resolved to** (that address goes to the log at debug level). There is no history, only
+the last result. The data is part of `pki.db`, so backups carry it.
+
+| Limit | Value |
+|---|---|
+| Endpoints | 100 (`scan_max_endpoints`, 1–500); the next one is refused with `409` |
+| Scans at the same time | 4 workers; an endpoint that is being scanned is skipped; a backlog is worked off at the speed of the workers |
+| One scan | `scan_timeout` (10 s) for resolve, connect and handshake; at most 4 addresses are tried, 3 seconds each; the leaf and 8 intermediates are looked at. Judging the chain against this PKI's CAs after the handshake has a budget of its own, **5 seconds**, so a slow handshake cannot leave it without time |
+| Request body of *add* | 4 KiB |
+| *Scan now* | once per endpoint and 60 seconds (kept in the database, so a restart does not reset it) |
+
+Scans **work while the server is sealed**: nothing is decrypted, and the certificates the scan compares
+with are public data in `pki.db`. A sealed server that still reports a deployment that lapsed is the
+point. The log has one `scan` line when the outcome of an endpoint changes (reachable, failed with a
+kind, the certificate changed) and nothing for a scan that found the same as before:
+
+```bash
+journalctl -u myownpki -o cat | grep '"msg":"scan"'
+```
+
+The remote host's own words are never stored, quoted or logged.
+
+### 14.8 Which addresses are never scanned
+
+The same guard decides where the server may connect for http-01 validation (§10.9), for the check of an
+agent's enrollment (chapter 12) and for the scan. A name is resolved **once**, and the connection goes to
+exactly the address that was checked – a DNS answer that changes between the check and the connect
+cannot redirect it. Every address a name resolves to is checked; the allowed ones are tried in the
+resolver's order.
+
+**Never, under either policy:**
+
+- unspecified (`0.0.0.0`, `::`), **loopback** (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`,
+  `fe80::/10`) and multicast addresses, and an IPv6 address with a zone (`%eth0`);
+- the reserved IPv4 ranges `0.0.0.0/8` and `240.0.0.0/4` (the latter includes the broadcast address);
+- the IPv6 ranges that carry an IPv4 address inside, or translate to one: IPv4-compatible (`::/96`),
+  NAT64 (`64:ff9b::/96` and `64:ff9b:1::/48`), 6to4 (`2002::/16`), Teredo (`2001::/32`) and the
+  IPv4-translated range (`::ffff:0:0:0/96`). A router or a client may translate such an address to the
+  embedded IPv4 one, so `64:ff9b::7f00:1` or `::ffff:0:7f00:1` could reach `127.0.0.1` although it looks
+  like a global address. The ranges are refused entirely, because no service of an internal PKI lives
+  there. IPv4-mapped addresses (`::ffff:a.b.c.d`, a different range from the IPv4-translated one) are
+  judged as the IPv4 address they carry;
+- ranges that are not globally reachable and are not private networks either, so nothing of yours lives
+  there: `192.0.0.0/24` (IETF protocol assignments), `198.18.0.0/15` (benchmarking), `192.88.99.0/24`
+  (the retired 6to4 relay anycast), `fec0::/10` (the retired site-local range), `100::/64` (discard only)
+  and `5f00::/16` (SRv6 segment identifiers).
+
+The documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and `2001:db8::/32`) are not
+on the list: they are allowed, because the examples and tests of this project use them as stand-ins for
+public addresses. They are not routed on the internet, so a scan of one simply times out.
+
+**Under the policy *public only*** a domain also refuses private networks (`10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and the carrier-grade NAT range `100.64.0.0/10`.
+*Internal networks too*, the default, allows them.
+
+So the server cannot scan its own `127.0.0.1`. Its LAN address is allowed: a bare handshake gives nothing
+that any client on that network does not get anyway.
+
+### 14.9 Who sees and does what
+
+| | Role | Notes |
+|---|---|---|
+| *Endpoints* page, `GET /api/v1/endpoints` | tenant-wide **viewer** or higher (permission `pki.read`) | The endpoints name the hosts of the whole tenant, so a role limited to one CA gets 403 and has no *Endpoints* entry in the menu. Works while sealed. |
+| *Scan now*, `POST /api/v1/endpoints/{id}/scan` | **operator** or admin (permission `endpoint.scan`) | An endpoint that is entered already adds no new target. Once per endpoint and 60 seconds. |
+| *Add endpoint* and *Remove*, `POST /api/v1/endpoints`, `DELETE /api/v1/endpoints/{id}` | tenant **admin** (permission `endpoint.manage`) | It makes the server connect to hosts of your choosing, so it sits at the level of domains and agents. No second factor: it grants no trust and changes no certificate, so an API token may do it. A role limited to one CA cannot. |
+| The scan settings | whoever edits `config.yaml` or the environment, on the server | There is no setting in the UI. |
+
+The tenant audit log (*Administration → Audit log*) records `endpoint.create`, `endpoint.delete` and
+`endpoint.scan` (scan now) with host and port. **A refusal is recorded too**, with the reason and the
+result `denied` or `failure`: an attempt to point the server at `127.0.0.1`, or at a port outside the
+list, is on record.
+
+An endpoint ID that is not well-formed (1 to 64 letters, digits, `_` or `-`) is "not found", and that is
+checked after the role: a viewer still gets 403 first. If such a request is denied or fails, the audit
+entry names only the target type `endpoint`; what was asked for is in the details (`id`), cleaned of
+control characters and clipped to 64 bytes, so a hostile ID cannot put text into the log. The scans
+themselves are not audited, only the requests.
+
+### 14.10 When something does not work
+
+First look at *Last error* on the page, or `last_error_kind` in the API. It is always one of these words;
+what the remote host said is never kept. Then try the same from the server:
+
+```bash
+openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </dev/null
+```
+
+| Last error | Cause | Fix |
+|---|---|---|
+| `dns` | The name does not resolve from the server, or has no address | `getent hosts proxy.homelab.lan` on the server. With split DNS set `acme.resolver` to the server that knows the name (§10.7). |
+| `timed out` | Nothing answered within `scan_timeout`: the host is down, or a firewall drops the packets | Check route and firewall from the server to the host and port. Raise `scan_timeout` (up to 30 s) only if the host really is slow. |
+| `connection refused` | The host answers and nothing listens on that port | Start the service, or correct the port. |
+| `could not connect` | Another network failure: no route, the network is unreachable, a reset | Same checks as for a timeout; with `log.level: debug` the log names the address that failed. |
+| `TLS handshake failed` | The port does not speak TLS from the first byte (plain HTTP, SSH, a STARTTLS port), the service speaks only TLS 1.0 or 1.1, or no cipher suite matches | `openssl s_client` shows which. A STARTTLS service cannot be scanned: remove the endpoint. Enable TLS 1.2 on the service. |
+| `no certificate` | The handshake worked, but the server presented no certificate | Rare; a service configured for anonymous or pre-shared keys. This scan cannot judge such a service. |
+| `client certificate required` | The service demands a client certificate and the scan presents none (a TLS 1.2 server rejects it after its chain; with TLS 1.3 the scan still reads the certificate, so such a service can look fine) | The endpoint cannot be scanned. It shows as *Unreachable* and **raises no alert**. Remove it, or scan a listener without client authentication. |
+| `refused by the address policy` | Every address of the name is in a range that is never scanned, or is private on a *public only* domain (§14.8) | Look at what the name resolves to; correct DNS, or change the domain's address setting. |
+| `no domain covers the host` | The domain was removed or narrowed after the endpoint was added | Restore the domain (§10.5) or remove the endpoint. |
+| `port is not in monitor.scan_ports` | The port list was changed after the endpoint was added | Put the port back (§14.6, restart) or remove the endpoint. |
+
+Other symptoms:
+
+| Symptom | Cause and fix |
+|---|---|
+| Adding is refused: `host: no domain covers this host – the host must lie in a domain of this PKI (Domains)` | No domain matches (§14.2). Create one, or let an existing one include subdomains. |
+| `port: port 22 is not in the list of scannable ports (monitor.scan_ports: …)` | The port is not in the list (§14.6). |
+| `host: this address range is never scanned …` | The IP address is in one of the ranges of §14.8. The message lists only the common ones (unspecified, loopback, link-local, multicast, reserved); the IPv6 forms that embed an IPv4 address and the non-global ranges are refused the same way. Use the host's name or another address. |
+| `host: the address policy of the domain "homelab.lan" (public) does not allow this address` | A private address on a *public only* domain. |
+| `host: …` about spaces, a scheme, brackets or a port | Enter a host name or IP address only; the port is its own field. `localhost` and single-label names fail because a fully qualified name is required. |
+| `409`: `the limit of 100 endpoints is reached …` or `this endpoint is entered already` | Remove one or raise `scan_max_endpoints`; or the same host, port and SNI exist already. |
+| *Scan now* is missing, or `409 scanning is switched off` | `monitor.scan_interval: off`. |
+| *Scan now* answers `429` (*try again in N seconds*) | One request per endpoint and 60 seconds. |
+| *That endpoint is gone already* on the page, or `404` from the API, for an endpoint that exists | The ID in the request is not well-formed (1 to 64 letters, digits, `_` or `-`), so it counts as "not found". Use the buttons of the page, or the `id` that `GET /api/v1/endpoints` returns. A caller without the role gets 403 first, never 404. |
+| State *Not issued by this PKI*, but the name has a certificate here | The endpoint is an IP address without an SNI, or the certificate this PKI issued names something else (check *Certificates* for the names). Add the endpoint again with the SNI. |
+| State *Wrong certificate* – *an older certificate* right after a renewal | The state shows at once; the alert waits `scan_mismatch_after`. Reload the service, then *Scan now*. |
+| State *Expired* – *no newer certificate was issued* | The host serves a certificate of this PKI that has ended, and nothing newer exists for the name. Issue a new certificate and deploy it (§10.9, §12.5). |
+| The state stays *Pending* | The first scans failed fewer than `scan_unreachable_after` times (see *Last error*), or scanning is off, or the server was started a moment ago. |
+| No alert although the state is wrong | The two scans or the waiting time are not over yet (§14.5), the name has no current certificate here, or the endpoint is *Not issued by this PKI*. Then §13.10 for the messages. |
+
+### 14.11 An end-to-end check
+
+Do this once after setup, on a test host with a service that serves a certificate of this PKI for a name
+you can renew; the names are examples. Set `monitor.scan_interval: 5m` for the test if you do not want to
+wait, and use *Scan now* (once a minute per endpoint) to speed up the steps. You need an admin account
+and a channel from chapter 13.
+
+1. `config check` shows the *TLS scan* rows (§14.3). Restart the service and unseal it.
+2. *Endpoints*: add `proxy.homelab.lan`, port 443. Within a minute the state is **OK**; compare the
+   fingerprint with the `openssl s_client` command of §14.3.
+3. **Older certificate.** On the host switch the service to a previous certificate of the same name (the
+   agent's backup, or one issued earlier) and reload. The newer certificate must be older than
+   `scan_mismatch_after`. After two scans and the next evaluation, one `scan_mismatch` alert (warning) is
+   on *Alerts* and one message arrives.
+4. **Fix.** Put the current certificate back and reload. After the next scan the alert resolves within a
+   minute; the second message says *resolved*.
+5. **Unreachable.** Stop the service. After `scan_unreachable_after` (3) failed scans: `scan_unreachable`.
+   A restart within two scans, as a reboot does, produces nothing. Start it again: resolved.
+6. **Not issued by this PKI.** Add an endpoint that serves a certificate of another CA for a name this PKI
+   never issued: the state reads *Not issued by this PKI* and no `scan_mismatch` opens.
+7. **Guard.** Adding `127.0.0.1` port 443 and `proxy.homelab.lan` port 22 is refused; both attempts are in
+   the audit log. Seal the server: the *Last scan* column keeps moving.
+8. Remove the test endpoints; their alerts resolve within a minute.
+
+If step 3 produces no alert after about twelve minutes with `scan_interval: 5m`, go through §14.10 and
+then §13.10.

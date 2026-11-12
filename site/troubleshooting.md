@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, notifications, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, notifications, the TLS scan, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -101,7 +101,7 @@ firewall, a closed port or a wrong address.
 | `connection: … could not be reached` | Port 80 of the host is closed for the PKI server, a host firewall (**nftables**, ufw, firewalld) drops it, or nothing listens | On the host: `ss -ltnp 'sport = :80'` and `nft list ruleset`. Allow tcp/80 from the PKI server. The server log (level info) has the address it tried. |
 | The same, but the name does not point at the host | The DNS name does not resolve to the host from the point of view of the **server** (split DNS, a public record) | Set `acme.resolver` to the DNS server that knows your internal names; test with `dig @192.0.2.53 nas.homelab.lan` |
 | It works from your laptop, not from the server | A **proxy or load balancer** in front of the host answers port 80 with a redirect or does not pass `/.well-known/acme-challenge/` | The validator follows redirects only to names of the same order and ports 80 and 443. Pass the challenge path through, or use dns-01. |
-| `connection: … address policy … refuses` | The name resolves to loopback or link-local, or to a private address on a *public only* domain | Fix DNS, or the domain's address setting |
+| `connection: … address policy … refuses` | The name resolves to a range that is never reached (loopback, link-local and others; [full list]({{ '/reference/operations/' | relative_url }}#148-which-addresses-are-never-scanned)), or to a private address on a *public only* domain | Fix DNS, or the domain's address setting |
 | `incorrectResponse: … answered with status 404` | The web server does not serve `/.well-known/acme-challenge/` | Use the client's webroot or standalone mode correctly |
 | `rejectedIdentifier: no domain covers …` | **The name is not allowed:** no ACME domain covers it, or it is a wildcard on a domain without wildcards | *ACME → Domains*: add the domain, or enable wildcards (dns-01) |
 | `unauthorized: account … waits for approval` | The domain's approval level is *approved accounts* | Approve the account (*ACME → Accounts*) or give the client an EAB key |
@@ -175,6 +175,39 @@ Is a channel configured (`config check`)? Can the service user read the files? D
 | `proxyconnect` or `Forbidden` from a proxy (webhook) | `HTTPS_PROXY` points to a proxy that refuses the destination, or `NO_PROXY` should list it. The variables are read when the server starts. |
 | Messages stop after a change of channel | The server was restarted and is sealed again; the checks run while sealed, but unseal anyway |
 | `notification dropped after the last retry – the alerts are still on the dashboard` in the log | Five delivery attempts failed over about two and a half hours. Fix the channel; open alerts come again at the next reminder, a dropped *resolved* message is lost. |
+
+## TLS scan
+
+Start with the *Last error* column of the *Endpoints* page (or `last_error_kind` in the API); it is
+always one of the words below. Then try the same from the server
+([operations guide §14.10]({{ '/reference/operations/' | relative_url }}#1410-when-something-does-not-work)):
+
+```bash
+openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </dev/null
+```
+
+| Symptom or error | Likely cause | Fix |
+|---|---|---|
+| `dns` | The name does not resolve from the server, or has no address | `getent hosts NAME` on the server. With split DNS set `acme.resolver` to the server that knows the name. |
+| `timed out` | Nothing answered within `scan_timeout`: the host is down, or a firewall drops the packets | Check route and firewall from the server to the host and port. Raise `scan_timeout` (up to 30 s) only if the host really is slow. |
+| `connection refused` | The host answers and nothing listens on that port | Start the service, or correct the port |
+| `could not connect` | Another network failure: no route, network unreachable, a reset | The same checks as for a timeout; `log.level: debug` names the address that failed |
+| `TLS handshake failed` | The port is not TLS from the first byte (plain HTTP, SSH, a STARTTLS port), or the service speaks only TLS 1.0 or 1.1, or no cipher suite matches | `openssl s_client` shows which. A STARTTLS service cannot be scanned: remove the endpoint. Enable TLS 1.2 on the service. |
+| `no certificate` | The handshake worked, but the server presented none | Rare (anonymous or pre-shared keys); the scan cannot judge such a service |
+| `client certificate required` | The service demands a client certificate and the scan presents none | The endpoint cannot be scanned and raises no alert: remove it, or scan a listener without client authentication |
+| `refused by the address policy` | Every address of the name is in a range that is never scanned, or private on a *public only* domain | Look at what the name resolves to; correct DNS or the domain's address setting |
+| `no domain covers the host` | The domain was removed or narrowed after the endpoint was added | Restore the domain or remove the endpoint |
+| `port is not in monitor.scan_ports` | The port list was changed after the endpoint was added | Put the port back (restart) or remove the endpoint |
+| Adding is refused: `no domain covers this host` | No domain matches the host | Create a domain for it, or let an existing one include subdomains |
+| Adding is refused: `port … is not in the list of scannable ports` | The port is not in `monitor.scan_ports` | Use a listed port, or extend the list in `config.yaml` and restart |
+| Adding is refused: `this address range is never scanned` | The IP address is loopback, link-local, multicast, reserved, an IPv6 form that embeds or translates to an IPv4 address, or in a non-global range ([full list]({{ '/reference/operations/' | relative_url }}#148-which-addresses-are-never-scanned)) | Use the host's name or another address |
+| *Scan now* is missing, or answers `409` | `monitor.scan_interval: off` | Set an interval and restart |
+| *Scan now* answers `429` | One request per endpoint and 60 seconds | Wait for the time in `Retry-After` |
+| *Not issued by this PKI*, but the name has a certificate here | The endpoint is an IP address without an SNI, or the certificate names something else | Add the endpoint again with the SNI |
+| *Wrong certificate* right after a renewal, but no alert | The state shows at once; the alert waits for two scans and `scan_mismatch_after` (1 hour) | Reload the service on the host, then *Scan now* |
+| *Expired*, no newer certificate was issued | The host serves a certificate of this PKI that has ended, and nothing newer exists for the name | Issue a new certificate and deploy it |
+| `404` or *gone already* for *Scan now* or *Remove* of an endpoint that exists | The endpoint ID in the request is not well-formed (1 to 64 letters, digits, `_` or `-`). A caller without the role gets 403 first | Use the page's buttons or the `id` from `GET /api/v1/endpoints` |
+| The state stays *Pending* | The first scans failed fewer than `scan_unreachable_after` times, or scanning is off | Read *Last error* |
 
 ## Containers
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
+	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -25,6 +26,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
+	"github.com/Der-Felix/MyOwnPKI/internal/tlsscan"
 )
 
 var console = testinstance.Console
@@ -48,6 +50,8 @@ type env struct {
 	acme        *acme.Server
 	alerts      *monitor.Store
 	tester      *notify.Tester
+	scan        *tlsscan.Service
+	endpoints   *monitor.Endpoints
 	mail, hook  *stubChannel
 	logs        bytes.Buffer
 }
@@ -75,11 +79,20 @@ func newEnv(t *testing.T) *env {
 	v.alerts = &monitor.Store{DB: in.SystemDB.Write, Tenant: store.DefaultTenant}
 	v.mail, v.hook = &stubChannel{name: "email"}, &stubChannel{name: "webhook"}
 	v.tester = &notify.Tester{Channels: []notify.Channel{v.mail, v.hook}, Server: "pki01", Clock: in.Clock, Audit: in.TenantAudit.Write, Scope: in.Engine.Scope, Tenant: store.DefaultTenant}
+	v.scan = &tlsscan.Service{
+		PKI: in.PKIDB.Write, Tenant: store.DefaultTenant, Engine: in.Engine, Clock: in.Clock,
+		Settings: tlsscan.Settings{Interval: 15 * time.Minute, Timeout: 10 * time.Second, MaxEndpoints: 100, Ports: []int{443, 465, 636, 853, 993, 995, 5061, 6514, 8443, 8883, 9443}},
+	}
+	v.endpoints = &monitor.Endpoints{
+		Service: v.scan, Clock: in.Clock,
+		Eval: &monitor.Evaluator{Engine: in.Engine, Seal: in.Ring.Status, Rules: monitor.DefaultRules(), Scan: v.scan,
+			Who: keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "monitor"}, Principal: authz.System("monitor")}},
+	}
 	v.api = New(Deps{
 		Auth: in.Auth, Engine: in.Engine, Keys: in.Ring, Presets: in.Presets, Clock: in.Clock,
 		Log: slog.New(slog.NewJSONHandler(&v.logs, nil)), Version: "test", Demo: true,
 		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents, ACME: acmeServer,
-		Alerts: v.alerts, Notify: v.tester,
+		Alerts: v.alerts, Notify: v.tester, Endpoints: v.endpoints,
 	})
 	return v
 }

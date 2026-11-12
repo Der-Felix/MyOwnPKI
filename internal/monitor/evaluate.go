@@ -26,6 +26,8 @@ type Engine interface {
 	Certificates(ctx context.Context, who keys.Who, f ca.CertificateFilter) (*ca.CertificatePage, error)
 	Certificate(ctx context.Context, who keys.Who, id string) (*ca.CertificateInfo, error)
 	CAs(ctx context.Context, who keys.Who) ([]ca.CAInfo, error)
+	// CertificateByFingerprint finds the certificate a TLS endpoint serves.
+	CertificateByFingerprint(ctx context.Context, who keys.Who, fingerprint string) (*ca.CertificateInfo, error)
 }
 
 // Agents is what the evaluation reads about agents; nil when the agent
@@ -42,6 +44,13 @@ type Evaluator struct {
 	Seal   func() keys.Status
 	Rules  Rules
 	Who    keys.Who // a system principal that may read the whole tenant
+	// Scan gives the TLS endpoints and their last scans; nil = no scan rules
+	// (docs/PHASE3.md §10.2).
+	Scan EndpointSource
+	// ScanOff: scanning is switched off (monitor.scan_interval: off). The scan
+	// alerts are not produced, so they resolve – there is no fresh result –
+	// but EndpointStates still tells the last known state.
+	ScanOff bool
 }
 
 // Evaluate returns every condition that holds at now, sorted by key.
@@ -51,7 +60,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, now time.Time) ([]Finding, err
 	if err != nil {
 		return nil, fmt.Errorf("monitor: certificates: %w", err)
 	}
-	out = append(out, certs...)
+	out = append(out, certs.findings...)
 	cas, err := e.Engine.CAs(ctx, e.Who)
 	if err != nil {
 		return nil, fmt.Errorf("monitor: CAs: %w", err)
@@ -66,13 +75,20 @@ func (e *Evaluator) Evaluate(ctx context.Context, now time.Time) ([]Finding, err
 		}
 		out = append(out, ag...)
 	}
+	if e.Scan != nil && !e.ScanOff {
+		sf, err := e.scanFindings(ctx, now, certs)
+		if err != nil {
+			return nil, fmt.Errorf("monitor: TLS scan: %w", err)
+		}
+		out = append(out, sf...)
+	}
 	slices.SortFunc(out, func(a, b Finding) int { return strings.Compare(a.Key, b.Key) })
 	return out, nil
 }
 
 // certificates: end-entity certificates that expire (or expired recently)
 // and are not superseded by a newer certificate for the same names.
-func (e *Evaluator) certificates(ctx context.Context, now time.Time) ([]Finding, error) {
+func (e *Evaluator) certificates(ctx context.Context, now time.Time) (*certSet, error) {
 	// Every valid certificate decides what is superseded; the expired ones
 	// of the last ExpiredFor can still be unreplaced.
 	valid, err := e.allCertificates(ctx, ca.CertificateFilter{Status: ca.CertValid, HideAgentCertificates: true})
@@ -118,7 +134,17 @@ func (e *Evaluator) certificates(ctx context.Context, now time.Time) ([]Finding,
 	for i := range expired {
 		check(&expired[i])
 	}
-	return out, nil
+	return &certSet{findings: out, valid: valid, latest: latest}, nil
+}
+
+// certSet is what the certificate rules loaded, for the rules that follow: the
+// valid end-entity certificates (agent identity certificates excluded), the
+// latest end of a valid certificate per name set (what decides that one is
+// superseded) and the cert_expiry findings.
+type certSet struct {
+	findings []Finding
+	valid    []ca.CertificateInfo
+	latest   map[string]time.Time
 }
 
 func (e *Evaluator) allCertificates(ctx context.Context, f ca.CertificateFilter) ([]ca.CertificateInfo, error) {

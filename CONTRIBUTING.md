@@ -9,7 +9,8 @@ them privately, never as a public issue or pull request.
 ## Before you start
 
 - Read [docs/PLAN.md](docs/PLAN.md): the architecture, the decisions (ADRs, §2) and the roadmap
-  (§10). The current work plan is [docs/PHASE1.md](docs/PHASE1.md).
+  (§10). The current work plan is [docs/PHASE3.md](docs/PHASE3.md); phases 1 and 2 are finished
+  ([docs/PHASE1.md](docs/PHASE1.md), [docs/PHASE2.md](docs/PHASE2.md)).
 - For anything larger than a small fix, open an issue first and describe what you want to change.
   Features from a later phase are usually not merged early.
 - **ADRs are deliberate trade-offs.** If your change conflicts with one, propose an ADR change in

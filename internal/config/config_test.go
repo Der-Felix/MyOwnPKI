@@ -188,7 +188,7 @@ func TestEveryFieldHasAnEnvVariable(t *testing.T) {
 	}
 	all := Config{DataDir: "marker", Log: Log{"marker", "marker"}, Admin: Admin{"marker", "marker", "marker", "marker", "marker", "marker"}, Public: Public{"marker"},
 		Auth: Auth{"marker", "marker", "marker"}, ACME: ACME{"marker", "marker", "marker", "marker", "marker"}, Agent: Agent{"marker", "marker", "marker", "marker", "marker"},
-		Monitor: Monitor{"marker", "marker", "marker", "marker", "marker"},
+		Monitor: Monitor{"marker", "marker", "marker", "marker", "marker", "marker", "marker", "marker", "marker", "marker", "marker"},
 		Notify:  Notify{Email{"marker", "marker", "marker", "marker", "marker", "marker", "marker"}, Webhook{"marker", "marker", "marker"}}}
 	if cfg != all {
 		t.Errorf("not every field is reachable from the environment: %+v", cfg)

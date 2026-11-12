@@ -288,6 +288,9 @@ func (c Config) Validate() error {
 	if _, err := c.Monitor.Values(); err != nil {
 		add("%w", err)
 	}
+	if _, err := c.Monitor.Scan(); err != nil {
+		add("%w", err)
+	}
 	c.validateNotify(add)
 
 	if len(errs) > 0 {

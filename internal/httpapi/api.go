@@ -67,6 +67,8 @@ type Deps struct {
 	// Alerts and Notify serve the monitoring (v0.3.3); nil = monitoring off.
 	Alerts *monitor.Store
 	Notify *notify.Tester
+	// Endpoints are the TLS scan endpoints with their assessed state (v0.3.4); nil = monitoring off.
+	Endpoints *monitor.Endpoints
 }
 
 // access says who may call a route.
@@ -97,6 +99,7 @@ type call struct {
 	token   string // the session cookie value
 	session *auth.Session
 	status  int
+	limit   int64 // the body limit of the route, for the message of a body that is too large
 }
 
 // who is the caller as the services want it.
@@ -258,6 +261,7 @@ func (a *API) serve(c *call, rt Route) error {
 		if rt.maxBody > 0 {
 			limit = rt.maxBody
 		}
+		c.limit = limit
 		c.r.Body = http.MaxBytesReader(c.w, c.r.Body, limit)
 	}
 	return rt.handle(c)

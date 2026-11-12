@@ -55,8 +55,9 @@ code can make a token fresh. Such a request answers `403` with the problem type 
   agent. (Reading them is allowed.)
 - creating other API tokens.
 
-Issuing and renewing certificates, reading CAs, certificates, agents, alerts and the audit log, and
-sending the test notification are allowed for the right role. A sign-in session in the browser can do
+Issuing and renewing certificates, reading CAs, certificates, agents, alerts and the audit log,
+sending the test notification, and adding, scanning and removing TLS endpoints (see
+[TLS scan]({{ '/tls-scan/' | relative_url }})) are allowed for the right role. A sign-in session in the browser can do
 everything its roles allow, after the step-up.
 
 ## Conventions

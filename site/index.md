@@ -27,6 +27,9 @@ may change the API, the configuration or the database schema; the
 - **Monitoring:** the server checks itself every minute and tells you by e-mail or webhook when a
   certificate or a CA is about to expire, a CRL goes stale, the server is sealed or an agent is
   silent.
+- **TLS scan:** the server connects to the endpoints you enter, reads the certificate each one really
+  serves and alerts when it is not the one this PKI issued – for example a renewal that never
+  reached the web server.
 - **Backup and restore**, a daily backup timer, and an import of the old `pki.sh` Bash suite.
 
 ## Who it is for
@@ -43,11 +46,12 @@ You choose per host how much MyOwnPKI does for you. The agent is optional.
 | Level | On the host | What the server knows | State |
 |---|---|---|---|
 | 1. ACME only | An ACME client you already run: certbot, acme.sh, lego, Traefik, Caddy | Issuances and renewals | Available |
-| 2. ACME and scan | The same client | Also whether the certificate is really served (a TLS scan from the server) | Planned (v0.3.4) |
+| 2. ACME and scan | The same client | Also whether the certificate is really served (a [TLS scan]({{ '/tls-scan/' | relative_url }}) from the server) | Available |
 | 3. Agent | `myownpki-agent`, which uses ACME inside | Everything: inventory, deployment, reload, rollback, a local TLS check | Available for Linux |
 
-Level 1 is enough for hosts that already renew by ACME. Take level 3 when you want the server to
-see what is deployed where and to renew on a button. How to set up each level is on
+Level 1 is enough for hosts that already renew by ACME. Add level 2 for the hosts you cannot afford
+to find out about from a user: nothing is installed, you enter the endpoint on the server. Take level 3
+when you want the server to see what is deployed where and to renew on a button. How to set up each level is on
 [Adding hosts]({{ '/hosts/' | relative_url }}).
 
 ## Start here
@@ -59,6 +63,7 @@ see what is deployed where and to renew on a button. How to set up each level is
 | Get certificates onto a host, with or without the agent | [Adding hosts]({{ '/hosts/' | relative_url }}) |
 | Roll the agent out with Salt | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
 | Be told when something expires or breaks | [Monitoring]({{ '/monitoring/' | relative_url }}) |
+| Check that a host really serves the certificate it should | [TLS scan]({{ '/tls-scan/' | relative_url }}) |
 | Know what to do and what to avoid | [Best practices]({{ '/best-practices/' | relative_url }}) |
 | Fix something that does not work | [Troubleshooting]({{ '/troubleshooting/' | relative_url }}) |
 | Look up a command, a key or an API call | [Reference]({{ '/reference/' | relative_url }}) |
