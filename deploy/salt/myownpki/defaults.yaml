@@ -1,0 +1,18 @@
+# Defaults of the pillar myownpki:agent, merged with the real pillar in map.jinja.
+# Plain YAML on purpose (no Jinja). Keys without a value here are required.
+agent:
+  version: null
+  server: null
+  acme_directory: null
+  root_source: null
+  root_sha256: null
+  package:
+    sha256: {}
+    source: salt://myownpki/files/{name}
+    format: auto
+  webroot: null
+  low_ports: false
+  enrollment_pass: null
+  config_source: null
+  deployments: {}
+  absent: []
