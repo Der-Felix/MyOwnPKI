@@ -263,6 +263,50 @@ func TestEndpointsPageStates(t *testing.T) {
 	}
 }
 
+// TestEndpointsPageExpiredWithNoReplacement: a certificate of this PKI that
+// has ended and was never replaced is not "an older certificate" - nothing
+// newer exists to compare it with. The page says Expired, in the status color
+// of the expiry alert; an expired one that was renewed stays the older one.
+func TestEndpointsPageExpiredWithNoReplacement(t *testing.T) {
+	t.Parallel()
+	e := newEndpointsUIEnv(t)
+	gone, err := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"gone.homelab.lan"}, ValidityDays: 1, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedOld, err := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"renewed.homelab.lan"}, ValidityDays: 1, Who: testinstance.Console})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Clock.Advance(2 * 24 * time.Hour)
+	if _, ierr := e.Engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"renewed.homelab.lan"}, ValidityDays: 90, Who: testinstance.Console}); ierr != nil {
+		t.Fatal(ierr)
+	}
+	goneID := e.add(t, "gone.homelab.lan", 443)
+	renewedID := e.add(t, "renewed.homelab.lan", 443)
+	e.serve(t, goneID, gone.Fingerprint, "CN=Issuing CA", "CN=gone.homelab.lan", gone.NotAfter)
+	e.serve(t, renewedID, renewedOld.Fingerprint, "CN=Issuing CA", "CN=renewed.homelab.lan", renewedOld.NotAfter)
+	admin := e.browser("192.0.2.1")
+	admin.signIn(t, "demo", e.DemoPassword)
+	html := admin.get(t, "/endpoints").html()
+	rows := regexp.MustCompile(`(?s)<tr.*?</tr>`).FindAllString(html, -1)
+	var goneRow, renewedRow string
+	for _, r := range rows {
+		switch {
+		case strings.Contains(r, "gone.homelab.lan:443"):
+			goneRow = r
+		case strings.Contains(r, "renewed.homelab.lan:443"):
+			renewedRow = r
+		}
+	}
+	if !strings.Contains(goneRow, "Expired") || strings.Contains(goneRow, "Wrong certificate") || strings.Contains(goneRow, "older") {
+		t.Errorf("expired and never replaced: %s", goneRow)
+	}
+	if !strings.Contains(renewedRow, "Wrong certificate") || !strings.Contains(renewedRow, "an older certificate of this PKI") {
+		t.Errorf("expired and renewed: %s", renewedRow)
+	}
+}
+
 // TestEndpointsPageEscapesWhatTheRemoteHostSent: the issuer and the subject
 // of a served certificate are the remote host's text.
 func TestEndpointsPageEscapesWhatTheRemoteHostSent(t *testing.T) {
@@ -466,6 +510,65 @@ func TestEndpointActionsFromThePage(t *testing.T) {
 	}
 	if got := e.endpointAudit(t); got["endpoint.delete/success"] != 1 || got["endpoint.scan/success"] != 2 || got["endpoint.delete/denied"] != 2 || got["endpoint.scan/denied"] != 1 {
 		t.Errorf("audit at the end: %v", got)
+	}
+}
+
+// TestEndpointActionsWithHostileIDs: the "id" of the scan and remove forms is
+// attacker input. The role is checked first (403), the audit entry of that
+// refusal names no ID that is not well-formed, and an admin who posts garbage
+// gets the plain "gone already" message and no audit entry at all.
+func TestEndpointActionsWithHostileIDs(t *testing.T) {
+	t.Parallel()
+	e := newEndpointsUIEnv(t)
+	e.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
+	admin, viewer := e.browser("192.0.2.1"), e.browser("192.0.2.2")
+	admin.signIn(t, "demo", e.DemoPassword)
+	viewer.signIn(t, "viewer", testinstance.Password)
+	adminToken, viewerToken := admin.csrf(t), viewer.csrf(t)
+
+	ids := map[string]string{
+		"escape sequence": "ep_\x1b[31mred",
+		"nul":             "ep_\x00x",
+		"newline":         "ep_1\nendpoint.delete/success",
+		"bidi override":   "ep_" + string(rune(0x202e)) + "1",
+		"over-long":       strings.Repeat("a", 5000),
+		"path":            "../../etc/passwd",
+		"empty":           "",
+	}
+	for name, id := range ids {
+		for _, path := range []string{"/endpoints/scan", "/endpoints/delete"} {
+			if r := viewer.post(t, path, url.Values{"csrf_token": {viewerToken}, "id": {id}}); r.Code != http.StatusForbidden {
+				t.Errorf("viewer %s %s: %d, want 403", path, name, r.Code)
+			}
+			r := admin.post(t, path, url.Values{"csrf_token": {adminToken}, "id": {id}})
+			if got := flashOf(t, admin, "/endpoints"); r.Code != http.StatusSeeOther || !strings.Contains(got, "gone already") {
+				t.Errorf("admin %s %s: %d, %s", path, name, r.Code, got)
+			}
+		}
+	}
+	e.Deliver(t)
+	rows, err := e.TenantAudit.Read.QueryContext(t.Context(), `SELECT action, result, target_id, details_json FROM audit_entries WHERE action LIKE 'endpoint.%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	wellFormed := regexp.MustCompile(`^[0-9A-Za-z_-]{0,64}$`)
+	n := 0
+	for rows.Next() {
+		var action, result, target, details string
+		if err := rows.Scan(&action, &result, &target, &details); err != nil {
+			t.Fatal(err)
+		}
+		n++
+		if result != "denied" || !wellFormed.MatchString(target) || strings.ContainsAny(details, "\x1b"+string(rune(0x202e))) || len(details) > 600 {
+			t.Errorf("audit entry %s/%s target %q details %q", action, result, target, details)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if want := 2 * len(ids); n != want { // the viewer's two refusals per ID; the admin's "not found" is no event
+		t.Errorf("%d audit entries, want %d", n, want)
 	}
 }
 

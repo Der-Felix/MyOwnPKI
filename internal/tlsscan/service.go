@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
@@ -83,6 +84,9 @@ func (s *Service) list(ctx context.Context) ([]Endpoint, error) {
 func (s *Service) Get(ctx context.Context, who keys.Who, id string) (*Endpoint, error) {
 	if err := s.authorize(who, authz.ReadPKI); err != nil {
 		return nil, err
+	}
+	if !ValidID(id) {
+		return nil, ErrNotFound
 	}
 	r, err := pkidb.New(s.PKI).GetEndpoint(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -175,12 +179,16 @@ func (s *Service) create(ctx context.Context, who keys.Who, req Request) (*Endpo
 // Delete removes an endpoint (permission endpoint.manage). Its alerts resolve
 // with the next evaluation.
 func (s *Service) Delete(ctx context.Context, who keys.Who, id string) error {
-	return s.refused(ctx, who, ActionDelete, audit.Target{Type: "endpoint", ID: id}, nil, s.delete(ctx, who, id))
+	target, details := endpointTarget(id)
+	return s.refused(ctx, who, ActionDelete, target, details, s.delete(ctx, who, id))
 }
 
 func (s *Service) delete(ctx context.Context, who keys.Who, id string) error {
 	if err := s.authorize(who, authz.ManageEndpoints); err != nil {
 		return err
+	}
+	if !ValidID(id) {
+		return ErrNotFound // after the role check: 403 comes first
 	}
 	now := s.now()
 	return s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
@@ -214,12 +222,16 @@ func (s *Service) ScanNow(ctx context.Context, who keys.Who, id string) error {
 	if errors.As(err, &wait) {
 		return err // a too-eager click is no event for the audit log
 	}
-	return s.refused(ctx, who, ActionScan, audit.Target{Type: "endpoint", ID: id}, nil, err)
+	target, details := endpointTarget(id)
+	return s.refused(ctx, who, ActionScan, target, details, err)
 }
 
 func (s *Service) scanNow(ctx context.Context, who keys.Who, id string) error {
 	if err := s.authorize(who, authz.ScanEndpoint); err != nil {
 		return err
+	}
+	if !ValidID(id) {
+		return ErrNotFound // after the role check: 403 comes first
 	}
 	if s.Settings.Off() {
 		return ErrOff
@@ -332,3 +344,25 @@ func parseNull(n sql.NullString) time.Time {
 }
 
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
+
+var idPattern = regexp.MustCompile(`^[0-9A-Za-z_-]{1,64}$`)
+
+// ValidID reports whether id has the form of an endpoint ID: 1 to 64 letters,
+// digits, underscore or hyphen (the rule of the REST API's path IDs). The ID
+// of a UI form or a request path is attacker input; whatever does not have
+// this form is an unknown endpoint, checked after the permission.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
+// endpointTarget is the audit target for the ID a request named, and the
+// details that go with it. An ID that is not well-formed never becomes a
+// target (the log shows target IDs to admins and ships them to a SIEM); what
+// was asked for is kept in the details, cleaned and clipped.
+func endpointTarget(id string) (audit.Target, map[string]any) {
+	if ValidID(id) {
+		return audit.Target{Type: "endpoint", ID: id}, nil
+	}
+	if id == "" {
+		return audit.Target{Type: "endpoint"}, nil
+	}
+	return audit.Target{Type: "endpoint"}, map[string]any{"id": clean(id, 64)}
+}

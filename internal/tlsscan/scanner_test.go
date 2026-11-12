@@ -740,6 +740,106 @@ func TestDispatchClaimsAScanBeforeItRuns(t *testing.T) {
 	}
 }
 
+// lateClose is a connection whose close_notify - the first thing the scan
+// writes after the handshake - is held back until the scan's own deadline has
+// passed: the handshake succeeded, and nothing of the budget is left.
+type lateClose struct {
+	net.Conn
+	until   time.Time
+	closing atomic.Bool
+}
+
+// SetWriteDeadline is what crypto/tls calls first when it closes after a
+// finished handshake; the handshake itself never calls it.
+func (c *lateClose) SetWriteDeadline(t time.Time) error {
+	c.closing.Store(true)
+	return c.Conn.SetWriteDeadline(t)
+}
+
+func (c *lateClose) Write(p []byte) (int, error) {
+	if c.closing.Load() {
+		time.Sleep(time.Until(c.until) + 20*time.Millisecond)
+	}
+	return c.Conn.Write(p)
+}
+
+// TestSlowButSuccessfulHandshakeStillRecordsAResult: the work after the
+// handshake (the trust anchors from the database) has its own budget. A
+// handshake that finishes with the scan's deadline in sight must not leave the
+// scan without a result - an Error log and no state, every interval.
+func TestSlowButSuccessfulHandshakeStillRecordsAResult(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.svc.Settings.Timeout = time.Second
+	issued, cert := f.issue(t, 90, "www.homelab.lan")
+	s := serveTLS(t, tlsConfig(cert))
+	f.route("www.homelab.lan", "192.0.2.10", 443, s.addr)
+	f.scanner.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := f.dial(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		dl, _ := ctx.Deadline()
+		return &lateClose{Conn: conn, until: dl}, nil
+	}
+	var logs lockedBuf
+	f.scanner.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ep := f.add(t, Request{Host: "www.homelab.lan", Port: 443})
+	f.scanDue(t)
+
+	got := f.get(t, ep.ID)
+	if !got.Scanned() || got.Fingerprint != issued.Fingerprint || got.ChainState != ChainTrusted || got.FailStreak != 0 {
+		t.Errorf("no result after a handshake that used the whole budget: %+v\nlog: %s", got, logs.String())
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("error log: %s", logs.String())
+	}
+}
+
+// stepBack moves the fake clock back by d (a wrong clock corrected by NTP).
+func (f *fixture) stepBack(d time.Duration) { f.inst.Clock.Set(f.inst.Clock.Now().Add(-d)) }
+
+// TestDispatchRescansAfterTheClockStepsBack: a scan claimed while the clock
+// was ahead (a VM that booted with a wrong RTC, corrected by NTP later) leaves
+// next_scan_at in the future. An endpoint must not stay silent until then:
+// a next time further away than any interval plus jitter can produce is due.
+func TestDispatchRescansAfterTheClockStepsBack(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, cert := f.issue(t, 90, "www.homelab.lan")
+	s := serveTLS(t, tlsConfig(cert))
+	f.route("www.homelab.lan", "192.0.2.10", 443, s.addr)
+	ep := f.add(t, Request{Host: "www.homelab.lan", Port: 443})
+	f.scanDue(t)
+	if s.handshakes() != 1 {
+		t.Fatalf("scanned %d times", s.handshakes())
+	}
+	first := f.get(t, ep.ID).NextScanAt
+
+	// A small step back (NTP slew, a few minutes) only delays the next scan.
+	f.stepBack(5 * time.Minute)
+	f.scanDue(t)
+	if s.handshakes() != 1 {
+		t.Fatalf("a step of 5 minutes rescanned (%d scans)", s.handshakes())
+	}
+
+	// The clock was two hours ahead when the scan was claimed: next_scan_at
+	// lies about 2 h 15 min after the corrected time.
+	f.stepBack(2 * time.Hour)
+	f.scanDue(t)
+	if s.handshakes() != 2 {
+		t.Fatalf("the endpoint stayed silent after the clock stepped back (%d scans)", s.handshakes())
+	}
+	got := f.get(t, ep.ID).NextScanAt
+	if !got.Before(first) || got.Sub(f.inst.Clock.Now()) > 17*time.Minute {
+		t.Errorf("next scan %v is not planned from the corrected clock %v (first %v)", got, f.inst.Clock.Now(), first)
+	}
+	f.scanDue(t)
+	if s.handshakes() != 2 {
+		t.Errorf("scanned again at once (%d scans)", s.handshakes())
+	}
+}
+
 func TestCloseCancelsRunningScansAndRecordsNothing(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

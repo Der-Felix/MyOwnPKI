@@ -70,6 +70,43 @@ func TestAllowed(t *testing.T) {
 		{"203.0.113.9", true, true},
 		{"2001:db8::1", true, true},
 		{"::ffff:192.0.2.10", true, true},
+		// IPv4-translated (SIIT, RFC 2765/6145 "::ffff:0:0:0/96"): not the IPv4-mapped range, so it is not unmapped.
+		{"::ffff:0:7f00:1", false, false},   // 127.0.0.1
+		{"::ffff:0:a00:1", false, false},    // 10.0.0.1
+		{"::ffff:0:c000:20a", false, false}, // 192.0.2.10: the range goes, not only bad contents
+		{"::ffff:0:0:0", false, false},
+		{"::ffff:0:ffff:ffff", false, false},
+		// Not globally reachable and no documentation range: refused under every policy (IANA special-purpose registries).
+		{"192.0.0.1", false, false}, // IETF protocol assignments 192.0.0.0/24
+		{"192.0.0.255", false, false},
+		{"198.18.0.1", false, false}, // benchmarking 198.18.0.0/15
+		{"198.19.255.254", false, false},
+		{"192.88.99.1", false, false}, // 6to4 relay anycast 192.88.99.0/24
+		{"192.88.99.255", false, false},
+		{"fec0::1", false, false}, // site-local fec0::/10
+		{"feff:ffff::1", false, false},
+		{"100::1", false, false}, // discard-only 100::/64
+		{"100::ffff:ffff:ffff:ffff", false, false},
+		{"5f00::1", false, false}, // SRv6 SIDs 5f00::/16
+		{"5f00:ffff::1", false, false},
+		{"::ffff:198.18.0.1", false, false}, // IPv4-mapped is unmapped first and judged as IPv4
+		{"::ffff:192.0.0.9", false, false},
+		// The edges of those ranges stay reachable.
+		{"192.0.1.1", true, true}, // between 192.0.0.0/24 and 192.0.2.0/24
+		{"198.17.255.255", true, true},
+		{"198.20.0.1", true, true},
+		{"192.88.98.1", true, true},
+		{"192.88.100.1", true, true},
+		{"fbff::1", true, true},      // just below fc00::/7
+		{"100:0:0:1::1", true, true}, // outside 100::/64
+		{"5eff::1", true, true},
+		{"6000::1", true, true},
+		{"::ffff:1:7f00:1", true, true}, // outside ::ffff:0:0:0/96 (the next /96)
+		// Documentation ranges stay allowed: tests and examples use them as stand-ins for public addresses.
+		{"192.0.2.0", true, true},
+		{"198.51.100.255", true, true},
+		{"203.0.113.1", true, true},
+		{"2001:db8:ffff::1", true, true},
 		// Ordinary global IPv6 next to the refused ranges is untouched.
 		{"2606:4700:4700::1111", true, true},
 		{"2001:1::1", true, true},    // 2001::/16 outside the Teredo /32
