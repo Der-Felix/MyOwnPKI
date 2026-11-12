@@ -3,8 +3,8 @@
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
 templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 …
 v0.2.2 released); phase 3 (agent, monitoring) in progress: v0.3.0 Linux agent, v0.3.1 packages and
-guided installation, v0.3.2 agent package fix, v0.3.3 monitoring, v0.3.4 TLS scan (current); next
-v0.3.5 host onboarding (see docs/PLAN.md §10.1).
+guided installation, v0.3.2 agent package fix, v0.3.3 monitoring, v0.3.4 TLS scan, v0.3.5 host onboarding (current); next
+v0.3.6 Salt formula (see docs/PLAN.md §10.1).
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
