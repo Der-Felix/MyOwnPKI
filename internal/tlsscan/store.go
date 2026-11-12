@@ -15,8 +15,9 @@ import (
 
 // claimDue claims up to limit endpoints that are due at now and are not in
 // skip: each one's next scan moves to next(id) first, so neither a crash nor
-// a slow scan makes it due again at once.
-func (s *Service) claimDue(ctx context.Context, now time.Time, limit int, skip func(id string) bool, next func() time.Time) ([]Endpoint, error) {
+// a slow scan makes it due again at once. An endpoint whose next scan lies
+// beyond horizon is due as well: the clock was ahead when it was claimed.
+func (s *Service) claimDue(ctx context.Context, now, horizon time.Time, limit int, skip func(id string) bool, next func() time.Time) ([]Endpoint, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -27,7 +28,7 @@ func (s *Service) claimDue(ctx context.Context, now time.Time, limit int, skip f
 	defer func() { _ = tx.Rollback() }()
 	q := pkidb.New(tx)
 	// Endpoints in flight can be due again (scan now), so ask for more.
-	rows, err := q.ListDueEndpoints(ctx, pkidb.ListDueEndpointsParams{NextScanAt: dbTime(now), Limit: int64(limit) * 4})
+	rows, err := q.ListDueEndpoints(ctx, pkidb.ListDueEndpointsParams{NextScanAt: dbTime(now), NextScanAt_2: dbTime(horizon), Limit: int64(limit) * 4})
 	if err != nil {
 		return nil, err
 	}

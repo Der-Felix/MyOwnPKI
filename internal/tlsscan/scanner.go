@@ -138,7 +138,7 @@ func (s *Scanner) Dispatch(ctx context.Context) error {
 		return nil
 	}
 	now := s.Clock.Now().UTC().Truncate(time.Second)
-	claimed, err := s.Svc.claimDue(ctx, now, free,
+	claimed, err := s.Svc.claimDue(ctx, now, now.Add(2*s.Svc.Settings.Interval), free,
 		func(id string) bool { s.mu.Lock(); defer s.mu.Unlock(); return s.running[id] },
 		func() time.Time { return s.nextScan(now) })
 	if err != nil {
