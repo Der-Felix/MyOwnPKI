@@ -7,6 +7,10 @@
 //	myownpki-agent run                          the service (systemd)
 //	myownpki-agent status                       what the agent knows about itself
 //	myownpki-agent config check                 check agent.yaml
+//	myownpki-agent deployment add NAME [flags]  add a deployment and widen the sandbox to match (root)
+//	myownpki-agent deployment list              show the deployments of agent.yaml
+//	myownpki-agent deployment remove NAME       remove a deployment (root)
+//	myownpki-agent sandbox sync                 recompute the systemd drop-ins from agent.yaml (root)
 //	myownpki-agent --version
 //
 // Released for Linux; it builds for Windows, macOS and FreeBSD too.
@@ -48,7 +52,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n", binary)
+		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n"+
+			"       %s deployment add NAME [flags] | list | remove NAME [--prune-paths]\n"+
+			"       %s sandbox sync [--dry-run] [--adopt | --prune]\n", binary, binary, binary)
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -77,6 +83,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "config":
 		if len(rest) > 1 && rest[1] == "check" {
 			return cmdConfigCheck(rest[2:], stdout, stderr)
+		}
+	case "deployment":
+		if len(rest) > 1 {
+			switch rest[1] {
+			case "add":
+				return cmdDeploymentAdd(ctx, rest[2:], stdout, stderr)
+			case "list":
+				return cmdDeploymentList(rest[2:], stdout, stderr)
+			case "remove":
+				return cmdDeploymentRemove(ctx, rest[2:], stdout, stderr)
+			}
+		}
+	case "sandbox":
+		if len(rest) > 1 && rest[1] == "sync" {
+			return cmdSandboxSync(ctx, rest[2:], stdout, stderr)
 		}
 	}
 	fs.Usage()

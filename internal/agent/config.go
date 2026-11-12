@@ -383,5 +383,18 @@ func (c *Config) Warnings() []string {
 	if c.Sandbox.LowPorts != nil && !*c.Sandbox.LowPorts && lowPortsWanted(&Config{Enrollment: c.Enrollment, Deployments: c.Deployments}, false) == lowPortsYes {
 		out = append(out, "sandbox.low_ports is false, but a standalone challenge binds port 80 – it fails without CAP_NET_BIND_SERVICE")
 	}
+	for _, e := range []struct {
+		field string
+		dirs  []string
+	}{{"paths", c.Paths}, {"sandbox.write", c.Sandbox.Write}} {
+		for _, p := range e.dirs {
+			switch {
+			case broadDir(p):
+				out = append(out, fmt.Sprintf("%s: %s is a system directory – the agent may write everything below it; use a subdirectory such as %s", e.field, p, narrowerThan(p)))
+			case wideDir(p):
+				out = append(out, fmt.Sprintf("%s: %s is wider than a certificate directory needs; prefer a subdirectory such as %s", e.field, p, narrowerThan(p)))
+			}
+		}
+	}
 	return out
 }

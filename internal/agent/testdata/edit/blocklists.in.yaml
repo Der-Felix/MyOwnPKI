@@ -1,0 +1,24 @@
+server: https://pki.homelab.lan:8444
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: proxy1.homelab.lan
+acme_directory: https://pki.homelab.lan/acme/directory
+state_dir: "@ROOT@/state"
+enrollment:
+  challenge: standalone
+hooks:
+  mail-reload: ["@ROOT@/bin/systemctl", "reload", "postfix"]
+paths:
+  - "@ROOT@/www"
+  - "@ROOT@/mail"
+sandbox:
+  write:
+    - "@ROOT@/log-a"
+deployments:
+  - name: mail
+    profile: file
+    names: [mail.homelab.lan]
+    challenge: standalone
+    files:
+      fullchain: "@ROOT@/mail/fullchain.pem"
+      key: "@ROOT@/mail/privkey.pem"
+    reload_hook: mail-reload

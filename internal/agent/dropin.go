@@ -403,7 +403,7 @@ func reportDropins(w io.Writer, plan *DropinPlan, hadPaths bool) {
 		_, _ = fmt.Fprintf(w, "Removed from %s: %s\n", dropinPathsName, strings.Join(plan.Removed, " "))
 	}
 	if len(plan.Kept) > 0 {
-		_, _ = fmt.Fprintf(w, "Kept in %s (agent.yaml does not explain them): %s\n  Record them under sandbox.write in agent.yaml to make them part of the configuration.\n", dropinPathsName, strings.Join(plan.Kept, " "))
+		_, _ = fmt.Fprintf(w, "Kept in %s (agent.yaml does not explain them): %s\n  \"myownpki-agent sandbox sync --adopt\" records them under sandbox.write in agent.yaml; --prune drops them.\n", dropinPathsName, strings.Join(plan.Kept, " "))
 	}
 	if plan.LowPorts == LowPortsRemove {
 		_, _ = fmt.Fprintf(w, "Removed %s (sandbox.low_ports: false).\n", dropinLowPortsName)

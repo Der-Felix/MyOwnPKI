@@ -1,0 +1,23 @@
+# MyOwnPKI agent on proxy1 - edited by hand over the years.
+
+server: "https://pki.homelab.lan:8444" # the agent listener
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: "proxy1.homelab.lan"
+acme_directory: "https://pki.homelab.lan/acme/directory"
+state_dir: "@ROOT@/state"
+log_level: info
+
+enrollment:
+  challenge: webroot
+  webroot: "@ROOT@/www"
+
+# Hooks: no shell, absolute path first.
+hooks:
+  # nginx -t needs /var/log/nginx in the sandbox
+  nginx-test: ["@ROOT@/bin/nginx", "-t"]
+  nginx-reload: ["@ROOT@/bin/systemctl", "reload", "nginx"]
+
+# Directories the agent may write.
+paths: ["@ROOT@/www"]
+
+deployments: []

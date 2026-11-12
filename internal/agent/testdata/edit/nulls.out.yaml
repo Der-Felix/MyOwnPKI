@@ -1,0 +1,16 @@
+server: https://pki.homelab.lan:8444
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: proxy1.homelab.lan
+acme_directory: "https://pki.homelab.lan/acme/directory"
+state_dir: "@ROOT@/state"
+hooks:
+  nginx-test: ["@ROOT@/bin/nginx", "-t"]
+paths:
+  - "@ROOT@/ssl"
+deployments:
+  - name: proxy
+    profile: nginx
+    names: [proxy1.homelab.lan]
+    challenge: standalone
+    dir: "@ROOT@/ssl/proxy"
+    test_hook: nginx-test

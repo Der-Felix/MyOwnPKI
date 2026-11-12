@@ -1,0 +1,6 @@
+server: https://pki.homelab.lan:8444
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: proxy1.homelab.lan
+state_dir: "@ROOT@/state"
+---
+server: https://other.homelab.lan:8444
