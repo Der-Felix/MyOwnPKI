@@ -33,6 +33,7 @@ On every minion that gets the pillar, in this order:
    0600) while the host has no agent certificate.
 4. **Enrollment.** It runs `myownpki-agent setup` until the host has its agent certificate
    (`/var/lib/myownpki-agent/agent.crt`). `setup` enables and starts the service when the host is admitted.
+   Once the certificate exists, the formula deletes the pass file, also on a host that was approved later.
 5. **Deployments.** It runs `deployment add` for each deployment in the pillar that the agent does not
    have yet, and `deployment remove` for each name in `absent`. Or, in the other mode, it renders a
    complete `agent.yaml` from your file and runs `sandbox sync`.
@@ -298,18 +299,14 @@ not for this name, or the host already has an agent. `setup` prints the reason i
 
 When the hosts of the roll-out are enrolled, delete `enrollment_pass` from the pillar. A host that still
 waits for an approval needs it until it is admitted, so remove it when the last one is done. The formula
-writes the pass file only while a host has no agent certificate, and `setup` deletes the file when it
-admits the host in that run. **A host that waited and was approved later keeps the file**: the formula
-does not remove it. Look for leftovers:
+writes the pass file only while a host has no agent certificate. `setup` deletes the file when it admits
+the host in that run; the state `myownpki-agent-pass-absent` deletes it as soon as the host has its agent
+certificate, so a host that waited and was approved later, or whose pass you took out of the pillar while
+it waited, is cleaned up by the next apply. A host that still waits keeps the file, because the next
+`setup` needs it. To check:
 
 ```bash
 salt 'minion-*' cmd.run 'test -e /root/myownpki-join-token && echo present || echo absent'
-```
-
-and delete the file where it is still present (a pass the host no longer needs is only a risk):
-
-```bash
-salt 'minion-01.homelab.lan' cmd.run 'rm -f /root/myownpki-join-token'
 ```
 
 If the pass still has uses left, revoke it in the UI (*Agents → Join tokens*, second factor).

@@ -57,9 +57,6 @@ server and the agent are unchanged; the live test by the owner is pending.
 - A changed option of an existing deployment in the pillar is not applied: the formula adds a deployment
   only when `deployment list` does not show the name. Remove it through `absent` first, or use
   `config_source`.
-- A host that waited for an approval and was approved later keeps `/root/myownpki-join-token`: `setup`
-  deletes the file only when it admits the host in that run, and the formula does not remove it. Delete
-  it by hand and take the pass out of the pillar after the roll-out.
 - The agent's state directory must stay `/var/lib/myownpki-agent`; the formula looks for `agent.crt` there.
 
 ### Upgrade notes

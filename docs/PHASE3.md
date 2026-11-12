@@ -1477,8 +1477,8 @@ finishes the job.
 5. **Pending approval:** on `minion-02.homelab.lan` approve the request (*Agents → Enrollment requests*,
    second factor), then `state.apply myownpki` again (or the next highstate): the host is enrolled, the
    service is enabled and running, the deployment is deployed. Check that the deployments were already
-   in `agent.yaml` after the first apply (§12.4), and whether `/root/myownpki-join-token` is left on a
-   host that waited with a pass (§12.4 says it is).
+   in `agent.yaml` after the first apply (§12.4), and that `/root/myownpki-join-token` is gone from the host
+   that waited with a pass after the second apply (`myownpki-agent-pass-absent`, §12.4).
 6. **Refusals:** break the pillar one way at a time and read the reason with `state.show_highstate`: a
    missing `server`, a typo in a key, a wrong hash length, `config_source` together with `deployments`,
    an unknown deployment option. Each gives only `myownpki-agent-refused`, and nothing is installed.
@@ -1584,12 +1584,13 @@ from §12.1 and §12.2 (the code decides):
   succeeds, the deployments are added (the file does not depend on the approval) and the unit stays
   disabled. The next apply polls the request, because `agent.crt` still does not exist. This is read from
   the code (`internal/agent/setup.go`, the state requisites) and part of the live test.
-- **A leftover pass file (found while writing the docs; the formula is unchanged).** `setup` deletes the
-  token file only when it admits the host in that run (`newlyAdmitted`). A host that waited and was
-  approved later, and a host whose pass was removed from the pillar while it waited, keep
-  `/root/myownpki-join-token`. The pass state writes the file only while `agent.crt` is missing, and
-  nothing removes it afterwards. The docs say so and give the check and the delete command; a
-  `file.absent` state guarded by `onlyif: test -e` the agent certificate would close it.
+- **A leftover pass file (found while writing the docs; fixed afterwards).** `setup` deletes the token
+  file only when it admits the host in that run (`newlyAdmitted`). A host that waited and was approved
+  later, and a host whose pass was removed from the pillar while it waited, would keep
+  `/root/myownpki-join-token`. The state `myownpki-agent-pass-absent` (`file.absent`, `onlyif: test -e` the
+  agent certificate, after `setup`) deletes it, with or without `enrollment_pass` in the pillar, and never
+  before the host has its certificate (a host that still waits needs the file for the next `setup`).
+  CI asserts the state in every case that renders the formula and not in the refusals.
 - **Tested** (CI job `salt formula`, Salt 3008.5, not a required check): every pillar of
   `deploy/salt/test/cases` rendered with `state.show_highstate`, expected and forbidden states, that the
   pass appears in no output, and `state.apply test=True` for the cases a Debian runner can apply.

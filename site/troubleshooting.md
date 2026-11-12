@@ -189,7 +189,7 @@ refusals and what they mean.
 | `myownpki-agent-package-verified` fails: `SHA-256 of … does not match package.sha256.<arch>; not installing` | The package file on the master is not the one whose hash is in the pillar | Compare with the admin UI, replace the file, apply again. Nothing was installed |
 | `setup` prints `Enrollment is pending: …` and the service is disabled | No pass in the pillar, or the pass did not count (the text says why) | An admin approves the host (*Agents → Enrollment requests*); then `state.apply myownpki` again. The formula never starts the service itself |
 | A changed option of a deployment has no effect | The formula adds a deployment only when its name is not in `deployment list` | Put the name in `absent`, apply, then add it back with the new options; or use `config_source` |
-| `/root/myownpki-join-token` is still on a host that is enrolled | The host waited and was approved later; `setup` deletes the file only when it admits the host in that run | `rm -f /root/myownpki-join-token`; remove `enrollment_pass` from the pillar |
+| `/root/myownpki-join-token` is still on a host that is not enrolled yet | The host waits for an approval and needs the file for the next `setup` | Approve the host (*Agents → Enrollment requests*), then `state.apply myownpki` again: the formula deletes the file once the agent certificate exists |
 | `agent.crt` checks fail or `setup` runs on every apply | A `config_source` sets a `state_dir` other than `/var/lib/myownpki-agent` | Keep the default state directory |
 
 ## Deployments and nginx
