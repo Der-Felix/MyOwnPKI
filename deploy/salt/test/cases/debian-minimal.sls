@@ -1,6 +1,7 @@
 # Only the required keys; osarch x86_64 is accepted as amd64. Nothing optional is rendered.
 # grain: os_family=Debian
 # grain: osarch=x86_64
+# present: myownpki-agent-pass-absent
 # mode: apply
 # present: myownpki-agent-package
 # present: myownpki-agent-root

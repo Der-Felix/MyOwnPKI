@@ -2,6 +2,7 @@
 # Rendered only: an apply would download from the network.
 # grain: os_family=Suse
 # grain: osarch=aarch64
+# present: myownpki-agent-pass-absent
 # mode: render
 # present: myownpki-agent-package-file
 # present: myownpki-agent-package-verified

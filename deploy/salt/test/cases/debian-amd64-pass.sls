@@ -1,6 +1,7 @@
 # Debian, amd64, with an enrollment pass, two deployments and one removal.
 # grain: os_family=Debian
 # grain: osarch=amd64
+# present: myownpki-agent-pass-absent
 # mode: apply
 # present: myownpki-agent-cache
 # present: myownpki-agent-package-file

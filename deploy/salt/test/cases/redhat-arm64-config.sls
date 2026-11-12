@@ -2,6 +2,7 @@
 # Rendered only: the CI runner has no rpm, so pkg.installed cannot run there.
 # grain: os_family=RedHat
 # grain: osarch=aarch64
+# present: myownpki-agent-pass-absent
 # mode: render
 # present: myownpki-agent-package-file
 # present: myownpki-agent-package

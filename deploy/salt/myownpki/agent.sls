@@ -146,6 +146,17 @@ myownpki-agent-setup:
       - file: myownpki-agent-config
 {% endif %}
 
+# setup deletes the pass file only when it admits the host in that very run. A host that
+# waited and was approved later, or whose pass left the pillar meanwhile, would keep it.
+# So the file goes as soon as the host has its certificate, with or without a pass in the
+# pillar, and never before: a host that still waits needs it for the next setup run.
+myownpki-agent-pass-absent:
+  file.absent:
+    - name: {{ m['token_file'] }}
+    - onlyif: test -e {{ m['agent_crt'] }}
+    - require:
+      - cmd: myownpki-agent-setup
+
 {% set restart_on = [] %}
 
 {% if m['config_source'] != '' %}

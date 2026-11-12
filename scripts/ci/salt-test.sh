@@ -235,6 +235,9 @@ run_case() {
     if [ "$(jq '.local | length' "$render")" != 1 ] || ! has_id "$render" "$refused_id"; then
       fail "$name: a refusal must render exactly the state $refused_id"
     fi
+    if has_id "$render" myownpki-agent-pass-absent; then
+      fail "$name: a refusal must not remove the pass file (myownpki-agent-pass-absent)"
+    fi
     text=$(jq -r --arg id "$refused_id" '.local[$id].test[]? | objects | .name // empty' "$render")
     want=$(directive "$case_file" refused)
     case $text in

@@ -15,7 +15,8 @@ It does, in this order, on every minion that gets the pillar:
    refuses a root that differs;
 3. writes the enrollment pass to `/root/myownpki-join-token` (mode 0600) while the host has no
    agent certificate (`/var/lib/myownpki-agent/agent.crt`);
-4. runs `myownpki-agent setup` until that certificate exists;
+4. runs `myownpki-agent setup` until that certificate exists, then removes the pass file (also
+   when the pass left the pillar);
 5. adds the deployments with `deployment add` and removes the ones in `absent` with
    `deployment remove`, **or** renders a complete `agent.yaml` (`config_source`) and runs
    `sandbox sync`;
@@ -121,6 +122,7 @@ Full example: `pillar.example` (pass, webroot, deployments, `absent`, the altern
 | `myownpki-agent-package` | `pkg.installed` from the verified local file |
 | `myownpki-agent-root` | stages the root certificate |
 | `myownpki-agent-pass` | the pass as a file (only with `enrollment_pass`, only until the agent certificate exists) |
+| `myownpki-agent-pass-absent` | removes `/root/myownpki-join-token` once the agent certificate exists, with or without `enrollment_pass` in the pillar. Never before: a host that still waits needs the file for the next `setup` |
 | `myownpki-agent-config` | `config_source` mode: `/etc/myownpki-agent/agent.yaml` |
 | `myownpki-agent-setup-update` | package changed on an enrolled host: `setup` again (refreshes the unit and drop-ins, restarts the agent), as the update instructions say |
 | `myownpki-agent-setup` | enrollment; `creates` the agent certificate; timeout 180 seconds |
@@ -151,9 +153,10 @@ file. `config_source` together with `deployments` (or `absent`) is refused.
 (`contents_pillar`), written with `show_changes: False` and mode 0600, and passed to `setup` as
 the file (`--token-file`), never as a value: it is on no command line, in no state name and in no
 highstate output. Keep it in an encrypted pillar, target the pillar at the hosts of the roll-out,
-and remove it afterwards. `setup` deletes the file when the host is admitted; a host that waits
-keeps it. A pass admits hosts without a person looking at each one: make it small and short-lived
-(see the page above).
+and remove it afterwards. `setup` deletes the file only when it admits the host in that very run, so
+`myownpki-agent-pass-absent` removes it as soon as the agent certificate exists (a host approved
+later, or a pass taken out of the pillar). A host that still waits keeps the file. A pass admits
+hosts without a person looking at each one: make it small and short-lived (see the page above).
 
 **Fail closed.** The pillar is checked before anything happens. If it is not usable, the render
 produces one failing state, `myownpki-agent-refused`, and nothing is installed. The reason is in
