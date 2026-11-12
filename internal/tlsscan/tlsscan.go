@@ -77,6 +77,7 @@ const (
 	DefaultWorkers  = 4
 	MaxTries        = 4               // addresses tried per scan
 	TryTimeout      = 3 * time.Second // each of them
+	ChainTimeout    = 5 * time.Second // the database work after a handshake, apart from the scan's own deadline
 	DispatchEvery   = 30 * time.Second
 	ScanNowEvery    = 60 * time.Second // per endpoint
 	MaxIntermediate = 8                // served intermediates that are looked at

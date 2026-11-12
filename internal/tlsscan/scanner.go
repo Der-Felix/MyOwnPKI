@@ -333,7 +333,12 @@ func (s *Scanner) probe(ctx context.Context, ep Endpoint) (Result, error) {
 		NotBefore: leaf.NotBefore.UTC(), NotAfter: leaf.NotAfter.UTC(),
 		ChainLen: min(len(certs), 1+MaxIntermediate), TLSVersion: tls.VersionName(state.Version),
 	}
-	res.Served.ChainState, err = s.chainState(ctx, leaf, inter)
+	// The scan's deadline bounds the dial and the handshake. The trust anchors
+	// come from the database, which has its own budget: a handshake that ended
+	// with the deadline in sight still gets a result. Close still cancels it.
+	cctx, cancel := context.WithTimeout(s.ctx, ChainTimeout)
+	defer cancel()
+	res.Served.ChainState, err = s.chainState(cctx, leaf, inter)
 	return res, err
 }
 

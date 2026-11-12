@@ -740,6 +740,62 @@ func TestDispatchClaimsAScanBeforeItRuns(t *testing.T) {
 	}
 }
 
+// lateClose is a connection whose close_notify - the first thing the scan
+// writes after the handshake - is held back until the scan's own deadline has
+// passed: the handshake succeeded, and nothing of the budget is left.
+type lateClose struct {
+	net.Conn
+	until   time.Time
+	closing atomic.Bool
+}
+
+// SetWriteDeadline is what crypto/tls calls first when it closes after a
+// finished handshake; the handshake itself never calls it.
+func (c *lateClose) SetWriteDeadline(t time.Time) error {
+	c.closing.Store(true)
+	return c.Conn.SetWriteDeadline(t)
+}
+
+func (c *lateClose) Write(p []byte) (int, error) {
+	if c.closing.Load() {
+		time.Sleep(time.Until(c.until) + 20*time.Millisecond)
+	}
+	return c.Conn.Write(p)
+}
+
+// TestSlowButSuccessfulHandshakeStillRecordsAResult: the work after the
+// handshake (the trust anchors from the database) has its own budget. A
+// handshake that finishes with the scan's deadline in sight must not leave the
+// scan without a result - an Error log and no state, every interval.
+func TestSlowButSuccessfulHandshakeStillRecordsAResult(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.svc.Settings.Timeout = time.Second
+	issued, cert := f.issue(t, 90, "www.homelab.lan")
+	s := serveTLS(t, tlsConfig(cert))
+	f.route("www.homelab.lan", "192.0.2.10", 443, s.addr)
+	f.scanner.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := f.dial(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		dl, _ := ctx.Deadline()
+		return &lateClose{Conn: conn, until: dl}, nil
+	}
+	var logs lockedBuf
+	f.scanner.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ep := f.add(t, Request{Host: "www.homelab.lan", Port: 443})
+	f.scanDue(t)
+
+	got := f.get(t, ep.ID)
+	if !got.Scanned() || got.Fingerprint != issued.Fingerprint || got.ChainState != ChainTrusted || got.FailStreak != 0 {
+		t.Errorf("no result after a handshake that used the whole budget: %+v\nlog: %s", got, logs.String())
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("error log: %s", logs.String())
+	}
+}
+
 // stepBack moves the fake clock back by d (a wrong clock corrected by NTP).
 func (f *fixture) stepBack(d time.Duration) { f.inst.Clock.Set(f.inst.Clock.Now().Add(-d)) }
 
