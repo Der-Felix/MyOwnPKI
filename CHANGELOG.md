@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.5]
+## [0.3.5] - 2026-11-12
 
 Host onboarding: a new host goes from its name to a deployed certificate with an *Add host* assistant,
 `myownpki-agent deployment add` writes `agent.yaml` and the systemd sandbox in one step, an enrollment
