@@ -377,6 +377,11 @@ type JoinToken struct {
 	UsedBy       sql.NullString
 	CreatedBy    string
 	CreatedAt    string
+	Kind         string
+	MaxUses      int64
+	UseCount     int64
+	RevokedAt    sql.NullString
+	RevokedBy    sql.NullString
 }
 
 type Key struct {

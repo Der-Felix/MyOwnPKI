@@ -104,10 +104,11 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollOutput, er
 	if _, xerr := q.ExpireEnrollments(ctx, dbTime(now)); xerr != nil {
 		return nil, xerr
 	}
-	tokenID, tokenValid, tokenProblem, err := s.checkToken(ctx, q, in.Token, host, now)
+	tc, err := s.checkToken(ctx, q, in.Token, host, now)
 	if err != nil {
 		return nil, err
 	}
+	tokenID, tokenValid, tokenProblem := tc.ID, tc.Valid, tc.Problem
 	known, err := s.knownAgent(ctx, q, host, spki)
 	if err != nil {
 		return nil, err
@@ -140,13 +141,26 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollOutput, er
 	}
 	who := keys.Who{Actor: audit.Actor{Type: audit.ActorAgent, ID: id, Name: host}, Principal: authz.System("agent-enrollment"), SourceIP: in.SourceIP}
 	err = s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		use := ""
 		if tokenValid {
-			n, uerr := q.UseJoinToken(ctx, pkidb.UseJoinTokenParams{UsedAt: nullString(dbTime(now)), UsedBy: nullString(id), ID: tokenID})
-			if uerr != nil {
+			// The one conditional UPDATE is the rule: a use is taken only while the
+			// token has one left, is not revoked and has not expired – in this
+			// transaction, so concurrent enrollments cannot spend a use twice.
+			used, uerr := q.UseJoinToken(ctx, pkidb.UseJoinTokenParams{Now: nullString(dbTime(now)), Enrollment: nullString(id), ID: tokenID})
+			switch {
+			case errors.Is(uerr, sql.ErrNoRows): // used up, revoked or expired in the meantime
+				tokenValid = false
+				cur, gerr := q.GetJoinToken(ctx, tokenID)
+				if gerr != nil {
+					return gerr
+				}
+				if tokenProblem = toJoinToken(cur).problem(now, host); tokenProblem == "" {
+					tokenProblem = "the join token was used already"
+				}
+			case uerr != nil:
 				return uerr
-			}
-			if n != 1 { // used in the meantime
-				tokenValid, tokenProblem = false, "the join token was used already"
+			default:
+				use = useText(used.UseCount, used.MaxUses)
 			}
 		}
 		if ierr := q.InsertEnrollment(ctx, pkidb.InsertEnrollmentParams{
@@ -159,6 +173,7 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollOutput, er
 		}
 		return enqueue(ctx, tx, now, who, ActionEnroll, audit.Target{Type: "agent_enrollment", ID: id}, map[string]any{
 			"hostname": host, "method": in.Method, "token_valid": tokenValid, "token_problem": tokenProblem,
+			"token_id": tokenID, "token_kind": tc.Kind, "use": use,
 			"known_agent": known, "os": in.OS, "arch": in.Arch, "version": in.Version,
 		})
 	})
@@ -170,27 +185,68 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollOutput, er
 
 // checkToken looks a join token up. A token that doesn't count is not an
 // error: the enrollment goes on without it, and the queue names why.
-func (s *Service) checkToken(ctx context.Context, q *pkidb.Queries, token, host string, now time.Time) (id string, valid bool, problem string, err error) {
+func (s *Service) checkToken(ctx context.Context, q *pkidb.Queries, token, host string, now time.Time) (tokenCheck, error) {
 	if token == "" {
-		return "", false, "", nil
+		return tokenCheck{}, nil
 	}
 	row, err := q.GetJoinTokenByHash(ctx, hashToken(token))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return "", false, "unknown join token", nil
+		return tokenCheck{Problem: "unknown join token"}, nil
 	case err != nil:
-		return "", false, "", err
+		return tokenCheck{}, err
 	}
 	jt := toJoinToken(row)
-	switch {
-	case !jt.UsedAt.IsZero():
-		return jt.ID, false, "the join token was used already", nil
-	case !now.Before(jt.ExpiresAt):
-		return jt.ID, false, "the join token expired", nil
-	case !MatchesAny(jt.Patterns, host):
-		return jt.ID, false, "the join token is not for " + host, nil
+	tc := tokenCheck{ID: jt.ID, Kind: jt.Kind}
+	if tc.Problem = jt.problem(now, host); tc.Problem != "" {
+		return tc, nil
 	}
-	return jt.ID, true, "", nil
+	if jt.Kind == KindPass {
+		// A pass admits new hosts only: replacing a host that has an agent stays
+		// a human act (a single-use token or the approval queue).
+		taken, terr := s.hostTaken(ctx, q, host)
+		if terr != nil {
+			return tokenCheck{}, terr
+		}
+		if taken {
+			tc.Problem = passHostTaken(host)
+			return tc, nil
+		}
+	}
+	tc.Valid = true
+	return tc, nil
+}
+
+// tokenCheck is what a presented secret turned out to be. A token that
+// doesn't count is no error: the enrollment goes on without it, and the
+// queue names why.
+type tokenCheck struct {
+	ID, Kind, Problem string
+	Valid             bool
+}
+
+// errHostTaken: a pass can't admit a host that has an agent.
+var errHostTaken = errors.New("an agent for this host exists")
+
+func passHostTaken(host string) string {
+	return "an agent for " + host + " exists – a pass admits new hosts only; ask an admin for a single-use token"
+}
+
+// hostTaken reports whether host has an agent that is not revoked. An active
+// one is the rule of docs/PHASE3.md section 11.2; a disabled one counts too:
+// somebody switched it off on purpose, and a pass must not bring the host
+// back under a new identity.
+func (s *Service) hostTaken(ctx context.Context, q *pkidb.Queries, host string) (bool, error) {
+	rows, err := q.ListAgentsByHostname(ctx, host)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range rows {
+		if a.Status != StatusRevoked {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // knownAgent finds an active agent with this hostname whose last
@@ -298,16 +354,42 @@ func (s *Service) runCheck(ctx context.Context, row pkidb.AgentEnrollment, now t
 	if err != nil {
 		return row, err
 	}
-	if admits(mode, row.TokenValid == 1, row.KnownAgent == 1, state == "passed") {
-		if err := s.admit(ctx, row.ID, mode, "mode "+mode, keys.Who{
+	pass, err := s.admittedByPass(ctx, q, row)
+	if err != nil {
+		return row, err
+	}
+	if admits(mode, row.TokenValid == 1, pass, row.KnownAgent == 1, state == "passed") {
+		err := s.admitBy(ctx, row.ID, mode, "mode "+mode, keys.Who{
 			Actor: audit.Actor{Type: audit.ActorSystem, Name: "agents"}, Principal: authz.System("agents"),
-		}); err != nil && !errors.Is(err, ErrConflict) {
+		}, pass)
+		switch {
+		case errors.Is(err, errHostTaken):
+			// An agent for the host appeared since the pass was checked (two hosts
+			// with one name, enrolling at the same time). The use stays spent; an
+			// admin decides.
+			if qerr := q.QueueEnrollmentWithProblem(ctx, pkidb.QueueEnrollmentWithProblemParams{TokenProblem: nullString(passHostTaken(row.Hostname)), ID: row.ID}); qerr != nil {
+				return row, qerr
+			}
+		case err != nil && !errors.Is(err, ErrConflict):
 			return row, err
 		}
 	} else if err := q.QueueEnrollment(ctx, row.ID); err != nil {
 		return row, err
 	}
 	return q.GetEnrollment(ctx, row.ID)
+}
+
+// admittedByPass reports whether the valid token behind the enrollment is an
+// enrollment pass.
+func (s *Service) admittedByPass(ctx context.Context, q *pkidb.Queries, row pkidb.AgentEnrollment) (bool, error) {
+	if row.TokenValid != 1 || !row.TokenID.Valid {
+		return false, nil
+	}
+	t, err := q.GetJoinToken(ctx, row.TokenID.String)
+	if err != nil {
+		return false, err
+	}
+	return t.Kind == KindPass, nil
 }
 
 // check proves control of the hostname: the file at
@@ -334,10 +416,16 @@ func (s *Service) check(ctx context.Context, row pkidb.AgentEnrollment) error {
 
 // admits is the table of docs/PHASE3.md §6.1. A known agent (the key of its
 // last certificate, not disabled or revoked) comes back with a passed check
-// alone, in every mode.
-func admits(mode string, token, known, passed bool) bool {
+// alone, in every mode. A valid enrollment pass is never enough on its own,
+// whatever the mode (docs/PHASE3.md section 11.2): it admits only together
+// with a passed check, and never in manual mode – in auto mode a passed
+// check admits anyway, a pass does not widen that.
+func admits(mode string, token, pass, known, passed bool) bool {
 	if known && passed {
 		return true
+	}
+	if token && pass {
+		return passed && (mode == tenant.EnrollAuto || mode == tenant.EnrollVerified)
 	}
 	switch mode {
 	case tenant.EnrollAuto:
@@ -369,6 +457,14 @@ func (s *Service) pendingMessage(row pkidb.AgentEnrollment) string {
 // admit makes an open enrollment an agent: a new one with its names, or the
 // known agent again. by is the mode or the admin, for the record.
 func (s *Service) admit(ctx context.Context, enrollmentID, mode, by string, who keys.Who) error {
+	return s.admitBy(ctx, enrollmentID, mode, by, who, false)
+}
+
+// admitBy is admit; guardPass is set when no person decides but the mode and
+// a pass: the host must still have no agent when the transaction runs, so two
+// enrollments for one name cannot both be admitted by a pass. A person who
+// approves from the queue has seen the reason and may replace a host.
+func (s *Service) admitBy(ctx context.Context, enrollmentID, mode, by string, who keys.Who, guardPass bool) error {
 	now := s.now()
 	return s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
 		row, err := q.GetEnrollment(ctx, enrollmentID)
@@ -401,6 +497,13 @@ func (s *Service) admit(ctx context.Context, enrollmentID, mode, by string, who 
 				return rerr
 			}
 		} else {
+			if guardPass {
+				if taken, terr := s.hostTaken(ctx, q, row.Hostname); terr != nil {
+					return terr
+				} else if taken {
+					return errHostTaken
+				}
+			}
 			if agentID, err = ids.New("agt", now, s.rnd()); err != nil {
 				return err
 			}
@@ -431,7 +534,10 @@ func (s *Service) admit(ctx context.Context, enrollmentID, mode, by string, who 
 }
 
 // initialNames: the hostname and the patterns of the join token that
-// admitted the agent.
+// admitted the agent. An enrollment pass grants the host name only: its
+// patterns decide who may enroll, not what the host may order – otherwise one
+// leaked pass for *.homelab.lan would give every admitted host the right to
+// order every name below the domain.
 func (s *Service) initialNames(ctx context.Context, q *pkidb.Queries, row pkidb.AgentEnrollment, agentID string, now time.Time) error {
 	add := func(pattern, source string) error {
 		return q.InsertAgentName(ctx, pkidb.InsertAgentNameParams{AgentID: agentID, Pattern: pattern, Source: source, AddedBy: "enrollment " + row.ID, AddedAt: dbTime(now)})
@@ -445,6 +551,9 @@ func (s *Service) initialNames(ctx context.Context, q *pkidb.Queries, row pkidb.
 	t, err := q.GetJoinToken(ctx, row.TokenID.String)
 	if err != nil {
 		return err
+	}
+	if t.Kind == KindPass {
+		return nil
 	}
 	for _, p := range toJoinToken(t).Patterns {
 		if p == row.Hostname {

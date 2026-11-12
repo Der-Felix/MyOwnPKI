@@ -3,8 +3,8 @@
 -- Query files must be ASCII only (sqlc 1.31.1, see system/tenants.sql).
 
 -- name: InsertJoinToken :exec
-INSERT INTO join_tokens (id, token_hash, label, name_patterns, expires_at, created_by, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO join_tokens (id, token_hash, label, name_patterns, expires_at, created_by, created_at, kind, max_uses)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetJoinToken :one
 SELECT * FROM join_tokens WHERE id = ?;
@@ -15,13 +15,33 @@ SELECT * FROM join_tokens WHERE token_hash = ?;
 -- name: ListJoinTokens :many
 SELECT * FROM join_tokens ORDER BY created_at DESC, id;
 
--- A token is used exactly once: the condition makes a second use a no-op.
--- name: UseJoinToken :execrows
-UPDATE join_tokens SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL;
+-- One use of a token or pass. The conditions ARE the rule (no use left, revoked,
+-- expired): the update takes a use only while all of them hold, in the
+-- transaction that stores the enrollment and its audit entry, so concurrent
+-- enrollments cannot spend a use twice. used_at and used_by are set with the
+-- last use. No row = nothing was taken.
+-- name: UseJoinToken :one
+UPDATE join_tokens SET use_count = use_count + 1,
+    used_at = CASE WHEN use_count + 1 >= max_uses THEN sqlc.arg(now) ELSE used_at END,
+    used_by = CASE WHEN use_count + 1 >= max_uses THEN sqlc.arg(enrollment) ELSE used_by END
+WHERE id = sqlc.arg(id) AND use_count < max_uses AND revoked_at IS NULL AND expires_at > sqlc.arg(now)
+RETURNING use_count, max_uses;
 
--- Only an unused token can be withdrawn; a used one stays as a record.
+-- Revoking ends use at once; it only applies to a token that can still admit.
+-- name: RevokeJoinToken :execrows
+UPDATE join_tokens SET revoked_at = sqlc.arg(now), revoked_by = sqlc.arg(by)
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND use_count < max_uses AND expires_at > sqlc.arg(now);
+
+-- Only a token that was never used can be withdrawn; a used one stays as a record.
 -- name: DeleteJoinToken :execrows
-DELETE FROM join_tokens WHERE id = ? AND used_at IS NULL;
+DELETE FROM join_tokens WHERE id = ? AND use_count = 0;
+
+-- The enrollments each pass admitted (or queued): one per use, oldest first.
+-- name: ListPassEnrollments :many
+SELECT e.token_id, e.id, e.hostname, e.state, e.agent_id, e.created_at
+FROM agent_enrollments e JOIN join_tokens t ON t.id = e.token_id
+WHERE t.kind = 'pass'
+ORDER BY e.created_at, e.id;
 
 -- name: InsertEnrollment :exec
 INSERT INTO agent_enrollments (id, agent_id, hostname, csr_der, spki_sha256, handle_hash, check_token, check_method,
@@ -61,6 +81,13 @@ WHERE id = ? AND state IN ('waiting_for_check', 'pending_approval');
 
 -- name: QueueEnrollment :exec
 UPDATE agent_enrollments SET state = 'pending_approval' WHERE id = ? AND state = 'waiting_for_check';
+
+-- A pass whose host got an active agent in the meantime: the use stays spent
+-- (the enrollment still names the pass), the enrollment waits for an admin
+-- and says why.
+-- name: QueueEnrollmentWithProblem :exec
+UPDATE agent_enrollments SET state = 'pending_approval', token_valid = 0, token_problem = ?
+WHERE id = ? AND state = 'waiting_for_check';
 
 -- name: SetEnrollmentCert :exec
 UPDATE agent_enrollments SET cert_id = ? WHERE id = ?;

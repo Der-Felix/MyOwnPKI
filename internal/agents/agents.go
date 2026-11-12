@@ -37,8 +37,9 @@ const (
 	ActionEnable      = "agent.enable"       //
 	ActionRevoke      = "agent.revoke"       // its certificates on the CRL, cut off
 	ActionNames       = "agent.names"        // a name added or removed
-	ActionTokenCreate = "agent.token.create" // a join token made (shown once)
+	ActionTokenCreate = "agent.token.create" // a join token or pass made (shown once)
 	ActionTokenDelete = "agent.token.delete" // an unused join token withdrawn
+	ActionTokenRevoke = "agent.token.revoke" // #nosec G101 -- an action name (ends a join token or pass at once), not a credential
 )
 
 // Limits (docs/PHASE3.md §6.1).
