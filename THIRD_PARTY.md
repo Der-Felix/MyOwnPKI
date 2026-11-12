@@ -22,6 +22,16 @@ Two-week rule: a version older than 2026-10-10 (docs/PHASE3.md §4).
 | `github.com/go-acme/lego/v4` | v4.35.2 (2026-04-24) | MIT | ACME library in the agent (block C); direct imports only `lego`, `certificate`, `registration`; the existing contained responder implements the HTTP provider interface | `github.com/go-jose/go-jose/v4` v4.1.4 (2026-03-31, Apache-2.0), `github.com/miekg/dns` v1.1.72 (2026-01-22, BSD-3), `github.com/cenkalti/backoff/v5` v5.0.3 (2025-07-23, MIT). No DNS provider or provider SDK is built in; existing higher `golang.org/x/*` versions stay unchanged |
 | `nginx:1.29.2-trixie` | 2025-10-07 | BSD-2-Clause | nginx in the Linux `agent end-to-end` CI job only; not shipped | multi-architecture index `sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903` |
 
+## CI-only tool for the Salt formula (v0.3.6)
+
+Used only by the `salt formula` job of `.github/workflows/ci.yml` (`scripts/ci/salt-test.sh`); it is not
+built into a binary, not shipped and not in `go.mod`. The download is checked against the pinned SHA-256.
+Two-week rule: the newest release of the LTS line that is older than 2026-10-29.
+
+| Tool | Version (release date) | License | For | Pin |
+|---|---|---|---|---|
+| [Salt](https://github.com/saltstack/salt) onedir | 3008.5 (2026-10-26), the 3008 LTS line | Apache-2.0 (`salt-3008.5.dist-info` in the tarball; the onedir also bundles CPython and Python libraries under their own licenses) | `salt-call --local` renders and applies (`test=True`) the test pillars of `deploy/salt/myownpki` | `salt-3008.5-onedir-linux-x86_64.tar.xz` from `packages.broadcom.com/artifactory/saltproject-generic/onedir/3008.5/`, SHA-256 `3bbc89d18ff1cef340bfe662d0e973db8387c9affbb0633df1645725bb63786e` (the digest of the file at the repository, of the asset of the same name on the GitHub release `v3008.5`, and the file matched the published `.SHA512` asset) |
+
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 
 Used only by `.github/workflows/release.yml` (and locally by `task release:check` /

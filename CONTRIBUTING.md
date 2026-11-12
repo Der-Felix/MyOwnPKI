@@ -60,7 +60,7 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
 ## Documentation-only pull requests
 
 A pull request that changes **only** documentation skips the heavy CI jobs (tests, race
-detector, cross-build, conformance, agent end-to-end, install, image); the job `changes`
+detector, cross-build, conformance, agent end-to-end, install, image, Salt formula); the job `changes`
 (`scripts/ci/changes.sh`) decides. "Documentation" is exactly: `.claude/**`, `docs/**/*.md` and
 `*.md` files in the repository root. Everything else counts as code, including other Markdown
 files such as `presets/README.md` and `assets/brand/README.md`, `.github/**` and `scripts/**`;
