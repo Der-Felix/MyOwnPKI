@@ -64,6 +64,18 @@ and tells you by e-mail or webhook – also while it is sealed.
 
 ### Fixed
 
+- **Agent commands with an absolute path:** the guided installation and update commands ended with
+  a bare `myownpki-agent setup …`, which failed with `command not found` where root's `PATH` lacks
+  `/usr/local/bin` (seen on Debian 13), although the package had been installed. Every command the
+  UI generates for root – guided install and update for deb, rpm and tarball, and the new join
+  token page – now calls `/usr/local/bin/myownpki-agent`, as does the agent's "not enrolled" log
+  hint and docs/OPERATIONS.md. Packages, tarball and the systemd unit already use that path; a test
+  keeps them in line.
+- **Join token page runs setup:** the page of a new join token showed `enroll` and
+  `systemctl enable --now`, which cannot work on a fresh package or tarball host – only `setup` writes
+  `agent.yaml` and installs the unit (`Unit myownpki-agent.service does not exist`). The page now
+  shows the token file (by here-doc, not as an argument), the root download with its SHA-256 check and
+  `setup` with the detected package format, like the guided installation.
 - **Agent packages in the container image:** the image carries the agent packages under
   `/opt/myownpki/agent-dist`, but nothing pointed `agent.package_dir` there, so a container served
   none of them. The image now sets `MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist`.
