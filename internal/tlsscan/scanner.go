@@ -263,13 +263,6 @@ type Result struct {
 
 func fail(kind string) Result { return Result{Fail: &Failure{Kind: kind, Message: kind}} }
 
-// Probe scans one endpoint now and returns what it found; nothing is
-// stored. (For tests and for the dispatcher.)
-func (s *Scanner) Probe(ctx context.Context, ep Endpoint) (Result, error) {
-	s.init()
-	return s.probe(ctx, ep)
-}
-
 func (s *Scanner) probe(ctx context.Context, ep Endpoint) (Result, error) {
 	if !s.Svc.Settings.portAllowed(ep.Port) {
 		return fail(KindRefusedPort), nil

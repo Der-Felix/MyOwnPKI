@@ -3,6 +3,7 @@ package tlsscan
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -67,8 +68,10 @@ func (s *Service) recordSuccess(ctx context.Context, id string, now, next time.T
 	defer func() { _ = tx.Rollback() }()
 	q := pkidb.New(tx)
 	prev, err := q.GetEndpoint(ctx, id)
-	if err != nil {
-		return err // deleted while the scan ran: nothing to record
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // deleted while the scan ran: nothing to record
+	} else if err != nil {
+		return err
 	}
 	same, since := int64(1), now
 	if prev.Fingerprint.Valid && prev.Fingerprint.String == v.Fingerprint {

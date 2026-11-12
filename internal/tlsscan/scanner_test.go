@@ -921,3 +921,37 @@ func (l *lockedBuf) Write(p []byte) (int, error) {
 	return l.b.Write(p)
 }
 func (l *lockedBuf) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+// TestScanOfAnEndpointDeletedMeanwhile: the result of a scan that was running
+// when its endpoint was removed is dropped quietly.
+func TestScanOfAnEndpointDeletedMeanwhile(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	var buf lockedBuf
+	f.scanner.Log = slog.New(slog.NewJSONHandler(&buf, nil))
+	_, cert := f.issue(t, 90, "www.homelab.lan")
+	s := serveTLS(t, tlsConfig(cert))
+	f.route("www.homelab.lan", "192.0.2.10", 443, s.addr)
+	started, release := make(chan struct{}), make(chan struct{})
+	f.scanner.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		close(started)
+		<-release
+		return f.dial(ctx, network, addr)
+	}
+	ep := f.add(t, Request{Host: "www.homelab.lan", Port: 443})
+	if err := f.scanner.Dispatch(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := f.svc.Delete(t.Context(), testinstance.Console, ep.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	f.scanner.Wait()
+	if _, err := f.svc.Get(t.Context(), testinstance.Console, ep.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the endpoint is back: %v", err)
+	}
+	if strings.Contains(buf.String(), "not stored") || strings.Contains(buf.String(), "could not run") {
+		t.Errorf("log:\n%s", buf.String())
+	}
+}
