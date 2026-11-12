@@ -248,10 +248,11 @@ func tokenFileCommands(secret string) string {
 // the verified root and setup. Setup, not enroll: on a fresh package or
 // tarball host only setup writes agent.yaml and installs the unit. A token
 // for one exact name fixes --hostname; with patterns the host's FQDN must
-// match one of them.
-func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret string) admin.Section {
+// match one of them. A pass (pass = true) is for several hosts, so every host
+// names itself.
+func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret string, pass bool) admin.Section {
 	hostname := `"$(hostname -f)"`
-	if len(patterns) == 1 && !strings.Contains(patterns[0], "*") {
+	if !pass && len(patterns) == 1 && !strings.Contains(patterns[0], "*") {
 		hostname = shellQuote(patterns[0])
 	}
 	var commands strings.Builder
@@ -260,9 +261,12 @@ func (a *app) joinTokenHostSection(trust agentTrust, patterns []string, secret s
 	commands.WriteString("if dpkg -s myownpki-agent >/dev/null 2>&1; then format=deb; elif rpm -q myownpki-agent >/dev/null 2>&1; then format=rpm; else format=tarball; fi\n")
 	fmt.Fprintf(&commands, "%s setup --server %s --ca-bundle %s --root-sha256 %s --package-format \"$format\" --hostname %s --token-file %s )\n",
 		agentdist.BinaryPath, shellQuote(a.d.AgentBaseURL), agentRootPath, shellQuote(trust.rootSHA256), hostname, agentTokenPath)
-	return admin.Section{Title: "On the host", Text: []string{
-		"Run as root on the host after installing the agent package or tarball; Agents → Install agent does both for one exact host. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here.",
-	}, KV: []view.KV{{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true}},
+	title, intro := "On the host", "Run as root on the host after installing the agent package or tarball; Agents → Install agent does both for one exact host. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here."
+	if pass {
+		title = "On each host"
+		intro = "Run as root on every host after installing the agent package or tarball; a Salt state, an Ansible task or a script can run the same two blocks. setup deletes the pass file once the host is admitted; a host that still waits keeps it. The root comes over HTTP and is accepted only when its DER SHA-256 matches the value shown here."
+	}
+	return admin.Section{Title: title, Text: []string{intro}, KV: []view.KV{{Key: "Root SHA-256 (DER, authoritative)", Value: trust.rootSHA256, Mono: true}},
 		Pre: []admin.Pre{{Title: "Write the root-only token file", Text: tokenFileCommands(secret)}, {Title: "Verify the root and run setup", Text: commands.String()}}}
 }
 

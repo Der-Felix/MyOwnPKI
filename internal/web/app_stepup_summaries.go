@@ -80,6 +80,10 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		summary = "Prepare guided agent installation for exact host " + entry.form["hostname"]
 	case "POST /agents/tokens/delete":
 		summary = "Withdraw join token " + a.joinTokenName(c, entry.form["id"])
+	case "POST /agents/tokens/pass":
+		summary = "Create enrollment pass " + orDash(entry.form["label"]) + " for " + strings.Join(strings.Fields(entry.form["names"]), ", ") + "; admits up to " + entry.form["uses"] + " hosts; valid for " + entry.form["hours"] + " hours"
+	case "POST /agents/tokens/revoke":
+		summary = "Revoke join token or pass " + a.joinTokenName(c, entry.form["id"])
 	case "POST /agents/{id}/names":
 		verb := "Add"
 		if entry.form["action"] == "remove" {

@@ -211,6 +211,8 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /agents/tokens", a.signedIn(a.joinTokens))
 	a.protected(mux, "POST /agents/tokens", a.joinTokenCreate, "label", "names", "hours")
 	a.protected(mux, "POST /agents/tokens/delete", a.joinTokenDelete, "id")
+	a.protected(mux, "POST /agents/tokens/pass", a.joinPassCreate, "label", "names", "uses", "hours")
+	a.protected(mux, "POST /agents/tokens/revoke", a.joinTokenRevoke, "id")
 	mux.HandleFunc("GET /agents/{id}", a.signedIn(a.agentDetail))
 	mux.HandleFunc("GET /agents/{id}/deployments", a.session(a.agentDeployments, true))
 	mux.HandleFunc("GET /agents/{id}/deployments/{name}/renew", a.signedIn(a.agentRenewPage))
