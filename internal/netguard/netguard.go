@@ -6,8 +6,8 @@
 //   - a name is resolved once and the connection goes to exactly the
 //     address that was checked – no DNS rebinding between check and connect;
 //   - the address policy of a domain decides which addresses are allowed;
-//     loopback, link-local, multicast, unspecified and reserved addresses
-//     never are;
+//     loopback, link-local, multicast, unspecified, reserved and other not
+//     globally reachable addresses never are;
 //   - the caller decides which ports are allowed (CheckPort); without that
 //     function every port is refused;
 //   - the client learns counts and kinds of failures, never addresses or what
@@ -64,7 +64,8 @@ var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 // 127.0.0.1 although the IPv6 address itself looks global. Judging the
 // embedded address would need one parser per format; none of these ranges is
 // a place anybody's TLS endpoint or ACME client lives, so they are refused
-// entirely. IPv4-mapped (::ffff:0:0/96) is not here: it is unmapped first and
+// entirely. IPv4-mapped (::ffff:0:0/96, a different range from the IPv4-translated
+// ::ffff:0:0:0/96) is not here: it is unmapped first and
 // judged as the IPv4 address it is.
 var embeddingPrefixes = []struct {
 	prefix netip.Prefix
@@ -75,6 +76,28 @@ var embeddingPrefixes = []struct {
 	{netip.MustParsePrefix("64:ff9b:1::/48"), "a local-use NAT64 address (64:ff9b:1::/48)"},
 	{netip.MustParsePrefix("2002::/16"), "a 6to4 address (2002::/16)"},
 	{netip.MustParsePrefix("2001::/32"), "a Teredo address (2001::/32)"},
+	// IPv4-translated (SIIT, RFC 2765, RFC 6145): not the IPv4-mapped range
+	// below it, so Unmap does not touch it.
+	{netip.MustParsePrefix("::ffff:0:0:0/96"), "an IPv4-translated address (::ffff:0:0:0/96)"},
+}
+
+// notGlobalPrefixes are ranges that are neither globally reachable nor a
+// documentation range, so no endpoint or ACME client of anybody lives there:
+// they are refused under every policy (IANA IPv4 and IPv6 Special-Purpose
+// Address Registries). The documentation ranges (192.0.2.0/24,
+// 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32) are deliberately not here:
+// the tests and examples of this repository use them as stand-ins for public
+// addresses. Private ranges are a matter of the policy and not listed.
+var notGlobalPrefixes = []struct {
+	prefix netip.Prefix
+	name   string
+}{
+	{netip.MustParsePrefix("192.0.0.0/24"), "an IETF protocol assignment address (192.0.0.0/24)"},
+	{netip.MustParsePrefix("198.18.0.0/15"), "a benchmarking address (198.18.0.0/15)"},
+	{netip.MustParsePrefix("192.88.99.0/24"), "a 6to4 relay anycast address (192.88.99.0/24)"},
+	{netip.MustParsePrefix("fec0::/10"), "a site-local address (fec0::/10)"},
+	{netip.MustParsePrefix("100::/64"), "a discard-only address (100::/64)"},
+	{netip.MustParsePrefix("5f00::/16"), "an SRv6 segment identifier address (5f00::/16)"},
 }
 
 // Allowed applies the address policy: nil if a may be connected to under
@@ -96,6 +119,11 @@ func Allowed(a netip.Addr, policy string) error {
 			if e.prefix.Contains(a) {
 				return fmt.Errorf("%s is %s that can embed an IPv4 address and is never a validation target", a, e.name)
 			}
+		}
+	}
+	for _, n := range notGlobalPrefixes {
+		if n.prefix.Contains(a) {
+			return fmt.Errorf("%s is %s and is never a validation target", a, n.name)
 		}
 	}
 	if policy == PolicyPublic && (a.IsPrivate() || cgnat.Contains(a)) {
