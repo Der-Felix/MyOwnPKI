@@ -60,3 +60,21 @@ func writeFile(t *testing.T, path, content string) {
 
 // yamlPath quotes a path for YAML (Windows paths have backslashes).
 func yamlPath(p string) string { return `"` + strings.ReplaceAll(p, `\`, `\\`) + `"` }
+
+func TestConfigCheckShowsTheSandbox(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agent.yaml")
+	writeFile(t, cfg, "server: https://pki.homelab.lan:8444\nca_bundle: "+yamlPath(filepath.Join(dir, "root.pem"))+
+		"\nhostname: proxy1.homelab.lan\nstate_dir: "+yamlPath(filepath.Join(dir, "state"))+"\nsandbox:\n  low_ports: false\n"+
+		"enrollment:\n  challenge: standalone\n")
+	var stdout, stderr bytes.Buffer
+	if code := run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	for _, want := range []string{"sandbox       ReadWritePaths " + filepath.Join(dir, "state"), "20-low-ports.conf removed", "warning", "Configuration is valid."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("config check output lacks %q:\n%s", want, stdout.String())
+		}
+	}
+}

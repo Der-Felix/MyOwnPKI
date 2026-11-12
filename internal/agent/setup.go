@@ -25,8 +25,11 @@ import (
 
 const (
 	DefaultSetupExampleDir = "/usr/share/myownpki-agent/examples"
-	maxSetupRootSize       = 1 << 20
-	maxSetupTokenSize      = 16 << 10
+	defaultUnitPath        = "/etc/systemd/system/myownpki-agent.service"
+	// DefaultDropinDir is the drop-in directory of the unit setup installs.
+	DefaultDropinDir  = defaultUnitPath + ".d"
+	maxSetupRootSize  = 1 << 20
+	maxSetupTokenSize = 16 << 10
 )
 
 // SetupOptions are the local inputs of myownpki-agent setup.
@@ -45,6 +48,7 @@ type SetupOptions struct {
 	ExampleDir    string
 	Version       string
 	PackageFormat string
+	ACMEDirectory string // https URL of the ACME directory, written into a new agent.yaml
 	Stdout        io.Writer
 	Stderr        io.Writer
 }
@@ -87,14 +91,28 @@ var (
 )
 
 type setupPlan struct {
-	cfg         *Config
-	configData  []byte
-	rootData    []byte
-	token       string
-	newConfig   bool
-	unitData    []byte
-	lowPortData []byte
-	needLowPort bool
+	cfg        *Config
+	configData []byte
+	rootData   []byte
+	token      string
+	newConfig  bool
+	unitData   []byte
+	unitPath   string
+	dropinDir  string
+	dropins    *DropinPlan
+	// hadPaths: 10-paths.conf existed, so a change to it is news to the operator.
+	hadPaths bool
+}
+
+// unitPaths are the unit file and its drop-in directory.
+func unitPaths(unitPath, dropinDir string) (string, string) {
+	if unitPath == "" {
+		unitPath = defaultUnitPath
+	}
+	if dropinDir == "" {
+		dropinDir = unitPath + ".d"
+	}
+	return unitPath, dropinDir
 }
 
 // Setup installs local configuration and units, enrolls, and only then enables
@@ -148,33 +166,13 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 			return err
 		}
 	}
-	unitPath := opts.UnitPath
-	if unitPath == "" {
-		unitPath = "/etc/systemd/system/myownpki-agent.service"
-	}
-	dropinDir := opts.DropinDir
-	if dropinDir == "" {
-		dropinDir = unitPath + ".d"
-	}
-	if err = atomicSetupFile(unitPath, plan.unitData, 0o644); err != nil {
+	if err = atomicSetupFile(plan.unitPath, plan.unitData, 0o644); err != nil {
 		return err
 	}
-	// #nosec G301 G703 -- root chooses the standard systemd drop-in directory.
-	if err = os.MkdirAll(dropinDir, 0o755); err != nil {
-		return fmt.Errorf("create unit drop-in directory: %w", err)
-	}
-	paths := "[Service]\nReadWritePaths=" + strings.Join(append([]string{stateDir}, plan.cfg.Paths...), " ") + "\n"
-	if err = atomicSetupFile(filepath.Join(dropinDir, "10-paths.conf"), []byte(paths), 0o644); err != nil {
+	if err = writeDropins(plan.dropinDir, plan.dropins); err != nil {
 		return err
 	}
-	lowPorts := filepath.Join(dropinDir, "20-low-ports.conf")
-	if plan.needLowPort {
-		if err = atomicSetupFile(lowPorts, plan.lowPortData, 0o644); err != nil {
-			return err
-		}
-	} else if removeErr := os.Remove(lowPorts); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return fmt.Errorf("remove unused low-ports drop-in: %w", removeErr)
-	}
+	reportDropins(opts.Stdout, plan.dropins, plan.hadPaths)
 	if err = setupSystemd.Run(ctx, "daemon-reload"); err != nil {
 		return err
 	}
@@ -263,6 +261,11 @@ func prepareSetup(opts SetupOptions) (*setupPlan, error) {
 			return nil, errors.New("token file is empty")
 		}
 	}
+	if opts.ACMEDirectory != "" {
+		if acmeErr := checkACMEDirectory(opts.ACMEDirectory); acmeErr != nil {
+			return nil, fmt.Errorf("--acme-directory: %w", acmeErr)
+		}
+	}
 	if opts.Webroot != "" {
 		if !filepath.IsAbs(opts.Webroot) || filepath.Clean(opts.Webroot) == string(filepath.Separator) {
 			return nil, errors.New("--webroot must be an absolute directory other than /")
@@ -292,7 +295,8 @@ func prepareSetup(opts SetupOptions) (*setupPlan, error) {
 	if stateDir == "" {
 		stateDir = DefaultStateDir
 	}
-	plan := &setupPlan{token: token, rootData: rootData, unitData: unitData, lowPortData: lowPortData}
+	plan := &setupPlan{token: token, rootData: rootData, unitData: unitData}
+	plan.unitPath, plan.dropinDir = unitPaths(opts.UnitPath, opts.DropinDir)
 	current, err := os.ReadFile(configPath)
 	switch {
 	case err == nil:
@@ -325,28 +329,39 @@ func prepareSetup(opts SetupOptions) (*setupPlan, error) {
 			paths = []string{opts.Webroot}
 		}
 		cfg := &Config{Server: opts.Server, CABundle: filepath.Join(filepath.Dir(configPath), "root.pem"), Hostname: hostname,
-			StateDir: stateDir, LogLevel: "info", Enrollment: Enrollment{Challenge: challenge, Webroot: webroot}, Paths: paths}
-		if err := cfg.Validate(); err != nil {
-			return nil, fmt.Errorf("generated configuration: %w", err)
+			StateDir: stateDir, LogLevel: "info", Enrollment: Enrollment{Challenge: challenge, Webroot: webroot}, Paths: paths, ACMEDirectory: opts.ACMEDirectory}
+		if validateErr := cfg.Validate(); validateErr != nil {
+			return nil, fmt.Errorf("generated configuration: %w", validateErr)
 		}
 		plan.cfg = cfg
 		plan.configData = renderSetupConfig(cfg)
 	} else {
 		plan.cfg.CABundle = filepath.Clean(plan.cfg.CABundle)
-		installedRoot, err := readSetupRegular(plan.cfg.CABundle, maxSetupRootSize, false)
-		if err != nil {
-			return nil, fmt.Errorf("read configured root certificate: %w", err)
+		installedRoot, rootErr := readSetupRegular(plan.cfg.CABundle, maxSetupRootSize, false)
+		if rootErr != nil {
+			return nil, fmt.Errorf("read configured root certificate: %w", rootErr)
 		}
-		installedRoot, err = verifiedRoot(installedRoot, expected)
-		if err != nil {
-			return nil, fmt.Errorf("configured root certificate: %w", err)
+		installedRoot, rootErr = verifiedRoot(installedRoot, expected)
+		if rootErr != nil {
+			return nil, fmt.Errorf("configured root certificate: %w", rootErr)
 		}
 		plan.rootData = installedRoot
-		if opts.Webroot != "" || opts.LowPorts || opts.Server != plan.cfg.Server {
+		if opts.Webroot != "" || opts.Server != plan.cfg.Server {
 			_, _ = fmt.Fprintln(opts.Stderr, "Existing agent.yaml is preserved; edit it by hand to change server or enrollment settings.")
 		}
 	}
-	plan.needLowPort = opts.LowPorts || plan.cfg.Enrollment.Challenge == ChallengeStandalone
+	if opts.ACMEDirectory != "" && !plan.newConfig && opts.ACMEDirectory != plan.cfg.ACMEDirectory {
+		_, _ = fmt.Fprintln(opts.Stderr, "Existing agent.yaml is preserved; set acme_directory by hand or with \"deployment add --acme-directory\".")
+	}
+	state, err := ReadDropins(plan.dropinDir)
+	if err != nil {
+		return nil, err
+	}
+	plan.hadPaths = state.HavePaths
+	plan.dropins, err = RenderDropins(plan.cfg, state, lowPortData, DropinOptions{LowPorts: opts.LowPorts})
+	if err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -354,6 +369,9 @@ func renderSetupConfig(cfg *Config) []byte {
 	var b strings.Builder
 	b.WriteString("# Written by myownpki-agent setup; this file is preserved on later runs.\n")
 	fmt.Fprintf(&b, "server: %q\nca_bundle: %q\nhostname: %q\nstate_dir: %q\nlog_level: \"info\"\n", cfg.Server, cfg.CABundle, cfg.Hostname, cfg.StateDir)
+	if cfg.ACMEDirectory != "" {
+		fmt.Fprintf(&b, "acme_directory: %q\n", cfg.ACMEDirectory)
+	}
 	fmt.Fprintf(&b, "enrollment:\n  challenge: %q\n", cfg.Enrollment.Challenge)
 	if cfg.Enrollment.Webroot != "" {
 		fmt.Fprintf(&b, "  webroot: %q\n", cfg.Enrollment.Webroot)
