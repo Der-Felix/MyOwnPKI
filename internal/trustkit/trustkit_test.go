@@ -538,6 +538,11 @@ func TestGuideCommands(t *testing.T) {
 			if ci < 0 || ki < 0 || ci > ki {
 				t.Errorf("%s: the check must come before the install:\n%s", p, cmds)
 			}
+			// Everything happens in a new private directory (mktemp -d): the first
+			// command of every chain, and before anything is downloaded or checked.
+			if di := strings.Index(cmds, "mktemp -d"); di < 0 || di > strings.Index(cmds, "curl") || !strings.HasPrefix(cmds, "tmp=$(mktemp -d) && cd \"$tmp\" \\\n") {
+				t.Errorf("%s: the chain does not start in a private directory:\n%s", p, cmds)
+			}
 		}
 		for _, b := range blocks {
 			if len(b.Lines) > 0 && !strings.Contains(b.Note, "only checks the download against this page") {

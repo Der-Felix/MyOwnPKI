@@ -78,6 +78,7 @@ func Guide(p Platform, r Root) []Block {
 		return append(blocks, Block{
 			Title: "Terminal",
 			Lines: chain(
+				privateDir,
 				"curl -fsS -o root.crt '"+url+"'",
 				"echo '"+hexSum+"  root.crt' | shasum -a 256 -c -",
 				"sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt",
@@ -112,6 +113,7 @@ func Guide(p Platform, r Root) []Block {
 		return []Block{{
 			Title: "Command line",
 			Lines: chain(
+				privateDir,
 				"curl -fsS -o root.crt '"+url+"'",
 				"echo '"+hexSum+"  root.crt' | sha256sum -c -",
 				"openssl x509 -inform DER -in root.crt -out myownpki-"+file+".crt",
@@ -127,6 +129,7 @@ func Guide(p Platform, r Root) []Block {
 		return []Block{{
 			Title: "Command line",
 			Lines: chain(
+				privateDir,
 				"curl -fsS -o root.crt '"+url+"'",
 				"echo '"+hexSum+"  root.crt' | sha256sum -c -",
 				"openssl x509 -inform DER -in root.crt -out myownpki-"+file+".pem",
@@ -152,6 +155,7 @@ func Guide(p Platform, r Root) []Block {
 		return []Block{{
 			Title: "keytool",
 			Lines: chain(
+				privateDir,
 				"curl -fsS -o root.crt '"+url+"'",
 				"echo '"+hexSum+"  root.crt' | sha256sum -c -",
 				"sudo keytool -importcert -trustcacerts -alias myownpki-"+file+` -file root.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit`,
@@ -172,6 +176,15 @@ func fileText(r Root) string {
 	}
 	return r.File()
 }
+
+// privateDir is the first command of every pasted chain: a new directory that
+// only the user can enter. The download, the check and the install all happen
+// there, so another local user cannot swap or link root.crt in a shared
+// directory such as /tmp between the check and the install, and curl -o cannot
+// write through a link that somebody planted. The variable form (not
+// cd "$(mktemp -d)") makes a failing mktemp stop the chain in every shell: an
+// empty cd argument is not an error in every shell (older bash, zsh).
+const privateDir = `tmp=$(mktemp -d) && cd "$tmp"`
 
 // chain joins commands with && so that a failed check stops the rest, one
 // command per line.

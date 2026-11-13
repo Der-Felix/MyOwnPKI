@@ -7,7 +7,8 @@ Note: An iPad that asks for the desktop version of web sites looks like a Mac to
 
 ## Terminal
 ```
-curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
+tmp=$(mktemp -d) && cd "$tmp" \
+  && curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
   && echo 'ff91eaaeb57e418aa50c8c3589ec4922bca0f995a1f9ce1390bf2960b6606690  root.crt' | shasum -a 256 -c - \
   && sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt
 ```

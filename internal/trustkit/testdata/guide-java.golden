@@ -1,6 +1,7 @@
 ## keytool
 ```
-curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
+tmp=$(mktemp -d) && cd "$tmp" \
+  && curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
   && echo 'ff91eaaeb57e418aa50c8c3589ec4922bca0f995a1f9ce1390bf2960b6606690  root.crt' | sha256sum -c - \
   && sudo keytool -importcert -trustcacerts -alias myownpki-fixture-root-ff91eaae -file root.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit
 ```
