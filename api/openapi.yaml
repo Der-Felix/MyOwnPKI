@@ -821,6 +821,119 @@ paths:
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
 
+  /settings/versions:
+    get:
+      tags: [settings]
+      operationId: listSettingsVersions
+      summary: History of the tenant settings (newest first)
+      description: |
+        Every change of the settings is a version: who made it, when, why (the optional `reason`)
+        and which settings it changed (`changed_keys`). Version 1 is often a `baseline`, the state
+        before the history began. Needs the audit right (admin with a tenant-wide role): versions
+        name users. The `ETag` is the newest version number (`"0"` = no history yet); send it as
+        `If-Match` with a restore.
+      x-required-role: admin
+      parameters:
+        - name: before
+          in: query
+          description: "Cursor: the next_before of the previous page"
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          description: "Versions per page (1 to 100)"
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: One page of versions
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsVersionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /settings/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/VersionNumber"
+    get:
+      tags: [settings]
+      operationId: getSettingsVersion
+      summary: One version of the tenant settings, with a diff
+      description: |
+        The full state of that version and a field diff `diff`. `against` chooses what it is
+        compared with: `previous` (default: what this version changed; version 1 is compared with
+        nothing), `current` (the settings as they are now: what a restore would change) or a
+        version number (0 = nothing). The diff always reads from the compared state to this
+        version. `restorable` and `restore_problems` say whether a restore would be accepted now,
+        from the same checks, without writing and without asking for the second factor. The `ETag`
+        is the newest version number of the settings (not of the version shown). Needs the audit
+        right (admin with a tenant-wide role).
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/Against"
+      responses:
+        "200":
+          description: The version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettingsVersion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /settings/versions/{version}/restore:
+    parameters:
+      - $ref: "#/components/parameters/VersionNumber"
+    post:
+      tags: [settings]
+      operationId: restoreSettingsVersion
+      summary: Restore a version of the tenant settings as a new version
+      description: |
+        Makes the settings look like that version again, as a **new** version (`change` =
+        `restore`, `restored_from` = the number); no version is ever edited. The restore runs the
+        same checks as `PUT /settings`, so everything a normal change refuses is refused here with
+        the same reasons (`422`). **Changing `agent_enrollment` by a restore needs a fresh second
+        factor and is never possible with an API token**, exactly as with `PUT /settings`
+        (`403`, problem types `step-up-required` and `forbidden`); a restore that leaves the mode
+        alone needs none. `If-Match` is **required**: the `ETag` of the newest version (`428`
+        `precondition-required` without it, `412` `precondition-failed` when it is not the newest).
+        Restoring the state the settings already have is refused (`409`). The audit log gets
+        `tenant.settings_restore` with `version`, `restored_from` and `snapshot_sha256`; the
+        `reason` stays with the version.
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+      requestBody:
+        description: "The optional reason (send `{}` for none)"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestoreRequest" }
+      responses:
+        "200":
+          description: Restored; the body is the settings now, the `ETag` the new version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "428": { $ref: "#/components/responses/PreconditionRequired" }
+
   # ---------------------------------------------------------------- presets
   /domains:
     get:
@@ -951,6 +1064,148 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "412": { $ref: "#/components/responses/PreconditionFailed" }
+
+  /domains/deleted:
+    get:
+      tags: [domains]
+      operationId: listDeletedDomains
+      summary: Deleted domains that can be restored
+      description: |
+        Domains whose newest version is their deletion, newest deletion first, for CAs the caller
+        may read. A deleted domain is restored with
+        `POST /domains/{domainId}/versions/{version}/restore` (its ID stays). Needs the audit
+        right (admin with a tenant-wide role).
+      x-required-role: admin
+      responses:
+        "200":
+          description: Deleted domains
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DeletedDomain" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /domains/{domainId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/DomainId"
+    get:
+      tags: [domains]
+      operationId: listDomainVersions
+      summary: History of a domain (newest first)
+      description: |
+        Also works for a deleted domain (its last version is the deletion). Every change is a
+        version: who, when, why (`reason`) and which settings it changed (`changed_keys`). Needs the
+        audit right (admin with a tenant-wide role) and the right to read the domain's CA (`404`
+        otherwise). The `ETag` is the newest version number (`"0"` = no history yet); send it as
+        `If-Match` with a restore.
+      x-required-role: admin
+      parameters:
+        - name: before
+          in: query
+          description: "Cursor: the next_before of the previous page"
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          description: "Versions per page (1 to 100)"
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: One page of versions
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsVersionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /domains/{domainId}/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/DomainId"
+      - $ref: "#/components/parameters/VersionNumber"
+    get:
+      tags: [domains]
+      operationId: getDomainVersion
+      summary: One version of a domain, with a diff
+      description: |
+        The full state of that version and a field diff `diff`. `against` chooses what it is
+        compared with: `previous` (default: what this version changed; version 1 is compared with
+        nothing), `current` (the domain as it is now, or nothing for a deleted domain: what a
+        restore would change) or a version number (0 = nothing). The diff always reads from the
+        compared state to this version. `restorable` and `restore_problems` say whether a restore
+        would be accepted now (a retired CA, a missing preset, a name that is taken, the identical
+        state), from the same checks, without writing and without asking for the second factor.
+        The `ETag` is the newest version number of the domain (not of the version shown). Needs the
+        audit right (admin with a tenant-wide role) and the right to read the domain's CA.
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/Against"
+      responses:
+        "200":
+          description: The version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DomainVersion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /domains/{domainId}/versions/{version}/restore:
+    parameters:
+      - $ref: "#/components/parameters/DomainId"
+      - $ref: "#/components/parameters/VersionNumber"
+    post:
+      tags: [domains]
+      operationId: restoreDomainVersion
+      summary: Restore a version of a domain as a new version
+      description: |
+        Makes the domain look like that version again, as a **new** version (`change` = `restore`,
+        `restored_from` = the number); no version is ever edited. A deleted domain is created
+        again under its old ID. The restore runs the same checks as changing or creating the
+        domain, so everything a normal change refuses is refused here with the same reasons
+        (`422`): a CA that is retired or gone, a missing preset, name constraints, a name taken by
+        another domain. Restoring the state the domain already has is refused (`409`). It needs
+        what the same change needs: a fresh second factor, never an API token (`403`, problem
+        types `step-up-required` and `forbidden`). `If-Match` is **required**: the `ETag` of the
+        newest version (`428` `precondition-required` without it, `412` `precondition-failed` when
+        it is not the newest). The audit log gets `domain.restore` with `version`, `restored_from`
+        and `snapshot_sha256`; the `reason` stays with the version.
+      x-required-role: admin
+      x-step-up: true
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+      requestBody:
+        description: "The optional reason (send `{}` for none)"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestoreRequest" }
+      responses:
+        "200":
+          description: Restored; the body is the domain now, the `ETag` the new version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Domain" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PolicyViolation" }
+        "428": { $ref: "#/components/responses/PreconditionRequired" }
 
   # ---------------------------------------------------------------- agents (v0.3)
   /agents:
@@ -2712,6 +2967,28 @@ components:
       in: header
       required: false
       schema: { type: string, pattern: '^"[0-9]+"$', maxLength: 22 }
+    IfMatchRequired:
+      description: |
+        The `ETag` of the newest version, quoted (`"7"`), as the last read of the history gave it.
+        **Required.** Without it the answer is `428` (`precondition-required`); when it is not the
+        newest version the answer is `412` (`precondition-failed`). Nothing is changed in either case.
+      name: If-Match
+      in: header
+      required: true
+      schema: { type: string, pattern: '^"[0-9]+"$', maxLength: 22 }
+    VersionNumber:
+      description: "Number of the version (1, 2, 3 ..., no gaps)"
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    Against:
+      name: against
+      in: query
+      description: |
+        What the diff compares the version with: `previous` (default), `current` or a version
+        number (0 = nothing).
+      schema: { type: string, pattern: '^(previous|current|[0-9]{1,15})$', default: previous }
     Limit:
       description: "Maximum number of items per page"
       name: limit
@@ -2812,6 +3089,13 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/PreconditionProblem" }
+    PreconditionRequired:
+      description: |
+        The operation needs `If-Match` (the `ETag` of the newest version) and the request came
+        without it. Nothing was changed.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     Conflict:
       description: State doesn't allow the action (e.g. already revoked, already unsealed)
       content:
@@ -3719,6 +4003,192 @@ components:
           items: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    SettingsVersion:
+      description: |
+        One version of a domain or of the tenant settings. Actor names, IDs and the reason are free
+        text and data: a client that shows them must escape them.
+      type: object
+      required: [version, change, actor_type, actor_id, actor_name, reason, restored_from, created_at,
+                 snapshot_sha256, schema, changed_keys]
+      properties:
+        version: { type: integer, minimum: 1 }
+        change:
+          type: string
+          enum: [create, update, delete, restore, baseline]
+          description: |
+            `baseline` is the state before the history began (actor "system, before history");
+            `delete` holds the deleted state; `restore` has `restored_from`.
+        actor_type: { type: string, enum: [user, token, system, acme_account, agent] }
+        actor_id: { type: string }
+        actor_name: { type: string }
+        reason: { type: string, maxLength: 200, description: "Free text of the change; empty if none" }
+        restored_from:
+          type: [integer, "null"]
+          minimum: 1
+          description: The version a restore copied; null for every other change
+        created_at: { type: string, format: date-time }
+        snapshot_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the canonical snapshot; the audit entry of the change carries the same value
+        schema: { type: integer, minimum: 1, description: "Number of the snapshot schema" }
+        changed_keys:
+          type: [array, "null"]
+          items: { type: string }
+          description: |
+            Keys of the settings this version changed compared with the version before it (version
+            1: every setting that is set). Null if a snapshot could not be read.
+
+    SettingsVersionPage:
+      description: One page of versions, newest first
+      type: object
+      required: [items, next_before]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SettingsVersion" }
+        next_before:
+          type: [integer, "null"]
+          description: Cursor for the next (older) page as `before`; null at the end
+
+    FieldChange:
+      description: One setting that differs between two states
+      type: object
+      required: [key, label, before, after, kind]
+      properties:
+        key: { type: string, description: "Stable machine name, e.g. `acme.orders_per_account`" }
+        label: { type: string, description: What an admin reads }
+        before: { type: array, items: { type: string }, description: "Values before; a list has one entry per element, an unset setting none" }
+        after: { type: array, items: { type: string }, description: Values after }
+        kind: { type: string, enum: [changed, added, removed] }
+
+    VersionDiff:
+      description: |
+        The settings that differ between two states, read from `from` to `to`. Lists compare as
+        sets: a pure reordering is no change.
+      type: object
+      required: [from, to, against, changes]
+      properties:
+        from: { type: integer, minimum: 0, description: "The compared version; 0 = nothing (also the current state of a deleted domain)" }
+        to: { type: integer, minimum: 1, description: The version shown }
+        against: { type: string, enum: [previous, current, version] }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/FieldChange" }
+
+    DomainSnapshot:
+      description: The state of a domain in a version (a closed list of fields; never a secret)
+      type: object
+      required: [name, ca_id, include_subdomains, wildcards, challenge_types, approval, preset, validity_days,
+                 address_policy, ip_ranges]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        ca_id: { type: string }
+        include_subdomains: { type: boolean }
+        wildcards: { type: boolean }
+        challenge_types: { type: array, items: { type: string } }
+        approval: { type: string }
+        preset: { type: string }
+        validity_days: { type: integer, minimum: 0, description: "0 = the default" }
+        address_policy: { type: string }
+        ip_ranges: { type: array, items: { type: string } }
+
+    TenantSnapshot:
+      description: The state of the tenant settings in a version (a closed list of fields; never a secret)
+      type: object
+      required: [allow_server_keygen, organization, organizational_unit, locality, state, country, acme,
+                 trust_page, agent_enrollment, step_up_minutes, agent_predecessor, other_predecessor]
+      additionalProperties: false
+      properties:
+        allow_server_keygen: { type: boolean }
+        organization: { type: string }
+        organizational_unit: { type: string }
+        locality: { type: string }
+        state: { type: string }
+        country: { type: string }
+        acme:
+          type: object
+          required: [orders_per_account, failed_per_name, accounts_per_ip]
+          additionalProperties: false
+          properties:
+            orders_per_account: { type: integer }
+            failed_per_name: { type: integer }
+            accounts_per_ip: { type: integer }
+        trust_page: { type: boolean }
+        agent_enrollment: { type: string }
+        step_up_minutes: { type: integer }
+        agent_predecessor: { $ref: "#/components/schemas/PredecessorSnapshot" }
+        other_predecessor: { $ref: "#/components/schemas/PredecessorSnapshot" }
+
+    PredecessorSnapshot:
+      description: "What happens to the old certificate on renewal: the choice and the days to keep it"
+      type: object
+      required: [choice, days]
+      additionalProperties: false
+      properties:
+        choice: { type: string }
+        days: { type: integer }
+
+    DomainVersion:
+      description: One version of a domain with its state, a diff and whether it can be restored now
+      allOf:
+        - $ref: "#/components/schemas/SettingsVersion"
+        - type: object
+          required: [snapshot, diff, restorable, restore_problems]
+          properties:
+            snapshot: { $ref: "#/components/schemas/DomainSnapshot" }
+            diff: { $ref: "#/components/schemas/VersionDiff" }
+            restorable: { type: boolean }
+            restore_problems:
+              type: array
+              items: { type: string }
+              description: |
+                Why a restore would be refused now (empty when `restorable`), the reasons the
+                restore itself would give. A missing second factor is no problem here.
+
+    TenantSettingsVersion:
+      description: One version of the tenant settings with its state, a diff and whether it can be restored now
+      allOf:
+        - $ref: "#/components/schemas/SettingsVersion"
+        - type: object
+          required: [snapshot, diff, restorable, restore_problems]
+          properties:
+            snapshot: { $ref: "#/components/schemas/TenantSnapshot" }
+            diff: { $ref: "#/components/schemas/VersionDiff" }
+            restorable: { type: boolean }
+            restore_problems:
+              type: array
+              items: { type: string }
+              description: |
+                Why a restore would be refused now (empty when `restorable`), the reasons the
+                restore itself would give. A missing second factor is no problem here.
+
+    DeletedDomain:
+      description: A deleted domain; its last version is the deletion
+      type: object
+      required: [id, name, ca_id, ca_name, version, deleted_at, deleted_by, reason]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        ca_id: { type: string }
+        ca_name: { type: [string, "null"], description: "Name of the CA now; null if the CA no longer exists" }
+        version: { type: integer, minimum: 1, description: "The deletion: the version to send as `If-Match`" }
+        deleted_at: { type: string, format: date-time }
+        deleted_by: { type: string, description: Name of the actor }
+        reason: { type: string, description: "Free text of the deletion; empty if none" }
+
+    RestoreRequest:
+      description: The optional reason of a restore
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 200
+          description: "Free text kept with the new version (at most 200 characters, no control characters); never in the audit log"
 
     CA:
       description: "A certificate authority of this tenant with its generations (one per key)"
