@@ -7,6 +7,100 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-13
+
+Charts, reports and analysis: a *Reports* page with the expiry of the current week and the next 12 weeks, the issuances by source,
+the certificates per CA, the alert history and the agent fleet, two of the charts on the dashboard, and an
+*Analysis* page that applies ten fixed rules and says what each finding saw, why it matters and what to do.
+The charts are drawn by the server as SVG; no script runs in the browser. Both pages and two new REST
+endpoints compute everything from data the server already holds. The live test by the maintainer is pending.
+
+### Added
+
+- **Reports page** (`GET /reports`, menu *Overview*): five sections, each a fold with a chart, a sentence that
+  says what is counted and a *Numbers* table with the same figures. *Expiry*: 13 weekly columns, the current ISO
+  week and 12 more (UTC, Monday start), colored by the warning and critical windows of the monitor
+  (`monitor.expiry_days`). *Issuances*: the last 12 weeks, stacked by source (ACME, agent, UI and API), derived from
+  the ACME orders; imported and external certificates and agent identity certificates are not counted.
+  *Authorities*: certificates per CA by valid, expiring, expired and revoked, with the certificates that have no CA
+  of this server as *External certificates*. *Alerts*: opened per week over five weeks (the 30 days the server keeps)
+  by severity, and how many are open. *Agents*: state, version against the server and deployments, only while the
+  agent listener is on. *Expiry* and *Authorities* are open, the rest closed; the state is not remembered. The numbers
+  are built at most once a minute per tenant and the page says when.
+- **Two charts on the dashboard** (*Expiry* and *Authorities*) below the table of certificates that expire in 30 days,
+  each in an open fold, with a link to the Reports page. A failed build costs the charts, not the dashboard.
+- **Analysis page** (`GET /analysis`, `?rule=<id>`): a summary line, the findings (*Severity*, *Rule*, *Subject* with a
+  link, *What was seen*, *Why it matters*, *What to do*), the state of every rule (`ok`, `findings` or `unknown` with the
+  reason) and a short explanation. Ten rules: `orphaned_certificate`, `duplicate_certificates`, `renewal_loop`,
+  `expiry_wave`, `weak_key`, `weak_signature`, `ca_cliff`, `outdated_agent`, `unused_acme_account` and `unused_domain`;
+  the thresholds are in the operations guide §15.2. A rule without the data to judge says `unknown` and never produces a
+  finding. The analysis is advice only: it raises no alert, sends no message, stores nothing and has no dismiss.
+- **REST:** `GET /api/v1/reports` and `GET /api/v1/analysis` (with `?rule=<id>`; an unknown id is `400`), described in
+  `api/openapi.yaml` (tag `monitoring`, role viewer, `403` for a role or token limited to one CA, `Cache-Control:
+  no-store`, work while the server is sealed).
+- **Migration `pki.db` 0020:** the indexes `certificates_created_at` and the partial `acme_orders_certificate`, for the
+  issuance chart. Indexes only.
+- **Chart and fold components** (`components.Chart`, `components.Fold`, `internal/web/charts`): server-rendered SVG with
+  a title, a description, a legend and a numbers table under every chart; the series differ by pattern as well as by
+  color; new tokens `--chart-s1` to `--chart-s3` and `--chart-w`; entries in the design gallery. Tests allow exactly one
+  `<svg>` shape and check the contrast of the chart colors in the light, dark and OS-follow themes.
+- **UI inventory:** `task screenshots -- -inventory` shoots every page of the real UI, light and dark, into the untracked
+  `.tmp/ui-inventory/` (with the HTML of each page and `manifest.txt`), on a demo instance with extra seeds (agents,
+  alerts, endpoints, back-dated issuances). A test fails when a page route is neither in the list nor on the exclusion
+  list. **`docs/UI-GAPS.md`** is the ranked list of what the walk found missing or awkward; nothing in it is built.
+- **Documentation:** the site page *Reports and analysis*, a new
+  operations guide chapter 15, entries in the tour, FAQ, glossary and the lifetimes page.
+
+### Changed
+
+- **ACME new names page:** the text now says what a client does. The first order for a new name is refused with
+  *unauthorized … is a new name … waits for approval*, the client does not wait, and it has to be run again after the name
+  is approved.
+- **Screenshots:** the certificate page (it shows *Revoke now* and *Plan revocation*) and the new names page are
+  refreshed in the README, the tour and the guide.
+- **Documentation:** `docs/PLAN.md` records that the charts are server-rendered SVG instead of the ECharts island (see
+  Known limitations).
+- `api/openapi.yaml` `info.version` is 0.3.8.
+
+### Security notes
+
+- **Permission before data.** The Reports and Analysis pages, the dashboard charts and both endpoints need the
+  tenant-wide read permission (`pki.read`), like the Alerts page, because they name the CAs, hosts, accounts, agents and
+  domains of the whole tenant. A role or an API token limited to one CA gets `403` and no menu entry. The check is the
+  first thing the services do; the cache has no key that comes from a request and belongs to the tenant.
+- **Names from outside are escaped.** CA, domain, agent and certificate names come from CSRs, ACME clients and agents.
+  The pages escape them in the template, the findings clip them to 120 characters and carry them as plain text in JSON
+  (no field holds HTML), chart texts are stripped of control and bidi characters and clipped, and a finding's link must
+  be a path inside the UI.
+- **SVG rules.** The only `<svg>` the UI may contain has one fixed shape; script, `<foreignObject>`, `<image>`, `<use>`,
+  `<style>`, links, animation, `href`, `style` and event attributes are refused inside it, and tests render every page
+  against that rule.
+- **The Content Security Policy is unchanged** (`script-src 'self'; style-src 'self'`); no script was added and the
+  charts need none. No new dependency: `go.mod`, `go.sum` and `THIRD_PARTY.md` are unchanged.
+- **Read-only, nothing leaves the server.** The pages and endpoints are `GET` and change nothing. The two new packages
+  import no network package (a test checks it) and the analysis only reads the stored result of the last TLS scan.
+- **Migration 0020 changes no data.**
+
+### Known limitations
+
+- **The live test by the maintainer is pending.** The thresholds of the ten rules are defaults chosen without long
+  experience, are constants in the program rather than settings, and are to be judged on a real installation; a finding
+  that cries wolf is a bug report. Expect `orphaned_certificate` to say `unknown` without a TLS scan.
+- **Charts are server-rendered SVG, not ECharts.** The plan named an ECharts island. ECharts' HTML tooltip is reported to
+  write inline `style` attributes, which the strict CSP refuses (not verified for the current version), the repository
+  has no JavaScript pipeline and esbuild is not an approved dependency. ECharts stays approved and unused; ADR-04 is
+  unchanged. The price: no hover effects, zoom or legend toggles (a bar has the browser's own tooltip).
+- The alert history is the 30 days the server keeps (five weeks). There is no dismiss or acknowledge of findings, no export
+  (CSV or image), no per-CA slice (a role limited to one CA sees nothing of it), and no renewal heatmap or key algorithm
+  chart. The sources of the issuance chart are ACME, agent, and UI and API together.
+- A report and an analysis are built at most once a minute per tenant, so a change can take a minute to show.
+
+### Upgrade notes
+
+- `pki.db` migration 0020 adds two indexes and changes nothing else; there is no configuration change and no change to
+  the agent. An older binary refuses the migrated database, so going back needs the backup. Update the server as always;
+  nothing has to be set up for the new pages.
+
 ## [0.3.7] - 2026-11-13
 
 dns-01 in the agent. A deployment can prove its names through a DNS TXT record, so the agent can get
@@ -920,7 +1014,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...v0.3.5

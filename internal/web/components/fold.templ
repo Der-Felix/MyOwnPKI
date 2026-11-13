@@ -1,0 +1,15 @@
+package components
+
+// Fold is a section that opens and closes: a native details element, no
+// script, so the keyboard and screen readers work as they do everywhere. The
+// summary holds the section heading (an h2), so the page keeps one heading
+// per section. The state is not remembered (docs/PHASE3.md D12). The id is a
+// constant of the calling page and must be unique on it.
+templ Fold(id, title string, open bool) {
+	<details class="fold" id={ id } open?={ open }>
+		<summary><h2>{ title }</h2></summary>
+		<div class="fold-body">
+			{ children... }
+		</div>
+	</details>
+}

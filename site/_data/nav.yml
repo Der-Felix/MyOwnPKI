@@ -80,6 +80,8 @@
       url: /monitoring/
     - title: TLS scan
       url: /tls-scan/
+    - title: Reports and analysis
+      url: /reports/
     - title: Best practices
       url: /best-practices/
     - title: Troubleshooting

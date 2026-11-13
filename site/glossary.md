@@ -58,6 +58,13 @@ server that stays [sealed](#seal-and-unseal) or a silent agent. An alert is *war
 the Alerts page, and closes by itself when the cause is gone; e-mail and webhook messages are optional.
 See [Monitoring]({{ '/monitoring/' | relative_url }}#the-alerts).
 
+### Analysis
+
+The page that applies ten fixed rules to what the server knows and lists *findings*: what was seen, why it matters and
+what to do. A rule is `ok`, has `findings` or is `unknown` when it lacks the data to judge, which is not a problem. It
+is advice only: it raises no [alert](#alert) and nothing is stored. See
+[Reports and analysis]({{ '/reports/' | relative_url }}#the-analysis-page).
+
 ### API token
 
 A secret starting with `mop_` that a script uses instead of a sign-in. It carries a [role](#role) its owner
@@ -236,6 +243,14 @@ A [join token](#join-token) for a bounded number of hosts (2 to 25), for names t
 fresh second factor; an API token never can. See
 [the enrollment pass]({{ '/hosts/' | relative_url }}#the-enrollment-pass-for-roll-outs).
 
+### Expiry wave
+
+Many certificates that end in the same week. If their renewals fail together, they become one large incident. The
+*Expiry* chart of the Reports page shows a wave as a tall column, and the `expiry_wave` rule of the *Analysis* page
+names a week in which at least 10 valid certificates and at least 30 percent of all of them end. Clients that renew
+at two thirds of the lifetime, each on its own schedule, spread the ends out. See
+[Reports and analysis]({{ '/reports/' | relative_url }}#the-ten-rules).
+
 ## F
 
 ### Fingerprint
@@ -357,6 +372,13 @@ The UI lists them under *ACME → Orders*.
 
 Background: [ACME explained]({{ '/learn/acme/' | relative_url }}).
 
+### Orphaned certificate
+
+In the *Analysis* page, a current certificate that no agent reports as deployed and that no scanned endpoint serves,
+although scanned endpoints that cover its names serve something else. The finding says "not seen", not "unused": the
+scan reaches only the endpoints you entered. Without a scan that can judge a certificate, the rule says `unknown`.
+See [Reports and analysis]({{ '/reports/' | relative_url }}#the-ten-rules) and [TLS scan](#tls-scan).
+
 ## P
 
 ### Passphrase
@@ -417,6 +439,13 @@ and the backups. See
 [operations guide §7]({{ '/reference/operations/' | relative_url }}#7-passphrase-and-recovery-key).
 
 Background: [Keys and unsealing]({{ '/learn/keys-and-unseal/' | relative_url }}).
+
+### Renewal loop
+
+A client that keeps getting new certificates for the same names, often because a deploy hook fails and the job starts
+again. The `renewal_loop` rule of the *Analysis* page fires at 3 certificates for the same names within 24 hours
+(critical at 6), or 8 within 7 days. ACME servers rate-limit this. See
+[Reports and analysis]({{ '/reports/' | relative_url }}#the-ten-rules).
 
 ### Revocation
 
@@ -481,6 +510,13 @@ A number that identifies a certificate among those of one issuer. MyOwnPKI uses 
 CA, and a [CRL](#crl) lists revoked certificates by serial number.
 
 Background: [Reading a certificate]({{ '/learn/certificate-anatomy/' | relative_url }}).
+
+### Signature algorithm
+
+The hash and key type with which a CA signs a certificate, for example ECDSA with SHA-256 or RSA with SHA-256. A
+certificate signed with SHA-1, MD5 or MD2 is flagged by the `weak_signature` rule of the *Analysis* page, because SHA-1
+collisions are practical. The signature of a root certificate is its own and is not judged. See
+[Reports and analysis]({{ '/reports/' | relative_url }}#the-ten-rules).
 
 ### Split DNS
 

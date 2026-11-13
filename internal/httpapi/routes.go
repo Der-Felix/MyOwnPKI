@@ -110,5 +110,7 @@ func (a *API) table() []Route {
 		{OperationID: "createEndpoint", Method: http.MethodPost, Path: "/endpoints", access: signedIn, body: true, maxBody: maxEndpointBody, handle: a.createEndpoint},
 		{OperationID: "deleteEndpoint", Method: http.MethodDelete, Path: "/endpoints/{endpointId}", access: signedIn, handle: a.deleteEndpoint},
 		{OperationID: "scanEndpoint", Method: http.MethodPost, Path: "/endpoints/{endpointId}/scan", access: signedIn, handle: a.scanEndpoint},
+		{OperationID: "getReports", Method: http.MethodGet, Path: "/reports", access: signedIn, handle: a.getReports},
+		{OperationID: "getAnalysis", Method: http.MethodGet, Path: "/analysis", access: signedIn, handle: a.getAnalysis},
 	}
 }

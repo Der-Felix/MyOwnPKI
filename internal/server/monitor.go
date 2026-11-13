@@ -7,12 +7,14 @@ import (
 	"net"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/analysis"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
+	"github.com/Der-Felix/MyOwnPKI/internal/report"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tlsscan"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
@@ -38,6 +40,8 @@ type monitorSide struct {
 	digest    monitor.DigestOptions
 	tester    *notify.Tester     // the test message of the UI and the API
 	endpoints *monitor.Endpoints // the TLS endpoints of the UI and the API
+	reports   *report.Service    // GET /reports (v0.3.8)
+	analysis  *analysis.Service  // GET /analysis (v0.3.8)
 }
 
 // scanSide is the TLS scan (docs/PHASE3.md §10): the endpoints and the pool
@@ -77,6 +81,14 @@ func (s *Server) buildMonitor() error {
 	}
 	m.eval.Scan, m.eval.ScanOff = s.scan.svc, sv.Off()
 	m.endpoints = &monitor.Endpoints{Service: s.scan.svc, Eval: m.eval, Clock: s.clk}
+	// The reports and the analysis (v0.3.8) read through the same services
+	// with their own system principals; the callers pass authz.ReadPKI first.
+	rd := report.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Alerts: m.store, Rules: rules, ServerVersion: s.opt.Release, Clock: s.clk, Log: s.log}
+	ad := analysis.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Scan: s.scan.svc, ScanOff: sv.Off(), ServerVersion: s.opt.Release, Clock: s.clk, Log: s.log}
+	if a := s.Agents(); a != nil { // not a typed nil: nil means the agent listener is off
+		rd.Agents, ad.Agents = a, a
+	}
+	m.reports, m.analysis = report.NewService(rd), analysis.NewService(ad)
 	m.queue = &notify.Queue{DB: s.sys.Write, Log: s.log, Channels: notifyChannels(s.opt.Config, s.opt.Hostname, s.opt.Release)}
 	m.digest = monitor.DigestOptions{Server: s.opt.Hostname, RepeatEvery: v.RepeatEvery, Link: uiLink(s.opt.Config), Channels: m.queue.Names()}
 	m.tester = &notify.Tester{Channels: m.queue.Channels, Server: s.opt.Hostname, Clock: s.clk, Audit: s.engine.Audit, Scope: s.engine.Scope, Tenant: store.DefaultTenant}
@@ -264,4 +276,38 @@ func (s *Server) endpointAdmin() web.EndpointAdmin {
 		return nil
 	}
 	return s.monitor.endpoints
+}
+
+// reportSource and analysisSource are the services as the UI's interfaces -
+// nil (not a typed nil) without monitoring.
+func (s *Server) reportSource() web.ReportSource {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.reports
+}
+
+func (s *Server) analysisSource() web.AnalysisSource {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.analysis
+}
+
+// Reports is the report service for the REST API and the pages; nil
+// without monitoring.
+func (s *Server) Reports() *report.Service {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.reports
+}
+
+// Analysis is the analysis service for the REST API and the pages; nil
+// without monitoring.
+func (s *Server) Analysis() *analysis.Service {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.analysis
 }
