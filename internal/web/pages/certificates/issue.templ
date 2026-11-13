@@ -56,7 +56,10 @@ type IssueData struct {
 	// Step 3
 	ServerKeyAllowed bool
 	MaxDaysHint      string
-	// Step 4
+	// Step 4: the plan of the engine (real UI); without one the request is
+	// summarized as rows from the form fields (prototype, or a plan that
+	// could not be made).
+	Plan   *PlanView
 	Review []view.KV
 
 	// Real UI (step 14): CSRF token, CSR file upload, and whether signing
@@ -249,6 +252,10 @@ templ keyStep(d IssueData) {
 }
 
 templ reviewStep(d IssueData) {
-	<h2 class="section-head">Review</h2>
-	@components.KVList(d.Review)
+	if d.Plan != nil {
+		@planReview(d.Plan)
+	} else {
+		<h2 class="section-head">Review</h2>
+		@components.KVList(d.Review)
+	}
 }

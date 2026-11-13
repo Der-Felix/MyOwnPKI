@@ -101,17 +101,9 @@ func (a *app) issue(c *rc, st certificates.IssueState, cas []ca.CAInfo) {
 			return
 		}
 	}
-	info, _ := findCA(cas, st.CA)
-	days, _ := strconv.Atoi(st.Days)
-	req := ca.Request{
-		CA: info.Name, Preset: st.Preset, Subject: ca.Subject{CommonName: st.CommonName},
-		DNSNames: lines(st.DNS), IPAddresses: lines(st.IP), EmailAddresses: lines(st.Email),
-		ValidityDays: days, Who: c.who(),
-	}
-	if st.KeyMode == "csr" {
-		req.CSR, req.IgnoreCSRNames = []byte(st.CSR), true
-	} else {
-		req.KeyAlgorithm = st.Algorithm
+	req := a.issueRequest(c, st, cas)
+	if a.d.onRequest != nil {
+		a.d.onRequest("issue", req)
 	}
 	out, err := a.d.Engine.Issue(c.r.Context(), req)
 	var denied *ca.DeniedError
@@ -125,7 +117,9 @@ func (a *app) issue(c *rc, st certificates.IssueState, cas []ca.CAInfo) {
 		c.fail(err)
 		return
 	case errors.As(err, &denied):
-		msgs := []view.Message{{Kind: view.MessageError, Text: "Nothing was issued – the policy refused the request:"}}
+		// The reasons follow; the review step lists them itself when its plan is
+		// refused too, and renderIssue then drops these copies.
+		msgs := []view.Message{{Kind: view.MessageError, Text: "Nothing was issued – the policy refused the request."}}
 		for _, r := range denied.Reasons {
 			msgs = append(msgs, view.Message{Kind: view.MessageError, Text: r})
 		}
@@ -322,8 +316,19 @@ func (a *app) renderIssue(c *rc, status, step int, st certificates.IssueState, c
 	}
 	if step == certificates.StepReview && prOK && caOK {
 		d.Review = reviewRows(pr, info, st)
-		if sealed {
-			d.Messages = append(d.Messages, view.Message{Kind: view.MessageWarning, Text: "The server is sealed – issuing is possible after an unseal."})
+		if pv := a.reviewPlan(c, st, cas); pv != nil {
+			// The plan carries the verdict, the reasons and the sealed notice. A
+			// refused plan switches the button off; Back stays.
+			d.Plan = pv
+			d.CanIssue = d.CanIssue && pv.Allowed
+			if !pv.Allowed {
+				d.Messages = dropReasons(d.Messages, pv.Reasons)
+			}
+		} else {
+			d.Messages = append(d.Messages, view.Message{Kind: view.MessageWarning, Text: "The preview could not be computed. The checks run when you issue."})
+			if sealed {
+				d.Messages = append(d.Messages, view.Message{Kind: view.MessageWarning, Text: "The server is sealed – issuing is possible after an unseal."})
+			}
 		}
 	}
 	p := c.page("Issue certificate", "issue", view.Crumb{Label: "Certificates", Href: "/certificates"})
@@ -370,4 +375,57 @@ func (a *app) serverKeygen(c *rc) (bool, error) {
 		return false, nil
 	}
 	return a.d.Engine.ServerKeygen(c.r.Context())
+}
+
+// issueRequest is the one place that turns the wizard state into the engine
+// request. The review step plans exactly this request and the final submit
+// issues exactly this request, so the preview shows what the wizard signs. It
+// builds only from the state (and who is asking): the wizard does not fill the
+// tenant's subject defaults, and a CSR is used for its key alone, never for
+// its names (IgnoreCSRNames, owner 2026-10-17).
+func (a *app) issueRequest(c *rc, st certificates.IssueState, cas []ca.CAInfo) ca.Request {
+	info, _ := findCA(cas, st.CA)
+	days, _ := strconv.Atoi(st.Days)
+	req := ca.Request{
+		CA: info.Name, Preset: st.Preset, Subject: ca.Subject{CommonName: st.CommonName},
+		DNSNames: lines(st.DNS), IPAddresses: lines(st.IP), EmailAddresses: lines(st.Email),
+		ValidityDays: days, Who: c.who(),
+	}
+	if st.KeyMode == "csr" {
+		req.CSR, req.IgnoreCSRNames = []byte(st.CSR), true
+	} else {
+		req.KeyAlgorithm = st.Algorithm
+	}
+	return req
+}
+
+// reviewPlan asks the engine what issuing the wizard's request would do. It
+// validates the earlier steps the way the final submit does and plans the very
+// request the submit would send; it writes nothing. nil = no plan could be made
+// (the state is invalid, or the engine failed): the engine decides again at
+// the submit.
+func (a *app) reviewPlan(c *rc, st certificates.IssueState, cas []ca.CAInfo) *certificates.PlanView {
+	for step := certificates.StepPreset; step < certificates.StepReview; step++ {
+		var notes []view.Message
+		if errs := a.validateIssueStep(c, step, &st, cas, &notes, false); len(errs) > 0 {
+			return nil
+		}
+	}
+	req := a.issueRequest(c, st, cas)
+	if a.d.onRequest != nil {
+		a.d.onRequest("review", req)
+	}
+	plan, err := a.d.Engine.Plan(c.r.Context(), req)
+	if err != nil {
+		a.log.ErrorContext(c.r.Context(), "issue preview", slog.Any("error", err))
+		return nil
+	}
+	return planView(plan)
+}
+
+// dropReasons removes the message lines that repeat a reason the plan lists.
+func dropReasons(msgs []view.Message, reasons []string) []view.Message {
+	return slices.DeleteFunc(msgs, func(m view.Message) bool {
+		return m.Kind == view.MessageError && slices.Contains(reasons, m.Text)
+	})
 }

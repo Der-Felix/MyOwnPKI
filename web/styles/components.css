@@ -514,6 +514,9 @@
 /* ---------- Forms ---------- */
 .form {
   display: grid;
+  /* One column that may shrink below the width of its widest table, which
+     then scrolls inside its own wrapper instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s-16);
   max-width: var(--form-w);
 }

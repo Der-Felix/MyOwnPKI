@@ -87,6 +87,10 @@ type AppDeps struct {
 	// nil hides the pages and the dashboard charts.
 	Reports  ReportSource
 	Analysis AnalysisSource
+
+	// onRequest, set only by tests, sees the engine request of the issue
+	// wizard's review step ("review") and of its final submit ("issue").
+	onRequest func(op string, r ca.Request)
 }
 
 // AlertSource is what the UI reads of the monitoring: the open alerts and

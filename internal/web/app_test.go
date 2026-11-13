@@ -446,13 +446,22 @@ func realPages(t *testing.T) map[string]string {
 		out["real wizard key"] = b.post(t, "/certificates/new", form(1, nil)).html()
 		out["real wizard names"] = b.post(t, "/certificates/new", form(2, nil)).html()
 		out["real wizard review"] = b.post(t, "/certificates/new", form(3, nil)).html()
+		out["real wizard review refused"] = b.post(t, "/certificates/new", form(3, url.Values{"email": {"ops@homelab.lan"}})).html()
+		out["real wizard review hostile"] = b.post(t, "/certificates/new", form(3, url.Values{"cn": {`<b>"x"</b> &'`}, "dns": {"<script>alert(1)</script>.homelab.lan"}})).html()
+		sealed := newUIEnv(t)
+		sb := sealed.browser("192.0.2.60")
+		sb.signIn(t, "demo", sealed.DemoPassword)
+		out["real wizard review sealed"] = sb.post(t, "/certificates/new", url.Values{
+			"csrf_token": {sb.csrf(t)}, "from": {"3"}, "go": {"next"}, "preset": {"server"}, "ca": {sealed.CAIDs["issuing"]},
+			"keymode": {"csr"}, "alg": {"ecdsa-p256"}, "days": {"90"}, "csr": {csrPEM}, "cn": {"web.homelab.lan"}, "dns": {"web.homelab.lan"},
+		}).html()
 		out["real wizard error"] = b.post(t, "/certificates/new", form(2, url.Values{"csr": {"hello"}})).html()
 		out["real wizard refused"] = b.post(t, "/certificates/new", form(4, url.Values{"go": {"issue"}, "dns": {"*.lan"}})).html()
 		out["real new user"] = b.post(t, "/admin/users/new", url.Values{"csrf_token": {token}, "username": {"carol"}, "password": {"a long password for the new colleague"}, "role": {"viewer"}}).html()
 		out["real new token"] = b.post(t, "/account/tokens", url.Values{"csrf_token": {token}, "name": {"ci"}, "role": {"viewer"}, "days": {"30"}}).html()
 		out["real new codes"] = b.post(t, "/account/recovery-codes", url.Values{"csrf_token": {token}, "password": {v.DemoPassword}}).html()
 		for page, want := range map[string]string{
-			"real wizard refused": "the policy refused the request", "real wizard error": `id="csr-err"`,
+			"real wizard refused": "the policy refused the request", "real wizard error": `id="csr-err"`, "real wizard review refused": "The policy would refuse", "real wizard review sealed": "The server is sealed – issuing is possible after an unseal.",
 			"real wizard names": `aria-current="step">Names`, "real /certificates/crt_none": "There is no such object",
 			"real /unseal": "Sealed since", "real /login/code": `autocomplete="one-time-code"`,
 			"real new user": "otpauth://", "real new token": "mop_", "real new codes": "Shown only now", "real /admin/audit?scope=instance": "user.login",
