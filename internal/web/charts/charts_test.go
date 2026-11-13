@@ -48,7 +48,7 @@ func TestExpiry(t *testing.T) {
 		t.Errorf("window series: %+v", c.Categories[:4])
 	}
 	// 78 certificates in total, 0+1+2 = 3 of them in the warning or critical weeks.
-	if want := "78 certificates end in the next 13 weeks, 3 of them in weeks that start inside the warning or critical window."; c.Summary != want {
+	if want := "78 certificates end in the current week and the next 12 weeks, 3 of them in weeks that start inside the warning or critical window."; c.Summary != want {
 		t.Errorf("summary %q, want %q", c.Summary, want)
 	}
 	out := render(t, c)

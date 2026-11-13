@@ -47,7 +47,7 @@ func Expiry(e report.Expiry) view.Chart {
 		ID:             "chart-expiry",
 		Kind:           view.ChartColumns,
 		Title:          "Expiry timeline",
-		Empty:          "No certificate ends in the next " + strconv.Itoa(len(e.Weeks)) + " weeks.",
+		Empty:          "No certificate ends in " + expiryReach(len(e.Weeks)) + ".",
 		CategoryHeader: "Week",
 		ValueHeader:    "Certificates",
 		SeriesHeader:   "Window",
@@ -76,9 +76,19 @@ func Expiry(e report.Expiry) view.Chart {
 			Label: weekLabel(w.Start), Name: weekName(w.Start), Series: series, Values: []int64{n},
 		})
 	}
-	c.Summary = plural(total, "certificate ends", "certificates end") + " in the next " + strconv.Itoa(len(e.Weeks)) +
-		" weeks, " + grp(soon) + " of them in weeks that start inside the warning or critical window."
+	c.Summary = plural(total, "certificate ends", "certificates end") + " in " + expiryReach(len(e.Weeks)) +
+		", " + grp(soon) + " of them in weeks that start inside the warning or critical window."
 	return c
+}
+
+// expiryReach says what the timeline covers: the dataset starts at the current
+// ISO week and ends with the last of its weeks, so "the next 13 weeks" would
+// be wrong (it is up to 97 days, counted to the end of the last week).
+func expiryReach(weeks int) string {
+	if weeks <= 1 {
+		return "the current week"
+	}
+	return "the current week and the next " + strconv.Itoa(weeks-1) + " weeks"
 }
 
 // Issuances is the issuances per week, stacked by source.

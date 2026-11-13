@@ -150,7 +150,7 @@ func TestGalleryShowsEveryChart(t *testing.T) {
 		t.Error("a numbers table is open by default")
 	}
 	// One empty-state chart, in words.
-	if !strings.Contains(out, `<p class="empty">No certificate ends in the next 13 weeks.</p>`) {
+	if !strings.Contains(out, `<p class="empty">No certificate ends in the current week and the next 12 weeks.</p>`) {
 		t.Error("the empty-state chart is missing")
 	}
 	// The classes of the families that need a gallery entry.
