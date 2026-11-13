@@ -45,7 +45,9 @@ var (
 	trustDebian = trustFamily{
 		Name: "Debian", Dir: "/usr/local/share/ca-certificates", File: "myownpki-agent-root.crt",
 		Install: []string{"/usr/sbin/update-ca-certificates"},
-		Remove:  []string{"/usr/sbin/update-ca-certificates", "--fresh"},
+		// A normal run already drops the dangling link of the removed file;
+		// --fresh would rebuild every link of the store for nothing.
+		Remove: []string{"/usr/sbin/update-ca-certificates"},
 	}
 	trustRedHat = trustFamily{
 		Name: "RedHat", Dir: "/etc/pki/ca-trust/source/anchors", File: "myownpki-agent-root.pem",

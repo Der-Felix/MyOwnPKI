@@ -467,9 +467,9 @@ func TestRemoveDeletesOnlyTheFixedFileAndTheKey(t *testing.T) {
 		osRelease string
 		hook      string
 	}{
-		"debian":  {osReleaseDebian, "/usr/sbin/update-ca-certificates --fresh"},
+		"debian":  {osReleaseDebian, "/usr/sbin/update-ca-certificates"},
 		"redhat":  {osReleaseRocky, "/usr/bin/update-ca-trust"},
-		"ubuntu2": {osReleaseUbuntu, "/usr/sbin/update-ca-certificates --fresh"},
+		"ubuntu2": {osReleaseUbuntu, "/usr/sbin/update-ca-certificates"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
