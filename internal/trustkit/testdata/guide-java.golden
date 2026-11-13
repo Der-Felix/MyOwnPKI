@@ -1,0 +1,7 @@
+## keytool
+```
+curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
+  && echo 'ff91eaaeb57e418aa50c8c3589ec4922bca0f995a1f9ce1390bf2960b6606690  root.crt' | sha256sum -c - \
+  && sudo keytool -importcert -trustcacerts -alias myownpki-fixture-root -file root.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit
+```
+Note: The value in this command only checks the download against this page. It does not show that the page is genuine: compare the SHA-256 with the admin UI or your administrator first. keytool prints the certificate's fingerprint and asks before it trusts it: compare it too. changeit is the public default password of the Java keystore; older Java keeps the file under jre/lib/security. On macOS use shasum -a 256 -c - instead of sha256sum -c -.
