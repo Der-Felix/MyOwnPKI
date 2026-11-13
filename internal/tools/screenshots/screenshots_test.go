@@ -274,3 +274,60 @@ func TestInventoryInstanceShowsData(t *testing.T) {
 		}
 	}
 }
+
+// TestPublicServerShowsThePortal: the two portal shots are served by the
+// public handler of the demo instance, without a session, for the platform
+// they name (not the one of the headless browser), with the demo's neutral
+// names and only public data.
+func TestPublicServerShowsThePortal(t *testing.T) {
+	t.Parallel()
+	in, err := newInstance(t.Context(), filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.close()
+	bases, stop, err := startServers(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	get := func(path string) string {
+		t.Helper()
+		resp, err := http.Get(bases[public] + path) //nolint:noctx // test against the local screenshot servers
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: status %d", path, resp.StatusCode)
+		}
+		return string(body)
+	}
+	shotPaths := map[string]string{}
+	for _, s := range shots {
+		if s.kind == public {
+			shotPaths[s.name] = s.path
+		}
+	}
+	if len(shotPaths) != 2 {
+		t.Fatalf("want the two portal shots, have %v", shotPaths)
+	}
+	for name, want := range map[string]string{"trust-portal": "Import-Certificate", "trust-portal-ios": "Not Signed"} {
+		html := get(shotPaths[name])
+		if !strings.Contains(html, want) || strings.Contains(html, "<script") {
+			t.Errorf("%s: the page lacks %q or has a script", name, want)
+		}
+		if !strings.Contains(html, "Homelab Offline Root") {
+			t.Errorf("%s: the demo's root is not listed", name)
+		}
+	}
+	host, _ := os.Hostname()
+	html := get("/?os=windows")
+	if !strings.Contains(html, "http://pki.homelab.example/ca/") {
+		t.Error("the commands must name the demo's neutral public address")
+	}
+	if host != "" && strings.Contains(strings.ToLower(html), strings.ToLower(host)) {
+		t.Error("the portal must not show the host name of the machine that shoots it")
+	}
+}
