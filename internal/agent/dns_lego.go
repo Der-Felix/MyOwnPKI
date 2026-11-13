@@ -107,20 +107,25 @@ func setLegoDNS(resolvers []string) {
 // ScrubProviderEnvironment removes the variables lego and its providers read
 // (LEGO_*, CLOUDFLARE_*, CF_*, RFC2136_*) from the process environment, so
 // that nothing outside agent.yaml and the credentials file can configure a DNS
-// provider or turn on lego's debug output. It returns the names it removed,
-// never the values.
+// provider or turn on lego's debug output. It also removes SSL_CERT_FILE and
+// SSL_CERT_DIR: the Cloudflare client trusts the system roots, and on Linux
+// those two variables decide which CAs that is, so they would decide who may
+// receive the API token. Nothing else of the agent reads them: the server
+// channel and the ACME client use the CA bundle of agent.yaml, the check of
+// the served certificate compares the exact leaf, and the hooks are fixed
+// commands that then see the default trust, too. It returns the names it
+// removed, never the values.
 func ScrubProviderEnvironment() []string {
 	var removed []string
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		upper := strings.ToUpper(name)
+		drop := upper == "SSL_CERT_FILE" || upper == "SSL_CERT_DIR"
 		for _, prefix := range []string{"LEGO_", "CLOUDFLARE_", "CF_", "RFC2136_"} {
-			if strings.HasPrefix(upper, prefix) {
-				if os.Unsetenv(name) == nil {
-					removed = append(removed, name)
-				}
-				break
-			}
+			drop = drop || strings.HasPrefix(upper, prefix)
+		}
+		if drop && os.Unsetenv(name) == nil {
+			removed = append(removed, name)
 		}
 	}
 	slices.Sort(removed)

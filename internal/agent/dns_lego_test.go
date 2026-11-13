@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -676,5 +677,30 @@ func TestObtainWithClientWiresTheDNSProviderAndNoResponder(t *testing.T) {
 	// A dns-01 deployment without a provider is refused, not served by http-01.
 	if _, err := a.obtainWithClient(t.Context(), d, user, "acme-test", ac, nil, nil); err == nil || !strings.Contains(err.Error(), "no DNS provider") {
 		t.Fatalf("without a provider: %v", err)
+	}
+}
+
+// The Cloudflare client trusts the system roots, and on Linux these two
+// variables choose them: they would choose who may receive the API token.
+func TestScrubProviderEnvironmentRemovesTheTrustStoreOverrides(t *testing.T) {
+	t.Setenv("SSL_CERT_FILE", "/tmp/evil-ca.pem")
+	t.Setenv("SSL_CERT_DIR", "/tmp/evil-cas")
+	t.Setenv("SSL_CERT_OTHER", "stays") // only the two Go reads
+	removed := ScrubProviderEnvironment()
+	for _, name := range []string{"SSL_CERT_FILE", "SSL_CERT_DIR"} {
+		if !slices.Contains(removed, name) {
+			t.Errorf("%s not reported: %v", name, removed)
+		}
+		if v, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s is still set (%d bytes)", name, len(v))
+		}
+	}
+	if os.Getenv("SSL_CERT_OTHER") != "stays" || slices.Contains(removed, "SSL_CERT_OTHER") {
+		t.Fatal("an unrelated variable was removed")
+	}
+	for _, n := range removed {
+		if strings.Contains(n, "evil") {
+			t.Fatalf("a value in the list of names: %v", removed)
+		}
 	}
 }
