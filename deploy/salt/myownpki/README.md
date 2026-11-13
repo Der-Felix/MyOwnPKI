@@ -238,7 +238,7 @@ minion's architecture or an unsupported architecture; `enrollment_pass` that is 
 unknown `package.format` or an `os_family` that `auto` cannot map; `config_source` together with
 `deployments` or `absent`; an unknown deployment option or a value of the wrong type; `challenge: dns-01` without
 `dns_provider` or with `webroot`; a `dns_*` option next to another challenge; a wildcard name without
-dns-01; a name in both `deployments` and `absent`; `system_trust` that is not a boolean, or `true` on a minion whose `os_family` is not Debian or RedHat; an unknown key (a typo) anywhere in the pillar.
+dns-01; a name in both `deployments` and `absent`; `system_trust` that is not a boolean, `true` on a minion whose `os_family` is not Debian or RedHat, or `true` with a `version` older than 0.3.9 (the command `trust install` does not exist there); an unknown key (a typo) anywhere in the pillar.
 
 **System trust store.** `system_trust: true` makes every program on the host trust the root of this PKI, for
 every name (name constraints on the intermediates are the only limit). It adds no new decision: the root is the one

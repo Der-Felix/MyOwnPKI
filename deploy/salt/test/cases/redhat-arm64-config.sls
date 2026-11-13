@@ -15,14 +15,14 @@
 # absent: myownpki-agent-deployment-proxy
 # absent: myownpki-agent-refused
 # contains: --package-format rpm
-# contains: myownpki-agent_0.3.6_linux_arm64.rpm
+# contains: myownpki-agent_0.3.9_linux_arm64.rpm
 # contains: sandbox sync
 # contains: trust install --root-sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --no-record
 # not-contains: --token-file
 # not-contains: --webroot
 myownpki:
   agent:
-    version: "0.3.6"
+    version: "0.3.9"
     server: https://pki.homelab.lan:8444
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://test/files/root.pem

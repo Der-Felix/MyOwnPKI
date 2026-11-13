@@ -13,7 +13,7 @@
 # not-contains: --no-record
 myownpki:
   agent:
-    version: "0.3.6"
+    version: "0.3.9"
     server: https://pki.homelab.lan:8444
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://test/files/root.pem
