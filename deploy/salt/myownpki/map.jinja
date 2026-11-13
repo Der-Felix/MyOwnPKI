@@ -65,7 +65,7 @@
 
 {% set version = cfg['version'] if cfg['version'] is string else '' %}
 {% if version != '' and not (version | regex_match('^[0-9][0-9A-Za-z.+~_-]*$')) %}
-{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.6') %}
+{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.7') %}
 {% endif %}
 
 {% set server = cfg['server'] if cfg['server'] is string else '' %}
