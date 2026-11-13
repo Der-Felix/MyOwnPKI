@@ -83,8 +83,8 @@ func (s *Server) buildMonitor() error {
 	m.endpoints = &monitor.Endpoints{Service: s.scan.svc, Eval: m.eval, Clock: s.clk}
 	// The reports and the analysis (v0.3.8) read through the same services
 	// with their own system principals; the callers pass authz.ReadPKI first.
-	rd := report.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Alerts: m.store, Rules: rules, ServerVersion: s.opt.Release, Clock: s.clk}
-	ad := analysis.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Scan: s.scan.svc, ScanOff: sv.Off(), ServerVersion: s.opt.Release, Clock: s.clk}
+	rd := report.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Alerts: m.store, Rules: rules, ServerVersion: s.opt.Release, Clock: s.clk, Log: s.log}
+	ad := analysis.Deps{Tenant: store.DefaultTenant, Engine: s.engine, Scan: s.scan.svc, ScanOff: sv.Off(), ServerVersion: s.opt.Release, Clock: s.clk, Log: s.log}
 	if a := s.Agents(); a != nil { // not a typed nil: nil means the agent listener is off
 		rd.Agents, ad.Agents = a, a
 	}

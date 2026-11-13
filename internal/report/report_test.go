@@ -3,12 +3,14 @@ package report
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,6 +81,8 @@ func (f *fakeAlerts) Since(_ context.Context, since time.Time) ([]monitor.Alert,
 type fakeAgents struct {
 	list []agents.Agent
 	deps map[string][]agents.Deployment
+	// gone are agents that ListAgents still lists but GetAgent no longer finds.
+	gone map[string]bool
 }
 
 func (f *fakeAgents) ListAgents(context.Context, keys.Who) ([]agents.Agent, error) {
@@ -86,6 +90,9 @@ func (f *fakeAgents) ListAgents(context.Context, keys.Who) ([]agents.Agent, erro
 }
 
 func (f *fakeAgents) GetAgent(_ context.Context, _ keys.Who, id string) (*agents.Agent, error) {
+	if f.gone[id] {
+		return nil, fmt.Errorf("agent %s: %w", id, agents.ErrNotFound)
+	}
 	return &agents.Agent{ID: id, Deployments: f.deps[id]}, nil
 }
 
@@ -439,13 +446,14 @@ func TestCache(t *testing.T) {
 		t.Errorf("the next minute did not rebuild: same=%v calls=%d at %v", next == first, e.calls.Load(), next.GeneratedAt)
 	}
 
-	// An error is returned and not kept.
+	// An error is returned and kept only for FailTTL (TestFailureIsRemembered).
 	clk.Advance(time.Hour)
 	e.err = errors.New("db down")
 	if _, err2 := s.Get(t.Context(), viewer); err2 == nil {
 		t.Fatal("the build error was swallowed")
 	}
 	e.err = nil
+	clk.Advance(FailTTL)
 	if _, err3 := s.Get(t.Context(), viewer); err3 != nil {
 		t.Errorf("after the error: %v", err3)
 	}
@@ -588,5 +596,173 @@ func TestNoNetworkImports(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestFailureIsRemembered: a failed build is remembered for FailTTL, so a
+// persistent error does not repeat the full build for every request; after
+// FailTTL the next call tries again.
+func TestFailureIsRemembered(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(wed)
+	e := &fakeEngine{err: errors.New("db down")}
+	s := NewService(deps(e, clk))
+	viewer := user(authz.Binding{Role: authz.Viewer})
+
+	_, first := s.Get(t.Context(), viewer)
+	if first == nil || !strings.Contains(first.Error(), "db down") {
+		t.Fatalf("first: %v", first)
+	}
+	calls := e.calls.Load()
+	for range 3 {
+		clk.Advance(time.Second)
+		if _, err := s.Get(t.Context(), viewer); !errors.Is(err, first) {
+			t.Errorf("within FailTTL: got %v, want the remembered error", err)
+		}
+	}
+	if e.calls.Load() != calls {
+		t.Errorf("a remembered failure built again: %d calls, was %d", e.calls.Load(), calls)
+	}
+	e.err = nil
+	clk.Advance(FailTTL - 3*time.Second)
+	if r, err := s.Get(t.Context(), viewer); err != nil || r == nil {
+		t.Errorf("after FailTTL: %v %v", r, err)
+	}
+	if e.calls.Load() == calls {
+		t.Error("no new build after FailTTL")
+	}
+	// A denied caller never sees the remembered error.
+	if _, err := s.Get(t.Context(), user(authz.Binding{CA: "issuing", Role: authz.Viewer})); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("denied caller: %v", err)
+	}
+}
+
+// gate is an Engine whose first read blocks until released.
+type gate struct {
+	*fakeEngine
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gate) ExpiryTimes(ctx context.Context, who keys.Who, after, until time.Time) ([]time.Time, error) {
+	g.once.Do(func() { close(g.entered) })
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return g.fakeEngine.ExpiryTimes(ctx, who, after, until)
+}
+
+func newGate() *gate {
+	return &gate{fakeEngine: &fakeEngine{}, entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+// TestWaiterHonorsItsContext: while a build is in progress a second caller
+// waits, but leaves as soon as its own context ends; the build goes on and
+// serves the next caller, and there is only one build at a time.
+func TestWaiterHonorsItsContext(t *testing.T) {
+	t.Parallel()
+	g := newGate()
+	d := deps(nil, clock.NewFake(wed))
+	d.Engine = g
+	al := &fakeAlerts{}
+	d.Alerts = al
+	s := NewService(d)
+	viewer := user(authz.Binding{Role: authz.Viewer})
+
+	type result struct {
+		r   *Report
+		err error
+	}
+	builder := make(chan result, 1)
+	go func() {
+		r, err := s.Get(context.Background(), viewer)
+		builder <- result{r, err}
+	}()
+	<-g.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiter := make(chan result, 1)
+	go func() {
+		r, err := s.Get(ctx, viewer)
+		waiter <- result{r, err}
+	}()
+	select {
+	case r := <-waiter:
+		t.Fatalf("the waiter returned while the build is in progress: %+v", r)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case r := <-waiter:
+		if !errors.Is(r.err, context.Canceled) || r.r != nil {
+			t.Errorf("waiter: %v %v", r.r, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter did not leave when its context ended")
+	}
+
+	second := make(chan result, 1)
+	go func() {
+		r, err := s.Get(context.Background(), viewer)
+		second <- result{r, err}
+	}()
+	close(g.release)
+	b, w := <-builder, <-second
+	if b.err != nil || w.err != nil || b.r == nil || b.r != w.r {
+		t.Errorf("builder %v %v, waiter %v %v: not the same build", b.r, b.err, w.r, w.err)
+	}
+	if n := al.calls.Load(); n != 1 {
+		t.Errorf("%d builds read the alerts, want 1", n)
+	}
+}
+
+// TestCancelledBuilderIsNotRemembered: the caller of a build that gives up (its
+// context ended) must not make the others fail for FailTTL.
+func TestCancelledBuilderIsNotRemembered(t *testing.T) {
+	t.Parallel()
+	g := newGate()
+	d := deps(nil, clock.NewFake(wed))
+	d.Engine = g
+	s := NewService(d)
+	viewer := user(authz.Binding{Role: authz.Viewer})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := s.Get(ctx, viewer); done <- err }()
+	<-g.entered
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("builder: %v", err)
+	}
+	close(g.release)
+	if r, err := s.Get(context.Background(), viewer); err != nil || r == nil {
+		t.Errorf("the next caller: %v %v", r, err)
+	}
+}
+
+// TestFleetSkipsADeletedAgent: an agent that was deleted between ListAgents
+// and GetAgent is left out; any other error still fails the build.
+func TestFleetSkipsADeletedAgent(t *testing.T) {
+	t.Parallel()
+	ag := &fakeAgents{
+		list: []agents.Agent{
+			{ID: "a1", Status: agents.StatusActive, LastSeenAt: wed.Add(-time.Minute), Version: "0.3.8"},
+			{ID: "a2", Status: agents.StatusActive, LastSeenAt: wed.Add(-time.Minute), Version: "0.3.8"},
+		},
+		deps: map[string][]agents.Deployment{"a1": {{State: "deployed"}}, "a2": {{State: "deployed"}}},
+		gone: map[string]bool{"a2": true},
+	}
+	d := deps(&fakeEngine{}, clock.NewFake(wed))
+	d.Agents = ag
+	r, err := Build(t.Context(), d, wed)
+	if err != nil {
+		t.Fatalf("a deleted agent failed the report: %v", err)
+	}
+	f := r.Agents
+	if f.Active != 1 || f.Version.Current != 1 || f.Deployments.Deployed != 1 {
+		t.Errorf("the deleted agent was counted: %+v", f)
 	}
 }

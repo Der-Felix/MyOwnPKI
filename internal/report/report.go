@@ -16,7 +16,9 @@ package report
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -186,6 +188,15 @@ type Deps struct {
 	// Who reads the data: a system principal that may read the whole tenant.
 	// The zero value means authz.System("report").
 	Who keys.Who
+	// Log gets the debug line with the duration of a build; nil = no logging.
+	Log *slog.Logger
+}
+
+func (d *Deps) log() *slog.Logger {
+	if d.Log != nil {
+		return d.Log
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 func (d *Deps) who() keys.Who {
@@ -377,6 +388,16 @@ func buildFleet(ctx context.Context, d *Deps, who keys.Who, now time.Time) (*Fle
 			f.Revoked++
 			continue
 		}
+		// ListAgents carries no deployments; the monitor reads them the same
+		// way. An agent that was deleted since the list was read is gone from
+		// the fleet: skip it, do not fail the report.
+		full, err := d.Agents.GetAgent(ctx, who, a.ID)
+		if errors.Is(err, agents.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
 		var silent time.Duration // never reported: not silent, as in the monitor
 		if !a.LastSeenAt.IsZero() {
 			silent = now.Sub(a.LastSeenAt)
@@ -396,11 +417,6 @@ func buildFleet(ctx context.Context, d *Deps, who keys.Who, now time.Time) (*Fle
 			f.Version.Older++
 		default:
 			f.Version.Unknown++
-		}
-		// ListAgents carries no deployments; the monitor reads them the same way.
-		full, err := d.Agents.GetAgent(ctx, who, a.ID)
-		if err != nil {
-			return nil, err
 		}
 		for _, dep := range full.Deployments {
 			if dep.Removed {
@@ -440,13 +456,25 @@ func versionClass(agent, server string) versionKind {
 	return versionCurrent
 }
 
+// FailTTL is how long a failed build is remembered: for this long every
+// caller gets the same error at once, instead of each one repeating the full
+// build against a database that is failing.
+const FailTTL = 5 * time.Second
+
 // Service builds the report of one tenant and keeps the result for CacheTTL.
 // It is the way in for the API and the pages.
 type Service struct {
 	deps Deps
 
-	mu    sync.Mutex // held during a build: one build at a time
+	mu    sync.Mutex // guards the fields below; never held during a build
 	cache *Report
+	// failed is the error of the last build and failedAt its time (zero = none).
+	failed   error
+	failedAt time.Time
+	// running is non-nil while a build is in progress (one build at a time)
+	// and is closed when it ends, so that waiting callers wake up or leave by
+	// their own context.
+	running chan struct{}
 }
 
 // NewService returns the report service of one tenant.
@@ -457,27 +485,65 @@ func NewService(d Deps) *Service { return &Service{deps: d} }
 // CA does: the report names every CA, agent and alert of the tenant). The
 // cache belongs to the tenant, not to the caller, and has no key that comes
 // from a request. The Report is shared: do not change it.
+//
+// One build at a time: a caller that finds a build in progress waits for it,
+// but gives up when its own context ends. A failed build is remembered for
+// FailTTL (except when the caller of that build gave up: that says nothing
+// about the data).
 func (s *Service) Get(ctx context.Context, who keys.Who) (*Report, error) {
-	now := s.deps.Clock.Now().UTC()
-	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: s.deps.Tenant}, now); err != nil {
+	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: s.deps.Tenant}, s.deps.Clock.Now().UTC()); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if age := now.Sub(s.cacheTime()); s.cache != nil && age >= 0 && age < CacheTTL {
-		return s.cache, nil
+	for {
+		now := s.deps.Clock.Now().UTC()
+		s.mu.Lock()
+		if s.cache != nil {
+			if age := now.Sub(s.cache.GeneratedAt); age >= 0 && age < CacheTTL {
+				r := s.cache
+				s.mu.Unlock()
+				return r, nil
+			}
+		}
+		if s.failed != nil {
+			if age := now.Sub(s.failedAt); age >= 0 && age < FailTTL {
+				err := s.failed
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
+		if wait := s.running; wait != nil {
+			s.mu.Unlock()
+			select {
+			case <-wait:
+				continue // the build is over: read its result from the cache
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		s.running = done
+		s.mu.Unlock()
+		return s.run(ctx, now, done)
 	}
-	r, err := Build(ctx, s.deps, now)
-	if err != nil {
-		return nil, err
-	}
-	s.cache = r
-	return r, nil
 }
 
-func (s *Service) cacheTime() time.Time {
-	if s.cache == nil {
-		return time.Time{}
-	}
-	return s.cache.GeneratedAt
+// run is the build of the caller that found none in progress. Whatever
+// happens (a panic too), it ends by releasing the waiting callers.
+func (s *Service) run(ctx context.Context, now time.Time, done chan struct{}) (r *Report, err error) {
+	start := s.deps.Clock.Now()
+	defer func() {
+		s.mu.Lock()
+		s.running = nil
+		switch {
+		case err == nil && r != nil:
+			s.cache, s.failed = r, nil
+		case err != nil && ctx.Err() == nil:
+			s.failed, s.failedAt = err, s.deps.Clock.Now().UTC()
+		}
+		s.mu.Unlock()
+		close(done)
+	}()
+	r, err = Build(ctx, s.deps, now)
+	s.deps.log().Debug("report built", slog.Duration("took", s.deps.Clock.Now().Sub(start)), slog.Bool("ok", err == nil))
+	return r, err
 }

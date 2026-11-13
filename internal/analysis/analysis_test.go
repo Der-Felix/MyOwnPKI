@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -295,6 +296,8 @@ func (f *fakeEngine) ListDomains(_ context.Context, who keys.Who) ([]ca.Domain, 
 type fakeAgents struct {
 	list []agents.Agent
 	deps map[string][]agents.Deployment
+	// gone are agents that ListAgents still lists but GetAgent no longer finds.
+	gone map[string]bool
 }
 
 func (f *fakeAgents) ListAgents(context.Context, keys.Who) ([]agents.Agent, error) {
@@ -302,6 +305,9 @@ func (f *fakeAgents) ListAgents(context.Context, keys.Who) ([]agents.Agent, erro
 }
 
 func (f *fakeAgents) GetAgent(_ context.Context, _ keys.Who, id string) (*agents.Agent, error) {
+	if f.gone[id] {
+		return nil, fmt.Errorf("agent %s: %w", id, agents.ErrNotFound)
+	}
 	return &agents.Agent{ID: id, Deployments: f.deps[id]}, nil
 }
 
@@ -522,14 +528,151 @@ func TestServicePermissionAndCache(t *testing.T) {
 	if err != nil || next == first || e.calls.Load() == reads || !next.GeneratedAt.Equal(now.Add(time.Minute)) {
 		t.Errorf("the next minute: %v same=%v", err, next == first)
 	}
-	// An error is not kept.
+	// An error is not kept as a result, only for FailTTL (see the test below).
 	clk.Advance(time.Hour)
 	e.err = errors.New("db down")
 	if _, err := s.Get(t.Context(), keys.Who{Principal: authz.System("x")}); err == nil {
 		t.Error("error swallowed")
 	}
 	e.err = nil
+	clk.Advance(FailTTL)
 	if _, err := s.Get(t.Context(), keys.Who{Principal: authz.System("x")}); err != nil {
 		t.Errorf("after the error: %v", err)
+	}
+}
+
+// TestServiceRemembersFailure: a failed run is remembered for FailTTL, so a
+// persistent error does not repeat the full read for every request; after
+// FailTTL the next call tries again.
+func TestServiceRemembersFailure(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(now)
+	e := &fakeEngine{err: errors.New("db down")}
+	s := NewService(Deps{Tenant: "default", Engine: e, ServerVersion: "0.3.8", Clock: clk})
+	who := viewer(authz.Binding{Role: authz.Viewer})
+
+	_, first := s.Get(t.Context(), who)
+	if first == nil || !strings.Contains(first.Error(), "db down") {
+		t.Fatalf("first: %v", first)
+	}
+	reads := e.calls.Load()
+	for range 3 {
+		clk.Advance(time.Second)
+		if _, err := s.Get(t.Context(), who); !errors.Is(err, first) {
+			t.Errorf("within FailTTL: got %v, want the remembered error", err)
+		}
+	}
+	if e.calls.Load() != reads {
+		t.Errorf("a remembered failure read again: %d reads, was %d", e.calls.Load(), reads)
+	}
+	// The data is fine again; FailTTL ends 5 seconds after the failure.
+	e.err = nil
+	clk.Advance(FailTTL - 3*time.Second)
+	if a, err := s.Get(t.Context(), who); err != nil || a == nil {
+		t.Errorf("after FailTTL: %v %v", a, err)
+	}
+	if e.calls.Load() == reads {
+		t.Error("no new run after FailTTL")
+	}
+	// A denied caller never sees the remembered error.
+	if _, err := s.Get(t.Context(), viewer(authz.Binding{CA: "issuing", Role: authz.Viewer})); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("denied caller: %v", err)
+	}
+}
+
+// gate is an Engine whose first read blocks until released.
+type gate struct {
+	*fakeEngine
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gate) CertificateTraits(ctx context.Context, who keys.Who) (map[string]ca.Traits, error) {
+	g.once.Do(func() { close(g.entered) })
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return g.fakeEngine.CertificateTraits(ctx, who)
+}
+
+// TestServiceWaiterHonorsItsContext: while a run is in progress a second
+// caller waits, but leaves as soon as its own context ends, and the run goes
+// on and serves the next caller; there is only one run at a time.
+func TestServiceWaiterHonorsItsContext(t *testing.T) {
+	t.Parallel()
+	g := &gate{fakeEngine: &fakeEngine{}, entered: make(chan struct{}), release: make(chan struct{})}
+	s := NewService(Deps{Tenant: "default", Engine: g, ServerVersion: "0.3.8", Clock: clock.NewFake(now)})
+	who := viewer(authz.Binding{Role: authz.Viewer})
+
+	type result struct {
+		a   *Analysis
+		err error
+	}
+	builder := make(chan result, 1)
+	go func() {
+		a, err := s.Get(context.Background(), who)
+		builder <- result{a, err}
+	}()
+	<-g.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiter := make(chan result, 1)
+	go func() {
+		a, err := s.Get(ctx, who)
+		waiter <- result{a, err}
+	}()
+	select {
+	case r := <-waiter:
+		t.Fatalf("the waiter returned while the run is in progress: %+v", r)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case r := <-waiter:
+		if !errors.Is(r.err, context.Canceled) || r.a != nil {
+			t.Errorf("waiter: %v %v", r.a, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter did not leave when its context ended")
+	}
+
+	// A second waiter without a deadline gets the result of the one run.
+	second := make(chan result, 1)
+	go func() {
+		a, err := s.Get(context.Background(), who)
+		second <- result{a, err}
+	}()
+	close(g.release)
+	b, w := <-builder, <-second
+	if b.err != nil || w.err != nil || b.a == nil || b.a != w.a {
+		t.Errorf("builder %v %v, waiter %v %v: not the same run", b.a, b.err, w.a, w.err)
+	}
+	if n := g.pages.Load(); n > 2 { // one run walks the valid and the recent certificates once each
+		t.Errorf("%d pages read: more than one run", n)
+	}
+}
+
+// TestServiceCancelledBuilderIsNotRemembered: the caller of a run that gives up
+// (its context ended) must not make the others fail for FailTTL.
+func TestServiceCancelledBuilderIsNotRemembered(t *testing.T) {
+	t.Parallel()
+	g := &gate{fakeEngine: &fakeEngine{}, entered: make(chan struct{}), release: make(chan struct{})}
+	s := NewService(Deps{Tenant: "default", Engine: g, ServerVersion: "0.3.8", Clock: clock.NewFake(now)})
+	who := viewer(authz.Binding{Role: authz.Viewer})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := s.Get(ctx, who); done <- err }()
+	<-g.entered
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("builder: %v", err)
+	}
+	close(g.release)
+	if a, err := s.Get(context.Background(), who); err != nil || a == nil {
+		t.Errorf("the next caller: %v %v", a, err)
 	}
 }

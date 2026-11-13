@@ -2,7 +2,9 @@ package analysis
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -56,6 +58,15 @@ type Deps struct {
 	// Who reads the data: a system principal that may read the whole tenant.
 	// The zero value means authz.System("analysis").
 	Who keys.Who
+	// Log gets the debug line with the duration of a run; nil = no logging.
+	Log *slog.Logger
+}
+
+func (d *Deps) log() *slog.Logger {
+	if d.Log != nil {
+		return d.Log
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 func (d *Deps) who() keys.Who {
@@ -209,6 +220,9 @@ func loadAgents(ctx context.Context, src Agents, who keys.Who) ([]Agent, error) 
 	out := make([]Agent, 0, len(list))
 	for _, a := range list {
 		full, err := src.GetAgent(ctx, who, a.ID) // ListAgents carries no deployments
+		if errors.Is(err, agents.ErrNotFound) {
+			continue // deleted since the list was read
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -258,13 +272,25 @@ func Analyze(ctx context.Context, d Deps, now time.Time) (*Analysis, error) {
 	return &Analysis{GeneratedAt: snap.Now, Results: results, Findings: Findings(results), Summary: Summarize(results)}, nil
 }
 
+// FailTTL is how long a failed run is remembered: for this long every caller
+// gets the same error at once, instead of each one repeating the full read of
+// the tenant against a database that is failing.
+const FailTTL = 5 * time.Second
+
 // Service runs the analysis of one tenant and keeps the result for CacheTTL.
 // It is the way in for the API and the pages.
 type Service struct {
 	deps Deps
 
-	mu    sync.Mutex // held during a run: one run at a time
+	mu    sync.Mutex // guards the fields below; never held during a run
 	cache *Analysis
+	// failed is the error of the last run and failedAt its time (zero = none).
+	failed   error
+	failedAt time.Time
+	// running is non-nil while a run is in progress (one run at a time) and
+	// is closed when it ends, so that waiting callers wake up or leave by
+	// their own context.
+	running chan struct{}
 }
 
 // NewService returns the analysis service of one tenant.
@@ -274,22 +300,65 @@ func NewService(d Deps) *Service { return &Service{deps: d} }
 // first and nothing is read for a caller who fails it: findings name the CAs,
 // hosts, accounts and domains of the whole tenant. The cache belongs to the
 // tenant, not to the caller. The Analysis is shared: do not change it.
+//
+// One run at a time: a caller that finds a run in progress waits for it, but
+// gives up when its own context ends. A failed run is remembered for FailTTL
+// (except when the caller of that run gave up: that says nothing about the
+// data).
 func (s *Service) Get(ctx context.Context, who keys.Who) (*Analysis, error) {
-	now := s.deps.Clock.Now().UTC()
-	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: s.deps.Tenant}, now); err != nil {
+	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: s.deps.Tenant}, s.deps.Clock.Now().UTC()); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cache != nil {
-		if age := now.Sub(s.cache.GeneratedAt); age >= 0 && age < CacheTTL {
-			return s.cache, nil
+	for {
+		now := s.deps.Clock.Now().UTC()
+		s.mu.Lock()
+		if s.cache != nil {
+			if age := now.Sub(s.cache.GeneratedAt); age >= 0 && age < CacheTTL {
+				a := s.cache
+				s.mu.Unlock()
+				return a, nil
+			}
 		}
+		if s.failed != nil {
+			if age := now.Sub(s.failedAt); age >= 0 && age < FailTTL {
+				err := s.failed
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
+		if wait := s.running; wait != nil {
+			s.mu.Unlock()
+			select {
+			case <-wait:
+				continue // the run is over: read its result from the cache
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		s.running = done
+		s.mu.Unlock()
+		return s.run(ctx, now, done)
 	}
-	a, err := Analyze(ctx, s.deps, now)
-	if err != nil {
-		return nil, err
-	}
-	s.cache = a
-	return a, nil
+}
+
+// run is the run of the caller that found none in progress. Whatever happens
+// (a panic too), it ends by releasing the waiting callers.
+func (s *Service) run(ctx context.Context, now time.Time, done chan struct{}) (a *Analysis, err error) {
+	start := s.deps.Clock.Now()
+	defer func() {
+		s.mu.Lock()
+		s.running = nil
+		switch {
+		case err == nil && a != nil:
+			s.cache, s.failed = a, nil
+		case err != nil && ctx.Err() == nil:
+			s.failed, s.failedAt = err, s.deps.Clock.Now().UTC()
+		}
+		s.mu.Unlock()
+		close(done)
+	}()
+	a, err = Analyze(ctx, s.deps, now)
+	s.deps.log().Debug("analysis built", slog.Duration("took", s.deps.Clock.Now().Sub(start)), slog.Bool("ok", err == nil))
+	return a, err
 }
