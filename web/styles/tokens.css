@@ -48,6 +48,12 @@
   --status-info: #0f5c99;
   --status-neutral: #616161;
   --on-status: #ffffff; /* text on a solid status background */
+
+  /* Chart series without a status meaning (issuances by source). At least 3:1
+     against --bg (WCAG 1.4.11); the second and third also carry a hatch. */
+  --chart-s1: #4f52b2;
+  --chart-s2: #0b7285;
+  --chart-s3: #8c4a9b;
 }
 
 [data-theme="dark"] {
@@ -79,6 +85,10 @@
   --status-info: #6aaee8;
   --status-neutral: #a8a8a8;
   --on-status: #1b1b1b;
+
+  --chart-s1: #8b8fe8;
+  --chart-s2: #4cc0d0;
+  --chart-s3: #d29be0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -111,6 +121,10 @@
     --status-info: #6aaee8;
     --status-neutral: #a8a8a8;
     --on-status: #1b1b1b;
+
+    --chart-s1: #8b8fe8;
+    --chart-s2: #4cc0d0;
+    --chart-s3: #d29be0;
   }
 }
 
@@ -159,6 +173,7 @@
   --search-w: 280px;
   --header-search-w: 400px;
   --number-w: 160px;    /* minimum column of the number row */
+  --chart-w: 480px;     /* widest chart: the SVG scales below it with its viewBox */
   --menu-w: 240px;
   --logo-header: 32px;  /* logo in the 48 px header: small variant */
   --logo-sample: 64px;  /* logo samples on /design: full variant */

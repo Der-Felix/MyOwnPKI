@@ -15,6 +15,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
+	"github.com/Der-Felix/MyOwnPKI/internal/analysis"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -23,6 +24,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
+	"github.com/Der-Felix/MyOwnPKI/internal/report"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
@@ -52,6 +54,8 @@ type env struct {
 	tester      *notify.Tester
 	scan        *tlsscan.Service
 	endpoints   *monitor.Endpoints
+	reports     *report.Service
+	analysis    *analysis.Service
 	mail, hook  *stubChannel
 	logs        bytes.Buffer
 }
@@ -88,11 +92,13 @@ func newEnv(t *testing.T) *env {
 		Eval: &monitor.Evaluator{Engine: in.Engine, Seal: in.Ring.Status, Rules: monitor.DefaultRules(), Scan: v.scan,
 			Who: keys.Who{Actor: audit.Actor{Type: audit.ActorSystem, Name: "monitor"}, Principal: authz.System("monitor")}},
 	}
+	v.reports = report.NewService(report.Deps{Tenant: store.DefaultTenant, Engine: in.Engine, Agents: v.agents, Alerts: v.alerts, Rules: monitor.DefaultRules(), ServerVersion: "v0.3.8", Clock: in.Clock})
+	v.analysis = analysis.NewService(analysis.Deps{Tenant: store.DefaultTenant, Engine: in.Engine, Agents: v.agents, Scan: v.scan, ServerVersion: "v0.3.8", Clock: in.Clock})
 	v.api = New(Deps{
 		Auth: in.Auth, Engine: in.Engine, Keys: in.Ring, Presets: in.Presets, Clock: in.Clock,
 		Log: slog.New(slog.NewJSONHandler(&v.logs, nil)), Version: "test", Demo: true,
 		Settings: &tenant.Store{DB: in.SystemDB.Write, Clock: in.Clock}, TenantAudit: in.TenantAudit.Read, InstanceAudit: in.InstanceAudit.Read, Agents: v.agents, ACME: acmeServer,
-		Alerts: v.alerts, Notify: v.tester, Endpoints: v.endpoints,
+		Alerts: v.alerts, Notify: v.tester, Endpoints: v.endpoints, Reports: v.reports, Analysis: v.analysis,
 	})
 	return v
 }

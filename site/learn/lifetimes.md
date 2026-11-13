@@ -73,6 +73,16 @@ Keep the time right on the server and on the clients.
 After a renewal the old certificate is revoked according to the tenant's predecessor setting (the agent
 default is after the new one is confirmed deployed; other certificates after seven days).
 
+## Spread the ends out
+
+Certificates that are issued on the same day with the same lifetime also end on the same day. If their
+renewals then fail for one reason, such as a DNS change or a broken deploy hook, you lose them together. Two
+habits help: let every client renew at about two thirds of the lifetime on its own schedule (see the table
+above), and add a random delay (*jitter*) to a job that many hosts start at the same moment. The
+[Reports]({{ '/reports/' | relative_url }}#expiry) page shows the current week and the next 12 weeks as columns, so a wave is
+visible, and the *Analysis* page names a week in which at least 10 certificates and at least 30 percent of
+the valid ones end ([expiry wave]({{ '/glossary/' | relative_url }}#expiry-wave)).
+
 ## What the monitor tells you
 
 Every minute the server checks the following. The defaults are configurable under `monitor.*`.

@@ -425,6 +425,25 @@
   line-height: var(--lh-caption);
 }
 
+/* A section that opens and closes (native details): the summary is the
+   section heading, drawn inline so the disclosure marker sits beside it. */
+.fold {
+  margin-bottom: var(--s-24);
+}
+
+.fold > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.fold > summary h2 {
+  display: inline;
+}
+
+.fold-body {
+  margin-top: var(--s-12);
+}
+
 .columns {
   display: grid;
   /* main column (properties) left, secondary right */
@@ -604,6 +623,115 @@
   font-size: var(--fs-caption);
   line-height: var(--lh-caption);
   white-space: pre;
+}
+
+/* ---------- Charts (server-rendered SVG, docs/PHASE3.md D1) ----------
+   Plain bars and columns, no gradient, shadow, animation or icon. Status
+   series use the fixed status tokens; the three series classes use
+   --chart-s1..s3, the second and third with a hatch (the pattern is defined
+   in the SVG), so color is never the only carrier. Text sizes are in the
+   units of the viewBox, which scales with the width. */
+.chart {
+  margin: 0 0 var(--s-24);
+}
+
+.chart-caption {
+  display: grid;
+  gap: var(--s-4);
+  margin-bottom: var(--s-8);
+}
+
+.chart-title {
+  font-weight: var(--fw-semibold);
+}
+
+.chart-summary {
+  color: var(--text-muted);
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  max-width: var(--chart-w);
+  height: auto;
+}
+
+.ch-axis {
+  stroke: var(--border-strong);
+  stroke-width: 1px;
+}
+
+.ch-grid {
+  stroke: var(--border);
+  stroke-width: 1px;
+}
+
+.ch-label {
+  fill: var(--text-muted);
+  font-size: var(--fs-caption);
+}
+
+.ch-mid {
+  text-anchor: middle;
+}
+
+.ch-end {
+  text-anchor: end;
+}
+
+.ch-bar {
+  stroke: var(--bg);
+  stroke-width: 1px;
+}
+
+.ch-ok { fill: var(--status-ok); }
+.ch-warn { fill: var(--status-warn); }
+.ch-crit { fill: var(--status-crit); }
+.ch-info { fill: var(--status-info); }
+.ch-neutral { fill: var(--status-neutral); }
+.ch-s1 { fill: var(--chart-s1); }
+
+/* s2 and s3 take their fill from a hatch pattern (the fill attribute of the
+   shape names it): a fill rule here would override it. Their base colors are
+   the hatch base classes below. */
+.ch-s2,
+.ch-s3 {
+  fill-opacity: 1;
+}
+
+.ch-s2-base { fill: var(--chart-s2); }
+.ch-s3-base { fill: var(--chart-s3); }
+
+.ch-hatch {
+  stroke: var(--bg);
+  stroke-width: 2px;
+}
+
+.chart-numbers {
+  margin-top: var(--s-8);
+}
+
+.chart-numbers > summary {
+  width: fit-content;
+  color: var(--link);
+  cursor: pointer;
+}
+
+.chart-numbers .table-wrap {
+  max-width: calc(var(--chart-w) * 1.5);
+  margin-top: var(--s-8);
+}
+
+.chart-numbers .table tbody th {
+  border-bottom-color: var(--border);
+  color: var(--text);
+  font-weight: var(--fw-regular);
+}
+
+.table th.ch-num,
+.table td.ch-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Empty state ---------- */

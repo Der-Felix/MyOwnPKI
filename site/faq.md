@@ -155,6 +155,23 @@ purpose). Since v0.3.3 the server also reports problems itself: a sealed server,
 certificates and silent agents, by e-mail or webhook. Set that up on day one
 ([Monitoring]({{ '/monitoring/' | relative_url }})).
 
+### Does it have charts or reports?
+
+Yes, since v0.3.8. The *Reports* page charts the certificates that end in the current week and each of the next 12 weeks, the
+issuances of the last 12 weeks by source (ACME, agent, UI and API), the certificates per CA and status, the
+alerts of the last five weeks and the agent fleet, each with a table of the exact numbers; the dashboard
+shows two of them. The *Analysis* page applies ten fixed rules and lists what looks odd, such as a weak key,
+a renewal loop or an agent older than the server. Both need a tenant-wide role; there is no export, and the
+alert history is the 30 days the server keeps.
+See [Reports and analysis]({{ '/reports/' | relative_url }}).
+
+### Why does the Analysis page say a rule is "unknown"?
+
+Because the rule has no data to judge and does not guess. The usual cases are a TLS scan that is off (the
+orphaned-certificate rule then cannot tell whether a host serves a certificate) and a tenant with fewer than
+20 valid certificates (an expiry wave needs that many). It is not a finding and not a fault.
+See [The three states]({{ '/reports/' | relative_url }}#the-three-states).
+
 ## Certificates and ACME
 
 ### What kinds of certificates can I issue?
@@ -432,7 +449,7 @@ See [Verify a download]({{ '/reference/security/' | relative_url }}#verify-a-dow
 
 ### What comes next?
 
-The plan lists dns-01 in the agent (v0.3.7), charts and an analysis page (v0.3.8), a public trust portal
-(v0.3.9), a preview before issuance and versioned settings (v0.3.10), Apache and HAProxy profiles and
-guides inside the UI (v0.3.11), then a quality round and a beta before 1.0. The order is firmer than the
-numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).
+The plan lists a public trust portal (v0.3.9), a preview before issuance and versioned settings (v0.3.10),
+Apache and HAProxy profiles and guides inside the UI (v0.3.11), then a quality round and a beta before
+1.0. dns-01 in the agent (v0.3.7) and the charts, reports and analysis pages (v0.3.8) are released. The
+order is firmer than the numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).

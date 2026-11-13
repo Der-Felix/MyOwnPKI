@@ -1,6 +1,7 @@
 package design
 
 import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -15,6 +16,8 @@ templ Page(p view.Page) {
 		@statusSection()
 		@commandSection()
 		@tableSection()
+		@chartSection()
+		@foldSection()
 		@formSection()
 		@detailSection()
 		@previewSection()
@@ -177,8 +180,38 @@ templ previewSection() {
 				}
 			}
 			@components.MessageBar(view.Message{Kind: view.MessageWarning, Text: "The CRL of homelab-users expires in 2 days."})
+			@components.Chart(darkChart())
 			@components.CertificateTable(sampleRows, false, "")
 		</div>
+	</section>
+}
+
+templ chartSection() {
+	<section class="section" id="charts" aria-labelledby="h-charts">
+		<div class="section-head"><h2 id="h-charts">Charts</h2></div>
+		<p class="muted">Server-rendered SVG, no script. Status series use the fixed status colors; issuances by source use three series colors, the second and third hatched. Every chart has its numbers as a table (closed by default) and a text legend, so color never carries the information alone. The chart scales with its width.</p>
+		@components.Chart(charts.Expiry(sampleExpiry))
+		@components.Chart(charts.Issuances(sampleIssuances))
+		@components.Chart(charts.Authorities(sampleAuthorities))
+		@components.Chart(charts.Alerts(sampleAlerts))
+		for _, c := range charts.Fleet(sampleFleet) {
+			@components.Chart(c)
+		}
+		<p class="muted">Empty state: a chart without data says so in words and draws nothing.</p>
+		@components.Chart(charts.Expiry(sampleEmptyExpiry))
+	</section>
+}
+
+templ foldSection() {
+	<section class="section" id="folds" aria-labelledby="h-folds">
+		<div class="section-head"><h2 id="h-folds">Folds</h2></div>
+		<p class="muted">A section that opens and closes: a native details element whose summary is the section heading. No script, so the keyboard works (Tab, then Enter or Space). The Reports page and the dashboard use it; the state is not remembered.</p>
+		@components.Fold("gallery-fold-open", "Open by default", true) {
+			<p class="muted">The content of the section: a chart, a table or a sentence.</p>
+		}
+		@components.Fold("gallery-fold-closed", "Closed by default", false) {
+			<p class="muted">Shown after the heading is opened.</p>
+		}
 	</section>
 }
 

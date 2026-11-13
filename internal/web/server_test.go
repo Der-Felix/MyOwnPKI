@@ -158,7 +158,6 @@ var (
 	reScriptTag   = regexp.MustCompile(`(?i)<script[\s>]`)
 	reEventAttr   = regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
 	reJSURL       = regexp.MustCompile(`(?i)(href|src|action)\s*=\s*"\s*javascript:`)
-	reIcon        = regexp.MustCompile(`(?i)<svg[\s>]`)
 	reImgTag      = regexp.MustCompile(`(?is)<img\b[^>]*>`)
 	reClassAttr   = regexp.MustCompile(`\sclass="([^"]*)"`)
 	reCSSClass    = regexp.MustCompile(`\.([a-zA-Z][a-zA-Z0-9_-]*)`)
@@ -182,11 +181,15 @@ func renderedPages(t *testing.T) map[string]string {
 	for k, html := range realPages(t) {
 		out[k] = html
 	}
+	for k, html := range reportPages(t) {
+		out[k] = html
+	}
 	return out
 }
 
 // TestNoInlineStylesOrScripts enforces ADR-12, the CSP and the "no icons"
-// design rule on every rendered page.
+// design rule on every rendered page. The one exception is the chart SVG
+// (svg_rules_test.go).
 func TestNoInlineStylesOrScripts(t *testing.T) {
 	t.Parallel()
 	checks := map[string]*regexp.Regexp{
@@ -195,13 +198,15 @@ func TestNoInlineStylesOrScripts(t *testing.T) {
 		"<script> tag":       reScriptTag,
 		"inline event (on*)": reEventAttr,
 		"javascript: URL":    reJSURL,
-		"inline <svg> icon":  reIcon,
 	}
 	for page, html := range renderedPages(t) {
 		for name, re := range checks {
 			if m := re.FindString(html); m != "" {
 				t.Errorf("%s contains a %s: %q", page, name, m)
 			}
+		}
+		for _, v := range svgViolations(html, reRenderedChartSVG) {
+			t.Errorf("%s: %s", page, v)
 		}
 		for _, img := range nonBrandImages(html) {
 			t.Errorf("%s contains an image that is not a brand file with alt text: %q", page, img)
@@ -237,11 +242,19 @@ func TestTemplSourcesHaveNoInlineStyles(t *testing.T) {
 		}
 		for name, re := range map[string]*regexp.Regexp{
 			"style attribute": reStyleAttr, "<style> block": reStyleTag,
-			"<script> tag": reScriptTag, "inline event (on*)": reEventAttr, "inline <svg> icon": reIcon,
+			"<script> tag": reScriptTag, "inline event (on*)": reEventAttr,
 		} {
 			if m := re.FindString(string(src)); m != "" {
 				t.Errorf("%s contains a %s: %q", path, name, m)
 			}
+		}
+		// The chart component is the one place that may write an <svg>.
+		if path == "components/chart.templ" {
+			for _, v := range svgViolations(string(src), reSourceChartSVG) {
+				t.Errorf("%s: %s", path, v)
+			}
+		} else if m := reSVGOpen.FindString(string(src)); m != "" {
+			t.Errorf("%s contains an inline <svg> icon: %q", path, m)
 		}
 		for _, img := range nonBrandImages(string(src)) {
 			t.Errorf("%s contains an image that is not a brand file with alt text: %q", path, img)

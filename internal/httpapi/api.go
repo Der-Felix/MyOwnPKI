@@ -23,6 +23,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 	"github.com/Der-Felix/MyOwnPKI/internal/agents"
+	"github.com/Der-Felix/MyOwnPKI/internal/analysis"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -32,6 +33,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
+	"github.com/Der-Felix/MyOwnPKI/internal/report"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 )
@@ -69,6 +71,9 @@ type Deps struct {
 	Notify *notify.Tester
 	// Endpoints are the TLS scan endpoints with their assessed state (v0.3.4); nil = monitoring off.
 	Endpoints *monitor.Endpoints
+	// Reports and Analysis serve GET /reports and GET /analysis (v0.3.8); they check the permission themselves.
+	Reports  *report.Service
+	Analysis *analysis.Service
 }
 
 // access says who may call a route.

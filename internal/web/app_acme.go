@@ -197,7 +197,7 @@ func (a *app) acmeNames(c *rc) {
 	}
 	sections := []admin.Section{{Text: []string{
 		"Under the approval level \"new names\" the first certificate for a name waits here; once approved, every later order for it passes.",
-		"A client keeps asking while it waits – approve, then it continues on its next try.",
+		"The first order for a new name is refused with \"unauthorized … is a new name … waits for approval\" and the name appears here. The client does not wait: run it again after you approved the name.",
 	}}, {Table: waiting}}
 	if c.may(authz.ManageCA, "") {
 		var forms []admin.FormData
