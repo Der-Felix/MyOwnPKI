@@ -41,6 +41,10 @@ type Material struct {
 	Fullchain   []byte            `json:"-"`
 	Key         []byte            `json:"-"`
 	Leaf        *x509.Certificate `json:"-"`
+	// Notice is a problem that does not make the issuance fail, for the
+	// deployment's status (a dns-01 record that could not be removed). It is
+	// free of secrets and of provider text.
+	Notice string `json:"-"`
 }
 
 func (*Material) String() string { return "certificate material (private key redacted)" }
@@ -186,7 +190,30 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		return nil, err
 	}
 	defer closeClient()
-	return a.obtainWithClient(ctx, d, u, base, ac, roots, dns)
+	m, err := a.obtainWithClient(ctx, d, u, base, ac, roots, dns)
+	// The cleanup of the records has run by now (obtainWithClient finishes the
+	// guard); what it could not remove belongs in the status of the deployment.
+	return withDNSNotice(m, err, dns)
+}
+
+// withDNSNotice adds the guard's notice to the result of an issuance: to the
+// material when it succeeded, in front of the error when it did not (the
+// status text is clipped at its end, and the notice must survive the clip).
+func withDNSNotice(m *Material, err error, g *dnsGuard) (*Material, error) {
+	if g == nil {
+		return m, err
+	}
+	notice := g.Notice()
+	if notice == "" {
+		return m, err
+	}
+	if err != nil {
+		return m, fmt.Errorf("%s; %w", notice, err)
+	}
+	if m != nil {
+		m.Notice = notice
+	}
+	return m, nil
 }
 
 // legoClient is shared by issuance and ARI. Both ignore environment trust

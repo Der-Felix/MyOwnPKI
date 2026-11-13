@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,8 @@ type recordKey struct{ domain, token, keyAuth string }
 //     compromised ACME server cannot make the agent write another name's record;
 //   - checks the context before Present, and hands it to the provider;
 //   - runs CleanUp with a context that is not canceled, for at most
-//     cleanupTimeout, and records a failure, which lego only logs;
+//     cleanupTimeout, and records a failure, which lego only logs; Notice puts
+//     the failures into the deployment's status;
 //   - turns a panic of the provider into an error;
 //   - removes the provider's secrets from every error and log line, and wipes
 //     them when the issuance is over.
@@ -53,6 +55,7 @@ type dnsGuard struct {
 	mu       sync.Mutex
 	pending  map[recordKey]bool
 	warnings []string
+	leftover []string // domains whose record may remain, in order, without repeats
 	closed   bool
 }
 
@@ -215,10 +218,37 @@ func (g *dnsGuard) Warnings() []string {
 	return append([]string(nil), g.warnings...)
 }
 
+// Notice is the text for the status of the deployment when a cleanup failed,
+// or "" when none did. It names the records that may remain and nothing the
+// provider said, so it carries no secret and no provider text; the details
+// are in Warnings and in the log. A certificate that was issued is still good,
+// so the issuance does not fail because of it.
+func (g *dnsGuard) Notice() string {
+	g.mu.Lock()
+	left := slices.Clone(g.leftover)
+	g.mu.Unlock()
+	if len(left) == 0 {
+		return ""
+	}
+	const shown = 3
+	var names []string
+	for _, d := range left[:min(len(left), shown)] {
+		names = append(names, "_acme-challenge."+d)
+	}
+	text := "dns-01 cleanup failed: a TXT record may remain at " + strings.Join(names, ", ")
+	if len(left) > shown {
+		text += fmt.Sprintf(" and %d more", len(left)-shown)
+	}
+	return text + "; remove it by hand if it stays (the agent log has the details)"
+}
+
 func (g *dnsGuard) warn(domain string, err error) {
 	text := g.redactText(err.Error())
 	g.mu.Lock()
 	g.warnings = append(g.warnings, text)
+	if d := baseName(domain); !slices.Contains(g.leftover, d) {
+		g.leftover = append(g.leftover, d)
+	}
 	g.mu.Unlock()
 	if g.log != nil {
 		g.log.Warn("dns-01 cleanup failed: a TXT record may be left behind; remove it by hand if it stays",
