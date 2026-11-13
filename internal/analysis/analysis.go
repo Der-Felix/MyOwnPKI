@@ -12,14 +12,17 @@
 // never become alerts, e-mails or webhooks (D8).
 //
 // Untrusted text. Certificate, agent and CA names come from CSRs, ACME
-// clients and agents. Findings carry them as raw strings, clipped to a fixed
-// length, inside fixed text templates; they never hold markup. Escaping is
-// the job of the template and the JSON encoder that render them.
+// clients and agents. Findings carry them as raw strings, with control and bidi
+// characters removed and clipped to a fixed length, inside fixed text templates;
+// they never hold markup. Escaping is the job of the template and the JSON
+// encoder that render them.
 package analysis
 
 import (
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Finding severities (D10). "info" is never a call to act.
@@ -180,6 +183,9 @@ func ruleOrder(id string) int {
 // things it could not assess. The state is findings if there are any, else
 // unknown if something was left unassessed, else ok.
 func finish(findings []Finding, unassessed int, reason string) Result {
+	for i := range findings {
+		findings[i].clean()
+	}
 	sortFindings(findings)
 	r := Result{State: StateOK}
 	for _, f := range findings {
@@ -213,10 +219,58 @@ func unknown(reason string) Result {
 	return Result{State: StateUnknown, UnknownReason: reason}
 }
 
-// clip shortens attacker-supplied text to maxClip runes.
+// clip cleans attacker-supplied text (see CleanText) and shortens it to
+// maxClip runes.
 func clip(s string) string {
+	s = CleanText(s)
 	if r := []rune(s); len(r) > maxClip {
 		return string(r[:maxClip-1]) + "…"
 	}
 	return s
+}
+
+// CleanText drops control characters (line breaks, TAB, ESC), format
+// characters (bidi overrides and isolates, zero-width marks) and invalid UTF-8
+// from text that came from a certificate, a CSR or an agent. A name that
+// reorders the text around it or hides a character must not reach a page, a
+// log or an API consumer. The result is still data: the template escapes it.
+func CleanText(s string) string {
+	if !strings.ContainsFunc(s, unwantedRune) && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if !unwantedRune(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func unwantedRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == utf8.RuneError
+}
+
+// SafeHref returns href if it is a path inside the UI: one leading slash, then
+// no second slash, no backslash and no byte below 0x20 or 0x7f. Browsers strip
+// TAB, CR and LF from a URL, so "/<TAB>/host" would become "//host", and some
+// treat a backslash like a slash. Anything else gives "": the text of a finding
+// stays, its link goes.
+func SafeHref(href string) string {
+	if !strings.HasPrefix(href, "/") || strings.HasPrefix(href, "//") || strings.ContainsRune(href, '\\') {
+		return ""
+	}
+	for i := 0; i < len(href); i++ {
+		if href[i] < 0x20 || href[i] == 0x7f {
+			return ""
+		}
+	}
+	return href
+}
+
+// clean makes the text fields of a finding safe to render: no control or
+// format characters in any of them, and a link that stays inside the UI.
+func (f *Finding) clean() {
+	f.Subject, f.Seen, f.Why, f.Recommendation = CleanText(f.Subject), CleanText(f.Seen), CleanText(f.Why), CleanText(f.Recommendation)
+	f.Href = SafeHref(f.Href)
 }

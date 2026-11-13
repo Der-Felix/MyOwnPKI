@@ -172,8 +172,11 @@ func toAnalysisJSON(an *analysis.Analysis) analysisJSON {
 		out.Rules = append(out.Rules, analysisRuleJSON{ID: r.ID, Title: r.Title, State: r.State, Count: r.Counts.Total(), UnknownReason: r.UnknownReason})
 	}
 	for _, f := range an.Findings {
-		out.Findings = append(out.Findings, findingJSON{Key: f.Key, Rule: f.Rule, Severity: f.Severity, Subject: f.Subject,
-			Seen: f.Seen, Why: f.Why, Recommendation: f.Recommendation, Href: f.Href})
+		// The rules clean their findings already; the translation does not
+		// rely on it, because the link and the text are the last step before a
+		// consumer that may put them on a page.
+		out.Findings = append(out.Findings, findingJSON{Key: f.Key, Rule: f.Rule, Severity: f.Severity, Subject: analysis.CleanText(f.Subject),
+			Seen: analysis.CleanText(f.Seen), Why: analysis.CleanText(f.Why), Recommendation: analysis.CleanText(f.Recommendation), Href: analysis.SafeHref(f.Href)})
 	}
 	return out
 }

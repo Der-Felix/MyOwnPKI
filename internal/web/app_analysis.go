@@ -92,13 +92,10 @@ func ruleState(r analysis.Result) (string, view.Status) {
 }
 
 // uiPath keeps a link of a finding inside the UI: a path that starts with one
-// slash. Anything else is dropped (the text stays, the link goes).
-func uiPath(href string) string {
-	if strings.HasPrefix(href, "/") && !strings.HasPrefix(href, "//") && !strings.ContainsAny(href, "\\\r\n") {
-		return href
-	}
-	return ""
-}
+// slash and holds no backslash and no control character (browsers strip TAB,
+// CR and LF, so "/<TAB>/host" would turn into "//host"). Anything else is
+// dropped (the text stays, the link goes).
+func uiPath(href string) string { return analysis.SafeHref(href) }
 
 // analysisPage shows the findings of the ten rules, the state of every rule
 // and how this works. ?rule=<id> limits the findings to one rule. A role

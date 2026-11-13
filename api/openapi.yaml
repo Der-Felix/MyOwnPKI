@@ -2575,8 +2575,8 @@ paths:
 
         Same permission and cache as `GET /reports`: the tenant-wide read permission (403 for a
         role limited to one CA), at most one run a minute per tenant, works while sealed. The
-        findings carry names from CSRs, ACME clients and agents as raw text, clipped to 120
-        characters, never HTML.
+        findings carry names from CSRs, ACME clients and agents as raw text, with control and bidirectional
+        characters removed and clipped to 120 characters, never HTML.
       x-required-role: viewer
       parameters:
         - name: rule
@@ -4428,7 +4428,7 @@ components:
     Analysis:
       description: |
         What the analysis rules found (docs/PHASE3.md §14.2). Advice, not an alarm. Every string
-        is raw text, never HTML; names from CSRs, ACME clients and agents are clipped to 120
+        is raw text, never HTML; names from CSRs, ACME clients and agents have control and bidirectional characters removed and are clipped to 120
         characters.
       type: object
       required: [generated_at, summary, rules, findings]

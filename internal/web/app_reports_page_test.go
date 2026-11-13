@@ -588,6 +588,8 @@ func TestAnalysisSummaryAndLinks(t *testing.T) {
 	for href, want := range map[string]string{
 		"/certificates/crt_1": "/certificates/crt_1", "": "", "javascript:alert(1)": "", "//evil.example": "", "https://evil.example": "",
 		`/a\b`: "", "/a\r\nSet-Cookie: x": "",
+		// Browsers strip TAB, CR and LF from a URL: "/<TAB>/evil" would be "//evil".
+		"/\t/evil.example": "", "/\n/evil.example": "", "/\x00/x": "", "/\x1f/x": "", "/\x7f/x": "", "/a\tb": "",
 	} {
 		if got := uiPath(href); got != want {
 			t.Errorf("uiPath(%q) = %q, want %q", href, got, want)
