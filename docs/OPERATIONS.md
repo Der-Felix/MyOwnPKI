@@ -3476,9 +3476,13 @@ each to be in a snapshot or on an explicit "not a setting" list, so a new column
   change (actor "system, before history"); the change is version 2. An object that was never changed has no row (ETag `"0"`).
   Changes made before v0.3.10 are not in the history: the audit log has them as text. A delete stores the deleted state.
 - **Size and retention.** Everything is kept; there is no pruning. A snapshot is small (the plan estimates about 0.5 KiB per
-  version) and at most 64 KiB. To keep it so, a domain has at most 256 IP ranges; a domain stored with more before the update
-  stays changeable and deletable, but its history keeps the first 256 ranges and the audit entry says so
-  (`history_ip_ranges_kept`, `ip_ranges_total`). Backups carry the history because it is inside the two databases.
+  version) and at most 64 KiB. To keep it so, a domain has at most 256 IP ranges (`422` beyond that; `maxItems: 256` in the
+  OpenAPI file), and the audit entry of a domain change lists at most 16 ranges and counts the rest. A domain stored with more
+  ranges before the update can still be deleted, but an update that leaves `ip_ranges` as they are is refused with the cap
+  message until the list is trimmed. Its baseline and deleted state keep only the first 256 ranges (the audit details say
+  `history_ip_ranges_kept` and `ip_ranges_total`), so restoring such a version brings back only 256. Backups carry the
+  history because it is inside the two databases. The actor name in a version is personal data in an append-only table: like
+  the audit log, it cannot be scrubbed later.
 
 ### 16.4 Reading the history and restoring
 
@@ -3558,7 +3562,7 @@ from the history. No new permission exists.
 | `409` `conflict` | restore, version detail | The state is already current; the version cannot be read |
 | `412` `precondition-failed` | `If-Match` | Not the current version; names `current_version`, `changed_at` and, for a caller with `audit.read`, `changed_by` |
 | `413` / `415` | bodies | Too large; no JSON content type |
-| `422` `policy-violation` | restore, edits | A normal change would refuse it too; the reasons are listed |
+| `422` `policy-violation` | restore, edits, history | A normal change would refuse it too, or the same name was taken by a concurrent create ("domain … exists already"); an invalid argument of the history, such as a snapshot above the size limit, is a `422` too, not a `500`; the reasons are listed |
 | `428` `precondition-required` | restore | `If-Match` is missing |
 
 The preview does not document `422` or `503`. In the web UI, a damaged or unknown-schema version shows the page *Version
@@ -3569,7 +3573,7 @@ cannot be read* (409); the other versions still work.
 `domain.create`, `domain.update`, `domain.delete` and `tenant.settings` gain the details `version` and `snapshot_sha256`
 (the same hash the version row holds, which ties the table to the tamper-evident chain). A restore writes `domain.restore` or
 `tenant.settings_restore` with `version`, `restored_from`, the changed keys and the hash. A refused domain change or restore,
-including a stale version, is audited like other refused domain changes (with the error text); a refused settings restore is
+including a stale version, is audited like other refused domain changes (with the error text; a refused domain restore also names `restored_from`); a refused settings restore is
 audited too; a stale save of the settings and an unknown version are not. **The reason is free text and stays out of the
 audit log**; it is kept only with the version. The preview writes no entry. The domain entries are in the tenant audit log;
 `tenant.settings` and `tenant.settings_restore` are in the instance log, because the settings live in `system.db`.

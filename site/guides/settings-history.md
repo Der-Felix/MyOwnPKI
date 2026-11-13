@@ -159,7 +159,7 @@ do the answers of `POST` and `PATCH /domains` and `PUT /settings`; `"0"` means n
 - `reason` (at most 200 characters, no control or invisible formatting characters) is a write-only field of the `POST`, `PATCH` and `PUT`
   bodies and of the restore body. `DELETE` has no body, so a delete through the API has no reason.
 - A restore answers `200` with the object as it is now and the new `ETag`. Refusals: `422` with the reasons
-  (the same as for a normal change), `409` for the identical state or a version that cannot be read, `404` for an
+  (the same as for a normal change; also an invalid argument of the history, which is a `422`, not a `500`), `409` for the identical state or a version that cannot be read, `404` for an
   unknown version or an object you may not read, `403` for a role that is too low, a missing second factor
   (`step-up-required`) or a token (`forbidden`).
 
@@ -193,7 +193,7 @@ curl -sS --cacert root.pem -X POST -H "Authorization: Bearer $MYOWNPKI_TOKEN" -H
 The entries of the changes gain two details, `version` and `snapshot_sha256` (the SHA-256 of the stored state, the same
 value the version row holds): `domain.create`, `domain.update`, `domain.delete` and `tenant.settings`. A restore writes
 `domain.restore` or `tenant.settings_restore` with `version`, `restored_from`, the changed keys and the hash. A refused
-restore is audited too, with the error. The **reason stays out of the audit log**: it is free text, kept only with the
+restore is audited too, with the error (a refused domain restore also names `restored_from`). The **reason stays out of the audit log**: it is free text, kept only with the
 version. The change, its version and its audit entry are written in one transaction: if one fails, none is kept.
 
 ## Retention and size
@@ -201,7 +201,10 @@ version. The change, its version and its audit entry are written in one transact
 Everything is kept; there is no pruning and no limit in v0.3.10. The history cannot be edited or deleted: the tables
 refuse an `UPDATE` or a `DELETE` of a version, even by hand. A snapshot is small (the plan estimates about 0.5 KiB,
 so 1,000 changes are about 0.5 MB). The history lives in `pki.db` (domains) and `system.db` (tenant settings), so
-every backup carries it and a restore of a backup brings it back with the data.
+every backup carries it and a restore of a backup brings it back with the data. The name of the actor in a version is personal
+data in a table that cannot be edited: like the audit log, it cannot be scrubbed later. To keep a snapshot small, a domain
+has at most 256 IP ranges (more is refused with `422`). An older domain with more ranges can still be deleted, but an
+update is refused until its list is trimmed; its history keeps only the first 256 ranges, and so would a restore of it.
 
 ## Check it worked
 

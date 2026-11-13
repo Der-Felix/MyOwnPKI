@@ -58,11 +58,18 @@ dependency. The live test by the maintainer is pending.
 
 - **The edit forms of a domain and of the tenant settings** carry a hidden `base_version` and an optional *Reason (optional)*
   field (also on the domain delete form). A save that is based on an older version is refused with a page *Changed meanwhile*
-  (409) that says who changed the object and when; nothing is saved. A form without the field is not checked, as before.
+  (409) that says when the object was changed, and by whom for a reader of the history ("somebody else" otherwise); nothing is
+  saved. A form without the field is not checked, as before.
 - **The audit entries** `domain.create`, `domain.update`, `domain.delete` and `tenant.settings` carry `version` and
   `snapshot_sha256`.
-- **A domain has at most 256 IP ranges,** so that its snapshot always fits the 64 KiB limit. A domain stored with more
-  stays changeable and deletable; its history keeps the first 256 ranges and the audit entry says so.
+- **A domain has at most 256 IP ranges** (`422` beyond that, `maxItems: 256` in the OpenAPI file), so that its snapshot always
+  fits the 64 KiB limit. The audit entry of a domain change lists at most 16 ranges and counts the rest. A domain stored with more
+  can be deleted; an update that leaves its `ip_ranges` as they are is refused until the list is trimmed. Its baseline and
+  deleted state keep the first 256 ranges (`history_ip_ranges_kept`, `ip_ranges_total` in the audit details), and a restore of
+  such a version brings back only those.
+- **An invalid argument of the history,** such as a snapshot above the size limit, answers `422` `policy-violation` instead of
+  `500`. A concurrent create of the same domain name during a restore gives the same `422` "domain … exists already" as the
+  name check, and the audit entry of a refused domain restore names `restored_from`.
 - **Changing a domain that was deleted meanwhile** now answers not found; it used to be a silent update that changed no row.
 - The order of the random draws of an issuance is unchanged (key first, then the serial number), and the existing issuance,
   ACME and agent tests ran unchanged against the split of `issue`.
@@ -90,6 +97,7 @@ dependency. The live test by the maintainer is pending.
 - **The reason is untrusted text:** at most 200 characters, no control and no invisible formatting characters (bidi overrides,
   zero-width characters), escaped on output, and kept out of the
   audit log.
+- **An independent security review found no blocker; its findings were fixed before the release.**
 - **No new dependency**; `go.mod` and `THIRD_PARTY.md` are unchanged.
 
 ### Known limitations
@@ -99,7 +107,9 @@ dependency. The live test by the maintainer is pending.
 - **The wizard does not apply the tenant subject defaults that the REST path applies,** and the wizard ignores the names of a
   CSR where REST uses them. The preview shows what each path really does. Which behavior should win is an **open decision**.
 - **No retention limit:** every version is kept, with no pruning, export or import. A snapshot is small (estimated at 0.5 KiB).
-- **The history is admin-only** (audit right on the whole tenant): an operator, a viewer and an admin of one CA cannot read it.
+- **The history is admin-only** (audit right on the whole tenant): an operator, a viewer and an admin of one CA cannot read it,
+  and an admin of one CA cannot restore a version of a domain they may change.
+- **The actor name in a version is personal data in an append-only table** and cannot be scrubbed later, like the audit log.
 - **Presets and CA limits are not versioned,** nor are per-account and per-agent settings, agent names and secrets.
 - **The check is per object:** two admins editing different fields of one object still conflict.
 - **`If-Match` is optional on the old calls,** so a script without it keeps last-writer-wins.
