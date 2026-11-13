@@ -1,0 +1,76 @@
+package admin
+
+// A change of settings as a plain table (PHASE3 section 16, step 64): one row
+// per setting that differs, the value before and after. A list is shown as a
+// set: every value on its own line, and the values that were added or removed
+// carry that word, so the change never depends on color.
+
+// DiffValue is one value of a setting; Mark is "", "added" or "removed".
+type DiffValue struct {
+	Text, Mark string
+}
+
+// DiffRow is one setting that differs.
+type DiffRow struct {
+	Label         string
+	Before, After []DiffValue
+}
+
+// DiffTable is the table of a diff. Every text comes from the database and is
+// escaped by templ like any other.
+type DiffTable struct {
+	// Caption names the table for screen readers (visually hidden).
+	Caption string
+	// BeforeLabel and AfterLabel head the two value columns.
+	BeforeLabel, AfterLabel string
+	Rows                    []DiffRow
+	// Empty is shown instead of the table when nothing differs.
+	Empty string
+}
+
+// Diff renders a DiffTable.
+templ Diff(d DiffTable) {
+	if len(d.Rows) == 0 {
+		<p class="empty">{ d.Empty }</p>
+	} else {
+		<div class="table-wrap table-adaptive">
+			<table class="table">
+				<caption class="visually-hidden">{ d.Caption }</caption>
+				<thead>
+					<tr>
+						<th scope="col">Setting</th>
+						<th scope="col">{ d.BeforeLabel }</th>
+						<th scope="col">{ d.AfterLabel }</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, row := range d.Rows {
+						<tr>
+							<td>{ row.Label }</td>
+							<td class="break">
+								@diffValues(row.Before)
+							</td>
+							<td class="break">
+								@diffValues(row.After)
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ diffValues(values []DiffValue) {
+	if len(values) == 0 {
+		<span class="muted">not set</span>
+	}
+	for _, v := range values {
+		<div>
+			if v.Mark != "" {
+				<span class="muted">{ v.Mark + ": " }</span>
+			}
+			{ v.Text }
+		</div>
+	}
+}
