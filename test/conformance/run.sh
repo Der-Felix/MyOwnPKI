@@ -9,7 +9,7 @@
 # Two packages, one after the other (-p 1: both need port 80): internal/acme
 # (the clients through a TLS stand-in for the reverse proxy) and
 # internal/server (lego and certbot directly against the own TLS listener,
-# acme.tls_issuer, v0.2.2).
+# acme.tls_issuer, v0.2.2; the agent's dns-01 against BIND, v0.3.7).
 #
 # Pinning: lego and Pebble by version (Taskfile.yml), the images by digest.
 # Each was at least two weeks old when pinned (tag dates on Docker Hub).
