@@ -97,6 +97,8 @@
       url: /recipes/
     - title: dns-01 and wildcards
       url: /dns-01/
+    - title: The trust portal
+      url: /trust-portal/
 - group: Help
   items:
     - title: FAQ

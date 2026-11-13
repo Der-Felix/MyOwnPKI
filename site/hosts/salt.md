@@ -36,10 +36,12 @@ On every minion that gets the pillar, in this order:
 4. **Enrollment.** It runs `myownpki-agent setup` until the host has its agent certificate
    (`/var/lib/myownpki-agent/agent.crt`). `setup` enables and starts the service when the host is admitted.
    Once the certificate exists, the formula deletes the pass file, also on a host that was approved later.
-5. **Deployments.** It runs `deployment add` for each deployment in the pillar that the agent does not
+5. **System trust (optional).** With `system_trust: true` it runs `myownpki-agent trust install`, which adds the
+   root to the host's system trust store ([below](#the-root-in-the-system-trust-store)).
+6. **Deployments.** It runs `deployment add` for each deployment in the pillar that the agent does not
    have yet, and `deployment remove` for each name in `absent`. Or, in the other mode, it renders a
    complete `agent.yaml` from your file and runs `sandbox sync`.
-6. **Restart.** If the configuration changed, it runs `systemctl try-restart myownpki-agent`: a running
+7. **Restart.** If the configuration changed, it runs `systemctl try-restart myownpki-agent`: a running
    agent restarts, a stopped one stays stopped.
 
 The formula **never enables or starts the service itself**. A host that is not admitted yet stays
@@ -142,7 +144,7 @@ README. Then put the root and the packages where the pillar points (these are th
 ```
 
 The package comes from the release (or from the agent listener of your server); the root PEM from the
-trust page of the public listener. Only the architectures and formats you roll out are needed. The name
+trust portal of the public listener. Only the architectures and formats you roll out are needed. The name
 is `myownpki-agent_<version>_linux_<arch>.<deb|rpm>`. The formula checks both again on the minion, against
 the hashes in your pillar, which you took from the UI.
 
@@ -215,6 +217,7 @@ The repository has the same file with comments: `deploy/salt/myownpki/pillar.exa
 | `package.format` | no | `auto` (default: `deb` for the Debian family, `rpm` for Red Hat and SUSE), `deb` or `rpm` |
 | `webroot` | no | An existing directory for the enrollment check (http-01). Unset: standalone on port 80 |
 | `low_ports` | no | `true` passes `--low-ports` to `setup`, needed when nginx listens on port 443. Set it on every host that already has `20-low-ports.conf`: `setup` takes this one setting only from the flag, so an enrolled host loses the drop-in at the next package update if the key is missing |
+| `system_trust` | no | `true` adds the root to the system trust store of the host after `setup` (agent 0.3.9 or later, Debian and Red Hat families, [below](#the-root-in-the-system-trust-store)). Default `false`: no state, and the formula never removes it. Must be a boolean |
 | `enrollment_pass` | no | The pass, as a string. Used only while the host has no agent certificate. Unset: pattern A |
 | `config_source` | no | A `salt://` source for a complete `agent.yaml`. Not together with `deployments` or `absent` |
 | `deployments` | no | Map of deployment name to options, applied with `deployment add` |
@@ -430,6 +433,37 @@ The agent must be 0.3.7 on the host before the first dns-01 deployment: an older
 ([Update the agents](#update-the-agents)), and add the deployment in a second step. The formula's own test
 cases render a dns-01 pillar and apply it with `test=True`; **the maintainer has not yet run it live.**
 
+## The root in the system trust store
+
+With `system_trust: true` the formula makes the host's own programs (`curl`, `wget` and most others) trust the
+root of this PKI. Since v0.3.9. The state `myownpki-agent-system-trust` runs after `setup`:
+
+```
+myownpki-agent trust install --root-sha256 <root_sha256>
+```
+
+- **Same root, same pin.** The root is the one `setup` verified against `root_sha256`; the command checks that
+  file again against the same value, writes one fixed file (Debian family:
+  `/usr/local/share/ca-certificates/myownpki-agent-root.crt` and `update-ca-certificates`; RedHat family:
+  `/etc/pki/ca-trust/source/anchors/myownpki-agent-root.pem` and `update-ca-trust`) and runs that command.
+- **Every program on the host then trusts that root for every name**, limited only by name constraints on the
+  intermediates. Firefox and Java keep their own stores.
+- **It runs once.** The state is skipped (`unless`) when `trust status --quiet --root-sha256 <root_sha256>`
+  already says the file is the pinned root, so a second apply changes nothing. A new `root_sha256` runs it again.
+  If the root itself was renewed, run `setup` again by hand first: `ca_bundle` is replaced only by `setup`.
+- **No restart, no change to the unit.** The service never touches the trust store.
+- **With `config_source`** Salt owns `agent.yaml`, so the state passes `--no-record` and the key `system_trust`
+  is not written. Add `system_trust: {root_sha256: "<the same value>"}` to your own file if `config check` should
+  show the block.
+- **`false` or absent creates no state, and the formula never removes the root.** To take it out, set the key to
+  `false` or delete it, then run `myownpki-agent trust remove` on the host (with `--root-sha256 <hex>` when its
+  `agent.yaml` has no `system_trust` key).
+- **Update the agents first.** The command exists in agent 0.3.9 and later, and an older agent refuses the key in
+  `agent.yaml`. The formula refuses `system_trust` with a `version` below 0.3.9, with a value that is not a boolean,
+  and with `true` on a minion whose `os_family` is neither Debian nor RedHat.
+
+The commands, the flags and what they check are on [The trust portal]({{ '/trust-portal/' | relative_url }}#the-root-in-the-system-trust-store-of-an-agent-host).
+
 ## When the formula refuses or fails
 
 The formula **fails closed**: it checks the pillar before it does anything. A pillar it cannot use renders
@@ -454,6 +488,9 @@ one failing state, `myownpki-agent-refused`, and nothing is installed. Read the 
 | `deployment "<name>": the wildcard name "*.…" needs challenge: dns-01 (and dns_provider)` | A wildcard is proven by dns-01 only |
 | `deployment "<name>": dns_type must be rfc2136 or cloudflare` / `dns_credentials must be an absolute path` | Correct the value |
 | `enrollment_pass must be a string` | Quote the value in the pillar |
+| `system_trust must be true or false` | Write a YAML boolean, not a string such as `"yes"` |
+| `system_trust: the agent supports the system trust store of Debian and RedHat family hosts only …` | `true` on another `os_family`. Leave it off there, or set it for the Debian and RedHat minions only |
+| `system_trust needs agent 0.3.9 or later …` | The `version` in the pillar is older. Set `version` and `package.sha256` to 0.3.9 or later, or leave `system_trust` off |
 
 Failures at run time:
 

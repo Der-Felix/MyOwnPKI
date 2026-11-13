@@ -82,7 +82,7 @@ The certificate page has a group of download links:
 | *Export with key* | The private key, in one of three formats | Only with a server-generated key |
 
 The root is never part of a chain: clients already have it as their trust anchor. Give clients the
-root from the trust page ([operations guide §11]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page)).
+root from the trust portal ([operations guide §11]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page)).
 
 With a request you already hold the key, so there is nothing to export. With a server-generated key,
 *Export with key* needs a fresh second factor, is written to the audit log, and offers PKCS#12 (a

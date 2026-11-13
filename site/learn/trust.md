@@ -4,6 +4,7 @@ description: "How a client decides to trust a certificate: chain building, trust
 permalink: /learn/trust/
 sources:
   - docs/OPERATIONS.md
+  - docs/PHASE3.md (15)
   - api/openapi.yaml
   - internal/ca/chain.go
   - .claude/skills/myownpki/references/pki-rules.md
@@ -59,10 +60,17 @@ impersonate every website to that client**.
 
 So treat it as a decision, not a download:
 
-- The public listener of MyOwnPKI serves a **trust page** at `/` (an admin can switch it off) with each root, its **SHA-256
-  fingerprint**, downloads (DER and PEM), Windows helper scripts and guides for Windows, macOS, iOS,
-  Android, Linux and Firefox. The page comes over plain HTTP so that it works before anything trusts you.
-- Therefore compare the fingerprint with one you got another way, such as the admin UI or a printout:
+- The public listener of MyOwnPKI serves a **trust portal** at `/` (an admin can switch it off) with each root, its **SHA-256
+  fingerprint**, downloads (DER and PEM), a configuration profile for iPhone, iPad and Mac, Windows helper scripts,
+  and the steps and commands for Windows, macOS, iOS, Android, Linux, Firefox and Java, chosen from the browser
+  or by hand. The page comes over plain HTTP so that it works before anything trusts you.
+- That is the **first-download problem**: the root has to arrive over a path that nothing protects yet, because
+  nothing on the device trusts your PKI before the root is installed. Whoever controls that path can swap the
+  page, the file and the hash in a command together, so a hash that comes from the same page proves only that the
+  download matches the page, not that the page is genuine. The way out is a value that arrives another way
+  (the admin UI, a printout, a message from your administrator). A public CA in front of the portal's address
+  would make the page authentic, but the portal does not depend on that.
+- Therefore compare the fingerprint with one you got another way, such as the admin UI, `myownpki ca show NAME` on the server or a printout:
 
   ```bash
   openssl x509 -in homelab-root.pem -noout -fingerprint -sha256
@@ -110,7 +118,7 @@ network's names.
 ## Next steps
 
 - Distribute the root: [operations guide §10.4]({{ '/reference/operations/' | relative_url }}#104-trusting-your-root-on-the-clients)
-  and [the public trust page]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page).
+  and [the trust portal]({{ '/trust-portal/' | relative_url }}).
 - A client says "unknown authority": [operations guide §10.9]({{ '/reference/operations/' | relative_url }}#109-when-a-client-fails).
 - Check what a host serves against your PKI: [TLS scan]({{ '/tls-scan/' | relative_url }}).
 - Read the fields the checks use: [Reading a certificate]({{ '/learn/certificate-anatomy/' | relative_url }}).

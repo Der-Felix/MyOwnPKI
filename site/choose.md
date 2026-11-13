@@ -94,3 +94,8 @@ at a time with the assistant, where you want deployment and rollback handled for
 **Many Linux hosts**: use the agent and roll it out with the
 [Salt formula]({{ '/hosts/salt/' | relative_url }}) and an enrollment pass, after you have run it on
 one host.
+
+Whichever level you pick, the devices that **open** your services must trust the root too. That is a separate
+step: send people to the [trust portal]({{ '/trust-portal/' | relative_url }}) of your server, and compare the
+fingerprint it shows with a value from another source. An agent host can also trust the root system-wide on
+request.

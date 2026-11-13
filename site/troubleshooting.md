@@ -108,7 +108,7 @@ firewall, a closed port or a wrong address.
 | `unauthorized: account … waits for approval` | The domain's approval level is *approved accounts* | Approve the account (*ACME → Accounts*) or give the client an EAB key |
 | `dns: … has no TXT record` | The TXT record went to another zone than the resolver reads | With split DNS use the **internal** zone |
 | `rateLimited` | A limit of the tenant settings | Wait for `Retry-After` or raise the limit |
-| TLS error, unknown authority | The client does not trust your root | Install the root ([trust page]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page)) or point the client at it (`REQUESTS_CA_BUNDLE`, `LEGO_CA_CERTIFICATES`, `--ca-bundle`) |
+| TLS error, unknown authority | The client does not trust your root | Install the root ([trust portal]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page)) or point the client at it (`REQUESTS_CA_BUNDLE`, `LEGO_CA_CERTIFICATES`, `--ca-bundle`) |
 | `unauthorized: the ACME server is reachable only through its reverse proxy` (403) | The proxy's address is not in `acme.trusted_proxies` | Add it (with Docker the network, for example `172.16.0.0/12`) |
 | A certificate for "MyOwnPKI ACME (bootstrap)" | With `acme.tls_issuer`: the server was not unsealed since the start, or the certificate expired while sealed | Unseal; the next unseal issues the certificate |
 | An order stays *processing* | The server is sealed: finalize waits and is issued at the unseal | Unseal |

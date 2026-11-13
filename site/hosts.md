@@ -221,7 +221,7 @@ A package puts the binary at `/usr/local/bin/myownpki-agent`, a pristine
 service. For a tarball, verify it, unpack it and install the binary as
 `/usr/local/bin/myownpki-agent`. All three formats run the same `setup`.
 
-The root certificate is the independent trust anchor. Get `root.pem` (the trust page of the public
+The root certificate is the independent trust anchor. Get `root.pem` (the trust portal of the public
 listener, or the guided page), then compare its SHA-256 over the **DER** form with the value in the
 admin UI:
 
@@ -252,6 +252,7 @@ sudo /usr/local/bin/myownpki-agent setup \
 | `--hostname FQDN` | The name to prove. Default: the host's fully qualified name. |
 | `--acme-directory URL` | The ACME directory, `https://…/acme/directory`. It is written into a **new** `agent.yaml`, so that the first deployment needs no hand edit. An existing file is kept as it is. |
 | `--low-ports` | Install the capability drop-in for ports below 1024 even in webroot mode |
+| `--system-trust` | After enrollment, add the verified root to the system trust store of this host (Debian and RedHat families only; [below](#the-root-in-the-system-trust-store)). Off by default |
 | `--config FILE` | Another `agent.yaml` path. Default `$MYOWNPKI_AGENT_CONFIG`, then `/etc/myownpki-agent/agent.yaml`. |
 
 `setup` is safe to run again: an already enrolled host keeps its configuration and the service is
@@ -385,6 +386,7 @@ nginx server block.
 | `paths` | The only directories the agent may write to, apart from its state: web roots and the parents of deployment targets |
 | `sandbox.write` | Directories that only **hooks** write (nginx: `/var/log/nginx`); they go into the drop-in `10-paths.conf`, not into `paths`. The agent itself does not get them. |
 | `sandbox.low_ports` | `true`: install `20-low-ports.conf`; `false`: remove it; unset: install it for any standalone challenge, otherwise leave it as found |
+| `system_trust` | `root_sha256`: the pin of the root that `trust install` put into the system trust store. Absent: off. Written by the command; an agent older than 0.3.9 refuses it ([below](#the-root-in-the-system-trust-store)) |
 | `deployments[].name` | Lower-case letters, digits and `-`, unique |
 | `deployments[].profile` | `nginx` (writes `fullchain.pem` and `privkey.pem` into `dir`) or `file` (explicit target files) |
 | `deployments[].names` | 1 to 100 DNS names for the certificate. Each must be covered by the agent's *Names it may order* on the server. A name that starts with `*.` (a wildcard, at least two labels after it) is allowed only with `challenge: dns-01`. |
@@ -516,6 +518,43 @@ included, and the name must resolve to the host from the point of view of the se
 (`acme.resolver`). In webroot mode the web server on port 80 must answer the challenge directory; in
 standalone mode port 80 is bound only while a check runs. A deployment with `challenge: dns-01` needs
 no port 80 at all (but the host still enrolls with http-01, or with an approval).
+
+## The root in the system trust store
+
+Since v0.3.9 the agent can add the root of this PKI to the **system trust store** of its host, so that `curl`
+and other programs there trust your certificates without `--cacert`. It is **off by default**, a command you run
+as root (or Salt runs), and **never part of `run`**: the sandboxed service cannot write the host's trust anchors
+and gets no right to.
+
+**What it can do, and what it implies.** The agent can add the CA that issues its own certificates; it never
+touches anything else. The root is the one the host pinned at enrollment (`ca_bundle` checked against
+`--root-sha256`), so no new trust decision is made, only a wider scope for the same one: **every program on the
+host that reads the system store then trusts that root for every name.** The only limit is a name constraint on
+the intermediates. Firefox and Java keep their own stores.
+
+```bash
+sudo myownpki-agent trust install --root-sha256 AA:BB:CC:...
+```
+
+It needs a Debian-family or a RedHat-family host (`ID` or `ID_LIKE` in `os-release` names `debian`, `rhel`,
+`fedora` or `centos`); any other host is refused and nothing changes. The file is fixed per family:
+`/usr/local/share/ca-certificates/myownpki-agent-root.crt` with `update-ca-certificates`, or
+`/etc/pki/ca-trust/source/anchors/myownpki-agent-root.pem` with `update-ca-trust`. The command checks that
+`ca_bundle` holds one self-signed CA whose SHA-256 equals the value, writes exactly the bytes it checked, runs the
+distribution's command (and puts the old state back when it fails), and records `system_trust` in `agent.yaml`.
+
+| Command | What it does |
+|---|---|
+| `trust install --root-sha256 HEX` with `--no-record`, `--config FILE` | Installs the file and records the key. `--no-record` leaves `agent.yaml` alone, for a file another tool renders. Root only. |
+| `trust status` with `--quiet`, `--root-sha256 HEX` | Read-only, no root needed. Exit code 0 only when the installed file is the pinned root. |
+| `trust remove` with `--root-sha256 HEX` | Deletes the file (only when it holds the pinned root), runs the command again and drops the key. Root only. |
+| `setup --system-trust` | Does the install after enrollment, together with `--root-sha256`. |
+
+The `agent.yaml` key is `system_trust: {root_sha256: "<64 hex digits>"}`, absent by default. **Update the agent
+before you write it:** an agent older than 0.3.9 refuses the key and does not start. `config check` prints a line
+`system trust`; it exits 1 only when the key does not match `ca_bundle`, and as non-root it cannot read a `ca_bundle`
+of mode 0600 (it says so and exits 0): run it as root. Every detail, and the Salt option, are on
+[The trust portal]({{ '/trust-portal/' | relative_url }}#the-root-in-the-system-trust-store-of-an-agent-host).
 
 ## Renewal, "Renew now" and what the agent reports
 

@@ -51,7 +51,7 @@ the repository.
   ([operations guide §8]({{ '/reference/operations/' | relative_url }}#8-when-something-is-lost-or-wrong)).
 - **A lost passphrase and recovery key.** There is no recovery; create new CAs.
 - **Clients that trust the wrong root.** Always compare the root's SHA-256 with the admin UI, because the
-  trust page is served over plain HTTP so that it works before anything trusts your PKI.
+  trust portal is served over plain HTTP so that it works before anything trusts your PKI.
 
 ## Verify a download
 
