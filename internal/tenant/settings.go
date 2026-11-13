@@ -197,12 +197,13 @@ func (s *Store) Set(ctx context.Context, tenant string, v Settings, who keys.Who
 // writes the baseline first), so nothing is half recorded. It returns the
 // number of the version it wrote, the new ETag.
 func (s *Store) SetWith(ctx context.Context, tenant string, v Settings, opts ChangeOptions, who keys.Who) (int64, error) {
-	now := s.Clock.Now().UTC()
-	if err := who.Principal.Check(authz.ManageTenant, authz.Resource{Tenant: tenant}, now); err != nil {
-		return 0, err
-	}
+	return s.set(ctx, tenant, v, opts, nil, who)
+}
+
+// validate returns the problems of new settings and of a reason, all at once.
+func validate(v Settings, reason string) []string {
 	var problems []string
-	if settingsver.CheckReason(opts.Reason) != nil {
+	if settingsver.CheckReason(reason) != nil {
 		problems = append(problems, fmt.Sprintf("reason: at most %d characters, no control characters", settingsver.MaxReason))
 	}
 	check := func(field, value string, n int) {
@@ -236,7 +237,18 @@ func (s *Store) SetWith(ctx context.Context, tenant string, v Settings, opts Cha
 			}
 		}
 	}
-	if len(problems) > 0 {
+	return problems
+}
+
+// set is SetWith and the restore of a version: rs is nil for an ordinary
+// change. A restore runs exactly the same checks, then records the change
+// "restore" (restored_from) and the audit action tenant.settings_restore.
+func (s *Store) set(ctx context.Context, tenant string, v Settings, opts ChangeOptions, rs *restoreOf, who keys.Who) (int64, error) {
+	now := s.Clock.Now().UTC()
+	if err := who.Principal.Check(authz.ManageTenant, authz.Resource{Tenant: tenant}, now); err != nil {
+		return 0, err
+	}
+	if problems := validate(v, opts.Reason); len(problems) > 0 {
 		return 0, fmt.Errorf("%w: %s", ErrInvalid, strings.Join(problems, "; "))
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -300,6 +312,12 @@ func (s *Store) SetWith(ctx context.Context, tenant string, v Settings, opts Cha
 	if v.AllowServerKeygen {
 		keygen = 1
 	}
+	after := Settings{AllowServerKeygen: v.AllowServerKeygen, Organization: v.Organization, OrganizationalUnit: v.OrganizationalUnit,
+		Locality: v.Locality, State: v.State, Country: v.Country, ACME: &limits, TrustPage: &trust, AgentEnrollment: &mode,
+		StepUpMinutes: &stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}
+	if rs != nil && settingsver.Same(snapshot(before), snapshot(&after)) {
+		return 0, settingsver.ErrIdentical
+	}
 	n, err := systemdb.New(tx).SetTenantSettings(ctx, systemdb.SetTenantSettingsParams{
 		AllowServerKeygen: keygen, SubjectO: v.Organization, SubjectOu: v.OrganizationalUnit, SubjectL: v.Locality,
 		SubjectSt: v.State, SubjectC: v.Country,
@@ -317,30 +335,37 @@ func (s *Store) SetWith(ctx context.Context, tenant string, v Settings, opts Cha
 	// The version, in the same transaction: the change, the version and the audit
 	// entry commit or roll back together. The first change of a tenant without
 	// history writes the baseline (the state in `before`) first.
-	after := Settings{AllowServerKeygen: v.AllowServerKeygen, Organization: v.Organization, OrganizationalUnit: v.OrganizationalUnit,
-		Locality: v.Locality, State: v.State, Country: v.Country, ACME: &limits, TrustPage: &trust, AgentEnrollment: &mode,
-		StepUpMinutes: &stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}
-	res, err := settingsver.Append(ctx, settingsver.SystemBackend(systemdb.New(tx)), settingsver.Entry{
+	entry := settingsver.Entry{
 		Kind: settingsver.KindTenant, ObjectID: tenant, Change: settingsver.ChangeUpdate,
 		Before: snapshot(before), After: snapshot(&after), Actor: versionActor(who),
 		Reason: opts.Reason, ExpectedVersion: opts.ExpectedVersion, Now: now,
-	})
+	}
+	action := ActionSettings
+	if rs != nil {
+		entry.Change, entry.RestoredFrom, action = settingsver.ChangeRestore, rs.from, ActionSettingsRestore
+	}
+	res, err := settingsver.Append(ctx, settingsver.SystemBackend(systemdb.New(tx)), entry)
 	if err != nil {
 		return 0, err
 	}
+	details := map[string]any{
+		"allow_server_keygen": v.AllowServerKeygen, "was_allow_server_keygen": before.AllowServerKeygen,
+		"subject": subjectText(v), "was_subject": subjectText(*before),
+		"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
+		"trust_page": trust, "was_trust_page": *before.TrustPage,
+		"agent_enrollment": mode, "was_agent_enrollment": *before.AgentEnrollment,
+		"step_up_minutes": stepUp, "was_step_up_minutes": *before.StepUpMinutes,
+		"agent_predecessor": agentPolicy, "was_agent_predecessor": *before.AgentPredecessor,
+		"other_predecessor": otherPolicy, "was_other_predecessor": *before.OtherPredecessor,
+		"version": res.Version.Number, "snapshot_sha256": res.Version.SHA256,
+	}
+	if rs != nil {
+		details["restored_from"] = rs.from
+		details["changed_keys"] = strings.Join(settingsver.Keys(settingsver.Diff(entry.Before, entry.After)), ",")
+	}
 	if err := audit.Enqueue(ctx, tx, now, audit.Entry{
-		Time: now, Actor: who.Actor, Action: ActionSettings, Target: audit.Target{Type: "tenant", ID: tenant},
-		Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: map[string]any{
-			"allow_server_keygen": v.AllowServerKeygen, "was_allow_server_keygen": before.AllowServerKeygen,
-			"subject": subjectText(v), "was_subject": subjectText(*before),
-			"acme_limits": limitsText(limits), "was_acme_limits": limitsText(*before.ACME),
-			"trust_page": trust, "was_trust_page": *before.TrustPage,
-			"agent_enrollment": mode, "was_agent_enrollment": *before.AgentEnrollment,
-			"step_up_minutes": stepUp, "was_step_up_minutes": *before.StepUpMinutes,
-			"agent_predecessor": agentPolicy, "was_agent_predecessor": *before.AgentPredecessor,
-			"other_predecessor": otherPolicy, "was_other_predecessor": *before.OtherPredecessor,
-			"version": res.Version.Number, "snapshot_sha256": res.Version.SHA256,
-		},
+		Time: now, Actor: who.Actor, Action: action, Target: audit.Target{Type: "tenant", ID: tenant},
+		Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
 	}); err != nil {
 		return 0, err
 	}
