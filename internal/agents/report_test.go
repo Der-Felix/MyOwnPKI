@@ -475,3 +475,21 @@ func TestRestartReleasesManyWatchesAndKeepsRequests(t *testing.T) {
 		}
 	}
 }
+
+// A dns-01 deployment (v0.3.7, docs/PHASE3.md step 41) reports its challenge
+// and a wildcard name like any other; the server stores both unchanged.
+func TestReportKeepsDNS01DeploymentsWithWildcards(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, tenant.EnrollAuto)
+	c := agentCaller(t, e, "proxy1.homelab.lan")
+	in := ReportInput{Deployments: []DeploymentReport{{
+		Name: "wild", Profile: "nginx", Names: []string{"*.homelab.lan", "homelab.lan"}, Challenge: "dns-01", State: "deployed",
+	}}}
+	if err := e.s.Report(t.Context(), c, in); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pkidb.New(e.s.PKI).ListAgentDeployments(t.Context(), c.Agent.ID)
+	if err != nil || len(rows) != 1 || rows[0].Challenge != "dns-01" || !strings.Contains(rows[0].Names, "*.homelab.lan") {
+		t.Fatalf("stored deployments: %+v %v", rows, err)
+	}
+}
