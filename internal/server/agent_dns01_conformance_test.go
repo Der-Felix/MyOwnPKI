@@ -4,13 +4,13 @@ package server
 
 import (
 	"context"
-	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/miekg/dns"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/agent"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
@@ -34,22 +34,34 @@ func TestConformanceAgentDNS01(t *testing.T) {
 		}
 	}
 	bind := env["CONF_DNS"]
-	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, network, bind)
-	}}
-	// txt reads the challenge name from BIND itself, never from a cache.
+	// txt asks BIND itself (UDP, TCP when the answer is truncated or UDP
+	// fails) for the TXT values of the challenge name. It does not use Go's
+	// resolver: in the first CI run that one answered "server misbehaving" for
+	// this BIND (no recursion) before checking anything.
+	// NXDOMAIN and an empty answer both mean "no record"; any other rcode or a
+	// network error fails the test.
 	txt := func(t *testing.T) []string {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
-		values, err := resolver.LookupTXT(ctx, "_acme-challenge.homelab.lan")
-		var dnsErr *net.DNSError
-		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
-			return nil
+		q := new(dns.Msg)
+		q.SetQuestion(dns.Fqdn("_acme-challenge.homelab.lan"), dns.TypeTXT)
+		q.RecursionDesired = false
+		r, _, err := (&dns.Client{Net: "udp", Timeout: 5 * time.Second}).ExchangeContext(ctx, q, bind)
+		if err != nil || r.Truncated {
+			r, _, err = (&dns.Client{Net: "tcp", Timeout: 5 * time.Second}).ExchangeContext(ctx, q, bind)
 		}
 		if err != nil {
-			t.Fatalf("BIND at %s: %v", bind, err)
+			t.Fatalf("TXT query to BIND at %s: %v", bind, err)
+		}
+		if r.Rcode != dns.RcodeSuccess && r.Rcode != dns.RcodeNameError {
+			t.Fatalf("TXT query to BIND at %s: rcode %s", bind, dns.RcodeToString[r.Rcode])
+		}
+		var values []string
+		for _, rr := range r.Answer {
+			if v, ok := rr.(*dns.TXT); ok {
+				values = append(values, strings.Join(v.Txt, ""))
+			}
 		}
 		return values
 	}
