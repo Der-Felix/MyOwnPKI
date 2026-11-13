@@ -203,7 +203,7 @@ func TestMobileConfig(t *testing.T) {
 	}
 	inner := payloadOf(t, d)
 	if inner["PayloadType"] != "com.apple.security.root" || inner["PayloadVersion"] != "int:1" ||
-		inner["PayloadIdentifier"] != "local.myownpki.root."+fp32+".cert" || inner["PayloadCertificateFileName"] != "fixture-root.crt" {
+		inner["PayloadIdentifier"] != "local.myownpki.root."+fp32+".cert" || inner["PayloadCertificateFileName"] != "fixture-root-"+r.SHA256()[:8]+".crt" {
 		t.Errorf("payload: %v", inner)
 	}
 	if der := carriedDER(t, d); !bytes.Equal(der, r.DER) {
@@ -387,9 +387,41 @@ func TestFormatting(t *testing.T) {
 	if SHA256Hex([]byte("x")) != hex.EncodeToString(sum[:]) || len(SHA256Hex(nil)) != 64 {
 		t.Error("SHA256Hex")
 	}
-	r := Root{Name: "root", Generation: 2, Current: false}
-	if r.File() != "root-2" || (Root{Name: "root", Generation: 2, Current: true}).File() != "root" {
-		t.Error("File")
+	r := Root{Name: "root", Generation: 2, Current: false, DER: []byte("one")}
+	fileSum := SHA256Hex(r.DER)[:8]
+	if r.File() != "root-2-"+fileSum || (Root{Name: "root", Generation: 2, Current: true, DER: r.DER}).File() != "root-"+fileSum {
+		t.Errorf("File: %q", r.File())
+	}
+}
+
+var fileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*-[0-9a-f]{8}$`)
+
+// TestFileNamesDoNotCollide: the CA "root-2" at generation 1 (current) and the
+// CA "root" at an older generation 2 are both "root-2" without the suffix; the
+// first 8 hex digits of the certificate keep their files apart, in every name
+// a root gets (download, install target, profile).
+func TestFileNamesDoNotCollide(t *testing.T) {
+	t.Parallel()
+	a := Root{Name: "root-2", Generation: 1, Current: true, DER: []byte("certificate a"), BaseURL: fixtureBase}
+	b := Root{Name: "root", Generation: 2, Current: false, DER: []byte("certificate b"), BaseURL: fixtureBase}
+	if a.File() == b.File() {
+		t.Fatalf("both are %q", a.File())
+	}
+	for _, r := range []Root{a, b} {
+		f := r.File()
+		if !fileNamePattern.MatchString(f) || !strings.HasSuffix(f, SHA256Hex(r.DER)[:8]) {
+			t.Errorf("file name %q", f)
+		}
+		for _, p := range []Platform{Debian, Fedora} {
+			if c := commandText(Guide(p, r)); !strings.Contains(c, "myownpki-"+f+".") {
+				t.Errorf("%s: the commands lack myownpki-%s:\n%s", p, f, c)
+			}
+		}
+	}
+	// The longest name still fits a file name with the prefix and the suffix.
+	long := Root{Name: strings.Repeat("a", 63), Generation: 9223372036854775807, DER: []byte("x"), BaseURL: fixtureBase}
+	if n := len("myownpki-" + long.File() + ".crt"); n > 255 {
+		t.Errorf("file name of %d bytes", n)
 	}
 }
 
@@ -523,7 +555,7 @@ func TestGuideCommands(t *testing.T) {
 	old := r
 	old.Current, old.Generation = false, 3
 	c := commandText(Guide(Debian, old))
-	if !strings.Contains(c, fixtureBase+"/ca/fixture-root/3.crt") || !strings.Contains(c, "myownpki-fixture-root-3.crt") {
+	if !strings.Contains(c, fixtureBase+"/ca/fixture-root/3.crt") || !strings.Contains(c, "myownpki-fixture-root-3-"+old.SHA256()[:8]+".crt") {
 		t.Errorf("older generation:\n%s", c)
 	}
 	// Platforms without commands have none, and an unknown platform has no blocks.

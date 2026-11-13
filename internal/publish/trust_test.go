@@ -3,7 +3,9 @@ package publish
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"html"
 	"io"
 	"io/fs"
@@ -11,6 +13,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +74,18 @@ func TestUncleanPathsAreRedirectedByTheRouter(t *testing.T) {
 			t.Errorf("%s: a header of the portal on the router's redirect: %v", path, rec.Header())
 		}
 	}
+}
+
+// wantFile is the base name of the downloads of a root, written out here
+// independently of trustkit: the CA name, the generation of an older one, and
+// the first 8 hex digits of the certificate's SHA-256.
+func wantFile(name string, gen int, current bool, der []byte) string {
+	sum := sha256.Sum256(der)
+	base := name
+	if !current {
+		base += "-" + strconv.Itoa(gen)
+	}
+	return base + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 func trustSetup(t *testing.T) (*testinstance.Instance, http.Handler, *tenant.Store) {
@@ -172,6 +187,7 @@ func TestTrustPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootFile := wantFile("root", 1, true, root.body)
 	page := string(a.body)
 	for _, want := range []string{
 		"Before you install anything", "plain HTTP", "Nothing on it proves itself, not even the fingerprints",
@@ -179,7 +195,7 @@ func TestTrustPage(t *testing.T) {
 		"Root certificates", "Intermediate certificates", "install nothing",
 		rootCert.Subject.CommonName, view.Fingerprint(trustkit.ColonHex(trustkit.SHA256Hex(root.body))),
 		rootCert.NotAfter.UTC().Format("2006-01-02"),
-		`href="/ca/root/1.crt" download="root.crt"`, `href="/ca/root/1.pem" download="root.pem"`, `href="/ca/issuing/1.crt"`,
+		`href="/ca/root/1.crt" download="` + rootFile + `.crt"`, `href="/ca/root/1.pem" download="` + rootFile + `.pem"`, `href="/ca/issuing/1.crt"`,
 		"This page could not tell your system. Choose it:",
 		`href="/?os=windows"`, `href="/?os=macos"`, `href="/?os=ios"`, `href="/?os=android"`, `href="/?os=debian"`,
 		`href="/?os=fedora"`, `href="/?os=firefox"`, `href="/?os=java"`, `href="/?os=all"`,
@@ -236,7 +252,7 @@ func TestTrustPageAllPlatforms(t *testing.T) {
 		"keytool -importcert", "security.enterprise_roots.enabled",
 		"Certificate Trust Settings", "Not Signed", "API 24", "only checks the download against this page",
 		`href="/trust/root/1/machine.cmd"`, `href="/trust/root/1/user.cmd"`, `href="/trust/root/1/profile.mobileconfig"`,
-		`download="root.cer"`, "SHA-1 fingerprint (Windows certificate dialog comparison only):",
+		`download="` + wantFile("root", 1, true, root) + `.cer"`, "SHA-1 fingerprint (Windows certificate dialog comparison only):",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the page lacks %q", want)
@@ -263,7 +279,8 @@ func TestTrustDownloads(t *testing.T) {
 	if p := fetch(t, h, "/ca/root/1.pem"); p.code != http.StatusOK || !bytes.Equal(p.body, pemOf(der)) || p.h.Get("Content-Type") != "application/x-pem-file" {
 		t.Errorf("PEM: %d %s", p.code, p.h.Get("Content-Type"))
 	}
-	for scope, file := range map[string]string{ScopeMachine: "root-trust-computer.cmd", ScopeUser: "root-trust-user.cmd"} {
+	current := wantFile("root", 1, true, der)
+	for scope, file := range map[string]string{ScopeMachine: current + "-trust-computer.cmd", ScopeUser: current + "-trust-user.cmd"} {
 		a := fetch(t, h, "/trust/root/1/"+scope+".cmd")
 		if a.code != http.StatusOK || !bytes.Equal(embeddedDER(t, a.body), der) || a.h.Get("Content-Disposition") != `attachment; filename="`+file+`"` {
 			t.Errorf("%s helper: %d %v", scope, a.code, a.h)
@@ -286,7 +303,7 @@ func TestTrustDownloads(t *testing.T) {
 	}
 	page := string(fetch(t, h, "/?os=debian").body)
 	text := html.UnescapeString(page)
-	if !strings.Contains(page, `download="root-1.crt"`) || !strings.Contains(page, "older generation 1, still valid") {
+	if !strings.Contains(page, `download="`+wantFile("root", 1, false, der)+`.crt"`) || !strings.Contains(page, "older generation 1, still valid") {
 		t.Errorf("the older generation is not marked:\n%s", page)
 	}
 	if strings.Index(page, `/ca/root/2.crt`) > strings.Index(page, `/ca/root/1.crt`) {
@@ -294,7 +311,9 @@ func TestTrustDownloads(t *testing.T) {
 	}
 	// One block per root generation, each with its own URL, hash and file names.
 	for _, want := range []string{
-		"/ca/root/2.crt'", "/ca/root/1.crt'", "myownpki-root.crt", "myownpki-root-1.crt",
+		"/ca/root/2.crt'", "/ca/root/1.crt'",
+		"myownpki-" + wantFile("root", 2, true, fetch(t, h, "/ca/root/2.crt").body) + ".crt",
+		"myownpki-" + wantFile("root", 1, false, der) + ".crt",
 		trustkit.SHA256Hex(fetch(t, h, "/ca/root/2.crt").body), trustkit.SHA256Hex(fetch(t, h, "/ca/root/1.crt").body),
 	} {
 		if !strings.Contains(text, want) {
@@ -304,7 +323,7 @@ func TestTrustDownloads(t *testing.T) {
 	if n := strings.Count(text, "sudo update-ca-certificates"); n != 2 {
 		t.Errorf("%d command blocks for 2 root generations", n)
 	}
-	for scope, wantName := range map[string]string{ScopeMachine: "root-1-trust-computer.cmd", ScopeUser: "root-1-trust-user.cmd"} {
+	for scope, wantName := range map[string]string{ScopeMachine: wantFile("root", 1, false, der) + "-trust-computer.cmd", ScopeUser: wantFile("root", 1, false, der) + "-trust-user.cmd"} {
 		if a := fetch(t, h, "/trust/root/1/"+scope+".cmd"); a.code != http.StatusOK || a.h.Get("Content-Disposition") != `attachment; filename="`+wantName+`"` {
 			t.Errorf("older helper: %d %v", a.code, a.h)
 		}

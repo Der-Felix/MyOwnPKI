@@ -6,7 +6,7 @@
 	<array>
 		<dict>
 			<key>PayloadCertificateFileName</key>
-			<string>fixture-root.crt</string>
+			<string>fixture-root-ff91eaae.crt</string>
 			<key>PayloadContent</key>
 			<data>
 			MIIBvjCCAWWgAwIBAgIBATAKBggqhkjOPQQDAjBHMR4wHAYDVQQKExV0cnVzdGtp

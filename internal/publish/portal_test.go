@@ -206,7 +206,7 @@ func TestPortalProfile(t *testing.T) {
 	if a.h.Get("Content-Type") != "application/x-apple-aspen-config" {
 		t.Errorf("Content-Type %q", a.h.Get("Content-Type"))
 	}
-	if a.h.Get("Content-Disposition") != `attachment; filename="root.mobileconfig"` {
+	if a.h.Get("Content-Disposition") != `attachment; filename="`+wantFile("root", 1, true, der)+`.mobileconfig"` {
 		t.Errorf("Content-Disposition %q", a.h.Get("Content-Disposition"))
 	}
 	if a.h.Get("Cache-Control") != "public, max-age=900" || a.h.Get("ETag") == "" || a.h.Get("X-Content-Type-Options") != "nosniff" {

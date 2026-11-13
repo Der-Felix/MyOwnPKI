@@ -208,14 +208,19 @@ type generationCert struct {
 	cert *x509.Certificate
 }
 
-// file is the base name the page uses for downloads of this generation: the
-// CA's name, with the generation appended for an older one.
-func (s generationCert) file() string {
-	if s.gen.Current {
-		return s.info.Name
+// root is the certificate as trustkit knows it.
+func (s generationCert) root() trustkit.Root {
+	return trustkit.Root{
+		Name: s.info.Name, Generation: s.gen.Generation, Current: s.gen.Current,
+		DER: s.cert.Raw, BaseURL: s.info.BaseURL, CommonName: s.cert.Subject.CommonName,
 	}
-	return s.info.Name + "-" + strconv.FormatInt(s.gen.Generation, 10)
 }
+
+// file is the base name the page, the profile and the Windows helpers use for
+// downloads of this generation (trustkit.Root.File: the CA's name, the
+// generation of an older one and 8 hex digits of the certificate, so two
+// certificates never get the same file name).
+func (s generationCert) file() string { return s.root().File() }
 
 // shown lists what the page shows: active CAs, every generation with a
 // certificate that is valid now and not revoked (after a root renewal the
@@ -316,10 +321,7 @@ func (h *Handler) portalData(ctx context.Context, platforms []trustkit.Platform,
 			continue
 		}
 		d.Roots = append(d.Roots, c)
-		roots = append(roots, trustkit.Root{
-			Name: s.info.Name, Generation: s.gen.Generation, Current: s.gen.Current,
-			DER: s.cert.Raw, BaseURL: s.info.BaseURL, CommonName: s.cert.Subject.CommonName,
-		})
+		roots = append(roots, s.root())
 	}
 	for _, p := range platforms {
 		sec := trust.Section{ID: string(p), Title: p.Label()}
@@ -372,13 +374,10 @@ func (h *Handler) trustFile(w http.ResponseWriter, r *http.Request) {
 			h.profile(w, r, s)
 			return
 		}
-		// The name is built from the CA name and the normalized generation, never
-		// from the text of the request ("+2" and "0002" both parse to 2).
-		who := map[string]string{ScopeMachine: "computer", ScopeUser: "user"}[scope]
-		download := name + "-trust-" + who + ".cmd"
-		if !s.gen.Current {
-			download = name + "-" + strconv.FormatInt(gen, 10) + "-trust-" + who + ".cmd"
-		}
+		// The name is built from the certificate (CA name, generation of an older
+		// one, 8 hex digits), never from the text of the request ("+2" and "0002"
+		// both parse to 2).
+		download := s.file() + "-trust-" + map[string]string{ScopeMachine: "computer", ScopeUser: "user"}[scope] + ".cmd"
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+download+`"`)
 		h.serveCached(w, r, "public", MaxAge, windowsHelper(name, gen, s.cert.Raw, scope))
@@ -390,10 +389,7 @@ func (h *Handler) trustFile(w http.ResponseWriter, r *http.Request) {
 // profile serves the Apple configuration profile of a shown root. The file
 // name comes from the validated CA name and the generation number.
 func (h *Handler) profile(w http.ResponseWriter, r *http.Request, s generationCert) {
-	data, err := trustkit.MobileConfig(trustkit.Root{
-		Name: s.info.Name, Generation: s.gen.Generation, Current: s.gen.Current,
-		DER: s.cert.Raw, BaseURL: s.info.BaseURL, CommonName: s.cert.Subject.CommonName,
-	})
+	data, err := trustkit.MobileConfig(s.root())
 	if err != nil {
 		h.fail(w, r, err)
 		return

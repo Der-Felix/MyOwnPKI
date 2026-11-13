@@ -97,13 +97,19 @@ type Root struct {
 	CommonName string // the certificate's common name; only ever shown as escaped text
 }
 
-// File is the base name the page uses for downloads: the CA's name, with the
-// generation appended for an older generation.
+// File is the base name the page uses for downloads and the commands for the
+// files they create: the CA's name, with the generation appended for an older
+// generation, and always the first 8 hex digits of the certificate's SHA-256.
+// The suffix keeps two certificates apart that would share a base name
+// otherwise: the CA "root-2" at generation 1 and the CA "root" at an older
+// generation 2 are both "root-2" without it. A name that passes [ValidName]
+// stays valid, so the result holds letters, digits, '.', '_' and '-' only.
 func (r Root) File() string {
-	if r.Current {
-		return r.Name
+	base := r.Name
+	if !r.Current {
+		base += "-" + strconv.FormatInt(r.Generation, 10)
 	}
-	return r.Name + "-" + strconv.FormatInt(r.Generation, 10)
+	return base + "-" + r.SHA256()[:8]
 }
 
 // SHA256 is the lower-case hex SHA-256 of the certificate.

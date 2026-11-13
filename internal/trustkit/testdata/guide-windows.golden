@@ -1,11 +1,11 @@
 ## By hand with the certificate dialog
-1. Download the DER file and save it as fixture-root.cer (the download link is above).
+1. Download the DER file and save it as fixture-root-ff91eaae.cer (the download link is above).
 2. Double-click it, choose Install Certificate, pick Current User or Local Machine and place the certificate in the store Trusted Root Certification Authorities.
 3. On the Details tab of the certificate dialog compare the thumbprint with the SHA-1 shown here and the fingerprint with the SHA-256 from the admin UI before you confirm.
 
 ## PowerShell, for your user only
 ```
-$f = Join-Path $env:TEMP 'myownpki-fixture-root.cer'
+$f = Join-Path $env:TEMP 'myownpki-fixture-root-ff91eaae.cer'
 Invoke-WebRequest -UseBasicParsing -Uri 'http://pki.example.test/ca/fixture-root/1.crt' -OutFile $f
 if ((Get-FileHash -Algorithm SHA256 -Path $f).Hash -eq 'FF91EAAEB57E418AA50C8C3589EC4922BCA0F995A1F9CE1390BF2960B6606690') { Import-Certificate -FilePath $f -CertStoreLocation Cert:\CurrentUser\Root } else { Remove-Item $f; Write-Error 'SHA-256 mismatch: nothing was installed' }
 ```
@@ -13,7 +13,7 @@ Note: Windows asks you to confirm the import. The value in this command only che
 
 ## PowerShell started as administrator, for all users of this computer
 ```
-$f = Join-Path $env:TEMP 'myownpki-fixture-root.cer'
+$f = Join-Path $env:TEMP 'myownpki-fixture-root-ff91eaae.cer'
 Invoke-WebRequest -UseBasicParsing -Uri 'http://pki.example.test/ca/fixture-root/1.crt' -OutFile $f
 if ((Get-FileHash -Algorithm SHA256 -Path $f).Hash -eq 'FF91EAAEB57E418AA50C8C3589EC4922BCA0F995A1F9CE1390BF2960B6606690') { Import-Certificate -FilePath $f -CertStoreLocation Cert:\LocalMachine\Root } else { Remove-Item $f; Write-Error 'SHA-256 mismatch: nothing was installed' }
 ```
