@@ -31,6 +31,8 @@ const (
 	ActionDomainCreate = "domain.create"
 	ActionDomainUpdate = "domain.update"
 	ActionDomainDelete = "domain.delete"
+	// ActionDomainRestore is a restore of a stored version (PHASE3 section 16, step 63).
+	ActionDomainRestore = "domain.restore"
 )
 
 // Approval levels (PLAN §6.3).
@@ -300,7 +302,8 @@ func (e *Engine) CreateDomain(ctx context.Context, req DomainRequest) (*Domain, 
 }
 
 func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.Time) (*Domain, error) {
-	if err := e.authorize(req.Who, authz.ManageCA, "", now); err != nil {
+	rs := req.Options.restore
+	if err := e.authorizeChange(req.Options, req.Who, authz.ManageCA, "", now); err != nil {
 		return nil, err
 	}
 	q := pkidb.New(e.PKI)
@@ -321,8 +324,14 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 	if len(problems) > 0 {
 		return nil, &DeniedError{Reasons: problems}
 	}
-	id, err := ids.New("dom", now, e.rand())
-	if err != nil {
+	if rs != nil && rs.dry {
+		return &d, nil
+	}
+	// A restore of a deleted domain creates it again under its old ID.
+	id := ""
+	if rs != nil {
+		id = rs.id
+	} else if id, err = ids.New("dom", now, e.rand()); err != nil {
 		return nil, err
 	}
 	d.ID, d.CreatedAt, d.UpdatedAt = id, now, now
@@ -334,16 +343,23 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 			return ierr
 		}
 		details := domainDetails(&d)
-		res, rerr := recordDomain(ctx, q, settingsver.Entry{
+		entry := settingsver.Entry{
 			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeCreate, After: domainSnapshot(&d),
 			Actor: versionActor(req.Who), Reason: req.Options.Reason, ExpectedVersion: req.Options.ExpectedVersion, Now: now,
-		}, details)
+		}
+		action := ActionDomainCreate
+		if rs != nil {
+			entry.Change, entry.RestoredFrom, action = settingsver.ChangeRestore, rs.from, ActionDomainRestore
+			details["restored_from"] = rs.from
+			details["changed_keys"] = strings.Join(settingsver.Keys(settingsver.Diff(nil, entry.After)), ",")
+		}
+		res, rerr := recordDomain(ctx, q, entry, details)
 		if rerr != nil {
 			return rerr
 		}
 		d.Version = res.Version.Number
 		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: req.Who.Actor, Action: ActionDomainCreate, Target: audit.Target{Type: "domain", ID: d.ID},
+			Time: now, Actor: req.Who.Actor, Action: action, Target: audit.Target{Type: "domain", ID: d.ID},
 			Result: audit.ResultSuccess, SourceIP: req.Who.SourceIP, Details: details,
 		})
 	})
@@ -375,7 +391,8 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 	if err != nil {
 		return nil, err
 	}
-	if aerr := e.authorize(who, authz.ManageCA, d.CA, now); aerr != nil {
+	rs := s.Options.restore
+	if aerr := e.authorizeChange(s.Options, who, authz.ManageCA, d.CA, now); aerr != nil {
 		return nil, aerr
 	}
 	before := domainDetails(d)
@@ -390,9 +407,12 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 	}
 	if s.CA != nil && *s.CA != before["ca"] {
 		// Moving to another CA needs the right on that CA as well.
-		if aerr := e.authorize(who, authz.ManageCA, d.CA, now); aerr != nil {
+		if aerr := e.authorizeChange(s.Options, who, authz.ManageCA, d.CA, now); aerr != nil {
 			return nil, aerr
 		}
+	}
+	if rs != nil && rs.dry {
+		return d, nil
 	}
 	d.UpdatedAt = now
 	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
@@ -405,6 +425,9 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 		current, berr := domainBefore(ctx, q, d.ID)
 		if berr != nil {
 			return berr
+		}
+		if rs != nil && settingsver.Same(domainSnapshot(current), domainSnapshot(d)) {
+			return settingsver.ErrIdentical
 		}
 		row := domainRow(d)
 		if uerr := q.UpdateDomain(ctx, pkidb.UpdateDomainParams{
@@ -421,17 +444,24 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 				details[k] = fmt.Sprintf("%v -> %v", before[k], v)
 			}
 		}
-		res, rerr := recordDomain(ctx, q, settingsver.Entry{
+		entry := settingsver.Entry{
 			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeUpdate,
 			Before: domainSnapshot(current), After: domainSnapshot(d), Actor: versionActor(who),
 			Reason: s.Options.Reason, ExpectedVersion: s.Options.ExpectedVersion, Now: now,
-		}, details)
+		}
+		action := ActionDomainUpdate
+		if rs != nil {
+			entry.Change, entry.RestoredFrom, action = settingsver.ChangeRestore, rs.from, ActionDomainRestore
+			details["restored_from"] = rs.from
+			details["changed_keys"] = strings.Join(settingsver.Keys(settingsver.Diff(entry.Before, entry.After)), ",")
+		}
+		res, rerr := recordDomain(ctx, q, entry, details)
 		if rerr != nil {
 			return rerr
 		}
 		d.Version = res.Version.Number
 		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: who.Actor, Action: ActionDomainUpdate, Target: audit.Target{Type: "domain", ID: d.ID},
+			Time: now, Actor: who.Actor, Action: action, Target: audit.Target{Type: "domain", ID: d.ID},
 			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
 		})
 	})

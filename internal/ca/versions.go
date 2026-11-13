@@ -24,6 +24,16 @@ type ChangeOptions struct {
 	// settingsver.MaxReason characters, no control characters). It is kept
 	// with the version and never goes to the audit log.
 	Reason string
+	// restore is set only by RestoreDomain: the change is then a restore of a
+	// version of the domain, run through the ordinary writer.
+	restore *restoreOf
+}
+
+// restoreOf says that a change is the restore of a stored version.
+type restoreOf struct {
+	from int64  // the version that is copied
+	id   string // the domain ID (a deleted domain is created again under it)
+	dry  bool   // check everything, write nothing (DomainRestoreCheck)
 }
 
 // domainSnapshot is the versioned state of a domain: the settings, the CA by
