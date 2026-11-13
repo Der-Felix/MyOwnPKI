@@ -10,7 +10,7 @@ Everything is embedded in the binary via `embed.FS`. No Node.js in the build.
 internal/web/
 ├─ view/          shared view types: page metadata, appearance prefs (cookie), status, date formats
 ├─ components/    shared building blocks: status text, message bar, breadcrumb, page head, tabs,
-│                 key/value list, number row, form row, choice row, wizard steps, certificate table …
+│                 key/value list, number row, form row, choice row, wizard steps, certificate table, fold, chart …
 ├─ layout/        app.templ – the application shell (header, sidebar, variants A/B/C)
 ├─ pages/         one package per area: overview, certificates, authorities, admin, design …
 └─ fixture/       sample data for the dev-mode prototype only (replaced by the store in phase 1)
@@ -99,7 +99,13 @@ rejected as "too AI-looking", and the first gallery still read as such – so:
 
 - Web Components in TypeScript, bundled by esbuild **as a Go library** during `go generate`; output embedded.
 - Islands fetch JSON from the REST API (same session) or receive it via a `<script type="application/json">` data block.
-- Charts: Apache ECharts; the ECharts theme is generated from the CSS tokens so charts follow themes and dark mode.
+- **Charts in v0.3.8 are server-rendered SVG, no script** (PHASE3 §14, decision D1): `components.Chart` draws a
+  `view.Chart` (columns, stacked columns, bars, stacked bars) as one inline `<svg class="chart-svg">` with title, description,
+  a legend inside the SVG and a closed `<details>` with the same numbers as a table; `internal/web/charts` maps the
+  `internal/report` datasets to it. Series colors are `--chart-s1..s3` and the status tokens; the second and third series
+  also carry a hatch pattern. `components.Fold` is a section that opens and closes (`<details>` with the heading in its
+  `<summary>`; the state is not remembered).
+- Interactive charts (not built): Apache ECharts as a `<pki-chart>` island; the ECharts theme is generated from the CSS tokens so charts follow themes and dark mode.
   Status series always use status tokens.
 - Dashboard grid: gridstack.js; layout persisted per user.
 - Vendor third-party JS as pinned files in the repo (with license), served from the binary – no CDNs (CSP `script-src 'self'`).

@@ -14,7 +14,10 @@ alert is "the server is sealed", and a sealed server cannot decrypt anything. Fo
 channels live in the configuration file and their secrets in files next to it, not in the database.
 Without a channel nothing breaks; the alerts still open and show in the UI, only nobody is told.
 Since v0.3.4 the server can also check what a host really serves; that is the
-[TLS scan]({{ '/tls-scan/' | relative_url }}). This page is the condensed version of
+[TLS scan]({{ '/tls-scan/' | relative_url }}). Since v0.3.8 the *Reports* page charts what the alerts
+leave out (the expiry of the next 13 weeks, the alert history, the agent fleet) and the *Analysis* page
+points out oddities that no alert covers; both are on [Reports and analysis]({{ '/reports/' | relative_url }}).
+This page is the condensed version of
 [operations guide chapter 13]({{ '/reference/operations/' | relative_url }}#13-monitoring-and-notifications).
 
 * TOC
@@ -284,6 +287,8 @@ the last 7 days. Each row says what is wrong, what to do, and links to the certi
 Open alerts also show as the figure *Open alerts* on the dashboard. The page and `GET /api/v1/alerts`
 need a tenant-wide role of *viewer* or higher; a role limited to one CA gets 403, because alerts name
 certificates, CAs and hosts of the whole tenant. Only a tenant admin can send the test message.
+The server keeps resolved alerts for 30 days; the *Reports* page shows how many alerts opened in each of
+the last five weeks ([Alerts]({{ '/reports/' | relative_url }}#alerts)).
 
 ## Two things to know before you rely on it
 

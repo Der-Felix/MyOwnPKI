@@ -1,6 +1,6 @@
 ---
 title: "A tour of the web UI"
-description: "A walk through the screens of the MyOwnPKI web UI: sign-in, unseal, dashboard, authorities, certificates, the issue wizard, the ACME pages, users, the audit log, legacy import and offline signing, with the role each one needs."
+description: "A walk through the screens of the MyOwnPKI web UI: sign-in, unseal, dashboard, reports, analysis, authorities, certificates, the issue wizard, the ACME pages, users, the audit log, legacy import and offline signing, with the role each one needs."
 permalink: /tour/
 sources:
   - docs/screenshots/
@@ -11,6 +11,8 @@ sources:
   - internal/web/app_admin.go
   - internal/web/app_acme.go
   - internal/web/app_pki.go
+  - internal/web/app_reports.go
+  - internal/web/app_analysis.go
   - internal/web/app_caactions.go
   - internal/web/app_issue.go
   - internal/acme/admin.go
@@ -19,8 +21,10 @@ sources:
 This page shows what each screen is for, what you can do there and which role it needs, so that you
 know where to look before you have an instance in front of you. The pictures come from a demo instance
 (`myownpki init --demo`) with sample certificates under `homelab.example`, taken in an earlier release.
-Your menu can have more entries than these pictures, for example *Agents*, *Alerts* and *Endpoints*; an
-entry is hidden when your role cannot use it. There is a light and a dark theme.
+The pictures of *Reports* and *Analysis* are from v0.3.8 and come from a demo instance with extra sample
+data (agents, alerts, endpoints). Your menu can have more entries than these pictures, for example
+*Agents*, *Alerts* and *Endpoints*; an entry is hidden when your role cannot use it. There is a light and a
+dark theme.
 
 The roles are the ones of the [glossary]({{ '/glossary/' | relative_url }}#role): *viewer* reads,
 *operator* also issues, revokes and exports keys, *admin* also manages CAs, ACME approvals, agents and
@@ -66,9 +70,39 @@ The first page after sign-in. The figures count certificates (all, valid, expiri
 expired, revoked) and CAs. *Needs attention* lists what waits for you: ACME accounts and new names that
 wait for approval, a CA that waits for its signature from the offline root, a CRL that is missing or
 about to expire. Below it are the certificates that expire in the next 30 days. When monitoring is
-configured, open alerts show here as well.
+configured, open alerts show here as well. For a role that may read the reports, two charts follow the
+table (*Expiry* and *Authorities*), each in a fold that can be closed.
 
-**Role:** viewer or higher. **More:** [Monitoring]({{ '/monitoring/' | relative_url }}).
+**Role:** viewer or higher; the charts need a tenant-wide role. **More:**
+[Monitoring]({{ '/monitoring/' | relative_url }}) and
+[Reports and analysis]({{ '/reports/' | relative_url }}#the-dashboard-charts).
+
+## Reports
+
+![The Reports page: the expiry timeline and the certificates per CA and status, with the issuances, alerts and agents sections closed]({{ '/assets/screens/tour-reports.png' | relative_url }})
+
+Five sections, each a fold with a chart, a sentence that says what is counted and a table of the exact
+numbers: *Expiry* (certificates that end in each of the next 13 weeks, colored by the warning and critical
+windows of the monitor), *Issuances* (the last 12 weeks by source: ACME, agent, UI and API), *Authorities*
+(certificates per CA by status), *Alerts* (opened per week, the last five weeks) and *Agents* (state,
+version and deployments, only with the agent listener on). The page says when it was computed; the
+numbers are refreshed at most once a minute. The charts are plain SVG: no script runs on the page.
+
+**Role:** viewer or higher with a tenant-wide role; a role limited to one CA gets a 403 page and no menu
+entry. **More:** [Reports and analysis]({{ '/reports/' | relative_url }}).
+
+## Analysis
+
+![The Analysis page: a summary line, the findings with what was seen, why it matters and what to do, and the state of each of the ten rules]({{ '/assets/screens/tour-analysis.png' | relative_url }})
+
+What ten fixed rules found in the data the server holds: an orphaned certificate, duplicates, a renewal
+loop, an expiry wave, a weak key or signature, a CA that ends before its certificates, an outdated agent,
+an unused ACME account or domain. Each finding says what was seen, why it matters and what to do, and its
+subject links to the page of the certificate, CA, agent, domain or account. Under the findings the *Rules*
+table shows the state of every rule. A rule that lacks the data to judge says *unknown* with the reason,
+which is not a problem. The analysis is advice only: it raises no alert and nothing can be dismissed.
+
+**Role:** the same as *Reports*. **More:** [Reports and analysis]({{ '/reports/' | relative_url }}#the-analysis-page).
 
 ## Certificate authorities
 
