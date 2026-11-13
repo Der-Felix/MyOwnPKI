@@ -201,7 +201,8 @@ func eachCertificate(ctx context.Context, e Engine, who keys.Who, f ca.Certifica
 }
 
 func convertCA(info *ca.CAInfo) CA {
-	out := CA{ID: info.ID, Name: info.Name, Issuing: info.Status == ca.StatusActive && info.KeyMode != ca.KeyModeOffline}
+	out := CA{ID: info.ID, Name: info.Name, Issuing: info.Status == ca.StatusActive && info.KeyMode != ca.KeyModeOffline,
+		MaxValidityDays: int(info.MaxValidityDays)}
 	for _, g := range info.Generations {
 		end, _ := time.Parse(time.RFC3339, g.NotAfter) // zero if the column is empty or corrupt
 		out.Generations = append(out.Generations, Generation{

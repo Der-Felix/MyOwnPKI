@@ -78,8 +78,11 @@ type CA struct {
 	ID, Name string
 	// Issuing: active, with a key that is not offline, so it signs
 	// end-entity certificates.
-	Issuing     bool
-	Generations []Generation
+	Issuing bool
+	// MaxValidityDays caps the validity of the leaves the CA issues; the
+	// engine shortens a longer default to it. 0 = not known, no cap assumed.
+	MaxValidityDays int
+	Generations     []Generation
 }
 
 // Generation is one key and certificate of a CA.

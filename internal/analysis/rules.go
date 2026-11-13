@@ -79,6 +79,13 @@ var ruleIDs = []string{
 
 func certHref(c *Certificate) string { return "/certificates/" + c.ID }
 
+// afterSnapshot reports whether a certificate was created after the snapshot
+// time. Load reads the certificates, their traits and their origins in
+// separate queries, so a certificate issued in between is in the walk but not
+// in the other maps: that is a race, not a certificate that cannot be read,
+// and it belongs to the next snapshot.
+func afterSnapshot(c *Certificate, s Snapshot) bool { return c.CreatedAt.After(s.Now) }
+
 // nameSet is the normalized set of a certificate's names – DNS names and IPs,
 // or the common name when there are none. Two certificates for the same set
 // replace each other (the same notion as internal/monitor).
@@ -250,7 +257,7 @@ func OrphanedCertificate(s Snapshot) Result {
 				Subject: label(c), Href: certHref(c),
 				Seen: fmt.Sprintf("No scanned endpoint served this certificate in the last 7 days and no agent deployment reports it as deployed; %s that cover its names served another certificate.",
 					plural(witnesses, "scanned endpoint", "scanned endpoints")),
-				Why:            "It may belong to a host that is gone or that no longer uses it.",
+				Why:            "It may belong to a host that is gone or that no longer uses it. A host that serves two certificates for one name, or several servers behind one address, shows only one of them to the scan.",
 				Recommendation: "Check the host, then revoke the certificate if it is not needed (second factor).",
 			})
 		}
@@ -272,8 +279,8 @@ func DuplicateCertificates(s Snapshot) Result {
 	groups := map[string][]*Certificate{}
 	for i := range s.Certificates {
 		c := &s.Certificates[i]
-		if c.Source != "issued" {
-			continue // imported and external certificates have no issuer of ours
+		if c.Source != "issued" || afterSnapshot(c, s) {
+			continue // imported and external certificates have no issuer of ours; a newer one is for the next run
 		}
 		lifetime, left := c.NotAfter.Sub(c.NotBefore), c.NotAfter.Sub(s.Now)
 		if lifetime <= 0 || left*3 <= lifetime {
@@ -398,7 +405,7 @@ func RenewalLoop(s Snapshot) Result {
 func ExpiryWave(s Snapshot) Result {
 	total := len(s.Certificates)
 	if total < waveMinTenant {
-		return unknown(fmt.Sprintf("the tenant has %s; a wave needs at least %d.", plural(total, "valid certificate", "valid certificates"), waveMinTenant))
+		return unknown(fmt.Sprintf("too few certificates to judge: the tenant has %s and a wave needs at least %d.", plural(total, "valid certificate", "valid certificates"), waveMinTenant))
 	}
 	weeks := map[time.Time]int{}
 	for i := range s.Certificates {
@@ -432,6 +439,8 @@ func WeakKey(s Snapshot) Result {
 	for i := range s.Certificates {
 		c := &s.Certificates[i]
 		switch {
+		case c.Traits == nil && afterSnapshot(c, s):
+			// Created after the traits were read: out of scope, not unreadable.
 		case c.Traits == nil:
 			unassessed++
 		case c.Traits.KeyAlgorithm == ca.TraitRSA && c.Traits.KeyBits <= 0:
@@ -466,6 +475,8 @@ func WeakSignature(s Snapshot) Result {
 	for i := range s.Certificates {
 		c := &s.Certificates[i]
 		switch {
+		case c.Traits == nil && afterSnapshot(c, s):
+			// Created after the traits were read: out of scope, not unreadable.
 		case c.Traits == nil || c.Traits.Signature == x509.UnknownSignatureAlgorithm:
 			unassessed++
 		case weakSignature(c.Traits.Signature):
@@ -504,8 +515,8 @@ func WeakSignature(s Snapshot) Result {
 // default validity of the certificates it issues. The engine shortens a
 // default validity to the end of the CA and refuses a longer explicit one, so
 // every certificate issued from now on ends with the CA. The default is the
-// longest validity_days of the domains of the CA, 90 days without a domain.
-// The monitor's ca_expiry alert stays the alarm.
+// ACME default: the longest validity_days of the domains of the CA, 90 days
+// without a domain, and never more than the CA's maximum validity. The monitor's ca_expiry alert stays the alarm.
 func CACliff(s Snapshot) Result {
 	var findings []Finding
 	unassessed := 0
@@ -536,6 +547,11 @@ func CACliff(s Snapshot) Result {
 		if !hasDomain {
 			validity = ca.DefaultACMEValidityDays
 		}
+		// The engine caps a leaf at the maximum of the CA (which can be
+		// lowered after a domain was made), so the default cannot be longer.
+		if authority.MaxValidityDays > 0 {
+			validity = min(validity, authority.MaxValidityDays)
+		}
 		left := g.NotAfter.Sub(s.Now)
 		if left >= time.Duration(validity)*day {
 			continue
@@ -560,7 +576,7 @@ func CACliff(s Snapshot) Result {
 			if left < cliffCritical {
 				f.Severity = SeverityCritical
 			}
-			f.Seen = fmt.Sprintf("This CA ends on %s, sooner than the default validity of %d days that new certificates get.", end, validity)
+			f.Seen = fmt.Sprintf("This CA ends on %s, sooner than the ACME default validity of %d days that new certificates get.", end, validity)
 			if ending > 0 {
 				f.Seen += fmt.Sprintf(" %s already end that day.", plural(ending, "valid certificate", "valid certificates"))
 			}
@@ -568,7 +584,11 @@ func CACliff(s Snapshot) Result {
 		}
 		findings = append(findings, f)
 	}
-	return finish(findings, unassessed, fmt.Sprintf("%s has no signed generation yet.", plural(unassessed, "issuing CA", "issuing CAs")))
+	verb := "have"
+	if unassessed == 1 {
+		verb = "has"
+	}
+	return finish(findings, unassessed, fmt.Sprintf("%s %s no signed generation yet.", plural(unassessed, "issuing CA", "issuing CAs"), verb))
 }
 
 // --- outdated_agent -----------------------------------------------------------
@@ -626,7 +646,11 @@ func OutdatedAgent(s Snapshot) Result {
 			Recommendation: "Update it from Agents, Update, or with the Salt formula.",
 		})
 	}
-	return finish(findings, unassessed, fmt.Sprintf("%s has a version that is not a release number.", plural(unassessed, "agent", "agents")))
+	reason := fmt.Sprintf("%s have a version that is not a release number.", plural(unassessed, "agent", "agents"))
+	if unassessed == 1 {
+		reason = "1 agent has a version that is not a release number."
+	}
+	return finish(findings, unassessed, reason)
 }
 
 // --- unused_acme_account ------------------------------------------------------
