@@ -45,6 +45,9 @@ type GenerationInfo struct {
 	// Warnings are found in the certificate itself, e.g. AIA/CDP URLs that
 	// differ from what MyOwnPKI serves (an offline-signed certificate).
 	Warnings []string
+	// SignatureAlgorithm is how the CA certificate is signed (the issuer's
+	// algorithm); UnknownSignatureAlgorithm for a pending generation.
+	SignatureAlgorithm x509.SignatureAlgorithm
 	// Revoked is "<reason> on <date>" for a revoked generation.
 	Revoked string
 	// CRL is the newest CRL; filled by AttachCRLStatus (it needs the time).
@@ -111,6 +114,11 @@ func ListCAs(ctx context.Context, q pkidb.DBTX) ([]CAInfo, error) {
 			if g.CertDer != nil {
 				sum := sha1.Sum(g.CertDer) // #nosec G401 -- Windows dialog display only; never used for verification
 				gi.FingerprintSHA1 = strings.ToUpper(hex.EncodeToString(sum[:]))
+				// A certificate that does not parse keeps the unknown algorithm; the
+				// analysis then says "unknown" instead of guessing.
+				if parsed, perr := x509.ParseCertificate(g.CertDer); perr == nil {
+					gi.SignatureAlgorithm = parsed.SignatureAlgorithm
+				}
 			}
 			if g.IssuerCaID.Valid {
 				gi.Issuer = names[g.IssuerCaID.String] + "/" + itoa(g.IssuerGeneration.Int64)
