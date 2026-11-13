@@ -515,6 +515,9 @@ func (p *prototype) authorityDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if ca.Kind == "root" {
 		d.Properties = slices.Insert(d.Properties, 8, view.KV{Key: "Root SHA-256 for automation (exact 64 hex)", Value: strings.ToLower(ca.Fingerprint()), Mono: true})
+		row, message := portal(ca.Name, ca.PublicBaseURL, ca.Fingerprint(), true)
+		d.Properties = append(d.Properties, view.KV{Key: "Trust portal", Value: row})
+		d.UserMessage = message
 	}
 	if len(ca.PermittedDNS) > 0 {
 		d.Constraints = append(d.Constraints, view.KV{Key: "Permitted DNS names", Value: strings.Join(ca.PermittedDNS, ", ")})

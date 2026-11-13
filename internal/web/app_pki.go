@@ -604,6 +604,9 @@ func (a *app) authorityDetail(c *rc) {
 		d.Properties = slices.Insert(d.Properties, 6, fingerprints...)
 	}
 	if info.Kind == ca.KindRoot {
+		row, message := a.portalFor(ctx, info.Name, info.BaseURL, g.Fingerprint)
+		d.Properties = append(d.Properties, view.KV{Key: "Trust portal", Value: row})
+		d.UserMessage = message
 		d.IssuedEmpty = "A root CA issues no end-entity certificates – it signs intermediate CAs and CRLs."
 		if subs := subCAs(info.Name, a.allCAs(c)); len(subs) > 0 {
 			d.IssuedEmpty += " Signed here: " + strings.Join(subs, ", ") + "."
