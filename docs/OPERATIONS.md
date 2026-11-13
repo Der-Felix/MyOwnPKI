@@ -1782,8 +1782,12 @@ check; without it the agent uses the first name that is not a wildcard, and a de
 that has a `check` needs it.
 
 **The credentials file.** A file of its own, never `agent.yaml`, a command line or an environment variable
-(`agent run` removes every variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or `RFC2136_`, logs
-their names and ignores them). YAML with strict keys; an unknown key, an empty value, a repeated key, an
+(`agent run` removes every variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or `RFC2136_`, and
+also `SSL_CERT_FILE` and `SSL_CERT_DIR`, logs their names and ignores them). The last two choose the
+system roots on Linux, which the Cloudflare calls trust, so they would choose which CA may receive the API
+token; the agent's own connections use the `ca_bundle` of `agent.yaml` and never read them. **Hooks inherit
+the cleaned environment**: they see none of these variables, and a hook that talks TLS uses the system's
+default trust. YAML with strict keys; an unknown key, an empty value, a repeated key, an
 alias or a second document is an error:
 
 | Provider | Keys |
@@ -1825,7 +1829,8 @@ A certificate for `*.homelab.lan` and `homelab.lan` needs this one `grant`; ever
 **This `update-policy` is not verified:** the BIND test of the CI job uses `allow-update`. Check it on a test
 zone. TSIG signatures carry the time (the agent sends a tolerance of 300 seconds), so keep both clocks on NTP.
 A CNAME from `_acme-challenge.<name>` to another zone is followed and the update goes to the target's zone,
-so the key must be valid there; leave `zone` unset in that case.
+so the key must be valid there; leave `zone` unset in that case, because with `zone` set a target outside
+that zone is refused before any message is sent (`rfc2136: zone mismatch: …`).
 
 **Cloudflare.** The agent looks the zone up by name, creates a TXT record and deletes it by its ID. The
 token therefore needs *Zone / Zone / Read* and *Zone / DNS / Edit*, scoped to the **one zone**; these are the
@@ -1841,12 +1846,28 @@ server to look. `authoritative` (default): the TXT record is on every authoritat
 servers. `wait`: no query, only `propagation_wait`. `propagation_wait` is added once before the first check in
 every mode. The ACME server's own read goes through `acme.resolver`, which must see the zone the agent writes.
 
-**Cleanup.** The agent removes its record on success, failure, cancellation and timeout (the removal gets 30
-seconds and is not cancelled with the issuance; while the agent is stopping, all removals of one issuance share 12 seconds) and only this run's value. A cleanup failure is logged as `dns-01 cleanup
-failed: a TXT record may be left behind; remove it by hand if it stays` and the deployment's *Last error* says `dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; remove it by hand if it stays`; the issuance keeps its result.
+**Cleanup.** The agent removes its record on success, failure, cancellation and timeout, and only this run's
+value. Each removal gets 30 seconds and is not cancelled with the issuance. Once the issuance is cancelled
+(the agent is stopping), all removals of one issuance share **12 seconds**, below the 30 seconds of the
+unit's `TimeoutStopSec`, so that a hanging DNS server and two records no longer end in `SIGKILL` during the
+second removal; a record that has no time left is not sent and counts as a failed removal. A cleanup failure
+is logged as `dns-01 cleanup failed: a TXT record may be left behind; remove it by hand if it stays` (with
+the reason), and it is reported in the deployment's *Last error*: `dns-01 cleanup failed: a TXT record may
+remain at _acme-challenge.<name>; remove it by hand if it stays (the agent log has the details)`, with up to
+three names and then `and N more`. That text carries no provider message and no secret. The issuance keeps
+its result: a deployed deployment stays `deployed`, and when the issuance failed too, the notice stands in
+front of the error. The next pass without a cleanup problem clears it. With Cloudflare the notice appears
+only when the create request may have worked (a network error, an answer that is not the API's JSON, a 5xx or
+a 2xx), because only then a record can exist that the agent cannot delete by ID; a create that was refused
+with a 4xx wrote nothing and stays quiet.
 `SIGKILL` or a power cut leaves a record, and the Cloudflare record IDs live in memory only, so remove such a
 record by hand. It does not harm validation. The agent refuses a challenge for a name that is not one of the
 deployment's names. `log_level: debug` shows lego's lines on the waiting and the checks.
+
+**Renewal checks during an issuance.** An issuance holds the agent's pass lock for as long as it runs, and a
+dns-01 one can wait up to `propagation_timeout` (15 minutes at most). The optional ARI lookup of a pass therefore does not queue
+behind it: while an issuance runs, the agent skips the lookup (debug log: `skipping the ARI check: an issuance
+is running`) and asks again at the next pass.
 
 **When it fails.** The error is the deployment's *Last error* on the agent page and in `myownpki-agent
 status`. Frequent texts: `credentials file …: wrong mode: is 0640, want 0600 or 0400` (the other states

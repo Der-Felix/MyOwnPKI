@@ -77,7 +77,11 @@ The secret (a TSIG key or an API token) lives in a file of its own, **never** in
 shared and often kept in version control. It is also never put on a command line
 (it would show in the process list and the shell history) or in an environment variable. The agent removes
 every variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or `RFC2136_` when it starts, logs their
-**names** and ignores them.
+**names** and ignores them. It also removes `SSL_CERT_FILE` and `SSL_CERT_DIR`: on Linux they choose which
+certificate authorities the system trusts, and the Cloudflare calls use that trust, so they would choose who
+may receive the API token. The agent's own connections (to the PKI server and to the ACME server) trust the
+`ca_bundle` of `agent.yaml` and never read them. **Hooks inherit the cleaned environment**: a test or reload
+hook sees none of these variables, and a hook that talks TLS uses the system's default trust.
 
 A file per provider entry, for example `/etc/myownpki-agent/dns/homelab.yaml`. It is YAML with a fixed set of
 keys; an unknown key, an empty value, a repeated key or a second YAML document is an error.
@@ -201,7 +205,8 @@ What the agent needs to know, in the `dns_providers` entry of `agent.yaml`:
 
 **CNAME delegation works.** If `_acme-challenge.homelab.lan` is a CNAME to a name in another zone, the agent
 follows it and sends the update to the zone of the target, so the key must be valid **there**. Leave `zone`
-unset in that case.
+unset in that case: with `zone` set, a target outside that zone is refused before any message is sent
+(`rfc2136: zone mismatch: …`).
 
 ### Cloudflare
 
@@ -284,6 +289,10 @@ waiting a little too long costs nothing.
 
 `propagation_wait` is added once before the first check in **every** mode, which helps with a secondary that
 needs a moment to receive a zone transfer.
+
+While an issuance runs, the agent does not queue the optional ARI check of another deployment behind it (a
+dns-01 issuance can wait up to `propagation_timeout`): it skips that check for this pass and asks again at the
+next one, so an early-renewal hint of the ACME server may arrive one pass later.
 
 ## Firewall
 
@@ -424,15 +433,27 @@ again.
 | `_acme-challenge.… has no TXT record`, or `no TXT record of … holds the digest of the key authorization` | The agent believed the record was visible, but **the server's resolver** does not see it | `acme.resolver` must read the zone the agent writes; with split DNS point it at the internal server ([Split DNS]({{ '/guides/split-dns/' | relative_url }})). A resolver with a cached "no record" needs `propagation_wait` |
 
 **A leftover record.** The agent removes its TXT record on success, on failure, when the issuance is cancelled
-and on a timeout (the removal itself gets 30 seconds; while the agent is stopping, all removals of one
-issuance share 12 seconds, so that systemd does not have to kill it). If the removal fails, or the agent is
-killed (`SIGKILL`, a power cut), a record can stay. It does no harm to validation, but it is untidy. A failed
-removal does not fail the issuance: the certificate is deployed, and the deployment's *Last error* says
+and on a timeout. Each removal gets 30 seconds while the issuance runs. While the agent is stopping, **all
+removals of one issuance share 12 seconds** (below the 30 seconds that systemd allows for stopping), so that
+systemd does not have to kill the agent in the middle of the second record; a record that has no time left is
+not sent and counts as a failed removal. If a removal fails, or the agent is killed (`SIGKILL`, a power cut), a
+record can stay. It does no harm to validation, but it is untidy.
+
+A failed removal does not fail the issuance. The deployment stays *deployed*, because the certificate is good,
+and its *Last error* (on the agent's page and in `myownpki-agent status`) names the records that may remain:
 `dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; remove it by hand if it stays (the
-agent log has the details)`. The agent log has the line `dns-01 cleanup failed: a TXT record may be left
-behind; remove it by hand if it stays`, with the provider, the name and the reason. Remove the record in your
-DNS. A killed agent writes nothing, and for Cloudflare the agent knows record IDs only in memory, so a leftover
-record there is always removed by hand.
+agent log has the details)`. It lists up to three names and then says `and N more`. The text has no provider
+message and no secret; the reason is in the agent log, with the line `dns-01 cleanup failed: a TXT record may be
+left behind; remove it by hand if it stays`, the provider, the name and the reason. If the issuance itself
+failed too, the notice comes first, in front of the error. The next pass without a cleanup problem clears the
+text. Remove the record in your DNS.
+
+With **Cloudflare** the agent tells you only when the request that created the record may have worked: the
+connection broke, the answer was not the API's JSON, or the status was 5xx or 2xx. Then no record ID is known
+and the agent cannot delete by ID, so it names `_acme-challenge.<name>`. A create that Cloudflare refused with a
+4xx (a token without permission, for example) wrote nothing and gives no notice. A killed agent writes
+nothing, and for Cloudflare the agent knows record IDs only in memory, so a leftover record there is always
+removed by hand.
 
 ## What is not supported
 

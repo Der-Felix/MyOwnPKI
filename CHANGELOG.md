@@ -44,8 +44,14 @@ already only reads the record. The live test by the maintainer is pending.
 - **Propagation check and cleanup:** `authoritative` waits until every authoritative name server of the zone
   has the record, `resolver` until the configured resolver has it, `wait` only sleeps. The agent uses its own
   resolver (`resolver`, else `/etc/resolv.conf`) and never falls back to public resolvers. The record is
-  removed on success, failure, cancellation and timeout; a failed removal is logged and shown in the deployment's status without failing the issuance. A challenge for a name
-  that is not one of the deployment's names is refused.
+  removed on success, failure, cancellation and timeout. Each removal gets 30 seconds; while the agent is
+  stopping, all removals of one issuance share 12 seconds, so that systemd does not kill it in the middle of
+  the second record. A failed removal is logged and shown in the deployment's *Last error*
+  (`dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; …`, without provider text or
+  secrets); it does not fail the issuance, the deployment stays `deployed`, and the next pass without a
+  cleanup problem clears the text. With Cloudflare the notice appears when the create request may have
+  worked (a network error, an answer that is not the API's JSON, a 5xx or a 2xx), not for a request the API
+  refused with a 4xx. A challenge for a name that is not one of the deployment's names is refused.
 - **`deployment add` flags:** `--challenge dns-01`, `--dns-provider`, `--dns-type`, `--dns-credentials`,
   `--dns-nameserver`, `--dns-zone`, `--dns-resolver` and `--check-name`. `--dns-type` defines a new provider
   entry; the same flags again change nothing and a different definition of an existing name is refused ("edit
@@ -76,8 +82,12 @@ already only reads the record. The live test by the maintainer is pending.
   carries neither lego nor `miekg/dns`**, checked by a test of `go list -deps` and a depguard rule.
   `THIRD_PARTY.md` has the details.
 - `agent run` removes every environment variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or
-  `RFC2136_` and logs their names, so nothing outside `agent.yaml` and the credentials file configures a DNS
-  provider or turns on lego's debug output.
+  `RFC2136_`, and `SSL_CERT_FILE` and `SSL_CERT_DIR`, and logs their names, so nothing outside `agent.yaml`
+  and the credentials file configures a DNS provider, turns on lego's debug output or chooses the system
+  roots that the Cloudflare calls trust. The agent's own connections use the `ca_bundle` of `agent.yaml`. The
+  hooks inherit the cleaned environment: they see none of these variables.
+- The optional ARI lookup of a renewal pass is skipped while an issuance runs (a dns-01 issuance can wait up
+  to 15 minutes) and asked again at the next pass, so it no longer stalls the pass.
 - The local TLS check of a deployment uses `check_name`, else the first name that is not a wildcard, as its
   server name.
 
@@ -105,6 +115,13 @@ already only reads the record. The live test by the maintainer is pending.
   grants the host name only.
 - A host that holds the key of a wildcard certificate can present itself as any name below it: give a `*.`
   pattern only to the agents that need it.
+- An independent security review found no blocker; its six findings were fixed before the release. The
+  fixes cover the redaction of the build error of a DNS provider (it ran after the secrets were wiped), a
+  race between the wipe of a TSIG secret and a cleanup that was still running, the report of a failed
+  cleanup in the deployment's status, a Cloudflare record that may remain although the agent holds no ID,
+  one shared time budget for the cleanups while the agent stops, `SSL_CERT_FILE` and `SSL_CERT_DIR` in the
+  agent's environment, and an ARI lookup that queued behind a running issuance; a test now pins that a CNAME
+  target outside a configured `zone` is refused.
 
 ### Upgrade notes
 
