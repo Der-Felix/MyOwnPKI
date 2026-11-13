@@ -417,7 +417,7 @@ func (a *app) reviewPlan(c *rc, st certificates.IssueState, cas []ca.CAInfo) *ce
 	}
 	plan, err := a.d.Engine.Plan(c.r.Context(), req)
 	if err != nil {
-		a.log.ErrorContext(c.r.Context(), "issue preview", slog.Any("error", err))
+		a.log.WarnContext(c.r.Context(), "issue preview", slog.Any("error", err))
 		return nil
 	}
 	return planView(plan)
