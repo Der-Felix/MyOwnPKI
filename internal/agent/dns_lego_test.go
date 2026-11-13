@@ -704,3 +704,28 @@ func TestScrubProviderEnvironmentRemovesTheTrustStoreOverrides(t *testing.T) {
 		}
 	}
 }
+
+// A CNAME at _acme-challenge may send the record to a zone the operator never
+// configured; with zone set, the agent refuses that update and says why.
+func TestRFC2136ConfiguredZoneRefusesACNAMETargetOutsideIt(t *testing.T) {
+	h := newDNSHarness(t)
+	h.store.AddZone("acme.example.")
+	h.store.SetCNAME(testChallenge, "_acme-challenge.homelab.acme.example.")
+	h.cfg.Zone = "homelab.lan"
+	g := h.guard(t.Context(), h.provider(tsigCreds(testTSIGSecret)), Deployment{Name: "web", Names: []string{"homelab.lan"}})
+	err := h.round(t.Context(), g, []acme.Authorization{h.authz("homelab.lan", false)}, func(acme.Authorization) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "zone mismatch") || !strings.Contains(err.Error(), "homelab.acme.example") || strings.Contains(err.Error(), testTSIGSecret) {
+		t.Fatalf("round: %v", err)
+	}
+	if n := h.srv.Updates(); n != 0 {
+		t.Fatalf("%d updates for a name outside the configured zone", n)
+	}
+	h.wantNoChallengeRecords()
+	// A target inside the configured zone is fine.
+	h.cfg.Zone = "acme.example"
+	g = h.guard(t.Context(), h.provider(tsigCreds(testTSIGSecret)), Deployment{Name: "web", Names: []string{"homelab.lan"}})
+	if err := h.round(t.Context(), g, []acme.Authorization{h.authz("homelab.lan", false)}, func(acme.Authorization) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.wantNoChallengeRecords()
+}
