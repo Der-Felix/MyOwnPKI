@@ -2,8 +2,13 @@ package dnsserver
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"math/big"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -69,24 +74,9 @@ func Start(tb testing.TB, store *Store, keys ...Key) *Server {
 		s.keys[canon(k.Name)] = &k
 		secrets[canon(k.Name)] = k.Secret
 	}
-	var lc net.ListenConfig
-	var (
-		l   net.Listener
-		pc  net.PacketConn
-		err error
-	)
-	// The same number for UDP and TCP: lego and the agent use host:port for both.
-	for range 20 {
-		if l, err = lc.Listen(context.Background(), "tcp", "127.0.0.1:0"); err != nil {
-			tb.Fatalf("dnsserver: %v", err)
-		}
-		if pc, err = lc.ListenPacket(context.Background(), "udp", l.Addr().String()); err == nil {
-			break
-		}
-		_ = l.Close()
-	}
+	l, pc, err := listenBoth(realListeners(), listenAttempts)
 	if err != nil {
-		tb.Fatalf("dnsserver: no port free for UDP and TCP: %v", err)
+		tb.Fatalf("dnsserver: %v", err)
 	}
 	s.addr = l.Addr().String()
 	handler := dns.HandlerFunc(s.serve)
@@ -108,6 +98,59 @@ func Start(tb testing.TB, store *Store, keys ...Key) *Server {
 		_ = udp.Shutdown()
 	})
 	return s
+}
+
+// listenAttempts bounds the search for a port that is free for UDP and TCP.
+const listenAttempts = 200
+
+// listeners are the primitives listenBoth uses; tests replace them.
+type listeners struct {
+	tcp  func(addr string) (net.Listener, error)
+	udp  func(addr string) (net.PacketConn, error)
+	port func() int // a random candidate port
+}
+
+func realListeners() listeners {
+	var lc net.ListenConfig
+	return listeners{
+		tcp: func(addr string) (net.Listener, error) {
+			return lc.Listen(context.Background(), "tcp", addr)
+		},
+		udp: func(addr string) (net.PacketConn, error) {
+			return lc.ListenPacket(context.Background(), "udp", addr)
+		},
+		// Below the dynamic range that starts at 49152: Windows hands out TCP
+		// ports there almost sequentially and reserves whole blocks of them for
+		// UDP, so a search that stays in that range can fail every time.
+		port: randomPort,
+	}
+}
+
+// listenBoth opens one TCP listener and one UDP socket on the same number of
+// 127.0.0.1 (lego and the agent use host:port for both). The first attempt asks
+// the OS for a TCP port; the others try random ports, because the OS choice can
+// be unusable for UDP. Whatever a failed attempt opened is closed again.
+func listenBoth(f listeners, attempts int) (net.Listener, net.PacketConn, error) {
+	var last, prev error
+	for i := range attempts {
+		addr := "127.0.0.1:0"
+		if i > 0 {
+			addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(f.port()))
+		}
+		l, err := f.tcp(addr)
+		if err != nil {
+			last, prev = fmt.Errorf("tcp %s: %w", addr, err), last
+			continue
+		}
+		pc, err := f.udp(l.Addr().String())
+		if err != nil {
+			_ = l.Close()
+			last, prev = fmt.Errorf("udp %s: %w", l.Addr(), err), last
+			continue
+		}
+		return l, pc, nil
+	}
+	return nil, nil, fmt.Errorf("no port free for UDP and TCP after %d attempts: %w", attempts, errors.Join(prev, last))
 }
 
 // Addr is host:port of the server (UDP and TCP).
@@ -373,4 +416,14 @@ func joinTXT(parts []string) string {
 		out += p
 	}
 	return out
+}
+
+// randomPort picks a number in [20000, 49152). crypto/rand keeps the project's
+// depguard rule simple; the value is not a secret.
+func randomPort() int {
+	n, err := rand.Int(rand.Reader, big.NewInt(49152-20000))
+	if err != nil {
+		return 20000
+	}
+	return 20000 + int(n.Int64())
 }
