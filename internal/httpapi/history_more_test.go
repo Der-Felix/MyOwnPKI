@@ -198,22 +198,26 @@ func TestDomainRestorePermissions(t *testing.T) {
 		t.Errorf("%d denied restores in the audit log, want 4 (a 404 says nothing about what exists)", denied)
 	}
 
-	// An admin of the domain's own CA may restore it, with the second factor.
+	// An admin of the domain's own CA may change the domain, but not restore an old
+	// version: a restore is made from the history, which needs the tenant-wide audit right.
 	clients["caadmin"].stepUp(t, "caadmin")
-	if r := h.call(t, clients["caadmin"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{}, ifMatch(2)...); r.Code != http.StatusOK || r.body["wildcards"] != false {
-		t.Fatalf("CA admin: %d %s", r.Code, r.Body.String())
+	if r := h.call(t, clients["caadmin"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{}, ifMatch(2)...); r.Code != http.StatusForbidden || r.problemType() != "forbidden" {
+		t.Fatalf("CA admin restores: %d %s", r.Code, r.Body.String())
 	}
-	// ... but not create a deleted domain again: that is a tenant-wide right, as creating one is.
+	if n := len(h.versionRows(t, settingsver.KindDomain, id)); n != 2 {
+		t.Fatalf("the refused CA admin wrote a version: %d", n)
+	}
+	// A deleted domain is created again by a tenant admin only.
 	h.admin.stepUp(t, "demo")
-	if r := h.call(t, h.admin, "deleteDomain", http.MethodDelete, path, nil, ifMatch(3)...); r.Code != http.StatusNoContent {
+	if r := h.call(t, h.admin, "deleteDomain", http.MethodDelete, path, nil, ifMatch(2)...); r.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", r.Code, r.Body.String())
 	}
 	clients["caadmin"].stepUp(t, "caadmin")
-	if r := h.call(t, clients["caadmin"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{}, ifMatch(4)...); r.Code != http.StatusForbidden || r.problemType() != "forbidden" {
+	if r := h.call(t, clients["caadmin"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{}, ifMatch(3)...); r.Code != http.StatusForbidden || r.problemType() != "forbidden" {
 		t.Errorf("CA admin recreates: %d %s", r.Code, r.Body.String())
 	}
 	clients["admin2"].stepUp(t, "admin2")
-	if r := h.call(t, clients["admin2"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{"reason": "back"}, ifMatch(4)...); r.Code != http.StatusOK || r.body["id"] != id {
+	if r := h.call(t, clients["admin2"], "restoreDomainVersion", http.MethodPost, restore, map[string]any{"reason": "back"}, ifMatch(3)...); r.Code != http.StatusOK || r.body["id"] != id {
 		t.Errorf("tenant admin recreates: %d %s", r.Code, r.Body.String())
 	}
 }
@@ -462,7 +466,7 @@ func TestHistoryHoldsNoSecretsAndHostileTextStaysData(t *testing.T) {
 	h := newHistoryEnv(t)
 	secret, _ := h.token(t)
 	id := h.newDomain(t, "homelab.lan", nil)
-	hostile := "<script>alert(1)</script> \"><img src=x onerror=alert(1)> " + string(rune(0x202E)) + "{{7*7}} ${jndi:x}"
+	hostile := "<script>alert(1)</script> \"><img src=x onerror=alert(1)> {{7*7}} ${jndi:x}" // bidi overrides are refused in a reason
 	h.call(t, h.admin, "updateDomain", http.MethodPatch, "/domains/"+id, map[string]any{"wildcards": true, "reason": hostile})
 	h.call(t, h.admin, "updateSettings", http.MethodPut, "/settings", map[string]any{"allow_server_keygen": false, "reason": hostile,
 		"subject_defaults": map[string]string{"organization": "<b>Org</b>", "organizational_unit": "", "locality": "", "state": "", "country": ""}})

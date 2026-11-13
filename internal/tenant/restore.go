@@ -196,6 +196,10 @@ func (s *Store) restore(ctx context.Context, tenant string, version int64, opts 
 	if err := who.Principal.Check(authz.ManageTenant, authz.Resource{Tenant: tenant}, now); err != nil {
 		return 0, err
 	}
+	// A restore is made from the history, which needs the audit right.
+	if err := s.checkAudit(tenant, who); err != nil {
+		return 0, err
+	}
 	b := s.backend()
 	v, err := settingsver.Get(ctx, b, settingsver.KindTenant, tenant, version)
 	if err != nil {

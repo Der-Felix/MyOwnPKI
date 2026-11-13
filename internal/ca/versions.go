@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
@@ -95,4 +96,26 @@ func (e *Engine) DomainVersion(ctx context.Context, who keys.Who, id string) (in
 		return 0, err
 	}
 	return settingsver.Current(ctx, settingsver.PKIBackend(q), settingsver.KindDomain, id)
+}
+
+// boundedSnapshot is domainSnapshot for the state a change replaces or
+// deletes: the baseline of an update and the deleted state. A domain stored
+// before the IP range cap (MaxDomainIPRanges) can be too large for a snapshot;
+// it must stay changeable and deletable, so its history keeps the first
+// MaxDomainIPRanges ranges and the audit details say that it was cut
+// (history_ip_ranges_kept, ip_ranges_total).
+func boundedSnapshot(d *Domain, details map[string]any) settingsver.DomainSnapshot {
+	snap := domainSnapshot(d)
+	if len(snap.IPRanges) > MaxDomainIPRanges {
+		details["history_ip_ranges_kept"] = MaxDomainIPRanges
+		details["ip_ranges_total"] = len(snap.IPRanges)
+		snap.IPRanges = snap.IPRanges[:MaxDomainIPRanges]
+	}
+	return snap
+}
+
+// isDomainUnique reports a UNIQUE violation of the domains table: the name,
+// or the ID of a restore, was taken by a concurrent request.
+func isDomainUnique(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: domains.")
 }

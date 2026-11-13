@@ -5,6 +5,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
 // Step 62 of PHASE3 section 16: the edit forms of a domain and of the tenant
@@ -113,5 +116,32 @@ func TestSettingsFormRefusesALostUpdate(t *testing.T) {
 	}
 	if r = b.post(t, "/admin/settings", save("-1", "Four")); r.Code != http.StatusSeeOther || !strings.Contains(flashOf(t, b, "/admin/settings"), "out of date") {
 		t.Errorf("save with a bad base_version: %d", r.Code)
+	}
+}
+
+// The page of a lost update says who changed the object only to a reader of
+// the history (the tenant-wide audit right): the name is personal data.
+func TestConflictPageNamesTheActorOnlyToAuditReaders(t *testing.T) {
+	t.Parallel()
+	h := newHistoryDomain(t) // version 4 was written by "console:test"
+	h.v.User(t, "caadmin", false, authz.Binding{CA: "issuing", Role: authz.Admin})
+	caAdmin := h.v.browser("192.0.2.10")
+	caAdmin.signIn(t, "caadmin", testinstance.Password)
+	stale := func(b *browser, token string) page {
+		return b.post(t, h.base, url.Values{"csrf_token": {token}, "ca": {"issuing"}, "subdomains": {"yes"}, "http01": {"yes"}, "approval": {"new_name"},
+			"preset": {"server"}, "address": {"internal"}, "base_version": {"1"}})
+	}
+
+	r := stale(h.b, h.csrf)
+	if body := r.html(); r.Code != http.StatusConflict || !strings.Contains(body, "This object was changed by console:test at ") {
+		t.Errorf("tenant admin: %d %s", r.Code, body)
+	}
+	r = stale(caAdmin, caAdmin.csrf(t))
+	body := r.html()
+	if r.Code != http.StatusConflict || !strings.Contains(body, "This object was changed by somebody else at ") || strings.Contains(body, "console:test") {
+		t.Errorf("admin of one CA: %d %s", r.Code, body)
+	}
+	if !strings.Contains(body, `href="`+h.base+`">Back to the page</a>`) {
+		t.Errorf("a reader without the history gets the link to the object:\n%s", body)
 	}
 }

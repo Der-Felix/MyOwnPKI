@@ -329,11 +329,9 @@ func TestHistoryIsForTenantAdminsOnly(t *testing.T) {
 				t.Errorf("%s sees a history link on %s:\n%s", who, p, html)
 			}
 		}
-		// A restore posted by hand changes nothing. (An admin of the CA may restore, as for any
-		// change of the domain: the engine asks for the same right; the history is what is closed to them.)
-		if who == "caadmin" {
-			continue
-		}
+		// A restore posted by hand changes nothing, also for an admin of the domain's own
+		// CA with a fresh second factor: a restore is made from the history, which needs
+		// the tenant-wide audit right.
 		before := h.newest(t)
 		token := b.csrf(t)
 		r := b.post(t, h.base+"/history/2/restore", url.Values{"csrf_token": {token}, "base_version": {strconv.FormatInt(before, 10)}})

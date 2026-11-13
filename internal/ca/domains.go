@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -53,6 +54,12 @@ const (
 // DefaultACMEValidityDays: ACME issuances default to 90 days, capped by the
 // CA's maximum (owner decision 6, 2026-10-13).
 const DefaultACMEValidityDays = 90
+
+// MaxDomainIPRanges caps the IP ranges of a domain. A snapshot of a domain
+// (name, settings, at most this many ranges of 43 characters) stays far below
+// settingsver.MaxSnapshotBytes, so no domain can become too large to change
+// or delete.
+const MaxDomainIPRanges = 256
 
 // Approvals, Challenges and AddressPolicies list the valid values.
 var (
@@ -240,6 +247,9 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 	if d.Wildcards && !d.AllowsChallenge(ChallengeDNS01) {
 		problems = append(problems, "wildcards are proven by dns-01 only (RFC 8555 §7.1.3) – allow dns-01")
 	}
+	if len(d.IPRanges) > MaxDomainIPRanges {
+		problems = append(problems, fmt.Sprintf("a domain has at most %d IP ranges (this one has %d) – use wider CIDR ranges", MaxDomainIPRanges, len(d.IPRanges)))
+	}
 	if len(d.IPRanges) > 0 && !d.AllowsChallenge(ChallengeHTTP01) {
 		problems = append(problems, "IP identifiers are proven by http-01 only – allow http-01")
 	}
@@ -340,9 +350,14 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 			return cerr
 		}
 		if ierr := q.InsertDomain(ctx, domainRow(&d)); ierr != nil {
+			if isDomainUnique(ierr) {
+				// Another request created the same name (or ID) after the check above.
+				return &DeniedError{Reasons: []string{fmt.Sprintf("domain %q exists already", short(d.Name))}}
+			}
 			return ierr
 		}
 		details := domainDetails(&d)
+		details["ip_ranges"] = auditText("ip_ranges", details["ip_ranges"])
 		entry := settingsver.Entry{
 			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeCreate, After: domainSnapshot(&d),
 			Actor: versionActor(req.Who), Reason: req.Options.Reason, ExpectedVersion: req.Options.ExpectedVersion, Now: now,
@@ -373,7 +388,7 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 // control character (a policy violation: 422 in the API, a message in the UI).
 func reasonProblems(o ChangeOptions) []string {
 	if settingsver.CheckReason(o.Reason) != nil {
-		return []string{fmt.Sprintf("reason: at most %d characters, no control characters", settingsver.MaxReason)}
+		return []string{fmt.Sprintf("reason: at most %d characters, no control or invisible formatting characters", settingsver.MaxReason)}
 	}
 	return nil
 }
@@ -441,12 +456,12 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 		after := domainDetails(d)
 		for k, v := range after {
 			if fmt.Sprint(before[k]) != fmt.Sprint(v) {
-				details[k] = fmt.Sprintf("%v -> %v", before[k], v)
+				details[k] = fmt.Sprintf("%v -> %v", auditText(k, before[k]), auditText(k, v))
 			}
 		}
 		entry := settingsver.Entry{
 			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeUpdate,
-			Before: domainSnapshot(current), After: domainSnapshot(d), Actor: versionActor(who),
+			Before: boundedSnapshot(current, details), After: domainSnapshot(d), Actor: versionActor(who),
 			Reason: s.Options.Reason, ExpectedVersion: s.Options.ExpectedVersion, Now: now,
 		}
 		action := ActionDomainUpdate
@@ -510,7 +525,7 @@ func (e *Engine) deleteDomain(ctx context.Context, id string, opts ChangeOptions
 			return derr
 		}
 		details := map[string]any{"name": d.Name, "ca": d.CA}
-		snap := domainSnapshot(current)
+		snap := boundedSnapshot(current, details)
 		if _, rerr := recordDomain(ctx, q, settingsver.Entry{
 			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeDelete, Before: snap, After: snap,
 			Actor: versionActor(who), Reason: opts.Reason, ExpectedVersion: opts.ExpectedVersion, Now: now,
@@ -527,6 +542,12 @@ func (e *Engine) deleteDomain(ctx context.Context, id string, opts ChangeOptions
 
 // finishDomain audits a refused domain change.
 func (e *Engine) finishDomain(ctx context.Context, now time.Time, action string, who keys.Who, id, name string, err error) error {
+	return e.finishDomainWith(ctx, now, action, who, id, name, nil, err)
+}
+
+// finishDomainWith is finishDomain with more audit details (a restore names
+// the version it wanted to copy, as the tenant side does).
+func (e *Engine) finishDomainWith(ctx context.Context, now time.Time, action string, who keys.Who, id, name string, extra map[string]any, err error) error {
 	if err == nil || errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -534,7 +555,9 @@ func (e *Engine) finishDomain(ctx context.Context, now time.Time, action string,
 	if target == "" {
 		target = short(name)
 	}
-	if aerr := e.refuse(ctx, now, action, who, audit.Target{Type: "domain", ID: target}, map[string]any{"name": short(name)}, err); aerr != nil {
+	details := map[string]any{"name": short(name)}
+	maps.Copy(details, extra)
+	if aerr := e.refuse(ctx, now, action, who, audit.Target{Type: "domain", ID: target}, details, err); aerr != nil {
 		return errors.Join(err, fmt.Errorf("audit: %w", aerr))
 	}
 	return err
@@ -734,3 +757,20 @@ func domainDetails(d *Domain) map[string]any {
 
 // oidServerAuth is the TLS server authentication EKU (RFC 5280 §4.2.1.12).
 var oidServerAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+
+// auditText is the value of an audit detail. The list of IP ranges can be
+// long (up to MaxDomainIPRanges of 43 characters, more than the 8 KiB an audit
+// entry may carry in all), so it shows the first ranges and counts the rest;
+// the full list is in the version of the domain.
+func auditText(key string, v any) any {
+	if key != "ip_ranges" {
+		return v
+	}
+	const shown = 16
+	list, _ := v.(string)
+	parts := strings.Split(list, ",")
+	if len(parts) <= shown {
+		return v
+	}
+	return strings.Join(parts[:shown], ",") + fmt.Sprintf(",… and %d more", len(parts)-shown)
+}

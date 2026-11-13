@@ -46,14 +46,16 @@ func baseVersion(c *rc) (*int64, error) {
 	return &n, nil
 }
 
-// conflictText says who changed the object after the page was opened.
-func conflictText(ce *settingsver.ConflictError) string {
+// conflictText says that somebody changed the object after the page was
+// opened, and when. The name of that person is only given to a reader who may
+// read the history (the tenant-wide audit right): it is personal data.
+func conflictText(ce *settingsver.ConflictError, mayName bool) string {
 	if ce.Latest.Number == 0 {
 		return "This object was changed after you opened this page. Reload the history and look again. Nothing was saved."
 	}
-	who := ce.Latest.Actor.Name
-	if who == "" {
-		who = "somebody else"
+	who := "somebody else"
+	if name := ce.Latest.Actor.Name; mayName && name != "" {
+		who = name
 	}
 	return "This object was changed by " + who + " at " + view.DateTime(ce.Latest.CreatedAt) +
 		" after you opened this page. Reload the history and look again. Nothing was saved."
@@ -71,5 +73,5 @@ func (c *rc) conflictPage(ce *settingsver.ConflictError, back, history string) {
 	if !c.canReadHistory() {
 		href, link = back, "Back to the page"
 	}
-	c.notice(http.StatusConflict, "Changed meanwhile", view.Message{Kind: view.MessageError, Text: conflictText(ce), Href: href, LinkText: link})
+	c.notice(http.StatusConflict, "Changed meanwhile", view.Message{Kind: view.MessageError, Text: conflictText(ce, c.canReadHistory()), Href: href, LinkText: link})
 }

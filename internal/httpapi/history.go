@@ -188,6 +188,10 @@ func versionError(c *call, err error) bool {
 	case errors.Is(err, settingsver.ErrCorrupt):
 		_ = c.problem(http.StatusConflict, "conflict",
 			"the stored version is damaged (it does not match its checksum or its format); it cannot be read or restored", nil)
+	case errors.Is(err, settingsver.ErrInvalid):
+		// A refused argument (for example a snapshot above the size limit) is
+		// the request's problem, not a server fault.
+		_ = c.problem(http.StatusUnprocessableEntity, "policy-violation", err.Error(), nil)
 	case errors.Is(err, settingsver.ErrNotFound):
 		_ = c.problem(http.StatusNotFound, "not-found", "no such object, or you may not see it", nil)
 	default:

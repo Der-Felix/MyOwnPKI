@@ -290,7 +290,7 @@ func TestRestoreNeedsIfMatch(t *testing.T) {
 	if r.Code != http.StatusPreconditionFailed || r.problemType() != "precondition-failed" || r.body["current_version"] != float64(2) || r.body["changed_by"] != "demo" || r.body["changed_at"] == nil {
 		t.Errorf("stale If-Match: %d %s", r.Code, r.Body.String())
 	}
-	for _, bad := range []string{`2`, `W/"2"`, `*`, `"2", "3"`, `"x"`} {
+	for _, bad := range []string{`2`, `W/2`, `*`, `"2", "3"`, `"x"`} {
 		if r = h.call(t, h.admin, "restoreDomainVersion", http.MethodPost, restore, map[string]any{}, "If-Match", bad); r.Code != http.StatusBadRequest {
 			t.Errorf("If-Match %s: %d %s", bad, r.Code, r.Body.String())
 		}

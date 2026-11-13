@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -144,7 +147,7 @@ func TestIfMatchMustBeOneQuotedNumber(t *testing.T) {
 	admin := v.client("192.0.2.1")
 	admin.signIn(t, "demo", v.demoPass)
 	settings := map[string]any{"allow_server_keygen": false, "subject_defaults": map[string]string{"organization": "", "organizational_unit": "", "locality": "", "state": "", "country": ""}}
-	for _, bad := range []string{`1`, `W/"1"`, `*`, `"1", "2"`, `"x"`, `""`, `"-1"`, `"99999999999999999999"`} {
+	for _, bad := range []string{`1`, `W/1`, `w/"1"`, `W/W/"1"`, `W/*`, `W/"1", W/"2"`, `*`, `"1", "2"`, `"x"`, `""`, `"-1"`, `"99999999999999999999"`} {
 		if r := admin.do(t, http.MethodPut, "/settings", settings, "If-Match", bad); r.Code != http.StatusBadRequest || r.problemType() != "bad-request" {
 			t.Errorf("If-Match %s: %d %s, want 400", bad, r.Code, r.Body.String())
 		}
@@ -157,3 +160,78 @@ func TestIfMatchMustBeOneQuotedNumber(t *testing.T) {
 func systemdbQueries(v *env) *systemdb.Queries { return systemdb.New(v.in.SystemDB.Read) }
 
 func pkidbQueries(v *env) *pkidb.Queries { return pkidb.New(v.in.PKIDB.Read) }
+
+// nginx gzip turns a strong ETag into a weak one, and the client sends it back
+// as it got it: W/"7" counts as "7".
+func TestIfMatchAcceptsAWeakETag(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.unseal(t)
+	admin := v.client("192.0.2.1")
+	admin.signIn(t, "demo", v.demoPass)
+	body := func(org string) map[string]any {
+		return map[string]any{"allow_server_keygen": false, "subject_defaults": map[string]string{"organization": org, "organizational_unit": "", "locality": "", "state": "", "country": ""}}
+	}
+	if r := admin.do(t, http.MethodPut, "/settings", body("One"), "If-Match", `W/"0"`); r.Code != http.StatusOK || r.Header().Get("ETag") != `"2"` {
+		t.Fatalf("put with a weak current ETag: %d ETag %q %s", r.Code, r.Header().Get("ETag"), r.Body.String())
+	}
+	if r := admin.do(t, http.MethodPut, "/settings", body("Two"), "If-Match", `W/"0"`); r.Code != http.StatusPreconditionFailed || r.body["current_version"] != float64(2) {
+		t.Errorf("put with a weak stale ETag: %d %s", r.Code, r.Body.String())
+	}
+	if r := admin.do(t, http.MethodPut, "/settings", body("Three"), "If-Match", `W/"2"`); r.Code != http.StatusOK || r.Header().Get("ETag") != `"3"` {
+		t.Errorf("put with W/\"2\": %d %s", r.Code, r.Body.String())
+	}
+}
+
+// The 412 names who changed the object only to a caller who may read the
+// history (the tenant-wide audit right): the name is personal data. The
+// version and the time are for everybody who may change the object.
+func TestPreconditionFailedNamesTheActorOnlyToAuditReaders(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.unseal(t)
+	s := loadContract(t)
+	patch := s.routeOf(t, v.api, "updateDomain")
+	v.user(t, "caadmin", false, authz.Binding{CA: "issuing", Role: authz.Admin})
+	admin, caAdmin := v.client("192.0.2.1"), v.client("192.0.2.2")
+	admin.signIn(t, "demo", v.demoPass)
+	caAdmin.signIn(t, "caadmin", testPassword)
+	admin.stepUp(t, "demo")
+	caAdmin.stepUp(t, "caadmin")
+
+	r := admin.do(t, http.MethodPost, "/domains", map[string]any{"name": "homelab.lan", "ca_id": v.caIDs["issuing"], "approval": "open", "ip_ranges": []string{}})
+	if r.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", r.Code, r.Body.String())
+	}
+	id, _ := r.body["id"].(string)
+	path := "/domains/" + id
+	if r = admin.do(t, http.MethodPatch, path, map[string]any{"wildcards": true}, "If-Match", `"1"`); r.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", r.Code, r.Body.String())
+	}
+
+	// Both callers hold a stale version 1; the current one is 2, written by "demo".
+	r = admin.do(t, http.MethodPatch, path, map[string]any{"wildcards": false}, "If-Match", `"1"`)
+	s.check(t, patch, r)
+	if r.Code != http.StatusPreconditionFailed || r.body["changed_by"] != "demo" || r.body["changed_at"] == nil || r.body["current_version"] != float64(2) {
+		t.Errorf("tenant admin: %d %s", r.Code, r.Body.String())
+	}
+	r = caAdmin.do(t, http.MethodPatch, path, map[string]any{"wildcards": false}, "If-Match", `"1"`)
+	s.check(t, patch, r)
+	if r.Code != http.StatusPreconditionFailed || r.problemType() != "precondition-failed" || r.body["current_version"] != float64(2) || r.body["changed_at"] == nil {
+		t.Fatalf("admin of one CA: %d %s", r.Code, r.Body.String())
+	}
+	if _, named := r.body["changed_by"]; named || strings.Contains(r.Body.String(), "demo") {
+		t.Errorf("a caller without the audit right is told who changed the object: %s", r.Body.String())
+	}
+}
+
+// A refused argument of the version history is the request's problem (422), not a server fault.
+func TestInvalidVersionIsNotAServerError(t *testing.T) {
+	t.Parallel()
+	rec := httptest.NewRecorder()
+	c := &call{w: rec, r: httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/domains/x", nil)}
+	err := fmt.Errorf("record domain: %w", fmt.Errorf("%w: snapshot is 70000 bytes, at most %d", settingsver.ErrInvalid, settingsver.MaxSnapshotBytes))
+	if !versionError(c, err) || rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "policy-violation") || !strings.Contains(rec.Body.String(), "snapshot is 70000 bytes") {
+		t.Errorf("ErrInvalid: %d %s", rec.Code, rec.Body.String())
+	}
+}

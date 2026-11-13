@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
 )
 
@@ -17,10 +18,12 @@ import (
 // writer may send it back as If-Match; when it is not the newest version,
 // the change is refused with 412 and nothing is written.
 
-// etagPattern is the only If-Match value that is accepted: one strong ETag
-// of this API. A weak ETag, a list and "*" are refused as a bad request
-// instead of being guessed at.
-var etagPattern = regexp.MustCompile(`^"([0-9]{1,15})"$`)
+// etagPattern is the only If-Match value that is accepted: one ETag of this
+// API, strong ("7") or weak (W/"7": a proxy that compresses the answer, nginx
+// gzip, turns a strong ETag weak, and the client sends it back as it got it).
+// A weak tag counts as the strong one. A list, "*" and anything else are
+// refused as a bad request instead of being guessed at.
+var etagPattern = regexp.MustCompile(`^(?:W/)?"([0-9]{1,15})"$`)
 
 // ifMatch returns the version the caller expects, nil when the header is
 // absent (the released behavior: the last writer wins).
@@ -74,7 +77,11 @@ func (c *call) preconditionFailed(err error) bool {
 		CurrentVersion: ce.Latest.Number,
 	}
 	if ce.Latest.Number > 0 {
-		doc.ChangedBy = ce.Latest.Actor.Name
+		// Who changed it is personal data: only a caller with the tenant-wide
+		// audit right (the one who may read the history) is told.
+		if c.canReadAudit() {
+			doc.ChangedBy = ce.Latest.Actor.Name
+		}
 		at := ce.Latest.CreatedAt.UTC()
 		doc.ChangedAt = &at
 	}
@@ -83,4 +90,13 @@ func (c *call) preconditionFailed(err error) bool {
 	c.w.WriteHeader(http.StatusPreconditionFailed)
 	_ = json.NewEncoder(c.w).Encode(doc)
 	return true
+}
+
+// canReadAudit reports whether the caller holds the tenant-wide audit right,
+// which decides whether names of other users may be shown to it.
+func (c *call) canReadAudit() bool {
+	if c.session == nil || c.session.Principal == nil {
+		return false
+	}
+	return c.session.Principal.Check(authz.ReadAudit, authz.Resource{Tenant: c.api.d.Tenant}, c.api.now()) == nil
 }

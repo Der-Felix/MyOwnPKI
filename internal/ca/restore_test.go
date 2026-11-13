@@ -477,8 +477,10 @@ func TestDomainHistoryAndRestorePermissions(t *testing.T) {
 		who  keys.Who
 		want error
 	}{
-		"admin with step-up": {admin, nil}, "admin of that CA with step-up": {caAdmin, nil},
-		"admin without step-up": {noStepUp, authz.ErrStepUpRequired}, "token": {token, authz.ErrDenied},
+		"admin with step-up": {admin, nil},
+		// A restore is made from the history: it needs the tenant-wide audit right too.
+		"admin of that CA with step-up": {caAdmin, authz.ErrDenied},
+		"admin without step-up":         {noStepUp, authz.ErrStepUpRequired}, "token": {token, authz.ErrDenied},
 		"operator": {operator, authz.ErrDenied}, "viewer": {viewer, authz.ErrDenied}, "admin of another CA": {otherCA, ErrNotFound},
 	} {
 		cur := int64(len(v.domainHistory(t, d.ID)))
@@ -520,7 +522,12 @@ func TestDomainHistoryAndRestorePermissions(t *testing.T) {
 	// Refusals are audited (denied).
 	var denied bool
 	for _, r := range v.auditRows(t) {
-		denied = denied || (r.action == ActionDomainRestore && r.result == "denied")
+		if r.action == ActionDomainRestore && r.result == "denied" {
+			denied = true
+			if got, _ := r.details["restored_from"].(float64); got != 1 {
+				t.Errorf("a refused restore names the version it wanted: %v", r.details)
+			}
+		}
 	}
 	if !denied {
 		t.Error("no denied domain.restore entry")

@@ -195,7 +195,7 @@ func (e *Engine) RestoreDomain(ctx context.Context, id string, version int64, op
 	now := e.now()
 	opts.restore = &restoreOf{from: version, id: id}
 	d, err := e.restoreDomain(ctx, id, version, opts, who, now)
-	return d, e.finishDomain(ctx, now, ActionDomainRestore, who, id, "", err)
+	return d, e.finishDomainWith(ctx, now, ActionDomainRestore, who, id, "", map[string]any{"restored_from": version}, err)
 }
 
 func (e *Engine) restoreDomain(ctx context.Context, id string, version int64, opts ChangeOptions, who keys.Who, now time.Time) (*Domain, error) {
@@ -215,6 +215,12 @@ func (e *Engine) restoreDomain(ctx context.Context, id string, version int64, op
 	// domain again needs it tenant-wide (as createDomain does). Both with the
 	// second factor, and never with an API token.
 	if aerr := e.authorizeChange(opts, who, authz.ManageCA, caName, now); aerr != nil {
+		return nil, aerr
+	}
+	// A restore is made from the history, and the history names users, so it
+	// needs the audit right (tenant-wide) like reading the history does: a
+	// CA-limited admin changes the domain, but does not restore old versions.
+	if aerr := e.authorize(who, authz.ReadAudit, "", now); aerr != nil {
 		return nil, aerr
 	}
 	if opts.ExpectedVersion == nil && !rs.dry {

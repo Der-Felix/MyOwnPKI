@@ -1174,7 +1174,9 @@ paths:
         (`422`): a CA that is retired or gone, a missing preset, name constraints, a name taken by
         another domain. Restoring the state the domain already has is refused (`409`). It needs
         what the same change needs: a fresh second factor, never an API token (`403`, problem
-        types `step-up-required` and `forbidden`). `If-Match` is **required**: the `ETag` of the
+        types `step-up-required` and `forbidden`) and, because a restore is made from the history,
+        the tenant-wide audit right: a CA-limited admin gets `403` (`forbidden`) here although they
+        may change the domain. `If-Match` is **required**: the `ETag` of the
         newest version (`428` `precondition-required` without it, `412` `precondition-failed` when
         it is not the newest). The audit log gets `domain.restore` with `version`, `restored_from`
         and `snapshot_sha256`; the `reason` stays with the version.
@@ -2962,20 +2964,23 @@ components:
     IfMatch:
       description: |
         The `ETag` of the last read, quoted (`"7"`). When it is not the current version of the
-        object, nothing is changed and the answer is `412` (`precondition-failed`). Optional.
+        object, nothing is changed and the answer is `412` (`precondition-failed`). Optional. A weak
+        form (`W/"7"`, which a compressing proxy such as nginx gzip makes of a strong ETag) is accepted
+        as `"7"`; `*`, a list and anything that is not a version number are `400`.
       name: If-Match
       in: header
       required: false
-      schema: { type: string, pattern: '^"[0-9]+"$', maxLength: 22 }
+      schema: { type: string, pattern: '^(W/)?"[0-9]+"$', maxLength: 24 }
     IfMatchRequired:
       description: |
         The `ETag` of the newest version, quoted (`"7"`), as the last read of the history gave it.
         **Required.** Without it the answer is `428` (`precondition-required`); when it is not the
         newest version the answer is `412` (`precondition-failed`). Nothing is changed in either case.
+        A weak form (`W/"7"`) is accepted as `"7"`.
       name: If-Match
       in: header
       required: true
-      schema: { type: string, pattern: '^"[0-9]+"$', maxLength: 22 }
+      schema: { type: string, pattern: '^(W/)?"[0-9]+"$', maxLength: 24 }
     VersionNumber:
       description: "Number of the version (1, 2, 3 ..., no gaps)"
       name: version
@@ -3179,7 +3184,9 @@ components:
         - type: object
           properties:
             current_version: { type: integer, minimum: 0, description: "The current version number (the new ETag)" }
-            changed_by: { type: string, description: "Name of the actor of the current version; empty if there is none yet" }
+            changed_by:
+              type: string
+              description: "Name of the actor of the current version. Left out when there is no version yet, and for a caller without the tenant-wide audit right (the names are personal data)"
             changed_at: { type: string, format: date-time, description: "When the current version was made" }
 
     ValidationProblem:
@@ -3800,7 +3807,7 @@ components:
         reason:
           description: |
             Why the settings change (since 0.3.10, optional in a change, at most 200 characters,
-            no control characters). Kept with the version of the settings, never in the audit log
+            no control or invisible formatting characters). Kept with the version of the settings, never in the audit log
             and never in an answer.
           type: string
           maxLength: 200
@@ -3945,7 +3952,7 @@ components:
           maxLength: 200
           writeOnly: true
           description: |
-            Why the domain changes (since 0.3.10, optional, no control characters). Kept with the
+            Why the domain changes (since 0.3.10, optional, no control or invisible formatting characters). Kept with the
             version of the domain, never in the audit log and never in an answer.
         ca_id: { $ref: "#/components/schemas/ID" }
         include_subdomains: { type: boolean, description: "Names below the domain are covered too" }
@@ -3966,8 +3973,9 @@ components:
           description: "Which addresses the http-01 check may connect to"
         ip_ranges:
           type: array
+          maxItems: 256
           items: { type: string, maxLength: 43 }
-          description: "IPs or CIDRs for IP identifiers (http-01 only)"
+          description: "IPs or CIDRs for IP identifiers (http-01 only); at most 256 (more is a 422)"
 
     DomainCreate:
       description: "A new domain"
@@ -4191,7 +4199,7 @@ components:
         reason:
           type: string
           maxLength: 200
-          description: "Free text kept with the new version (at most 200 characters, no control characters); never in the audit log"
+          description: "Free text kept with the new version (at most 200 characters, no control or invisible formatting characters such as bidi overrides, zero-width characters or a BOM); never in the audit log"
 
     CA:
       description: "A certificate authority of this tenant with its generations (one per key)"
