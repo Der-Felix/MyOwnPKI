@@ -1881,3 +1881,28 @@ approval of ECharts is kept for a later step. What that step takes (so the choic
 - **Fixtures:** `internal/analysis/testdata/weak-key-rsa1024.pem` and `weak-signature-sha1.pem` (self-signed, names under
   `.invalid`, no private key; the OpenSSL command is in the header of each file).
 - Not run on this machine: `go test -race` (no C compiler here; the packages are pure Go and the build is `CGO_ENABLED=0`).
+
+**Step 47 (REST and OpenAPI).** What differs from the plan text, and why:
+
+- **The handlers call `report.Service.Get` and `analysis.Service.Get`**, not `Build` and `Load`/`Run`: the services do the
+  tenant-wide `authz.ReadPKI` check and the one-minute cache. The server builds both once (`Server.Reports()`,
+  `Server.Analysis()`, in `internal/server/monitor.go`) with the monitor's `Rules` and `Release` as server version;
+  `httpapi.Deps` has `Reports` and `Analysis`. The pages of step 49 take the same two services.
+- **An unknown `?rule=` is 400** (`bad-request`, field `rule`, the valid ids named, the input never echoed), like a bad
+  `?state=` of `GET /alerts`. The id is checked against the fixed rule list before anything is read, so a refused
+  caller with a bad id sees 400 instead of 403; the list of ids is not a secret. An empty `?rule=` means no filter.
+- **Schemas:** besides `Report`, `ReportWeek`, `Analysis`, `AnalysisRule` and `Finding` the spec has `ReportIssuanceWeek`,
+  `ReportAuthority`, `ReportAlertWeek` and `ReportFleet`, so every week row has a named shape. `AnalysisRule.id` is an
+  enum of the ten ids. There is no `external` flag on an authority: the certificates without a CA are the entry with an
+  empty `id` and an empty `name`, last in the list.
+- **`generated_at` is cut to whole seconds** in the JSON. `agents` is `null` while the agent listener is off (the key stays).
+  An active agent that never reported counts as `active`. `Report.authorities[].valid` includes `expiring`.
+- **`AnalysisRule.unknown_reason`** is a string, empty when there is none (an `ok` rule, or `findings` without a gap);
+  `count` is every finding of the rule, `findings` holds at most 200 per rule. With `?rule=` the summary covers that rule only.
+- **Tests:** the contract run covers both operations (viewer 200, a role limited to one CA 403, no role 403, no session 401,
+  the 400); `internal/httpapi/reports_test.go` covers shapes, the cache by content, roles, API tokens (tenant-wide 200,
+  limited to one CA 403), the refusal of a user of another tenant on the service the API uses, and a CA named with
+  `<script>`, quotes and 4,000 characters (the finding clips it, the body holds no literal `<`). The API is bound to one
+  tenant and takes none from the request, so "another tenant" is tested on the service, not over HTTP; the separate cache per
+  tenant is tested in `internal/report`. `internal/server/monitor_test.go` checks the wiring.
+- No CLI help or docs change: the plan names none; the API reference page of the site is step 51.
