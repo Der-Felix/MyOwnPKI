@@ -10,12 +10,14 @@
 # present: myownpki-agent-setup
 # present: myownpki-agent-sandbox
 # present: myownpki-agent-restart
+# present: myownpki-agent-system-trust
 # absent: myownpki-agent-pass
 # absent: myownpki-agent-deployment-proxy
 # absent: myownpki-agent-refused
 # contains: --package-format rpm
 # contains: myownpki-agent_0.3.6_linux_arm64.rpm
 # contains: sandbox sync
+# contains: trust install --root-sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --no-record
 # not-contains: --token-file
 # not-contains: --webroot
 myownpki:
@@ -25,6 +27,7 @@ myownpki:
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://test/files/root.pem
     root_sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    system_trust: true
     package:
       source: salt://test/files/{name}
       sha256:

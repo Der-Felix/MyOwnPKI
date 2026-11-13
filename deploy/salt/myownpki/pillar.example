@@ -29,6 +29,11 @@ myownpki:
     webroot: /var/www/html
     # true: pass --low-ports to setup (needed when nginx listens on port 443).
     low_ports: false
+    # true: add the root of this PKI to the system trust store of the host (Debian and RedHat families, agent
+    # 0.3.9 or later): the formula runs "myownpki-agent trust install --root-sha256 <root_sha256>" after setup.
+    # Every program on the host then trusts that root. false or unset: no state; remove it by hand with
+    # "myownpki-agent trust remove".
+    system_trust: false
     # Optional secret: an enrollment pass made by an admin with the second factor, 1 to 25 hosts.
     # Written to /root/myownpki-join-token (0600) only until the host has its agent
     # certificate. Keep it in an encrypted pillar and remove it when the roll-out is done.

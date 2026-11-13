@@ -102,6 +102,13 @@
 {%   set _ = errors.append('myownpki:agent:low_ports must be true or false') %}
 {% endif %}
 
+{#- The root in the system trust store (docs/PHASE3.md section 15): a boolean, off by default. -#}
+{% if cfg['system_trust'] is not sameas true and cfg['system_trust'] is not sameas false %}
+{%   set _ = errors.append('myownpki:agent:system_trust must be true or false') %}
+{% elif cfg['system_trust'] and grains.get('os_family') not in ['Debian', 'RedHat'] %}
+{%   set _ = errors.append('myownpki:agent:system_trust: the agent supports the system trust store of Debian and RedHat family hosts only, this minion has os_family "' ~ grains.get('os_family') ~ '"') %}
+{% endif %}
+
 {% set config_source = '' %}
 {% if cfg['config_source'] is not none %}
 {%   if cfg['config_source'] is not string or not (cfg['config_source'] | regex_match('^salt://[^ ]+$')) %}
@@ -314,6 +321,7 @@
   'acme_directory': acme_directory,
   'webroot': webroot,
   'low_ports': cfg['low_ports'] is sameas true,
+  'system_trust': cfg['system_trust'] is sameas true,
   'pass_set': pass_set,
   'deployments': deployment_list,
   'absent': absent,
