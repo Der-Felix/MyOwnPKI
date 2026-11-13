@@ -1,12 +1,14 @@
 package web
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
 // Lost-update protection of the forms that change a versioned object (a
@@ -20,6 +22,15 @@ import (
 func baseVersionField(version int64) admin.Field {
 	return admin.Field{ID: "base_version", Type: "hidden", Value: strconv.FormatInt(version, 10)}
 }
+
+// reasonField is the optional reason of a change, kept in the history.
+func reasonField() admin.Field {
+	return admin.Field{ID: "reason", Label: "Reason (optional)",
+		Hint: "At most " + strconv.Itoa(settingsver.MaxReason) + " characters. Other admins read it in the history; it is not written to the audit log."}
+}
+
+// reasonOf reads the reason of a post.
+func reasonOf(c *rc) string { return strings.TrimSpace(c.r.PostFormValue("reason")) }
 
 // baseVersion reads base_version of a post: nil when the field is absent, an
 // error for anything but a plain non-negative number (a changed form).
@@ -35,15 +46,30 @@ func baseVersion(c *rc) (*int64, error) {
 	return &n, nil
 }
 
-// conflictText says who changed the object while the form was open.
+// conflictText says who changed the object after the page was opened.
 func conflictText(ce *settingsver.ConflictError) string {
 	if ce.Latest.Number == 0 {
-		return "This page is out of date – nothing was saved. The page now shows the current state."
+		return "This object was changed after you opened this page. Reload the history and look again. Nothing was saved."
 	}
 	who := ce.Latest.Actor.Name
 	if who == "" {
 		who = "somebody else"
 	}
-	return "Changed by " + who + " at " + ce.Latest.CreatedAt.UTC().Format("2006-01-02 15:04") +
-		" UTC while you were editing – your change was not saved. The page now shows the current state."
+	return "This object was changed by " + who + " at " + view.DateTime(ce.Latest.CreatedAt) +
+		" after you opened this page. Reload the history and look again. Nothing was saved."
+}
+
+// conflictPage answers a change or restore that was based on an older version:
+// a page of its own (409) with who changed the object and when, and a link
+// back. Nothing was written. history is the object's history page; "" = back
+// plus /history. Whoever may not read the history gets a link to the object.
+func (c *rc) conflictPage(ce *settingsver.ConflictError, back, history string) {
+	href, link := history, "Back to the history"
+	if href == "" {
+		href = back + "/history"
+	}
+	if !c.canReadHistory() {
+		href, link = back, "Back to the page"
+	}
+	c.notice(http.StatusConflict, "Changed meanwhile", view.Message{Kind: view.MessageError, Text: conflictText(ce), Href: href, LinkText: link})
 }

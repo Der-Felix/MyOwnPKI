@@ -27,7 +27,11 @@ import (
 
 // refused ends a POST that a service refused: back to the form with the
 // reasons, or to the step-up page when a fresh second factor is missing.
-func (c *rc) refused(err error, back string) {
+func (c *rc) refused(err error, back string) { c.refusedAt(err, back, "") }
+
+// refusedAt is refused for an action whose stale-version page links to history
+// (the history list of the object; "" = the object page of back plus /history).
+func (c *rc) refusedAt(err error, back, history string) {
 	var denied *ca.DeniedError
 	var ref *auth.RefusedError
 	var pol *auth.PolicyError
@@ -58,14 +62,27 @@ func (c *rc) refused(err error, back string) {
 	case errors.As(err, &pol):
 		add(pol.Error())
 	case errors.As(err, &conflict):
-		add(conflictText(conflict))
+		c.conflictPage(conflict, back, history)
+		return
+	case errors.Is(err, settingsver.ErrNotFound):
+		c.fail(ca.ErrNotFound)
+		return
+	case errors.Is(err, settingsver.ErrIdentical):
+		add("The current state already equals this version.")
+	case errors.Is(err, settingsver.ErrPreconditionRequired):
+		add("This form is out of date – open the page again and repeat the change.")
+	case errors.Is(err, settingsver.ErrUnknownSchema), errors.Is(err, settingsver.ErrCorrupt):
+		add("This version can't be read by this release, so it can't be restored.")
+		if history != "" {
+			back = history // the page of an unreadable version only says so; the list shows this message
+		}
 	case errors.Is(err, authz.ErrDenied):
 		add("Your role doesn't allow this.")
 	case errors.Is(err, auth.ErrInvalidLogin):
 		add("Wrong password.")
 	case errors.Is(err, auth.ErrInvalidCode):
 		add("Wrong or already used code.")
-	case errors.Is(err, tenant.ErrInvalid), errors.Is(err, agents.ErrInvalid), errors.Is(err, agents.ErrConflict), errors.Is(err, ca.ErrKeyDeleted), errors.Is(err, ca.ErrNoStoredKey),
+	case errors.Is(err, tenant.ErrInvalid), errors.Is(err, settingsver.ErrInvalid), errors.Is(err, agents.ErrInvalid), errors.Is(err, agents.ErrConflict), errors.Is(err, ca.ErrKeyDeleted), errors.Is(err, ca.ErrNoStoredKey),
 		errors.Is(err, auth.ErrNoTOTPChange), errors.Is(err, auth.ErrPasskeysOff), errors.Is(err, auth.ErrNoToken), errors.Is(err, auth.ErrNoPasskey):
 		add(err.Error())
 	default:

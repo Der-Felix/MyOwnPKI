@@ -49,9 +49,10 @@ func TestDomainFormsRefuseALostUpdate(t *testing.T) {
 	}
 	// Somebody else saved in between: the old form is refused and says who and when.
 	rr := b.post(t, detail, change("1", "new_name"))
-	flash := flashOf(t, b, detail)
-	if rr.Code != http.StatusSeeOther || !strings.Contains(flash, "Changed by") || !strings.Contains(flash, "while you were editing") || !strings.Contains(flash, "was not saved") {
-		t.Fatalf("stale change: %d %q", rr.Code, flash)
+	if body := rr.html(); rr.Code != http.StatusConflict || !strings.Contains(body, "This object was changed by demo at ") ||
+		!strings.Contains(body, "after you opened this page. Reload the history and look again.") || !strings.Contains(body, "Nothing was saved.") ||
+		!strings.Contains(body, `href="`+detail+`/history">Back to the history</a>`) {
+		t.Fatalf("stale change: %d %s", rr.Code, body)
 	}
 	if got := b.get(t, detail).html(); !strings.Contains(got, `value="account" selected`) || strings.Contains(got, `value="new_name" selected`) {
 		t.Errorf("a refused change was stored:\n%s", got)
@@ -65,8 +66,8 @@ func TestDomainFormsRefuseALostUpdate(t *testing.T) {
 		t.Errorf("change with a bad base_version: %d", rr.Code)
 	}
 	// The same for the deletion: the old number is refused, the domain stays.
-	if rr = b.post(t, detail+"/delete", url.Values{"csrf_token": {token}, "base_version": {"1"}}); rr.Code != http.StatusSeeOther || rr.location() != detail ||
-		!strings.Contains(flashOf(t, b, detail), "Changed by") {
+	if rr = b.post(t, detail+"/delete", url.Values{"csrf_token": {token}, "base_version": {"1"}}); rr.Code != http.StatusConflict ||
+		!strings.Contains(rr.html(), "This object was changed by demo at ") {
 		t.Fatalf("stale delete: %d %q", rr.Code, rr.location())
 	}
 	if rr = b.post(t, detail+"/delete", url.Values{"csrf_token": {token}, "base_version": {"3"}}); rr.Code != http.StatusSeeOther || rr.location() != "/domains" {
@@ -100,8 +101,9 @@ func TestSettingsFormRefusesALostUpdate(t *testing.T) {
 		t.Fatalf("the form after the change:\n%s", page)
 	}
 	r := b.post(t, "/admin/settings", save("0", "Two"))
-	if flash := flashOf(t, b, "/admin/settings"); r.Code != http.StatusSeeOther || !strings.Contains(flash, "Changed by") || !strings.Contains(flash, "was not saved") {
-		t.Fatalf("stale save: %d %q", r.Code, flash)
+	if body := r.html(); r.Code != http.StatusConflict || !strings.Contains(body, "This object was changed by demo at ") ||
+		!strings.Contains(body, `href="/admin/settings/history">Back to the history</a>`) {
+		t.Fatalf("stale save: %d %s", r.Code, body)
 	}
 	if page := b.get(t, "/admin/settings").html(); !strings.Contains(page, `value="One"`) || strings.Contains(page, `value="Two"`) {
 		t.Errorf("a refused save was stored:\n%s", page)

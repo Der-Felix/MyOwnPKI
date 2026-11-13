@@ -37,6 +37,9 @@ func (a *app) domainList(c *rc) {
 			{Text: strings.Join(dm.ChallengeTypes, ", ")}, {Text: approvalText(dm.Approval)},
 			{Text: strconv.Itoa(dm.EffectiveValidityDays()) + " days", Num: true}})
 	}
+	if c.canReadHistory() {
+		d.More, d.MoreLabel = "/domains/deleted", "Deleted domains"
+	}
 	p := c.page("Domains", "domains")
 	p.Description = "Name spaces ACME issues for: which CA signs, which challenges prove control, who must approve."
 	render(c.w, c.r, a.log, http.StatusOK, admin.TablePage(p, d))
@@ -212,16 +215,20 @@ func (a *app) domainDetail(c *rc) {
 			c.fail(ferr)
 			return
 		}
-		fields = append(fields, baseVersionField(d.Version))
+		fields = append(fields, reasonField(), baseVersionField(d.Version))
 		self := "/domains/" + d.ID
 		sections = append(sections, admin.Section{Forms: []admin.FormData{
 			c.form(admin.FormData{Title: "Change", Action: self, Submit: "Save", Fields: fields}),
 			c.form(admin.FormData{Title: "Delete", Action: self + "/delete", Submit: "Delete domain", Danger: true,
-				Fields: []admin.Field{baseVersionField(d.Version)},
+				Fields: []admin.Field{reasonField(), baseVersionField(d.Version)},
 				Intro:  []string{"Certificates already issued stay valid. Open ACME orders for its names fail."}}),
 		}})
 	}
-	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(c.page(d.Name, "domains", domainCrumbs()...), admin.DetailData{Messages: c.messages(), Sections: sections}))
+	data := admin.DetailData{Messages: c.messages(), Sections: sections}
+	if c.canReadHistory() {
+		data.Tabs = historyTabs("/domains/"+d.ID, false)
+	}
+	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(c.page(d.Name, "domains", domainCrumbs()...), data))
 }
 
 func orDash(s string) string {
@@ -239,6 +246,7 @@ func (a *app) domainUpdate(c *rc) {
 		c.refused(err, "/domains/"+id)
 		return
 	}
+	settings.Options.Reason = reasonOf(c)
 	if _, err = a.d.Engine.UpdateDomain(c.r.Context(), id, settings, c.who()); err != nil {
 		c.refused(err, "/domains/"+id)
 		return
@@ -254,6 +262,7 @@ func (a *app) domainDelete(c *rc) {
 		c.refused(err, "/domains/"+id)
 		return
 	}
+	opts.Reason = reasonOf(c)
 	if err = a.d.Engine.DeleteDomainWith(c.r.Context(), id, opts, c.who()); err != nil {
 		c.refused(err, "/domains/"+id)
 		return
