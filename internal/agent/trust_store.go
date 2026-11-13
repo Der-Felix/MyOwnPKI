@@ -257,7 +257,7 @@ func restoreTrustFile(t *trustTarget) error {
 // that went, for the end of an error text. A hook that failed or timed out may
 // already have rewritten the bundle, so the bundle has to be built again from
 // the files that are there now. It is best effort: a failure here is reported
-// and never hides the first error. The run is not cut short by a cancelled
+// and never hides the first error. The run is not cut short by a canceled
 // context (an interrupt included): the state has to end up consistent.
 func (e trustEnv) regenerate(ctx context.Context, argv []string) string {
 	if err := e.runHook(context.WithoutCancel(ctx), argv); err != nil {

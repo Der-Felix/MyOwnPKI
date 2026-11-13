@@ -106,6 +106,7 @@ func TestGuideChainRunsInAPrivateDirectoryAndStopsOnAFailedCheck(t *testing.T) {
 				if dir == "" || dir == realShared {
 					t.Fatalf("curl ran in %q, not in a new directory (shared: %s)", dir, realShared)
 				}
+				// #nosec G703 -- the directory that mktemp -d made and the stub curl reported, in this test only.
 				if st, serr := os.Stat(dir); serr != nil || st.Mode().Perm()&0o077 != 0 {
 					t.Errorf("the working directory %s is not private: %v %v", dir, st, serr)
 				}
