@@ -1906,3 +1906,34 @@ approval of ECharts is kept for a later step. What that step takes (so the choic
   tenant and takes none from the request, so "another tenant" is tested on the service, not over HTTP; the separate cache per
   tenant is tested in `internal/report`. `internal/server/monitor_test.go` checks the wiring.
 - No CLI help or docs change: the plan names none; the API reference page of the site is step 51.
+
+**Step 48 (chart rendering).** What differs from the plan text, and why:
+
+- **No `internal/web/chart` package.** The chart is a templ component in the existing `components` package
+  (`components.Chart(view.Chart)`, `chart.templ` and `chart.go` for the geometry), the plain description is
+  `view.Chart` (the `view` and `components` packages import nothing else of the product), and the texts and the
+  mapping from `report.Report` live in the new Go-only package `internal/web/charts` (`Expiry`, `Issuances`,
+  `Authorities`, `Alerts`, `Fleet`). The step 49 pages call `components.Chart(charts.Expiry(rep.Expiry))` and so on;
+  `charts.Fleet` returns three bar charts (states, versions, deployments) or nil while the listener is off.
+- **Kinds:** `columns` and `bars` (one value per category, the color comes from the category's series: expiry windows,
+  agent states) and `stacked` and `stackedbars` (one value per series). The CA chart is horizontal (`stackedbars`)
+  because names are long; the other stacked charts and the expiry timeline are vertical.
+- **The legend is drawn inside the SVG** (swatch plus text, wrapped in Go), not as HTML, so the hatch patterns
+  (`pattern` per chart id: `s2` diagonal, `s3` horizontal lines) are the same in the plot and the legend. Chart ids are
+  page constants (`chart-expiry` ...) and must be unique on a page: the patterns are found by id (the gallery's dark
+  preview uses its own id for that reason).
+- **Tokens:** `--chart-s1..s3` (light, dark, OS-follow) and `--chart-w` (480 px, the widest chart; the SVG scales below
+  it, the viewBox is 360 units wide so a phone shows 12 px text at about 1:1). No `--chart-grid`: grid lines use
+  `--border`, the axis `--border-strong`, text `--text-muted`. `TestChartColorsHaveContrast` checks 3:1 against `--bg`
+  for the three series and the five status tokens in all three blocks.
+- **Text safety:** every string from data is stripped of control and format characters (line breaks, bidi overrides),
+  clipped (18 runes on an axis, 48 in the table and tooltip, 24 for series, 200 for title and summary; the plan said 32)
+  and written by templ; attributes are plain decimals or constants; class names come from a fixed list.
+- **Empty and extreme data:** all zero (or no category) renders the empty-state sentence and the caption, no SVG and no
+  table; a zero value draws no bar; a non-zero value is at least 2 units; values are clamped to 0 .. 2^50.
+- **Test rule:** `svg_rules_test.go` holds `svgViolations`: an `<svg` must be exactly
+  `<svg class="chart-svg" role="img" aria-labelledby="..." viewBox="0 0 W H">`, not nested, closed, and with no
+  `<script>`, `<foreignObject>`, `<image>`, `<use>`, `<style>`, `<a>`, `<animate*>`, `<set>`, `href`, `src`, `style=`, `on*=`
+  or `javascript:` inside. The render tests use it on every page; the `.templ` scan allows `<svg` only in
+  `components/chart.templ`, in the template form of the same shape.
+- The gallery has a "Charts" section with sample data (fixed dates), the empty state, and one chart in the dark preview.

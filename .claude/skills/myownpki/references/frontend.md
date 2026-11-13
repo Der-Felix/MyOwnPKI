@@ -108,7 +108,8 @@ rejected as "too AI-looking", and the first gallery still read as such – so:
 
 - Semantic HTML, labels for every input, keyboard navigation, visible focus.
 - Screenshot tests per layout (A/B/C) and theme (light/dark) for key pages.
-- Tests render every page and fail on inline styles/scripts, event handlers, inline `<svg>`, images other
+- Tests render every page and fail on inline styles/scripts, event handlers, inline `<svg>` (except the one chart tag
+  shape of `components.Chart`, see `svg_rules_test.go`), images other
   than brand files with `alt`,
   undefined CSS classes, unknown tokens and hard-coded colors outside `tokens.css`.
 
