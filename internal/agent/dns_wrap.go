@@ -11,9 +11,15 @@ import (
 	"time"
 )
 
-// cleanupTimeout bounds one CleanUp: a hanging DNS server must not keep the
-// agent from finishing (and from systemd's TimeoutStopSec).
-const cleanupTimeout = 30 * time.Second
+const (
+	// cleanupTimeout bounds one CleanUp while the issuance runs normally.
+	cleanupTimeout = 30 * time.Second
+	// shutdownCleanupBudget is all the time the CleanUps of one issuance share
+	// once its context is canceled (the agent is stopping): the unit's
+	// TimeoutStopSec is 30 s, and a hanging DNS server must not make systemd
+	// kill the agent in the middle of the second record.
+	shutdownCleanupBudget = 12 * time.Second
+)
 
 // Optional interfaces of the providers behind the guard.
 type (
@@ -37,8 +43,9 @@ type recordKey struct{ domain, token, keyAuth string }
 //     compromised ACME server cannot make the agent write another name's record;
 //   - checks the context before Present, and hands it to the provider;
 //   - runs CleanUp with a context that is not canceled, for at most
-//     cleanupTimeout, and records a failure, which lego only logs; Notice puts
-//     the failures into the deployment's status;
+//     cleanupTimeout (when the issuance was canceled: within one shared
+//     budget of shutdownCleanupBudget), and records a failure, which lego only
+//     logs; Notice puts the failures into the deployment's status;
 //   - turns a panic of the provider into an error;
 //   - removes the provider's secrets from every error and log line, and wipes
 //     them when the issuance is over.
@@ -51,12 +58,15 @@ type dnsGuard struct {
 	names             map[string]bool // base names of the deployment, no "*."
 	timeout, interval time.Duration
 	cleanupTimeout    time.Duration
+	cleanupBudget     time.Duration // shared by all CleanUps once ctx is canceled
 
-	mu       sync.Mutex
-	pending  map[recordKey]bool
-	warnings []string
-	leftover []string // domains whose record may remain, in order, without repeats
-	closed   bool
+	mu         sync.Mutex
+	pending    map[recordKey]bool
+	warnings   []string
+	leftover   []string        // domains whose record may remain, in order, without repeats
+	budget     context.Context //nolint:containedctx // the shared deadline of the CleanUps after a cancel; nil until the first one
+	budgetStop context.CancelFunc
+	closed     bool
 }
 
 // newDNSGuard wraps inner for one issuance of deployment d. interval is the
@@ -66,7 +76,7 @@ func newDNSGuard(ctx context.Context, inner dnsProvider, name string, cfg DNSPro
 		inner: inner, ctx: ctx, log: log, name: name,
 		names:    map[string]bool{},
 		timeout:  time.Duration(cfg.PropagationTimeout+cfg.PropagationWait) * time.Second,
-		interval: interval, cleanupTimeout: cleanupTimeout,
+		interval: interval, cleanupTimeout: cleanupTimeout, cleanupBudget: shutdownCleanupBudget,
 		pending: map[recordKey]bool{},
 	}
 	for _, n := range d.Names {
@@ -157,8 +167,29 @@ func (g *dnsGuard) CleanUp(domain, token, keyAuth string) error {
 	return nil
 }
 
+// cleanupParent is the context the next CleanUp's limit hangs on, and the
+// longest the CleanUp may take. While the issuance runs, that is a context
+// that is not canceled and cleanupTimeout. Once the issuance is canceled (the
+// agent is stopping), all CleanUps share one deadline of cleanupBudget, which
+// starts with the first of them; ok is false when it has passed.
+func (g *dnsGuard) cleanupParent() (parent context.Context, limit time.Duration, ok bool) {
+	if g.ctx.Err() == nil {
+		return context.WithoutCancel(g.ctx), g.cleanupTimeout, true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.budget == nil {
+		g.budget, g.budgetStop = context.WithTimeout(context.WithoutCancel(g.ctx), g.cleanupBudget)
+	}
+	return g.budget, g.cleanupBudget, g.budget.Err() == nil
+}
+
 func (g *dnsGuard) cleanUp(k recordKey) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(g.ctx), g.cleanupTimeout)
+	parent, limit, ok := g.cleanupParent()
+	if !ok {
+		return fmt.Errorf("dns provider %q: removing the TXT record for %s was not tried: the %s that the agent takes for all cleanups while it stops are used up", g.name, k.domain, g.cleanupBudget)
+	}
+	ctx, cancel := context.WithTimeout(parent, g.cleanupTimeout)
 	defer cancel()
 	g.bind(ctx)
 	done := make(chan error, 1)
@@ -172,7 +203,7 @@ func (g *dnsGuard) cleanUp(k recordKey) error {
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("dns provider %q: removing the TXT record for %s did not finish within %s", g.name, k.domain, g.cleanupTimeout)
+		return fmt.Errorf("dns provider %q: removing the TXT record for %s did not finish within %s", g.name, k.domain, min(limit, g.cleanupTimeout))
 	}
 }
 
@@ -202,7 +233,11 @@ func (g *dnsGuard) close() {
 		return
 	}
 	g.closed = true
+	stop := g.budgetStop
 	g.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 	if c, ok := g.inner.(dnsIdleCloser); ok {
 		c.closeIdle()
 	}

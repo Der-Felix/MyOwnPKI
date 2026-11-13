@@ -213,7 +213,8 @@ func TestGuardCleansUpAfterCancelWithAContextThatIsNotCanceled(t *testing.T) {
 	if p.cleanCtxErr != nil {
 		t.Fatalf("the cleanup context was canceled: %v", p.cleanCtxErr)
 	}
-	if d := p.cleanDeadline; d.IsZero() || time.Until(d) > cleanupTimeout || time.Until(d) < cleanupTimeout-5*time.Second {
+	// Canceled: the shared shutdown budget, not the 30 s of a running issuance.
+	if d := p.cleanDeadline; d.IsZero() || time.Until(d) > shutdownCleanupBudget || time.Until(d) < shutdownCleanupBudget-5*time.Second {
 		t.Fatalf("cleanup deadline %v", d)
 	}
 	if got := strings.Join(p.calls, "|"); got != "present homelab.lan tok|cleanup homelab.lan tok" {
@@ -351,5 +352,70 @@ func TestGuardCloseWipesTheCredentialsAndReleasesConnections(t *testing.T) {
 	g.close()
 	if p.creds.TSIGSecret.isSet() || !p.idleClosed {
 		t.Fatalf("secret set %v, connections closed %v", p.creds.TSIGSecret.isSet(), p.idleClosed)
+	}
+}
+
+func TestGuardSharesOneCleanupBudgetAfterCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	p := newRecordingProvider()
+	p.cleanBlock = make(chan struct{})
+	t.Cleanup(func() { close(p.cleanBlock) })
+	log, _ := captureLog()
+	g := testGuard(ctx, p, log)
+	g.cleanupBudget = 300 * time.Millisecond // the per-record limit stays 30 s
+	for _, tok := range []string{"a", "b"} {
+		if err := g.Present("homelab.lan", tok, "ka"+tok); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cancel() // the agent is stopping
+	start := time.Now()
+	g.finish()
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("two cleanups of a hanging server took %v, the budget is 300ms in total", d)
+	}
+	w := g.Warnings()
+	if len(w) != 2 {
+		t.Fatalf("warnings %q", w)
+	}
+	// One record hung until the budget ended, the other had no time left and
+	// was not even sent to the provider.
+	var hung, untried int
+	for _, text := range w {
+		switch {
+		case strings.Contains(text, "did not finish"):
+			hung++
+		case strings.Contains(text, "was not tried"):
+			untried++
+		}
+	}
+	if hung != 1 || untried != 1 {
+		t.Fatalf("hung %d, not tried %d: %q", hung, untried, w)
+	}
+	if calls := p.callList(); len(calls) != 3 {
+		t.Fatalf("calls %q: two Present and one CleanUp expected", calls)
+	}
+	if n := g.Notice(); !strings.Contains(n, "_acme-challenge.homelab.lan") {
+		t.Fatalf("notice %q", n)
+	}
+}
+
+// Without a cancel each record keeps its own 30 s (here: the guard's value).
+func TestGuardKeepsThePerRecordLimitWhileTheIssuanceRuns(t *testing.T) {
+	t.Parallel()
+	p := newRecordingProvider()
+	g := testGuard(t.Context(), p, nil)
+	g.cleanupBudget = time.Millisecond // ignored: the context is not canceled
+	if err := g.Present("homelab.lan", "tok", "ka"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.CleanUp("homelab.lan", "tok", "ka"); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if d := p.cleanDeadline; d.IsZero() || time.Until(d) > cleanupTimeout || time.Until(d) < cleanupTimeout-5*time.Second {
+		t.Fatalf("cleanup deadline %v", d)
 	}
 }
