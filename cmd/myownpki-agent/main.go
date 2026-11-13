@@ -56,7 +56,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n"+
 			"       %s deployment add NAME [flags] | list | remove NAME [--prune-paths]\n"+
 			"       %s sandbox sync [--dry-run] [--adopt | --prune]\n"+
-			"       %s trust install --root-sha256 HEX | remove | status [--quiet]\n", binary, binary, binary, binary)
+			"       %s trust install --root-sha256 HEX | remove | status [--quiet]\n"+
+			"note:  config check reads ca_bundle; run as non-root it cannot read a 0600 ca_bundle and\n"+
+			"       reports \"cannot be checked against the pin\" (exit 0). Run it as root for the full check.\n", binary, binary, binary, binary)
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

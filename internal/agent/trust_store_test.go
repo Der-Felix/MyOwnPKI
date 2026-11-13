@@ -792,6 +792,14 @@ func TestSystemTrustCheck(t *testing.T) {
 	if text, ok := check(); !ok || !strings.Contains(text, "configured") || !strings.Contains(text, "Debian-family") {
 		t.Errorf("unsupported: %v %q", ok, text)
 	}
+	// A ca_bundle that cannot be read (a 0600 file seen by another user; a
+	// directory stands in for it here): reported as "cannot be checked", and the
+	// check still passes, as "config check" documents.
+	mkdirAll(t, f.caBundle)
+	f.writeAt("/etc/os-release", osReleaseDebian)
+	if text, ok := check(); !ok || !strings.Contains(text, "ca_bundle cannot be checked against the pin") {
+		t.Errorf("unreadable ca_bundle: %v %q", ok, text)
+	}
 }
 
 func TestParseOSReleaseAndFamilies(t *testing.T) {

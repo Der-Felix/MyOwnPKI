@@ -56,13 +56,21 @@ func TrustRemove(ctx context.Context, opts TrustOptions) error {
 }
 
 // TrustStatus reports whether the file in the store is the pinned root. It
-// writes nothing and does not need root.
+// writes nothing and does not need root. It reads agent.yaml and the file in
+// the anchors directory, never ca_bundle: "config check" is the command that
+// compares ca_bundle with the pin, and as non-root it cannot read a 0600
+// ca_bundle (see SystemTrustCheck).
 func TrustStatus(opts TrustOptions) (bool, error) {
 	return trustStatus(trustHost(), opts)
 }
 
 // SystemTrustCheck is the block "system trust" of "config check": the text to
 // print, and false when agent.yaml and ca_bundle disagree about the root.
+//
+// Limit: the check reads ca_bundle. A ca_bundle with mode 0600 (owned by root)
+// cannot be read by another user, and "config check" run as non-root then
+// prints "ca_bundle cannot be checked against the pin" and exits 0. Run it as
+// root for the full check; "trust status" does not read ca_bundle at all.
 func SystemTrustCheck(cfg *Config) (string, bool) {
 	return systemTrustCheck(trustHost(), cfg)
 }
