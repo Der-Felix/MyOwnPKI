@@ -154,9 +154,33 @@ func TestGalleryShowsEveryChart(t *testing.T) {
 		t.Error("the empty-state chart is missing")
 	}
 	// The classes of the families that need a gallery entry.
-	for _, class := range []string{"ch-ok", "ch-warn", "ch-crit", "ch-info", "ch-neutral", "ch-s1", "ch-s2", "ch-s3", "ch-axis", "ch-grid", "ch-label", "ch-hatch", "ch-num", "chart-numbers"} {
+	for _, class := range []string{"ch-ok", "ch-warn", "ch-crit", "ch-info", "ch-neutral", "ch-s1", "ch-s2", "ch-s3", "ch-axis", "ch-grid", "ch-label", "ch-hatch", "ch-num", "chart-numbers", "fold", "fold-body"} {
 		if !strings.Contains(out, class) {
 			t.Errorf("the gallery does not show %s", class)
+		}
+	}
+}
+
+// TestFoldStylesAreCalm: the fold (the details section of the Reports page
+// and the dashboard) has no motion or decoration and the gallery shows it
+// open and closed.
+func TestFoldStylesAreCalm(t *testing.T) {
+	t.Parallel()
+	css := readStyles(t)["styles/components.css"]
+	i := strings.Index(css, ".fold {")
+	j := strings.Index(css, ".columns {")
+	if i < 0 || j < i {
+		t.Fatal("fold block not found in components.css")
+	}
+	for _, bad := range []string{"gradient", "shadow", "animation", "transition", "@keyframes", "url(", "filter", "background", "border"} {
+		if strings.Contains(css[i:j], bad) {
+			t.Errorf("the fold styles use %q", bad)
+		}
+	}
+	out := get(t, newTestHandler(t, true), "/design").Body.String()
+	for _, want := range []string{`<details class="fold" id="gallery-fold-open" open>`, `<details class="fold" id="gallery-fold-closed">`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the gallery lacks %q", want)
 		}
 	}
 }

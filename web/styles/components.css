@@ -424,6 +424,25 @@
   line-height: var(--lh-caption);
 }
 
+/* A section that opens and closes (native details): the summary is the
+   section heading, drawn inline so the disclosure marker sits beside it. */
+.fold {
+  margin-bottom: var(--s-24);
+}
+
+.fold > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.fold > summary h2 {
+  display: inline;
+}
+
+.fold-body {
+  margin-top: var(--s-12);
+}
+
 .columns {
   display: grid;
   /* main column (properties) left, secondary right */

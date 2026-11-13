@@ -17,6 +17,7 @@ templ Page(p view.Page) {
 		@commandSection()
 		@tableSection()
 		@chartSection()
+		@foldSection()
 		@formSection()
 		@detailSection()
 		@previewSection()
@@ -198,6 +199,19 @@ templ chartSection() {
 		}
 		<p class="muted">Empty state: a chart without data says so in words and draws nothing.</p>
 		@components.Chart(charts.Expiry(sampleEmptyExpiry))
+	</section>
+}
+
+templ foldSection() {
+	<section class="section" id="folds" aria-labelledby="h-folds">
+		<div class="section-head"><h2 id="h-folds">Folds</h2></div>
+		<p class="muted">A section that opens and closes: a native details element whose summary is the section heading. No script, so the keyboard works (Tab, then Enter or Space). The Reports page and the dashboard use it; the state is not remembered.</p>
+		@components.Fold("gallery-fold-open", "Open by default", true) {
+			<p class="muted">The content of the section: a chart, a table or a sentence.</p>
+		}
+		@components.Fold("gallery-fold-closed", "Closed by default", false) {
+			<p class="muted">Shown after the heading is opened.</p>
+		}
 	</section>
 }
 
