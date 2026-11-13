@@ -21,7 +21,7 @@ full design is in [PLAN.md](PLAN.md).
 | Part | What it is | Default |
 |---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` |
-| Public listener | CRLs and CA certificates over plain HTTP, no login; the trust page at `/` ([chapter 11](#11-the-public-trust-page)) | `:8080` |
+| Public listener | CRLs and CA certificates over plain HTTP, no login; the trust portal at `/` ([chapter 11](#11-the-public-trust-page)) | `:8080` |
 | ACME listener | ACME for the reverse proxy only, plain HTTP – or, with `acme.tls_issuer`, with its own TLS for the clients ([10.10](#1010-without-a-reverse-proxy-acme-with-its-own-tls)); off until `acme.base_url` is set ([chapter 10](#10-acme-server)) | `127.0.0.1:8081` |
 | Data directory | `system.db` (users, sessions, key ring), `audit.db` (instance audit log), `tenants/default/pki.db` (CAs, certificates, encrypted keys) and `tenants/default/audit.db`, `tls/` (bootstrap certificates and the ones the server issues itself, §2.4), `auth.key` | `/var/lib/myownpki` |
 | Config file | YAML, every key also as `MYOWNPKI_*` variable | `/etc/myownpki/config.yaml` (Windows: `%ProgramData%\MyOwnPKI\config.yaml`) |
@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.8
+v=0.3.9
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -510,6 +510,17 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.8 to v0.3.9: no migration, no configuration change and no change to the agent protocol (`myownpki db status`
+shows the same versions), so going back needs no restore. The release turns the page at `/` of the public listener
+into the trust portal ([chapter 11](#11-the-public-trust-page)): the setting `trust_page` keeps its name and meaning but
+has a new label, the downloads and the Windows helpers have new file names with the first 8 hex digits of the
+certificate's SHA-256 (`/ca/…` URLs unchanged), and the page has new headings. It also adds `trust install`,
+`trust remove`, `trust status`, `setup --system-trust`, the `agent.yaml` key `system_trust` and the pillar key
+`system_trust` ([§12.12](#1212-the-root-in-the-system-trust-store)). **Update the agents before you enable
+`system_trust`:** an agent of v0.3.8 or older refuses an `agent.yaml` with that key (unknown keys are errors on
+purpose) and does not start. Nothing changes on an agent until you ask for it. To go back to an older agent, remove the key first:
+`trust remove` does it and also takes the root out of the store. Update the server first, as always.
+
 From v0.3.7 to v0.3.8: pki.db migration 0020 adds two indexes (`certificates_created_at` and the partial
 `acme_orders_certificate`) for the issuance chart; it is indexes only, so no column, row or constraint changes.
 There is no configuration change and no change to the agent or its protocol. The release adds the *Reports* and
@@ -756,7 +767,7 @@ the proxy's address is not in `acme.trusted_proxies`.
 ### 10.4 Trusting your root on the clients
 
 Clients check the proxy's certificate like any website, so they must trust your root CA. Since
-v0.2.2 the trust page at `/` of the public listener walks every platform through it ([chapter
+v0.2.2 the trust page at `/` of the public listener walks every platform through it, since v0.3.9 as the trust portal ([chapter
 11](#11-the-public-trust-page)). By hand: the root
 is on the public listener as `/ca/<root name>/<generation>.crt` (DER):
 
@@ -950,30 +961,43 @@ curl --cacert root.pem https://pki.homelab.lan/acme/directory
 ## 11. The public trust page
 
 Since v0.2.2 the public listener serves a page at `/` – `http://pki.homelab.lan/` behind port 80 –
-that everybody may open without signing in. Send people there instead of mailing root files:
+that everybody may open without signing in. Since v0.3.9 it is the **trust portal**: it guesses the
+visitor's platform, shows the steps and commands for it, and serves a configuration profile for iPhone,
+iPad and Mac. Send people there instead of mailing root files ([§11.2](#112-the-portal-page-and-its-routes)):
 
-- every active CA, **roots first**: name, common name, validity, authoritative **SHA-256 fingerprint**
-  and **SHA-1 only for comparison with the Windows certificate dialog**; after a root renewal also
-  the older generation while it is valid;
-- downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
-  and PEM (`/ca/<name>/<generation>.pem`, new);
-- per root two **Windows helpers** (`.cmd`): *this computer* (LocalMachine, asks for administrator
+- every active CA, **roots first**: name, common name, validity, DER and PEM downloads, and the
+  authoritative **SHA-256 fingerprint** of every root; after a root renewal also the older generation
+  while it is valid. The SHA-1 value is shown with the Windows steps only, for comparison with the Windows
+  certificate dialog;
+- the downloads as DER (`/ca/<name>/<generation>.crt`, the URL in every certificate's AIA, unchanged)
+  and PEM (`/ca/<name>/<generation>.pem`);
+- the steps and commands for Windows, macOS, iPhone and iPad (including *Certificate Trust Settings* –
+  without that step iOS installs a root but doesn't trust it for websites), Android, Debian and Ubuntu,
+  Fedora and RHEL, Firefox and Java, **for every root shown**;
+- per root a configuration profile ([§11.3](#113-the-configuration-profile)) and two **Windows helpers**
+  (`.cmd`, [§11.1](#111-the-windows-helpers)): *this computer* (LocalMachine, asks for administrator
   rights itself) and *my user only* (CurrentUser, no administrator rights);
-- guides for Windows, macOS, iPhone/iPad (including *Certificate Trust Settings* – without that
-  step iOS installs a root but doesn't trust it for websites), Android, Linux and Firefox.
+- intermediates as a table of downloads only: servers send them, nothing is installed.
 
 Only public data, no JavaScript, a strict Content Security Policy (`default-src 'none'`, the own
-stylesheets and logo only), cached for 5 minutes (the files for 15) with ETags.
+stylesheets and logo only, no `script-src`).
 
-**Switch it off** in *Administration → Tenant settings* (*Public trust page*), or through the API
-(`PUT /api/v1/settings` with `"trust_page": false`). Off, `/` and the Windows helpers answer 404;
-the CA certificates, their PEM copies and the CRLs stay – certificates point to them.
+**Switch it off** in *Administration → Tenant settings*, setting `trust_page` (label: *Trust portal at /
+of the public listener (CA certificates, fingerprints, install steps per platform)*; help text: *Covers the
+portal page at /, its ?os= choice, the configuration profile for iPhone, iPad and Mac, and the Windows
+helpers. The downloads under /ca/ and /crl/ stay served either way: certificates point to them.*), or
+through the API (`PUT /api/v1/settings` with `"trust_page": false`). It is asked on every request, so a
+change applies at once. Off, `/`, `/?os=…`, the profile and the Windows helpers answer 404 (the same 404 as
+for a path that never existed); the CA certificates, their PEM copies and the CRLs stay – certificates point
+to them – and so do the page's stylesheets and logo under `/static/`.
 
 > **PKI background – why compare the fingerprint.** A root is the anchor every check ends at:
 > whoever slips you a false root can impersonate every website for you. The page comes over plain
 > HTTP (it must work before anything trusts your PKI), so someone in the network path could change
-> it. The fingerprint is the check: compare it with one you got another way – the admin UI
-> (*Certificate authorities*), a printout, your administrator.
+> it, **the fingerprints on it included**. The fingerprint is the check, but only when you compare it
+> with one you got another way: the admin UI (*Authorities*, the root, which also has a ready-made
+> *Message for your users*), `myownpki ca show NAME` on the server, a printout, your administrator.
+> The first block of the page says exactly this.
 
 ### 11.1 The Windows helpers
 
@@ -996,13 +1020,122 @@ value imports noninteractively. Any unknown argument or missing parameter value 
 The file is ASCII with CRLF line ends. Check a downloaded helper without importing:
 
 ```bat
-cmd /c root-trust-computer.cmd /check
-cmd /c root-trust-computer.cmd /check -ExpectedSha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+cmd /c root-1a2b3c4d-trust-computer.cmd /check
+cmd /c root-1a2b3c4d-trust-computer.cmd /check -ExpectedSha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Windows may warn about a downloaded `.cmd` (SmartScreen, *Unblock* in its properties) – that is
 normal for scripts from the network. Use only the SHA-256 value from the authenticated admin UI or
 another independent channel; never copy an expectation from the download page or helper itself.
+
+The portal's PowerShell and shell blocks ([§11.2](#112-the-portal-page-and-its-routes)) are different on this
+point: they **do** contain the root's SHA-256, taken from the page, and only check the download against it. That
+does not contradict the rule above, which is about the helpers: the embedded value shows that a download matches
+the page, not that the page is genuine, and every block says so. The helpers keep the stricter path (a value
+from the admin UI that you give them).
+
+### 11.2 The portal page and its routes
+
+| Route | What it serves |
+|---|---|
+| `/` | The portal. One optional query value `os` selects a platform |
+| `/ca/<name>/<generation>.crt`, `.pem` | DER and PEM of a CA certificate (always served, also with the portal off) |
+| `/crl/<name>/<generation>.crl` | The CRL (always served) |
+| `/trust/<name>/<generation>/machine.cmd`, `user.cmd` | The Windows helpers of a root ([§11.1](#111-the-windows-helpers)) |
+| `/trust/<name>/<generation>/profile.mobileconfig` | The configuration profile of a root ([§11.3](#113-the-configuration-profile)) |
+| `/static/styles/…`, `/static/brand/…`, `/favicon.ico` | The stylesheets and logo of the page |
+
+The helpers and the profile are served for **roots** only, and only for a generation the page lists. An
+intermediate never gets a command, a helper or a profile.
+
+**The platform.** The server reads the `User-Agent`: only its first 512 bytes count, ASCII letters are folded to
+lower case, and an ordered list of fixed substrings decides, the first match wins. No regular expression is
+used, so there is no backtracking, and no part of the header is kept or written anywhere.
+
+| The header contains | Platform |
+|---|---|
+| `iphone`, `ipad`, `ipod` or `like mac os x` | iPhone and iPad |
+| `android` | Android |
+| `windows` | Windows |
+| `macintosh` or `mac os x` | macOS |
+| `cros` | none (ChromeOS) |
+| `ubuntu` or `debian` | Debian and Ubuntu |
+| `fedora`, `red hat` or `centos` | Fedora, RHEL, Rocky and Alma |
+| `linux` or `x11` | Linux: both families are shown |
+
+`firefox/` (not on iOS) is a flag, not a platform: the page adds a note that Firefox keeps its own list of
+authorities. The result is a guess and the page says so; an iPad that asks for the desktop version of web sites
+sends a Mac string and is shown macOS steps (the macOS block names this case).
+
+**The choice.** `/?os=<value>` with one of `windows`, `macos`, `ios`, `android`, `debian`, `fedora`, `firefox`,
+`java` or `all` overrides the guess (`all` shows every platform). Anything else – an unknown value, an empty
+one, a repeated one, one longer than 16 bytes – counts as not given. The value is compared with that list and
+never echoed. With neither a choice nor a guess the page shows the list of systems and no steps.
+
+**The commands.** Each block for a root carries only values from the database: the root's SHA-256, its download
+address (the CA's public base URL plus `/ca/<name>/<generation>.crt`, the base URL inside its certificates,
+never the `Host` header of the request) and its name. The base URL must be `http` or `https`, with a host of
+letters, digits, dots and hyphens, an optional port and an optional path of letters, digits and `._~/-`; the
+name must be a valid CA name. Otherwise the block shows no command and says to compare the file by hand. The
+Linux, macOS and Java chains are joined with `&&`, so a failed check stops everything after it, and every chain
+starts with `tmp=$(mktemp -d) && cd "$tmp"`: the download, check and install happen in a new private
+directory. That directory is **not removed** afterwards. Windows uses one PowerShell `if`/`else` statement
+that imports into `Cert:\CurrentUser\Root`, or `Cert:\LocalMachine\Root` in a PowerShell started as
+administrator.
+
+**File names.** The files the commands create are `myownpki-<name>[-<generation>]-<8hex>.crt` (Debian family) or
+`.pem` (RedHat family): the generation appears for an older generation only, and the last part is the first 8
+hex digits of the certificate's SHA-256, so two certificates never get the same name (the CA `root-2` at
+generation 1 and the CA `root` at an older generation 2 would both be `root-2` without it). The downloads of the
+page, the profile and the Windows helpers use the same base name: `<name>[-<generation>]-<8hex>.crt`, `.pem`,
+`.cer` (the DER file Windows opens with its certificate dialog), `.mobileconfig`, and
+`<base>-trust-computer.cmd` and `<base>-trust-user.cmd`.
+
+**Headers and caching.**
+
+| Response | Headers |
+|---|---|
+| The page | `Vary: User-Agent` always; `Cache-Control: private, max-age=300` when the `User-Agent` told the page something (a platform or Firefox) and no `?os=` was given, `public, max-age=300` otherwise; an `ETag`; `HEAD` and `If-None-Match` work. The strict CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer` |
+| The profile, the helpers | `public, max-age=900` with an `ETag`; the profile as `application/x-apple-aspen-config` with `Content-Disposition: attachment`, the name built from the validated CA name |
+
+A shared cache in front of the listener (a reverse proxy that caches) may therefore serve the profile and the
+helpers for up to 15 minutes, and a page it stored as `public` for up to 5 minutes, **after you switched the
+portal off**.
+
+**No redirects, no state.** None of the portal's own routes redirects, and no response of it has a `Location`
+header. The router in front of them (Go's `ServeMux`) answers `307` for a path that is not clean, such as
+`//ca/root/1.crt` or `/a/../ca`, before any route runs. A request writes nothing: no log line, no counter, no
+audit entry. **There is no rate limit on the public listener** (its timeouts and its 8 KiB header limit apply);
+a server that is reachable from the internet should be limited in its reverse proxy.
+
+**The root's page in the admin UI.** *Authorities*, a root: the row *Trust portal* shows the address (the root's
+public base URL plus `/`), *Switched off in Administration → Tenant settings.* while `trust_page` is off, *This
+root is not offered on the portal (status: …)* when the portal does not list it (the CA is not active, or its
+certificate waits for its signature, is revoked, is not valid yet or has expired), or a hint without an address
+when the base URL is empty or not a plain `http://` or `https://` address. The block *Message for your users*
+below the properties is a plain text to copy into a mail or a wiki page: the address, the root's name, its
+SHA-256 fingerprint, a sentence to compare it with the value on the page before installing, and a sentence about
+the second step on an iPhone or iPad. It is escaped text, with no script and no clipboard button, and it is not
+shown for an intermediate or while the portal does not offer the root.
+
+### 11.3 The configuration profile
+
+`/trust/<name>/<generation>/profile.mobileconfig` is generated from the root's certificate on every request and
+contains **only the public certificate**: one `Configuration` dictionary with a single payload of the type
+`com.apple.security.root`. The display name is the common name (control characters removed, at most 64
+characters), the identifier is `local.myownpki.root.<first 32 hex digits of the SHA-256>`, and the UUIDs are
+derived from the SHA-256 (the first 16 bytes of a SHA-256 over a fixed label and the fingerprint, with the
+version nibble 8 and the variant bits set). There is no date, host name, serial number or scope, no other payload
+type, and `PayloadRemovalDisallowed` is `false`: the user can always remove it. The same root gives the same bytes
+every time, so installing it again replaces the profile; a renewed root has another fingerprint and can be
+installed next to the old one.
+
+The profile is **unsigned**, so iOS, iPadOS and macOS show it as *Not Signed*. A signature would need a
+certificate the device already trusts, which is what is missing. On iOS and iPadOS the second step is on the page
+and in the admin message: *Settings, General, About, Certificate Trust Settings*, then switch the root on; without
+it the root is installed but not trusted for web sites. On a Mac, if Keychain Access still shows the certificate
+as not trusted, set *When using this certificate* to *Always Trust*. How a real device shows the profile, which
+menu names it uses and what macOS does with a profile that names no scope were not tried on a device.
 
 ## 12. Agent
 
@@ -1091,15 +1224,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.8
+v=0.3.9
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.8_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.9_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.8_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.8_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.9_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.9_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1128,6 +1261,10 @@ and enrolls before enabling or starting anything. A pending enrollment leaves th
 and prints `systemctl enable --now myownpki-agent` for use after approval; rerunning setup polls the
 pending request. Admission enables and starts the service. An already-enrolled update keeps local
 configuration and restarts it.
+
+`--system-trust` adds the root that `setup` just verified to the host's system trust store and records
+`system_trust` in `agent.yaml`, as the last step after enrollment (Debian and RedHat families, off by default,
+[§12.12](#1212-the-root-in-the-system-trust-store)). An unsupported host is refused before any file is written.
 
 The token file is deleted only when that invocation newly obtains admission; pending, failed, polled
 and already-enrolled runs keep it. The initial `agent.yaml` has no deployments. Setup preserves every
@@ -1346,6 +1483,11 @@ measured overall exposure are documented in the **agent end-to-end** job summary
 values can differ between systemd releases. No unmeasured local value is claimed here. The
 **install** job separately downloads the served `.deb` from a real server, checks independent root
 and package hashes, enrolls through `setup`, and updates an older enrolled agent on real systemd.
+
+The optional top-level key `system_trust: {root_sha256: "<64 hex digits>"}` records that the root of this PKI was put
+into the host's system trust store by `myownpki-agent trust install` or `setup --system-trust`
+([§12.12](#1212-the-root-in-the-system-trust-store)). Absent means off. The running service ignores it, and an
+agent older than 0.3.9 refuses it.
 
 ### 12.4 Firewall
 
@@ -1715,7 +1857,7 @@ formula's own [README](../deploy/salt/myownpki/README.md) lists every state and 
 - **Pillar `myownpki:agent`.** Required: `version`, `server`, `acme_directory`, `root_source`,
   `root_sha256` and `package.sha256` (a map of `amd64` and `arm64` to the SHA-256 of the package). Optional:
   `package.source` (default `salt://myownpki/files/{name}`) and `package.format` (`auto`, `deb`, `rpm`),
-  `webroot`, `low_ports`, `enrollment_pass`, `config_source`, `deployments` and `absent`. The hashes come
+  `webroot`, `low_ports`, `system_trust`, `enrollment_pass`, `config_source`, `deployments` and `absent`. The hashes come
   from the authenticated admin UI, not from the files being rolled out.
 - **Verified package.** Salt ignores `source_hash` for `salt://` sources, so the formula stages the package
   in `/var/cache/myownpki-agent`, compares its SHA-256 with the pillar (the state
@@ -1734,6 +1876,10 @@ formula's own [README](../deploy/salt/myownpki/README.md) lists every state and 
   other than `/var/lib/myownpki-agent` breaks the formula's `agent.crt` checks.
 - **Updates.** A new package on an enrolled host runs `setup` again (the state
   `myownpki-agent-setup-update`), which is the update step of [§9](#9-upgrading). Update the server first.
+- **System trust.** `system_trust: true` (a boolean, default `false`) adds the state
+  `myownpki-agent-system-trust` after `setup`, which runs `trust install` ([§12.12](#1212-the-root-in-the-system-trust-store)).
+  It refuses a value that is not a boolean, `true` on an `os_family` other than Debian and RedHat, and `true` with
+  a `version` below 0.3.9. `false` or absent creates no state and removes nothing: `trust remove` is by hand.
 - **Fails closed.** A missing required key, a missing hash for the minion's architecture, an unknown key,
   option or format, a pass that is not a string and similar mistakes render one failing state,
   `myownpki-agent-refused`, and nothing is installed. `state.show_highstate` prints the reason.
@@ -1908,6 +2054,109 @@ now*; the deployment turns *deployed*; `openssl s_client -connect minion-01.home
 x.homelab.lan` shows both names; `dig +short TXT _acme-challenge.homelab.lan @192.0.2.53` prints nothing.
 Put a wrong secret in the file and the renewal fails with a message that names the provider and holds no part
 of the secret; correct the file and the next attempt works without a restart.
+
+### 12.12 The root in the system trust store
+
+Since v0.3.9 the agent can add the root of this PKI to the **system trust store** of its host, so that `curl`
+and every other program there trust the PKI's certificates without a `--cacert` option. It is **opt-in and off
+by default**, it is a command that root runs (or Salt runs), and it is **never part of `run`**: the running
+service is confined by the unit's sandbox (§12.3) and cannot write `/etc/ssl`, `/etc/pki` or `/usr/local/share`.
+Widening the unit's `ReadWritePaths` to those directories would give the always-running, network-facing process
+write access to the host's trust anchors, so it is not done; the unit file and its drop-ins are unchanged.
+
+**What it can do, and what it implies.** The agent can add the CA that issues its own certificates; it never
+touches anything else. The root is the one the host already pinned at enrollment: `ca_bundle`, checked against
+`--root-sha256` by `setup`. The option therefore makes no new trust decision, it only widens the scope of the same
+one. After it, **every program on the host that reads the system store trusts that root for every name**; the
+only limit is a name constraint on the intermediates (which works only where
+the client enforces it). Firefox, Java and other programs with their own store are not affected.
+
+**Hosts.** Debian-family and RedHat-family Linux. The family comes from `ID` and `ID_LIKE` in `/etc/os-release`
+(or `/usr/lib/os-release`): `debian` selects the Debian family, `rhel`, `fedora` or `centos` the RedHat family.
+Anything else, and a host without a readable `os-release`, is refused with the `ID` and `ID_LIKE` it reports, and
+nothing is changed. The target and the command are fixed per family; nothing from `agent.yaml` reaches a path or
+an argument:
+
+| Family | File | Command (no shell) |
+|---|---|---|
+| Debian | `/usr/local/share/ca-certificates/myownpki-agent-root.crt` | `/usr/sbin/update-ca-certificates` |
+| RedHat | `/etc/pki/ca-trust/source/anchors/myownpki-agent-root.pem` | `/usr/bin/update-ca-trust` |
+
+The command runs with the environment `PATH=/usr/sbin:/usr/bin:/sbin:/bin` and `LC_ALL=C` (no proxy and no
+`SSL_CERT_*` variable), with the working directory `/`, with umask 022 whatever the caller's umask is (so the
+bundle stays readable for everyone), and with a limit of 60 seconds. Its output is cleaned of control characters
+and cut before it enters an error text.
+
+**`trust install --root-sha256 HEX [--no-record] [--config FILE]`** (root only). `--root-sha256` is required
+(exit code 2 without it). Before a byte is written it checks that: the caller is root; the host is of a supported
+family; `ca_bundle` is a regular file (a symbolic link is refused) of at most 1 MiB with exactly one PEM
+certificate and nothing else; that certificate is a self-signed CA; and its SHA-256 equals the value given. The
+file written is made from the bytes that were checked, not read again. The anchors directory must exist (an error
+names the missing CA certificates package otherwise), and neither it nor the target may be a symbolic link. The
+file goes through a temporary file in the same directory with mode 0644 and a rename, then the command runs, then
+`agent.yaml` gets the key `system_trust` (the previous file stays as `agent.yaml.bak`). `--no-record` leaves
+`agent.yaml` alone, for a file that another tool renders.
+
+- **A failed command is rolled back.** The previous state of the file is put back, or the file is removed, so
+  "the file is there" means "the command succeeded". Because a failed `update-ca-certificates` may already have
+  rewritten the bundle, the command then runs **once more**, best effort, and the error text says how that went
+  ("the trust store was regenerated again" or "could not be regenerated again: …"). The first error is kept.
+- **Running it again** is safe: with identical content nothing is written, but the command still runs once. That
+  makes a file dropped in by hand effective, and it is cheap.
+- **A different pin** than the recorded one replaces the key after the new value matched `ca_bundle` (a root
+  renewal). `ca_bundle` is replaced only by `setup`, so run `setup` with the new root first.
+- **An error after the install** (the key cannot be written) says that the root is installed and to run the
+  command again after fixing `agent.yaml`.
+
+**`trust status [--quiet] [--root-sha256 HEX] [--config FILE]`** reads and writes nothing and needs no root. It
+compares the fixed file with the pin of `agent.yaml` (or the argument) and prints one line. It never reads
+`ca_bundle`. **Exit code 0 only when the installed file is the pinned root**; "not installed", "differs", "not
+configured", a pin that disagrees with the argument and an unsupported host all exit 1. `--quiet` prints nothing.
+
+**`trust remove [--root-sha256 HEX] [--config FILE]`** (root only) needs a valid `agent.yaml` and a pin (the key,
+or the argument; both given and different is an error). It deletes **only the fixed file, and only when it holds
+the pinned root**; another content is refused. Then it runs the same command as `install` and removes the key
+from `agent.yaml`. When the file is already gone it still runs the command, so a stale bundle is built again, and
+exits 0. Without the anchors directory there is nothing to run. A failed command puts the file back and runs the
+command once more.
+
+**`setup --system-trust`** (with the `--root-sha256` that `setup` always needs) does the install after
+enrollment, for an admitted and for a waiting host (the root does not depend on the approval) and never for a
+denied or expired one. It checks the family before it writes any file ("no host files were changed"). If the
+install fails, `setup` itself is done, and the message says to run `trust install` after fixing the cause.
+
+**`agent.yaml`:**
+
+```yaml
+system_trust:
+  root_sha256: "AA..."   # 64 hexadecimal digits, no colons; absent: off
+```
+
+The key is read by `config check` and the `trust` commands; the running service ignores it. **An agent older than
+0.3.9 refuses the key** (unknown keys are errors) and does not start, so update the agents before you write it
+(§9). `deploy/agent.example.yaml` does not list it, because `setup` compares that file with the installed one.
+
+**`config check`** prints a line `system trust`: `off`; `installed: <file> holds the root with SHA-256 <hex>`;
+`not installed (<file>); as root run: myownpki-agent trust install --root-sha256 <hex>`; or `differs: …`. Those
+are information and exit 0. It exits 1 only when `system_trust` does not match the root in `ca_bundle` (the line then says
+"pin differs from ca_bundle"), or the key cannot be read. **Limit:** the check reads `ca_bundle`, which `setup`
+writes with mode 0600 for root, so as another user `config check` says that `ca_bundle` cannot be checked against
+the pin, and exits 0. Run it as root for the full check.
+
+**Salt.** The pillar key `myownpki:agent:system_trust` is a boolean. With `true` the formula adds the state
+`myownpki-agent-system-trust` after `setup`: `trust install --root-sha256 <root_sha256>`, skipped (`unless`) when
+`trust status --quiet --root-sha256 <root_sha256>` already exits 0, with no restart. With `config_source` the
+state adds `--no-record`, because Salt owns `agent.yaml`. `false` and an absent key create no state, **and the
+formula never removes the root**: set the key to `false`, then run `trust remove` on the host. The formula
+refuses a value that is not a boolean, `true` on a minion whose `os_family` is not Debian or RedHat, and `true`
+with a `version` below 0.3.9 (§12.10).
+
+An end-to-end check on a Debian or RedHat agent host, as root: `trust install --root-sha256 <hex>` prints the
+file and the command it ran; `trust status` exits 0; `config check` shows `system trust  installed: …`; a second
+`install` changes nothing; a wrong hash is refused before any write; `curl https://<a host of the PKI>/` works
+without `--cacert`; `systemctl show myownpki-agent -p ReadWritePaths` is as before; `trust remove`, then
+`trust status` exits 1. This was tested with a fake runner and temporary directories in the program's tests, not
+yet on a live host.
 
 ## 13. Monitoring and notifications
 

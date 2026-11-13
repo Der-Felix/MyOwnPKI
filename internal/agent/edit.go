@@ -31,7 +31,7 @@ var errYAMLFeatures = errors.New("agent.yaml uses anchors, aliases or several do
 // topLevelOrder is the order in which new top-level keys are inserted: before
 // the first existing key that comes later in this list, else at the end.
 var topLevelOrder = []string{"server", "ca_bundle", "hostname", "acme_directory", "proxy", "state_dir", "log_level",
-	"enrollment", "dns_providers", "hooks", "paths", "sandbox", "deployments"}
+	"enrollment", "dns_providers", "hooks", "paths", "sandbox", "system_trust", "deployments"}
 
 type yamlEditor struct {
 	orig    []byte
@@ -288,6 +288,38 @@ func (e *yamlEditor) setLowPortsTrue() error {
 	m.Content = append(m.Content, plainKey("low_ports"), boolNode(true))
 	e.changed = true
 	return nil
+}
+
+// setSystemTrust records system_trust.root_sha256 (lower-case hex), always
+// double-quoted so that a hash of digits only cannot be read as a number.
+func (e *yamlEditor) setSystemTrust(pin string) error {
+	m, err := e.ensure(e.root, trustConfigKey, yaml.MappingNode)
+	if err != nil {
+		return err
+	}
+	block(m)
+	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pin, Style: yaml.DoubleQuotedStyle}
+	if v := mapGet(m, "root_sha256"); v != nil {
+		if !strings.EqualFold(v.Value, pin) || v.Tag != "!!str" {
+			*v = *node
+			e.changed = true
+		}
+		return nil
+	}
+	m.Content = append(m.Content, plainKey("root_sha256"), node)
+	e.changed = true
+	return nil
+}
+
+// removeSystemTrust deletes the key; there is nothing to do without one.
+func (e *yamlEditor) removeSystemTrust() {
+	for i := 0; i+1 < len(e.root.Content); i += 2 {
+		if e.root.Content[i].Value == trustConfigKey {
+			e.root.Content = slices.Delete(e.root.Content, i, i+2)
+			e.changed = true
+			return
+		}
+	}
 }
 
 // addHook defines a hook; the caller has already checked that the name is free.

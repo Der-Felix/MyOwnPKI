@@ -1,6 +1,6 @@
 ---
 title: "A tour of the web UI"
-description: "A walk through the screens of the MyOwnPKI web UI: sign-in, unseal, dashboard, reports, analysis, authorities, certificates, the issue wizard, the ACME pages, users, the audit log, legacy import and offline signing, with the role each one needs."
+description: "A walk through the screens of the MyOwnPKI web UI: sign-in, unseal, dashboard, reports, analysis, authorities, certificates, the issue wizard, the ACME pages, users, the audit log, legacy import, offline signing and the public trust portal, with the role each one needs."
 permalink: /tour/
 sources:
   - docs/screenshots/
@@ -16,13 +16,16 @@ sources:
   - internal/web/app_caactions.go
   - internal/web/app_issue.go
   - internal/acme/admin.go
+  - internal/publish/trust.go
+  - internal/web/pages/trust/trust.templ
+  - internal/tools/screenshots/main.go
 ---
 
 This page shows what each screen is for, what you can do there and which role it needs, so that you
 know where to look before you have an instance in front of you. The pictures come from a demo instance
 (`myownpki init --demo`) with sample certificates under `homelab.example`, taken in an earlier release.
 The pictures of *Reports* and *Analysis* are from v0.3.8 and come from a demo instance with extra sample
-data (agents, alerts, endpoints). Your menu can have more entries than these pictures, for example
+data (agents, alerts, endpoints). The two pictures of the *trust portal* are from v0.3.9. Your menu can have more entries than these pictures, for example
 *Agents*, *Alerts* and *Endpoints*; an entry is hidden when your role cannot use it. There is a light and a
 dark theme.
 
@@ -253,6 +256,26 @@ parent signature) before it activates the CA.
 [Sign with an offline root]({{ '/guides/offline-root/' | relative_url }}) and
 [Root and intermediate CAs]({{ '/learn/root-and-intermediate/' | relative_url }}).
 
+## The trust portal
+
+![The trust portal for Windows: a warning, the roots with their SHA-256 fingerprints, the list of systems and the Windows steps]({{ '/assets/screens/tour-portal-windows.png' | relative_url }})
+
+![The trust portal for iPhone and iPad: the same page with the profile download and the four steps]({{ '/assets/screens/tour-portal-ios.png' | relative_url }})
+
+This is not a page of the admin UI. It is the page at `/` of the **public listener**, which anybody on the
+network may open without signing in, and the one you send people to so that their devices trust your root.
+Both pictures show it with the system chosen in the address (`/?os=windows` and `/?os=ios`); without that
+the page guesses the system from the browser. The warning comes first on purpose: the page is plain HTTP, so
+nothing on it proves itself, and the fingerprint must be compared with a value from another source. Below the
+fingerprints come the list of systems and the steps for the chosen one: PowerShell and the Windows helpers, or
+the configuration profile and the *Certificate Trust Settings* step on an iPhone. The pictures come from the demo
+instance of v0.3.9, whose two roots are both listed.
+
+**Role:** none; it is public. An admin finds the address and a *Message for your users* on the root's page under
+*Certificate authorities*, and can switch the portal off in *Tenant settings*. **More:**
+[The trust portal]({{ '/trust-portal/' | relative_url }}) and
+[Make clients trust your root]({{ '/guides/trust-the-root/' | relative_url }}).
+
 ## Pages without a picture here
 
 - **Alerts** lists what the server watches and works while sealed. Viewer or higher, tenant-wide.
@@ -265,7 +288,7 @@ parent signature) before it activates the CA.
   admin and a fresh second factor. [Domains, approvals and EAB keys]({{ '/guides/domains-and-approvals/' | relative_url }}).
 - **Presets** shows what each kind of certificate gets, read-only.
 - **Tenant settings** holds the step-up lifetime, the ACME rate limits, whether the server may generate
-  keys, the default subject fields, the trust page switch, the predecessor defaults and the agent
+  keys, the default subject fields, the trust portal switch, the predecessor defaults and the agent
   enrollment mode. Viewers and operators read, an admin changes, and a
   different enrollment mode needs a fresh second factor.
   [operations guide §4]({{ '/reference/operations/' | relative_url }}#step-up-confirmation-lifetime).

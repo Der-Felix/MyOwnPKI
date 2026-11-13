@@ -7,6 +7,117 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-13
+
+The trust portal. The page at `/` of the public listener now guesses the visitor's system from the browser, lets the
+visitor choose another one, and shows the steps and commands that install a root there; iPhone, iPad and Mac get a
+configuration profile. The root's page in the admin UI shows the portal's address and a message to send to users.
+An agent host can put the root of this PKI into its own system trust store on request, by command or with the Salt
+formula. The release adds no dependency and no migration. The live test by the maintainer is pending.
+
+### Added
+
+- **Trust portal** (`GET /` of the public listener, internal package `trustkit` for the generated parts): the page
+  starts with a warning that it comes over plain HTTP, so nothing on it proves itself, and says where to get the
+  SHA-256 fingerprint another way (the admin UI, `myownpki ca show NAME`, `openssl`). Then a table of the roots
+  (name, common name, validity, DER and PEM downloads) with each root's SHA-256, the list of systems, the steps for
+  the chosen system and a table of the intermediates (downloads only: servers send them, nothing is installed).
+- **Platform detection** from the `User-Agent` (first 512 bytes, a fixed table, no regular expression: iPhone, iPad
+  and "like Mac OS X", Android, Windows, macOS, Debian and Ubuntu, Fedora, Red Hat and CentOS, Linux or X11 as both
+  Linux blocks, ChromeOS as nothing; Firefox is a flag) and a manual choice with `/?os=<value>`: `windows`, `macos`,
+  `ios`, `android`, `debian`, `fedora`, `firefox`, `java` or `all`. Any other value counts as not given.
+- **Install blocks per platform**, generated per root from the database: Windows (the DER as `.cer`, the certificate
+  dialog, and PowerShell for the current user and for all users), macOS (profile and a Terminal block), iPhone and
+  iPad (profile, and the second step under *Certificate Trust Settings*), Android (user CA store; apps that target
+  API 24 or higher ignore user CAs), the Debian and RedHat families, Firefox (`security.enterprise_roots.enabled`
+  on Windows and macOS only) and Java (`keytool` without `-noprompt`). Each block with a command says that the
+  embedded SHA-256 only checks the download against the page.
+- **Configuration profile** (`/trust/<name>/<generation>/profile.mobileconfig`, roots only): unsigned, only the public
+  certificate, byte-identical for the same root, removable by the user, `application/x-apple-aspen-config`.
+  Devices show it as *Not Signed*.
+- **Admin UI:** a root's page shows a *Trust portal* row (the address, or why there is none) and a plain-text
+  *Message for your users* with the address, the root's SHA-256 and the iPhone step.
+- **Agent: `system_trust`.** Off by default. `myownpki-agent trust install --root-sha256 HEX [--no-record]`,
+  `trust remove` and `trust status [--quiet]`, `setup --system-trust`, the `agent.yaml` key
+  `system_trust: {root_sha256: "<64 hex digits>"}` and a `system trust` line in `config check`. Root only, never part
+  of `run`. Debian-family and RedHat-family hosts, one fixed file and one fixed command per family, the pin checked
+  against `ca_bundle` (one self-signed CA certificate) before anything is written, a failed command rolled back.
+  `config check` exits 1 only when the key does not match `ca_bundle`.
+- **Salt formula:** the pillar key `system_trust` (a boolean, default `false`) and the state
+  `myownpki-agent-system-trust`; `--no-record` with `config_source`; the formula refuses a value that is not a boolean,
+  `true` on a minion that is not Debian or RedHat family, and `true` with a version below 0.3.9. `false` or absent
+  creates no state and the formula never removes the root.
+- **Screenshots tool:** a `public` view kind (the demo instance's public handler) for the portal shots, and `-only`
+  now also selects the standard shots by name.
+- **Documentation:** the site page *The trust portal*, operations guide §11.2, §11.3 and §12.12, two pictures in the
+  tour, and the notes in the FAQ, glossary, guide, CLI and Salt pages.
+
+### Changed
+
+- **The `trust_page` setting** keeps its name, default and API field. Its label is now *Trust portal at / of the public
+  listener (CA certificates, fingerprints, install steps per platform)*, and its help text names the portal page, its
+  `?os=` choice, the profile and the Windows helpers and says that `/ca/` and `/crl/` stay served.
+- **File names:** downloads, the profile, the Linux files and the Windows helpers carry the first 8 hex digits of the
+  certificate's SHA-256 (`<name>[-<generation>]-<8hex>.crt`, `myownpki-<name>[-<generation>]-<8hex>.crt` on Linux,
+  `…-trust-computer.cmd`), so two certificates never share a name. The `/ca/` URLs are unchanged.
+- **The page:** one block per system instead of one section per CA with a guide for the first root only. The by-hand
+  Windows step is now the certificate dialog and two PowerShell blocks instead of `certutil -addstore`; the text of the
+  Windows helpers is as before. The Linux commands download, check the hash and install in one `&&` chain instead of
+  `sudo cp`.
+- **Caching:** the page sends `Vary: User-Agent` and is `private, max-age=300` when the browser told it something,
+  `public, max-age=300` otherwise; the profile and the helpers are `public, max-age=900`. `.btn-row` has a bottom margin.
+- `api/openapi.yaml` `info.version` is 0.3.9, and the description of `trust_page` follows the web UI (description only).
+
+### Security notes
+
+- **A public page without a sign-in shows only public data:** CA certificates, their fingerprints and text. A request
+  can influence two things: the platform guess (a row of a fixed table) and the `?os=` value (an entry of an
+  allow-list). Nothing of the `User-Agent` or the query is written into the page, a header, a file name or a command
+  (tests plant a canary in both). The `Host` header is not used: addresses come from the CA's public base URL.
+- **No half-checked command.** The base URL must pass a conservative pattern and the CA name its own check; otherwise
+  the block shows no command and says to compare by hand. Variables in a command are hashes, validated names and that
+  address. The Linux, macOS and Java chains are joined with `&&` and start in a new `mktemp -d` directory, so a failed
+  check stops them and another local user cannot swap the file between the check and the install.
+- **The page does not claim more than it can.** It says first that nothing on it proves itself, and that the hash in a
+  command only checks the download against the page. The Windows helpers still contain no expected value.
+- **Switched off means 404**, the same as for a path that never existed; `/ca/` and `/crl/` stay. None of the portal's
+  own routes redirects (Go's router still answers 307 for an unclean path before a route runs). A request writes no
+  state, no log line and no audit entry. The Content Security Policy has no `script-src`.
+- **Agent:** the install is a command run by root, not part of the service; the sandbox of the unit and its drop-ins
+  are unchanged. The checked bytes are the ones written; the files and the command are fixed; no shell, a cleaned
+  environment, a time limit, umask 022; symbolic links are refused; `remove` deletes only a file that holds the pinned
+  root. What the option allows is stated: every program on the host then trusts that root for every name.
+- **No new dependency**; `go.mod`, `go.sum` and the guard of the server binary's imports are unchanged.
+- **An independent review found no blocker, and its findings were fixed:** a switched-off page that differed from a
+  404, a helper file name built from the request's text, colliding file names, commands that ran in a shared directory,
+  the trust command run again after a failure and for unchanged files, the hook's umask and the removal command, and
+  a root page that offered an address for a root the portal does not list.
+
+### Known limitations
+
+- **The live test by the maintainer is pending.** How iOS, iPadOS, macOS, Android and Firefox show the profile and the
+  menus, what a profile without a scope does on a Mac, whether Firefox on Linux honors `enterprise_roots`, and
+  `update-ca-certificates` on a real host were **not tested on devices**; the menu names on the page are the vendors'
+  documented ones and may differ. The page is corrected after the live test.
+- **The page cannot prove itself.** It comes over plain HTTP (the public listener has no TLS), so the fingerprint must
+  be compared with a value from another source, and the hash in a command checks the download only against the page.
+- **No rate limit** on the public listener and no counters; limit in the reverse proxy when it is reachable from the
+  internet.
+- A shared cache may serve the profile and the helpers for up to 15 minutes, and a `public` page for up to 5, after the
+  portal is switched off. The directory a pasted command creates with `mktemp -d` stays behind.
+- Detection is a guess: an iPad that asks for the desktop version looks like a Mac, a Linux without a distribution
+  shows both families, ChromeOS shows the list. The profile is unsigned (*Not Signed*); there is no MDM payload, no QR
+  code and no installer script. There is no way to hide one root from the portal.
+- `system_trust` supports Debian-family and RedHat-family Linux only, adds the host's own root only, and a renewed root
+  needs a new `trust install` after `setup`. As non-root, `config check` cannot read a 0600 `ca_bundle` and does not
+  check the key against it. The Salt render has run in CI only.
+
+### Upgrade notes
+
+- No migration and no configuration change; `myownpki db status` is unchanged, so going back needs no restore.
+- **Update the agents before you enable `system_trust`:** an agent older than 0.3.9 refuses the key and does not start.
+  Update the server first, as always. The new file names and headings change the page, not the `/ca/` URLs.
+
 ## [0.3.8] - 2026-11-13
 
 Charts, reports and analysis: a *Reports* page with the expiry of the current week and the next 12 weeks, the issuances by source,
@@ -1014,7 +1125,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...v0.3.6

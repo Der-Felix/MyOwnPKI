@@ -1,9 +1,12 @@
-// Package trust renders the public trust page (v0.2.2): the CA certificates
-// with their fingerprints, downloads and install guides, served by the
-// public listener at / without a sign-in. Only public data; no JavaScript.
+// Package trust renders the public trust portal (v0.2.2, extended in v0.3.9):
+// the root and intermediate CA certificates with their fingerprints and
+// downloads, and the install steps for one platform – chosen by the
+// visitor or guessed from the browser. Served by the public listener at /
+// without a sign-in. Only public data; no JavaScript.
 package trust
 
 import (
+	"github.com/Der-Felix/MyOwnPKI/internal/trustkit"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -21,121 +24,217 @@ type CA struct {
 	// Fingerprint is authoritative SHA-256; SHA1 is only for the Windows dialog.
 	Fingerprint, SHA1 string
 	DER, PEM          string // download paths
-	// FileDER and FilePEM are the names the browser saves them as.
-	FileDER, FilePEM string
-	// WinMachine and WinUser are the Windows helpers (roots only).
-	WinMachine, WinUser string
+	// FileDER and FilePEM are the names the browser saves them as; FileCER is
+	// the DER copy with the extension Windows opens with its certificate dialog.
+	FileDER, FilePEM, FileCER string
+	// WinMachine, WinUser and Profile are the Windows helpers and the Apple
+	// configuration profile (roots only); FileProfile is the name it is saved as.
+	WinMachine, WinUser, Profile, FileProfile string
+}
+
+// Choice is one entry of the platform list.
+type Choice struct {
+	Label    string
+	Href     string // /?os=… (from a fixed list, never from the request)
+	Selected bool   // its steps are shown below
+}
+
+// RootGuide is the steps and commands for one root on one platform.
+type RootGuide struct {
+	CA     CA
+	Blocks []trustkit.Block
+}
+
+// Section is the guide of one platform: one RootGuide per shown root.
+type Section struct {
+	ID    string // trustkit platform name, used in anchors
+	Title string
+	Roots []RootGuide
 }
 
 // Data is the page.
 type Data struct {
-	CAs []CA
-	// Example is the root the guides name in their commands (the first one).
-	Example *CA
+	Roots, Intermediates []CA
+	// Detected is the platform name guessed from the browser ("" when nothing
+	// was found or the visitor chose with ?os=); the text comes from a fixed table.
+	Detected string
+	Choices  []Choice
+	// Sections are the guides to show; none means the page offers only the list.
+	Sections []Section
+	// FirefoxHint is set when the browser is Firefox and its steps are not shown.
+	FirefoxHint bool
 }
 
 templ Page(p view.Page, d Data) {
 	@layout.Plain(p) {
-		<section class="section" aria-labelledby="h-check">
+		<section class="section" aria-labelledby="h-warning">
+			<div class="section-head"><h2 id="h-warning">Before you install anything</h2></div>
+			@components.Messages([]view.Message{{Kind: view.MessageWarning, Text: "This page comes over plain HTTP. Nothing on it proves itself, not even the fingerprints: anyone in the network path could change this page, the downloads and the commands together. Before you install a root, compare its SHA-256 fingerprint with a value you got another way."}})
+			<p>Where to get that value:</p>
+			<ul>
+				<li>in the admin UI: <em>Authorities</em>, open the root (it shows the SHA-256 fingerprint);</li>
+				<li>on the PKI server: <code>myownpki ca show NAME</code> prints the SHA-256 of every generation;</li>
+				<li>from your administrator, a printout or a message you trust.</li>
+			</ul>
+			<p>
+				To see the value of a file you downloaded: <code>openssl x509 -inform DER -in FILE -noout -fingerprint -sha256</code>.
+				That helps only when you compare it with a value from the list above.
+			</p>
+		</section>
+		<section class="section" aria-labelledby="h-roots">
+			<div class="section-head"><h2 id="h-roots">Root certificates</h2></div>
 			<p>
 				Install a <strong>root CA</strong> once on every device and browser that should trust the
-				certificates of this PKI. Intermediate CAs need no installation – servers send them along.
+				certificates of this PKI.
 			</p>
-			@components.Messages([]view.Message{{Kind: view.MessageWarning, Text: "This page comes over plain HTTP: anyone in the network path could change it. Before you trust a root, compare its SHA-256 fingerprint with one you got another way – from your administrator, or from the admin UI (Certificate authorities)."}})
+			if len(d.Roots) == 0 {
+				<p class="muted">There is no root certificate authority to show yet.</p>
+			} else {
+				@caTable(d.Roots)
+				for _, c := range d.Roots {
+					<div class="section-head">
+						<h3>SHA-256 of { c.Name }</h3>
+						if !c.Current {
+							<span class="muted">older generation { itoa(c.Generation) }, still valid</span>
+						}
+					</div>
+					<pre class="fingerprint">{ c.Fingerprint }</pre>
+				}
+			}
 		</section>
-		if len(d.CAs) == 0 {
-			<p class="muted">There is no certificate authority to show yet.</p>
+		<section class="section" aria-labelledby="h-system">
+			<div class="section-head"><h2 id="h-system">Your system</h2></div>
+			if d.Detected != "" {
+				<p>Your browser says: <strong>{ d.Detected }</strong>. That is a guess; choose another system if it is wrong.</p>
+			} else if len(d.Sections) == 0 {
+				<p>This page could not tell your system. Choose it:</p>
+			} else {
+				<p>Choose a system:</p>
+			}
+			<ul>
+				for _, c := range d.Choices {
+					<li>
+						<a href={ templ.SafeURL(c.Href) }>{ c.Label }</a>
+						if c.Selected {
+							<span class="muted">– shown below</span>
+						}
+					</li>
+				}
+			</ul>
+			if d.FirefoxHint {
+				<p class="muted">Your browser is Firefox. It keeps its own list of certificate authorities on most systems: see <a href="/?os=firefox">the Firefox steps</a>.</p>
+			}
+		</section>
+		for _, s := range d.Sections {
+			@guide(s)
 		}
-		for _, c := range d.CAs {
-			<section class="section" aria-labelledby={ "h-" + c.Name + "-" + itoa(c.Generation) }>
-				<div class="section-head">
-					<h2 id={ "h-" + c.Name + "-" + itoa(c.Generation) }>{ c.Name } – { c.Kind }</h2>
-					if !c.Current {
-						<span class="muted">older generation { itoa(c.Generation) }, still valid</span>
-					}
-				</div>
-				@components.KVList([]view.KV{
-					{Key: "Common name", Value: c.CommonName},
-					{Key: "Valid", Value: c.Valid},
-				})
-				<h3>SHA-256 fingerprint (authoritative)</h3>
-				<pre class="fingerprint">{ c.Fingerprint }</pre>
-				<h3>SHA-1 fingerprint (Windows certificate dialog comparison only)</h3>
-				<pre class="fingerprint">{ c.SHA1 }</pre>
-				<div class="btn-row">
-					<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileDER }>Download { c.FileDER } (DER)</a>
-					<a class="btn" href={ templ.SafeURL(c.PEM) } download={ c.FilePEM }>Download { c.FilePEM } (PEM)</a>
-					if c.Root {
-						<a class="btn" href={ templ.SafeURL(c.WinMachine) }>Windows helper: this computer</a>
-						<a class="btn" href={ templ.SafeURL(c.WinUser) }>Windows helper: my user only</a>
-					}
-				</div>
+		if len(d.Intermediates) > 0 {
+			<section class="section" aria-labelledby="h-intermediates">
+				<div class="section-head"><h2 id="h-intermediates">Intermediate certificates</h2></div>
+				<p>Servers send these along with their own certificate: install nothing. The files are here for servers and tools that need them.</p>
+				@caTable(d.Intermediates)
 			</section>
-		}
-		if d.Example != nil {
-			@guides(*d.Example)
 		}
 	}
 }
 
-templ guides(r CA) {
-	<section class="section" aria-labelledby="h-windows">
-		<div class="section-head"><h2 id="h-windows">Windows</h2></div>
-		<p>
-			The <strong>Windows helper</strong> shows the root's SHA-256 and SHA-1. Only SHA-256 authorizes trust;
-			SHA-1 is display-only for comparison with the Windows certificate dialog. Compare SHA-256 with the
-			exact value from the authenticated admin UI or your administrator, then type YES, or pass that exact
-			64-hex value as <code>-ExpectedSha256</code> to import noninteractively. <em>This computer</em> asks for
-			administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to
-			confirm). <code>/check</code> only displays and checks; <code>/quiet</code> never bypasses authorization.
-		</p>
-		<p>By hand, in a command prompt as administrator – for your user only, add <code>-user</code> after <code>certutil</code>:</p>
-		<pre class="pem">certutil -addstore -f Root { r.FileDER }</pre>
+// caTable lists certificates: what they are and the downloads.
+templ caTable(list []CA) {
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Common name</th>
+					<th>Valid</th>
+					<th>Download</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, c := range list {
+					<tr>
+						<td>
+							{ c.Name }
+							if !c.Current {
+								<span class="muted">(older generation { itoa(c.Generation) }, still valid)</span>
+							}
+						</td>
+						<td>{ c.CommonName }</td>
+						<td>{ c.Valid }</td>
+						<td>
+							<div><a href={ templ.SafeURL(c.DER) } download={ c.FileDER }>{ c.FileDER } (DER)</a></div>
+							<div><a href={ templ.SafeURL(c.PEM) } download={ c.FilePEM }>{ c.FilePEM } (PEM)</a></div>
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// guide is the steps of one platform for every shown root.
+templ guide(s Section) {
+	<section class="section" aria-labelledby={ "h-" + s.ID }>
+		<div class="section-head"><h2 id={ "h-" + s.ID }>{ s.Title }</h2></div>
+		if s.ID == "windows" {
+			<p>
+				The <strong>Windows helper</strong> shows the root's SHA-256 and SHA-1. Only SHA-256 authorizes trust;
+				SHA-1 is display-only for comparison with the Windows certificate dialog. Compare SHA-256 with the
+				exact value from the authenticated admin UI or your administrator, then type YES, or pass that exact
+				64-hex value as <code>-ExpectedSha256</code> to import noninteractively. <em>This computer</em> asks for
+				administrator rights and works for all users; <em>my user only</em> needs none (Windows asks once to
+				confirm). <code>/check</code> only displays and checks; <code>/quiet</code> never bypasses authorization.
+			</p>
+		}
+		for _, r := range s.Roots {
+			<div class="section">
+				<div class="section-head">
+					<h3>{ r.CA.Name } – { r.CA.CommonName }</h3>
+					if !r.CA.Current {
+						<span class="muted">older generation { itoa(r.CA.Generation) }, still valid</span>
+					}
+				</div>
+				@downloads(s.ID, r.CA)
+				if s.ID == "windows" {
+					<p>SHA-1 fingerprint (Windows certificate dialog comparison only):</p>
+					<pre class="fingerprint">{ r.CA.SHA1 }</pre>
+				}
+				for _, b := range r.Blocks {
+					<div class="section-head"><h4>{ b.Title }</h4></div>
+					if len(b.Steps) > 0 {
+						<ol>
+							for _, step := range b.Steps {
+								<li>{ step }</li>
+							}
+						</ol>
+					}
+					if len(b.Lines) > 0 {
+						<pre class="pem">{ join(b.Lines) }</pre>
+					}
+					if b.Note != "" {
+						<p class="muted">{ b.Note }</p>
+					}
+				}
+			</div>
+		}
 	</section>
-	<section class="section" aria-labelledby="h-macos">
-		<div class="section-head"><h2 id="h-macos">macOS</h2></div>
-		<ol>
-			<li>Download <code>{ r.FileDER }</code> and double-click it; Keychain Access opens. Add it to the <em>System</em> keychain.</li>
-			<li>Double-click the certificate in Keychain Access, open <em>Trust</em>, set <em>When using this certificate</em> to <em>Always Trust</em>, close the window and confirm with your password.</li>
-		</ol>
-		<p>Or in Terminal:</p>
-		<pre class="pem">sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain { r.FileDER }</pre>
-		<p>Safari, Chrome and Edge use the keychain.</p>
-	</section>
-	<section class="section" aria-labelledby="h-ios">
-		<div class="section-head"><h2 id="h-ios">iPhone and iPad</h2></div>
-		<ol>
-			<li>Open this page in <strong>Safari</strong> and tap <a href={ templ.SafeURL(r.DER) }>{ r.Name + " for iPhone and iPad" }</a>; allow the download of the configuration profile.</li>
-			<li>Open <em>Settings</em> – <em>Profile Downloaded</em> at the top (or <em>General → VPN &amp; Device Management</em>), choose the profile, tap <em>Install</em> and enter your passcode.</li>
-			<li>
-				Open <em>Settings → General → About → Certificate Trust Settings</em> and switch on full trust for
-				<em>{ r.CommonName }</em>. <strong>Without this step</strong> the root is installed but not trusted for
-				websites.
-			</li>
-		</ol>
-	</section>
-	<section class="section" aria-labelledby="h-android">
-		<div class="section-head"><h2 id="h-android">Android</h2></div>
-		<ol>
-			<li>Download <code>{ r.FileDER }</code>.</li>
-			<li>Open <em>Settings → Security and privacy → More security settings → Encryption and credentials → Install a certificate → CA certificate</em> (names differ between vendors), confirm the warning and choose the file.</li>
-		</ol>
-		<p class="muted">Chrome trusts such a user CA; many apps don't. A device management (MDM) can install it for all apps.</p>
-	</section>
-	<section class="section" aria-labelledby="h-linux">
-		<div class="section-head"><h2 id="h-linux">Linux</h2></div>
-		<p>Debian, Ubuntu – the file must be PEM and end in <code>.crt</code>:</p>
-		<pre class="pem">{ "sudo cp " + r.FilePEM + " /usr/local/share/ca-certificates/" + r.Name + ".crt\nsudo update-ca-certificates" }</pre>
-		<p>Fedora, RHEL, Rocky, Alma:</p>
-		<pre class="pem">{ "sudo cp " + r.FilePEM + " /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust" }</pre>
-		<p class="muted">curl, wget, Python and most programs use this store; Firefox and Chrome on Linux keep their own (see Firefox).</p>
-	</section>
-	<section class="section" aria-labelledby="h-firefox">
-		<div class="section-head"><h2 id="h-firefox">Firefox</h2></div>
-		<ol>
-			<li>Open <em>Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities</em>.</li>
-			<li><em>Import</em> <code>{ r.FileDER }</code> and tick <em>Trust this CA to identify websites</em>.</li>
-		</ol>
-		<p class="muted">On Windows and macOS Firefox can use the system store instead: <code>about:config</code>, <code>security.enterprise_roots.enabled</code> = true.</p>
-	</section>
+}
+
+// downloads are the files a platform needs, as buttons.
+templ downloads(id string, c CA) {
+	<div class="btn-row">
+		switch id {
+			case "windows":
+				<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileCER }>Download { c.FileCER }</a>
+				<a class="btn" href={ templ.SafeURL(c.WinMachine) }>Windows helper: this computer</a>
+				<a class="btn" href={ templ.SafeURL(c.WinUser) }>Windows helper: my user only</a>
+			case "macos", "ios":
+				<a class="btn" href={ templ.SafeURL(c.Profile) }>Download profile { c.FileProfile }</a>
+			case "debian", "fedora", "java":
+				<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileDER }>Download { c.FileDER } (DER)</a>
+				<a class="btn" href={ templ.SafeURL(c.PEM) } download={ c.FilePEM }>Download { c.FilePEM } (PEM)</a>
+			default:
+				<a class="btn" href={ templ.SafeURL(c.DER) } download={ c.FileDER }>Download { c.FileDER } (DER)</a>
+		}
+	</div>
 }

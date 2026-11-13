@@ -1,0 +1,5 @@
+## Import dialog
+1. Download the certificate file (the link above).
+2. Open Settings, Privacy & Security, Certificates, View Certificates, Authorities.
+3. Import the file and tick Trust this CA to identify websites.
+Note: On Windows and macOS Firefox can use the system store instead: open about:config and set security.enterprise_roots.enabled to true. This does not apply to Linux.

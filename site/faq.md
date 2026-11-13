@@ -14,6 +14,7 @@ sources:
   - site/upgrade.md
   - site/hosts.md
   - site/best-practices.md
+  - site/trust-portal.md
 ---
 
 Short answers, each with a link to the page that holds the detail. They describe release
@@ -55,7 +56,7 @@ acme.sh or lego for public names. Release plan:
 
 Only for clients that trust your root. Browsers and operating systems trust the public CAs they ship
 with, and your root is not among them. That is the difference between a private and a public CA, and it
-is why you hand your own root to your own devices ([the trust page]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page)).
+is why you hand your own root to your own devices ([the trust portal]({{ '/trust-portal/' | relative_url }})).
 Background: [How trust works]({{ '/learn/trust/' | relative_url }}).
 
 ### Is it production ready?
@@ -91,11 +92,11 @@ operations guide names a Windows configuration path. This site, however, describ
 the server: the systemd service and the container. For another operating system you install the binary
 by hand and write your own service definition
 ([operations guide §2.2]({{ '/reference/operations/' | relative_url }}#22-with-docker-or-by-hand)); there is no installer for
-it. The agent is Linux only. Windows and macOS as **clients** are fine: the trust page has guides for both.
+it. The agent is Linux only. Windows and macOS as **clients** are fine: the trust portal has steps for both.
 
 ### Which ports does it use?
 
-The admin listener (web UI and API) on 9443, the public listener (CRLs, CA certificates, trust page)
+The admin listener (web UI and API) on 9443, the public listener (CRLs, CA certificates, trust portal)
 on 8080 or 80, the ACME listener only if you set `acme.base_url` (443 with its own TLS, or a local port
 behind your proxy), and the agent listener on 8444 only if you enable it. The server also connects out
 to port 80 of your hosts for http-01. The table with who needs to reach what is in
@@ -274,19 +275,26 @@ Guide: [When things go wrong]({{ '/guides/when-things-go-wrong/' | relative_url 
 
 ### How do I make my devices trust the root?
 
-Open the trust page at `/` of the public listener, for example `http://pki.homelab.lan/`. It lists every
-root with its SHA-256 fingerprint, offers DER and PEM downloads and two Windows helper scripts, and has
-guides for Windows, macOS, iPhone and iPad, Android, Linux and Firefox. On iOS the root needs one more
-switch under *Certificate Trust Settings*.
-See [operations guide chapter 11]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page).
+Send people to the **trust portal**: the page at `/` of the public listener, for example
+`http://pki.homelab.lan/`. It lists every root with its SHA-256 fingerprint, guesses the visitor's system from the
+browser (the visitor can choose another), and shows the steps and commands for Windows, macOS, iPhone and iPad,
+Android, Debian and Ubuntu, Fedora and RHEL, Firefox and Java. iPhone, iPad and Mac get a configuration profile,
+which the device shows as *Not Signed*; on iOS the root needs one more switch under *Certificate Trust Settings*.
+The admin UI writes the message to send: the root's page has *Message for your users*, with the address and the
+fingerprint.
+See [The trust portal]({{ '/trust-portal/' | relative_url }}) and
+[operations guide chapter 11]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page).
 Guide: [Make clients trust your root]({{ '/guides/trust-the-root/' | relative_url }}).
 
 ### Is it safe to download the root over plain HTTP?
 
-Only if you compare the fingerprint with one you got another way, such as the admin UI or a printout.
-The page is plain HTTP on purpose, because it has to work before anything trusts your PKI, so someone in
-the network path could change it; the fingerprint is the check. The Windows helper scripts refuse to
-import without that comparison. See [Security]({{ '/reference/security/' | relative_url }}#what-it-does-not-protect).
+Only if you compare the fingerprint with one you got another way, such as the admin UI, `myownpki ca show NAME`
+or a printout. The portal is plain HTTP on purpose, because it has to work before anything trusts your PKI, so
+someone in the network path could change it. The commands on the page contain the root's SHA-256 and refuse a
+download that differs, but the digits come from the same page: they show that the download matches the page,
+not that the page is genuine. The fingerprint from another source is the check. The Windows helper scripts
+contain no expected value at all and refuse to import without that comparison. See
+[Security]({{ '/reference/security/' | relative_url }}#what-it-does-not-protect).
 
 ### Do clients trust the root or the intermediate?
 
@@ -367,6 +375,15 @@ No. There is no self-update and no remote command. An update is a new package an
 host; the *Agents* page shows the verified commands, and with Salt it is a change of `version` and the
 package hash in the pillar. Update the server first. See
 [Update the agents]({{ '/upgrade/' | relative_url }}#update-the-agents).
+
+### Can the agent put the root into the system trust store?
+
+Yes, since v0.3.9, on request: `myownpki-agent trust install --root-sha256 <hex>` as root, or
+`setup --system-trust`, or `system_trust: true` in the Salt pillar. It is off by default and never part of the running
+service. It adds one file with the root the host already pinned at enrollment, on Debian-family and RedHat-family
+hosts only, and then every program on that host that reads the system store trusts the root for every name.
+See [The trust portal]({{ '/trust-portal/' | relative_url }}#the-root-in-the-system-trust-store-of-an-agent-host).
+**Update the agents before you write the key**: an older agent refuses it.
 
 ## Security and recovery
 
@@ -449,7 +466,7 @@ See [Verify a download]({{ '/reference/security/' | relative_url }}#verify-a-dow
 
 ### What comes next?
 
-The plan lists a public trust portal (v0.3.9), a preview before issuance and versioned settings (v0.3.10),
+The plan lists a preview before issuance and versioned settings (v0.3.10),
 Apache and HAProxy profiles and guides inside the UI (v0.3.11), then a quality round and a beta before
-1.0. dns-01 in the agent (v0.3.7) and the charts, reports and analysis pages (v0.3.8) are released. The
+1.0. dns-01 in the agent (v0.3.7), the charts, reports and analysis pages (v0.3.8) and the trust portal (v0.3.9) are released. The
 order is firmer than the numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).

@@ -26,7 +26,7 @@ task view. If you would rather have no proxy at all, ACME can use its own TLS
 | Listener | Default | Through the proxy? |
 |---|---|---|
 | Admin (UI and REST API), HTTPS | `127.0.0.1:9443` (`install.sh` writes `0.0.0.0:9443` with `admin.allowed_networks`) | No. The examples do not publish it; keep it for administrators ([Installation]({{ '/install/' | relative_url }}#what-runs-where)) |
-| Public (CRLs, CA certificates, trust page), plain HTTP | `:8080` | Yes, as `http://pki.homelab.lan/` on port 80, **without** a redirect to HTTPS |
+| Public (CRLs, CA certificates, trust portal), plain HTTP | `:8080` | Yes, as `http://pki.homelab.lan/` on port 80, **without** a redirect to HTTPS |
 | ACME, plain HTTP | `127.0.0.1:8081` | Yes, as `https://pki.homelab.lan/acme/` on port 443 |
 | Agents, mutual TLS | `:8444` | Not in the examples; the agent listener speaks mutual TLS itself ([Adding hosts]({{ '/hosts/' | relative_url }})) |
 
@@ -132,7 +132,7 @@ curl --cacert homelab-root.pem https://pki.homelab.lan/acme/directory
 ```
 
 The answer lists `newAccount`, `newOrder`, `revokeCert` and `renewalInfo`, all under
-`https://pki.homelab.lan/acme/`. The public listener answers on plain HTTP; 200 is the trust page, 404 means
+`https://pki.homelab.lan/acme/`. The public listener answers on plain HTTP; 200 is the trust portal, 404 means
 the page is switched off, which is fine:
 
 ```bash

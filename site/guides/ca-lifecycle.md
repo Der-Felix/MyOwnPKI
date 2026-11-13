@@ -115,7 +115,7 @@ If the key may be compromised, revoke instead of only retiring:
 |---|---|
 | An intermediate was renewed or replaced, the root is the same | Nothing, if servers send the full chain. New certificates carry the new intermediate. Hosts with an old certificate keep working until it ends. Re-issue by hand what ACME clients and agents do not renew. |
 | An intermediate was revoked | Clients that check revocation reject its certificates once they fetch the new CRL. Re-issue below a new CA. |
-| A root was renewed (a new key) | Install the new root in every trust store **before** certificates below it are used, after comparing its fingerprint ([Make clients trust your root]({{ '/guides/trust-the-root/' | relative_url }})). The trust page lists the older generation while it is valid. |
+| A root was renewed (a new key) | Install the new root in every trust store **before** certificates below it are used, after comparing its fingerprint ([Make clients trust your root]({{ '/guides/trust-the-root/' | relative_url }})). The trust portal lists the older generation while it is valid. |
 
 ## Check it worked
 

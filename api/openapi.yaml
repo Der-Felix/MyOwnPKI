@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.3.8
+  version: 0.3.9
   summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
     v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy
@@ -775,7 +775,7 @@ paths:
         the subject defaults fill fields that neither the request nor the CSR gives (like
         pki.conf of pki.sh) – never the common name.
         `acme_limits` (since 0.2, optional here) are the rate limits of the ACME server.
-        `trust_page` (since 0.2.2, optional here) switches the public trust page.
+        `trust_page` (since 0.2.2, optional here) switches the trust portal of the public listener.
 
         **Changing `agent_enrollment` to a different value needs a fresh second factor** (see
         `POST /auth/step-up`) and is never possible with an API token: in `auto` mode a host that
@@ -3384,11 +3384,14 @@ components:
             accounts_per_ip: { type: integer, minimum: 1, maximum: 1000, description: "New accounts per client address (IPv6 per /64)" }
         trust_page:
           description: |
-            The public listener serves the trust page at `/`: the CA certificates with their
-            SHA-256 fingerprints, install guides and the Windows helpers (since 0.2.2, default
-            on). Always in the answer; optional in a change – left out, the stored value stays.
-            Off, the public listener serves only what certificates point to (CA certificates,
-            CRLs) and the PEM copies.
+            The public listener serves the trust portal at `/` (since 0.2.2 as the trust page,
+            default on; in the web UI the setting reads "Trust portal at / of the public listener
+            (CA certificates, fingerprints, install steps per platform)"). In 0.3.9 it covers the
+            portal page at `/` with its `?os=` choice, the configuration profile for iPhone, iPad
+            and Mac, and the Windows helpers; the field keeps its name. Always in the answer;
+            optional in a change – left out, the stored value stays. Off, `/`, the profile and the
+            helpers answer 404, and the public listener serves only what certificates point to:
+            the CA certificates under `/ca/` (DER and PEM copies) and the CRLs under `/crl/`.
           type: boolean
         agent_enrollment:
           description: |

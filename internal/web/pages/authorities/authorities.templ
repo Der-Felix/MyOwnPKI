@@ -96,7 +96,10 @@ type DetailData struct {
 	Properties  []view.KV
 	Constraints []view.KV
 	CRL         []view.KV
-	Issued      []view.CertRow
+	// UserMessage is the copy-ready text for the people who install the root
+	// ("" = no block): roots only, plain text, shown as escaped text.
+	UserMessage string
+	Issued     []view.CertRow
 	IssuedEmpty string // the text when Issued is empty; "" = the default
 	CanSign     bool
 	// Real is set by the real UI: downloads instead of prototype commands.
@@ -142,6 +145,13 @@ templ Detail(p view.Page, d DetailData) {
 				}
 			</div>
 		</div>
+		if d.UserMessage != "" {
+			<section class="section" aria-labelledby="h-msg">
+				<h2 id="h-msg" class="section-head">Message for your users</h2>
+				<p class="muted">Select the text and copy it into a mail or a wiki page. Nothing on this page is sent anywhere.</p>
+				<pre class="pem">{ d.UserMessage }</pre>
+			</section>
+		}
 		<section class="section" aria-labelledby="h-issued">
 			<h2 id="h-issued" class="section-head">Issued certificates</h2>
 			if len(d.Issued) == 0 && d.IssuedEmpty != "" {

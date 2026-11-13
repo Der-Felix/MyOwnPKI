@@ -166,6 +166,13 @@ from the first SAN.
 
 Background: [Reading a certificate]({{ '/learn/certificate-anatomy/' | relative_url }}).
 
+### Configuration profile
+
+An Apple file (`.mobileconfig`) that tells an iPhone, iPad or Mac to install a setting, here one payload: a root
+certificate. The [trust portal](#trust-portal) serves one per root, unsigned, so the device shows it as *Not
+Signed*; the user can remove it. On iOS and iPadOS the root must also be switched on under *Settings → General →
+About → Certificate Trust Settings*. See [The trust portal]({{ '/trust-portal/' | relative_url }}#macos-iphone-and-ipad).
+
 ### CRL
 
 Certificate revocation list (RFC 5280 §5): a list, signed by a CA, of the serial numbers it has revoked, with a
@@ -256,7 +263,7 @@ at two thirds of the lifetime, each on its own schedule, spread the ends out. Se
 ### Fingerprint
 
 A hash, usually SHA-256, of a certificate's DER encoding, written as hex. You compare a fingerprint of a root you
-got over an untrusted path with one from a trusted source. The trust page also shows a SHA-1 value, only for the
+got over an untrusted path with one from a trusted source. The trust portal also shows a SHA-1 value, only for the
 Windows certificate dialog.
 
 Background: [How trust works]({{ '/learn/trust/' | relative_url }}).
@@ -423,7 +430,7 @@ come from the preset, never from the [CSR](#csr).
 
 ### Public listener
 
-The plain-HTTP listener without a login that serves the CRLs, the CA certificates and the trust page. It speaks
+The plain-HTTP listener without a login that serves the CRLs, the CA certificates and the trust portal. It speaks
 HTTP on purpose, because clients fetch from it before they trust anything. See
 [What runs where]({{ '/install/' | relative_url }}#what-runs-where).
 
@@ -557,18 +564,22 @@ Time-based one-time password (RFC 6238): the six-digit code from an authenticato
 every user here, set up at `init` or confirmed at a new user's first sign-in, with recovery codes as a spare. See
 [Troubleshooting]({{ '/troubleshooting/' | relative_url }}#server-and-sign-in).
 
-### Trust page
+### Trust portal
 
-The page at `/` of the [public listener](#public-listener) where every root can be downloaded (DER and PEM), with
-its SHA-256 fingerprint, two Windows helper scripts and guides for Windows, macOS, iOS, Android, Linux and Firefox.
-It can be switched off in the tenant settings. See
+The page at `/` of the [public listener](#public-listener) (since v0.3.9; a simpler trust page before). It lists
+every root with its SHA-256 fingerprint and downloads (DER and PEM), guesses the visitor's system from the browser,
+and shows the steps and commands for it, with a [configuration profile](#configuration-profile) for Apple devices
+and two Windows helper scripts. It comes over plain HTTP, so nothing on it proves itself: compare the fingerprint
+with a value from another source. It can be switched off in the tenant settings (`/ca/` and `/crl/` stay). See
+[The trust portal]({{ '/trust-portal/' | relative_url }}) and
 [operations guide chapter 11]({{ '/reference/operations/' | relative_url }}#11-the-public-trust-page).
 
 ### Trust store
 
 The set of root certificates that a system or an application trusts: the operating system's store, or the one of
 Firefox and Java. A certificate is accepted only if its [chain](#chain) ends at a root in the store, which is why
-your own root must be added to every client. See
+your own root must be added to every client. An agent host can add it to its own system store on request
+([The trust portal]({{ '/trust-portal/' | relative_url }}#the-root-in-the-system-trust-store-of-an-agent-host)). See
 [Trusting your root on the clients]({{ '/reference/operations/' | relative_url }}#104-trusting-your-root-on-the-clients).
 
 Background: [How trust works]({{ '/learn/trust/' | relative_url }}).

@@ -11,6 +11,7 @@
 //	myownpki-agent deployment list              show the deployments of agent.yaml
 //	myownpki-agent deployment remove NAME       remove a deployment (root)
 //	myownpki-agent sandbox sync                 recompute the systemd drop-ins from agent.yaml (root)
+//	myownpki-agent trust install|remove|status  the root in the system trust store of the host (install and remove: root)
 //	myownpki-agent --version
 //
 // Released for Linux; it builds for Windows, macOS and FreeBSD too.
@@ -54,7 +55,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(stderr, "usage: %s setup | enroll [--token-file FILE] | run | status | config check [--config FILE]\n"+
 			"       %s deployment add NAME [flags] | list | remove NAME [--prune-paths]\n"+
-			"       %s sandbox sync [--dry-run] [--adopt | --prune]\n", binary, binary, binary)
+			"       %s sandbox sync [--dry-run] [--adopt | --prune]\n"+
+			"       %s trust install --root-sha256 HEX | remove | status [--quiet]\n"+
+			"note:  config check reads ca_bundle; run as non-root it cannot read a 0600 ca_bundle and\n"+
+			"       reports \"cannot be checked against the pin\" (exit 0). Run it as root for the full check.\n", binary, binary, binary, binary)
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -99,6 +103,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(rest) > 1 && rest[1] == "sync" {
 			return cmdSandboxSync(ctx, rest[2:], stdout, stderr)
 		}
+	case "trust":
+		return cmdTrust(ctx, rest[1:], stdout, stderr)
 	}
 	fs.Usage()
 	return 2
@@ -127,6 +133,7 @@ func cmdSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.StringVar(&opts.Hostname, "hostname", "", "exact FQDN to prove at enrollment (default: host FQDN)")
 	fs.StringVar(&opts.ACMEDirectory, "acme-directory", "", "https URL of the ACME directory, written into a new agent.yaml")
 	fs.BoolVar(&opts.LowPorts, "low-ports", false, "allow the service to bind ports below 1024")
+	fs.BoolVar(&opts.SystemTrust, "system-trust", false, "after enrollment, add the verified root to the system trust store (Debian and RedHat families)")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -290,8 +297,16 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintln(stdout, line)
 		}
 	}
+	// System trust: read-only, and information unless agent.yaml and ca_bundle
+	// disagree about the root.
+	trustText, trustOK := agent.SystemTrustCheck(cfg)
+	_, _ = fmt.Fprint(stdout, trustText)
 	for _, w := range cfg.Warnings() {
 		_, _ = fmt.Fprintln(stdout, "  warning      ", w)
+	}
+	if !trustOK {
+		_, _ = fmt.Fprintln(stderr, "\nThe configuration is valid, but system_trust does not match the root in ca_bundle (see \"system trust\" above).")
+		return 1
 	}
 	if unusable > 0 {
 		_, _ = fmt.Fprintf(stderr, "\nThe configuration is valid, but %d DNS credentials file(s) used by a deployment cannot be used (see \"dns providers\" above).\n", unusable)

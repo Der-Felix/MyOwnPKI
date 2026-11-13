@@ -41,7 +41,7 @@ This page is the condensed version of
    each send.
 
 2. If the mail server's certificate comes from your own CA, give the server your root as an extra
-   trusted root. Any readable PEM file works, for example the root from the trust page:
+   trusted root. Any readable PEM file works, for example the root from the trust portal:
 
    ```bash
    sudo curl -fsS -o /etc/myownpki/mail-ca.pem http://pki.homelab.lan/ca/root/1.pem
