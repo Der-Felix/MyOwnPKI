@@ -56,8 +56,10 @@ type Agent struct {
 	obtainForTest   func(context.Context, Deployment) (*Material, error)
 	runHookForTest  func(context.Context, string) error
 	openRootForTest func(string) (*os.Root, error)
-	// newDNSProvider builds the provider of a dns-01 issuance (dns_seam.go).
+	// newDNSProvider builds the provider of a dns-01 issuance (dns_seam.go);
+	// nil is the real one. dns holds what tests tune.
 	newDNSProvider dnsProviderFactory
+	dns            dnsTuning
 	reportWake     chan struct{}
 	runMu          sync.Mutex
 	ariForTest     func(context.Context, *x509.Certificate) (renewalWindow, error)
@@ -89,9 +91,8 @@ func New(cfg *Config, log *slog.Logger, version string) (*Agent, error) {
 	a := &Agent{
 		cfg: cfg, st: state{dir: cfg.StateDir}, ch: ch, log: log, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		StandaloneAddr: ":80", Now: clock.System{}.Now, Sleep: sleep,
-		acmeDial:       defaultACMEDial,
-		newDNSProvider: notBuiltDNSProvider,
-		reportWake:     make(chan struct{}, 1),
+		acmeDial:   defaultACMEDial,
+		reportWake: make(chan struct{}, 1),
 	}
 	if err := a.st.ensure(); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)

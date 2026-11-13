@@ -201,6 +201,11 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
+	// A DNS provider is configured by agent.yaml and its credentials file only:
+	// never by a variable of the process environment (docs/PHASE3.md §13.2).
+	if removed := agent.ScrubProviderEnvironment(); len(removed) > 0 {
+		log.Warn("ignoring environment variables that would configure a DNS provider or lego; use agent.yaml and the credentials file", slog.Any("names", removed))
+	}
 	a, err := agent.New(cfg, log, version.Get().Version)
 	if err != nil {
 		log.Error("start", slog.Any("error", err))

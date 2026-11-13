@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-acme/lego/v4/registration"
+	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/challenge/dns01"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -456,26 +457,32 @@ func (f *fakeDNSProvider) CleanUp(domain, _, _ string) error {
 
 func (*fakeDNSProvider) Timeout() (time.Duration, time.Duration) { return time.Minute, time.Second }
 
-func TestDNS01SeamDefaultIsNotBuilt(t *testing.T) {
+// The default factory reads the credentials file at the start of the
+// issuance: a missing file stops it before the account and the network, with
+// a message that names the provider and the file.
+func TestDNS01DefaultFactoryNeedsTheCredentialsFile(t *testing.T) {
 	t.Parallel()
 	c := dnsTestConfig(t.TempDir())
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	d := c.Deployments[0]
-	// A zero factory and the factory New installs behave the same.
+	// A nil factory and a field set to the default behave the same. The agent
+	// has no state or channel: reaching the account would panic.
 	for name, a := range map[string]*Agent{
 		"nil factory":     {cfg: c},
-		"default factory": {cfg: c, newDNSProvider: notBuiltDNSProvider},
+		"default factory": {cfg: c},
 	} {
+		a.newDNSProvider = nil
 		_, err := a.obtain(t.Context(), d)
-		if !errors.Is(err, errDNSNotBuilt) || !strings.Contains(err.Error(), `deployment "wild"`) {
+		var ce *credentialsError
+		if !errors.As(err, &ce) || ce.State != credMissing || !strings.Contains(err.Error(), `deployment "wild"`) || !strings.Contains(err.Error(), `dns provider "homelab-dns"`) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 }
 
-func TestDNS01SeamPassesTheEntryAndCreatesNoResponder(t *testing.T) {
+func TestDNS01SeamPassesTheEntryAndRunsTheProviderInTheGuard(t *testing.T) {
 	t.Parallel()
 	c := dnsTestConfig(t.TempDir())
 	if err := c.Validate(); err != nil {
@@ -486,28 +493,25 @@ func TestDNS01SeamPassesTheEntryAndCreatesNoResponder(t *testing.T) {
 	var gotName string
 	var gotCfg DNSProvider
 	var gotDeployment Deployment
-	a := &Agent{cfg: c, StandaloneAddr: "256.0.0.1:bad", newDNSProvider: func(_ context.Context, name string, cfg DNSProvider, d Deployment) (dnsProvider, error) {
+	a := &Agent{cfg: c, newDNSProvider: func(_ context.Context, name string, cfg DNSProvider, d Deployment) (dnsProvider, error) {
 		gotName, gotCfg, gotDeployment = name, cfg, d
 		return fake, nil
 	}}
-	p, err := a.dnsProviderFor(t.Context(), d)
-	if err != nil || p != dnsProvider(fake) {
-		t.Fatalf("provider %v, %v", p, err)
+	g, err := a.dnsProviderFor(t.Context(), d)
+	if err != nil || g.inner != dnsProvider(fake) {
+		t.Fatalf("provider %v, %v", g, err)
 	}
 	if gotName != "homelab-dns" || gotCfg != c.DNSProviders["homelab-dns"] || !reflect.DeepEqual(gotDeployment, d) {
 		t.Fatalf("factory got %q %+v %+v", gotName, gotCfg, gotDeployment)
 	}
-	// With a provider, the issuance never builds a responder (standalone
-	// would use the bad address above) and stops at the lego seam.
-	_, err = a.obtainWithClient(t.Context(), d, &accountUser{reg: &registration.Resource{}}, "acme-test", nil, nil, p)
-	if !errors.Is(err, errDNSNotWired) {
-		t.Fatalf("obtainWithClient: %v", err)
-	}
-	if _, err = a.obtainWithClient(t.Context(), d, &accountUser{reg: &registration.Resource{}}, "acme-test", nil, nil, nil); err == nil || errors.Is(err, errDNSNotWired) {
-		t.Fatalf("dns-01 without a provider: %v", err)
-	}
+	// Nothing is presented by building the provider.
 	if len(fake.presented)+len(fake.cleaned) != 0 {
 		t.Fatalf("provider used: %+v", fake)
+	}
+	// lego needs a provider, and a resolver of the agent's own.
+	set := func(challenge.Provider, ...dns01.ChallengeOption) error { return nil }
+	if err := a.connectDNS01(t.Context(), set, nil, c.DNSProviders["homelab-dns"]); err == nil {
+		t.Fatal("dns-01 without a provider connected")
 	}
 }
 
