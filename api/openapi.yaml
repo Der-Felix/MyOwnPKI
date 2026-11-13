@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MyOwnPKI Admin API
-  version: 0.3.6
+  version: 0.3.8
   summary: REST API of the MyOwnPKI admin listener (v0.2)
   description: |
     v0.1 (docs/PLAN.md §10): CAs, certificates, presets, upload/download, revocation, legacy

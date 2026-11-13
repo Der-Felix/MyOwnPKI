@@ -78,7 +78,7 @@ distributions; amd64 or arm64). Download the script with the checksum file, chec
 never pipe it into a shell:
 
 ```sh
-v=0.3.6
+v=0.3.8
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -99,7 +99,7 @@ single `myownpki` binary, the operations guide, an example configuration, the sy
 `install.sh`.
 
 ```sh
-v=0.3.6
+v=0.3.8
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -140,8 +140,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.3.6 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.6" \
+cosign verify ghcr.io/der-felix/myownpki:0.3.8 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.8" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
