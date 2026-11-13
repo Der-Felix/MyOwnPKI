@@ -275,6 +275,7 @@ check "update: rolled back, healthy again" "$(said "rolled back to $old_version,
 check "update: rolls back the agent distribution too" "$(tr '\n' ' ' <"$upd/dist-events")" "publish rollback "
 update_run new no
 check "update: not healthy → rolled back, error, restore commands" "$rc $(installed) $(said "restore $upd/backups/")" "1 $old_version yes"
+check "update: restore runs as root, then hands the data directory to the service user" "$(said "chown -R $SVC:$SVC $DATA") $(grep -c 'runuser.* restore ' "$upd.out" || true)" "yes 0"
 update_run new yes bad-copy
 check "update: the copy is not the new binary → rolled back, error" "$rc $(installed)" "1 $old_version"
 check "update: says why" "$(said "the new binary was not installed")" "yes"

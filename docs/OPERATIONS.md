@@ -357,12 +357,22 @@ myownpki backup /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml
   myownpki backup verify /backup/myownpki-2026-10-21 --checkpoint-key <fingerprint>
   ```
 
-Restore into an **empty or missing** data directory, with the server stopped:
+Restore into an **empty or missing** data directory, with the server stopped. With the packaged
+install (§2.1) stop the service, move the old data directory away, create an empty one, run
+`restore` **as root** – not as the service user: it builds its work copy next to the data directory
+(in `/var/lib`), which the service user cannot write to – and hand the result back:
 
 ```bash
+systemctl stop myownpki
+mv /var/lib/myownpki /var/lib/myownpki.old
+install -d -m 0700 -o myownpki -g myownpki /var/lib/myownpki
 myownpki restore /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml --checkpoint-key <fingerprint>
+chown -R myownpki:myownpki /var/lib/myownpki
+systemctl start myownpki
 ```
 
+(`restore` replaces the empty directory by the restored one, which belongs to root until the
+`chown -R`; a data directory owned by someone else also makes `install.sh` refuse to continue.)
 It runs every check first (hashes, database integrity, audit chains and heads, the certificate name
 index) and writes nothing if one fails. Then start the server and unseal it with the passphrase
 **that was valid when the backup was taken**. Certificates issued after the backup are not in it;

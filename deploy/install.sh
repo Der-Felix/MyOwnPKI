@@ -684,11 +684,14 @@ rollback() {
 		die "rolled back to $old_version, which is healthy again; see journalctl -u $SVC. Backup: $backup"
 	fi
 	die "rolled back to $old_version, but it is not healthy either – the new version may have migrated the
-  databases. Restore the backup taken before the update:
+  databases. Restore the backup taken before the update. Run restore as root
+  (the service user cannot write to $(dirname "$DATA"), where restore builds its work
+  copy), then hand the data directory to the service user:
     systemctl stop $SVC
     mv $DATA $DATA.failed-$stamp
     install -d -m 0700 -o $SVC -g $SVC $DATA
-    runuser -u $SVC -- $BIN restore $backup --config $CONF
+    $BIN restore $backup --config $CONF
+    chown -R $SVC:$SVC $DATA
     systemctl start $SVC"
 }
 
