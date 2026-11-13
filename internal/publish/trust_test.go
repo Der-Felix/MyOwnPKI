@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,8 +30,10 @@ type answer struct {
 	h    http.Header
 }
 
-// fetch is a GET; pairs of header name and value follow the path. No answer of
-// this handler is ever a redirect, so none may carry a Location header.
+// fetch is a GET; pairs of header name and value follow the path. None of the
+// portal's own routes is ever a redirect, so no answer to a clean path may carry
+// a Location header. (The router redirects unclean paths with 307 before a
+// handler runs; TestUncleanPathsAreRedirectedByTheRouter shows it.)
 func fetch(t *testing.T, h http.Handler, path string, hdr ...string) answer {
 	t.Helper()
 	return fetchMethod(t, h, http.MethodGet, path, hdr...)
@@ -49,6 +52,25 @@ func fetchMethod(t *testing.T, h http.Handler, method, path string, hdr ...strin
 		t.Errorf("%s %s: a redirect (%d, Location %q)", method, path, rec.Code, loc)
 	}
 	return answer{rec.Code, body, rec.Header()}
+}
+
+// TestUncleanPathsAreRedirectedByTheRouter: what is true about redirects. The
+// portal's own routes never redirect, but Go's ServeMux answers an unclean path
+// with 307 to the clean one before any handler runs; no header of the portal is
+// on that answer.
+func TestUncleanPathsAreRedirectedByTheRouter(t *testing.T) {
+	t.Parallel()
+	_, h, _ := trustSetup(t)
+	for path, want := range map[string]string{"//ca/root/1.crt": "/ca/root/1.crt", "/a/../ca/root/1.crt": "/ca/root/1.crt"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != want {
+			t.Errorf("%s: %d, Location %q, want 307 to %q", path, rec.Code, rec.Header().Get("Location"), want)
+		}
+		if rec.Header().Get("Vary") != "" || rec.Header().Get("Content-Security-Policy") != "" {
+			t.Errorf("%s: a header of the portal on the router's redirect: %v", path, rec.Header())
+		}
+	}
 }
 
 func trustSetup(t *testing.T) (*testinstance.Instance, http.Handler, *tenant.Store) {
@@ -316,6 +338,19 @@ func TestTrustDownloads(t *testing.T) {
 	for _, p := range []string{"/ca/root/1.crt", "/ca/root/1.pem", "/ca/root/2.crt", "/crl/issuing/1.crl"} {
 		if a := fetch(t, h, p); a.code != http.StatusOK {
 			t.Errorf("off: %s answers %d – it must stay", p, a.code)
+		}
+	}
+	// A switched-off portal is indistinguishable from a path that was never
+	// there: same status, same body and the same headers (no Vary, no cache or
+	// page header of the portal).
+	never := fetch(t, h, "/never-there")
+	if never.code != http.StatusNotFound {
+		t.Fatalf("a path that does not exist: %d", never.code)
+	}
+	for _, p := range []string{"/", "/?os=debian", "/trust/root/2/user.cmd", "/trust/root/1/profile.mobileconfig"} {
+		a := fetch(t, h, p, "User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Firefox/126.0")
+		if a.code != never.code || !bytes.Equal(a.body, never.body) || !reflect.DeepEqual(a.h, never.h) {
+			t.Errorf("off: %s differs from any other 404:\n got %d %v %q\nwant %d %v %q", p, a.code, a.h, a.body, never.code, never.h, never.body)
 		}
 	}
 }

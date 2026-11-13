@@ -45,8 +45,11 @@ import (
 //
 // What a request can influence: the platform guess (a row of a fixed table)
 // and the ?os= value (one entry of an allow-list). Nothing of either is
-// echoed into the page, a header, a file name or a command; there is no
-// redirect, no log line, no counter and no audit entry per request.
+// echoed into the page, a header, a file name or a command; none of the
+// portal's own routes redirects, and there is no log line, no counter and no
+// audit entry per request. (Go's ServeMux does answer 307 for a path that is not
+// clean, such as //ca/root/1.crt or /a/../ca, before a handler runs; that is the
+// router, not a route of the portal.)
 
 // PageMaxAge: the page lists the CAs – a new one shows within five minutes.
 const PageMaxAge = 5 * time.Minute
@@ -144,11 +147,11 @@ func platformsShown(choice trustkit.Platform, explicit bool, det trustkit.Detect
 }
 
 func (h *Handler) trustPage(w http.ResponseWriter, r *http.Request) {
+	if !h.on(w, r) {
+		return // 404 or 500, before any header of this page: a switched-off portal looks like any other 404
+	}
 	// The answer may depend on the browser, so shared caches must ask.
 	w.Header().Set("Vary", "User-Agent")
-	if !h.on(w, r) {
-		return
-	}
 	choice, explicit := osChoice(r)
 	var det trustkit.Detection
 	if !explicit {
