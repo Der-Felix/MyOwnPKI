@@ -41,7 +41,11 @@ func decoded(t *testing.T, v settingsver.Version) settingsver.TenantSnapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.(settingsver.TenantSnapshot)
+	snap, ok := s.(settingsver.TenantSnapshot)
+	if !ok {
+		t.Fatalf("snapshot of a tenant version is a %T", s)
+	}
+	return snap
 }
 
 // tenantAudit returns the details of the settings audit entries, oldest
@@ -74,6 +78,12 @@ func tenantAudit(t *testing.T, db *sql.DB) []map[string]any {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// failTriggers make every INSERT into the table fail with a SQL error.
+var failTriggers = map[string]string{
+	"outbox":            "CREATE TRIGGER test_fail BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+	"settings_versions": "CREATE TRIGGER test_fail BEFORE INSERT ON settings_versions BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
 }
 
 func adminWho() keys.Who {
@@ -260,8 +270,7 @@ func TestSetRollsBackWhenAuditOrVersionFails(t *testing.T) {
 			}
 			wasOrg := got.Organization
 			auditBefore := len(tenantAudit(t, v.SystemDB.Write))
-			trigger := "CREATE TRIGGER test_fail BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT, 'injected failure'); END"
-			if _, err = v.SystemDB.Write.ExecContext(context.Background(), trigger); err != nil {
+			if _, err = v.SystemDB.Write.ExecContext(context.Background(), failTriggers[table]); err != nil {
 				t.Fatal(err)
 			}
 			got.Organization = "Changed"

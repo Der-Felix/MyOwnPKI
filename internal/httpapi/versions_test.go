@@ -49,7 +49,8 @@ func TestIfMatchOnSettings(t *testing.T) {
 		t.Errorf("the 412 must name the current version, who and when: %s", r.Body.String())
 	}
 	got := admin.do(t, http.MethodGet, "/settings", nil)
-	if org := got.body["subject_defaults"].(map[string]any)["organization"]; org != "One" || got.Header().Get("ETag") != `"2"` {
+	defaults, _ := got.body["subject_defaults"].(map[string]any)
+	if org := defaults["organization"]; org != "One" || got.Header().Get("ETag") != `"2"` {
 		t.Errorf("a refused put changed the settings: %v ETag %q", org, got.Header().Get("ETag"))
 	}
 	// Without the header the last writer wins, as before 0.3.10.

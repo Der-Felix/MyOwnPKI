@@ -35,7 +35,11 @@ func snapshotOf(t *testing.T, ver settingsver.Version) settingsver.DomainSnapsho
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.(settingsver.DomainSnapshot)
+	snap, ok := s.(settingsver.DomainSnapshot)
+	if !ok {
+		t.Fatalf("snapshot of a domain version is a %T", s)
+	}
+	return snap
 }
 
 // assertContiguous checks that the numbers run 1, 2, 3 ... without a gap.
@@ -356,12 +360,16 @@ func TestDomainChangeRollsBackWhenAuditOrVersionFails(t *testing.T) {
 	}
 }
 
-// failInserts makes every INSERT into table fail with a SQL error.
+// failTriggers make every INSERT into the table fail with a SQL error.
+var failTriggers = map[string]string{
+	"outbox":            "CREATE TRIGGER test_fail BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+	"settings_versions": "CREATE TRIGGER test_fail BEFORE INSERT ON settings_versions BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+}
+
+// failInserts installs the trigger; settings_versions has triggers of its own, a second BEFORE INSERT trigger is allowed.
 func (v *env) failInserts(t *testing.T, table string) {
 	t.Helper()
-	// settings_versions has a trigger of its own; a second BEFORE INSERT trigger is allowed.
-	if _, err := v.pki.ExecContext(context.Background(),
-		`CREATE TRIGGER test_fail_`+table+` BEFORE INSERT ON `+table+` BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+	if _, err := v.pki.ExecContext(context.Background(), failTriggers[table]); err != nil {
 		t.Fatal(err)
 	}
 }
