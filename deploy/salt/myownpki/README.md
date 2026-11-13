@@ -41,7 +41,7 @@ fileserver_backend: [gitfs, roots]
 gitfs_remotes:
   - https://github.com/Der-Felix/MyOwnPKI.git:
     - root: deploy/salt
-    - base: v0.3.9
+    - base: v0.3.10
 ```
 
 Put the root certificate and the packages where `root_source` and `package.source` point, by
@@ -66,7 +66,7 @@ Defaults are in `defaults.yaml` and merged with the pillar in `map.jinja`. A val
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
-| `version` | yes | none | The release to install, for example `0.3.9`. Part of the package file name |
+| `version` | yes | none | The release to install, for example `0.3.10`. Part of the package file name |
 | `server` | yes | none | Agent listener, `https://pki.homelab.lan:8444` (https, no path) |
 | `acme_directory` | yes | none | ACME directory URL (https); `setup --acme-directory` writes it into a new `agent.yaml` |
 | `root_source` | yes | none | `salt://` source of the root certificate (PEM) |
@@ -171,7 +171,7 @@ Minimal pillar (the host waits for one approval; no deployment yet):
 ```yaml
 myownpki:
   agent:
-    version: "0.3.9"
+    version: "0.3.10"
     server: https://pki.homelab.lan:8444
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://myownpki/files/root.pem
