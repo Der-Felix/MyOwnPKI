@@ -206,14 +206,21 @@ install -d -m 0700 -o myownpki -g myownpki /var/lib/myownpki
 ```
 
 ```bash
-runuser -u myownpki -- /usr/local/bin/myownpki restore /var/backups/myownpki/<time>-<old version> --config /etc/myownpki/config.yaml --checkpoint-key <fingerprint>
+/usr/local/bin/myownpki restore /var/backups/myownpki/<time>-<old version> --config /etc/myownpki/config.yaml --checkpoint-key <fingerprint>
+```
+
+```bash
+chown -R myownpki:myownpki /var/lib/myownpki
 ```
 
 ```bash
 systemctl start myownpki
 ```
 
-Restore runs all its checks first and writes nothing if one fails. Start the server, then unseal with
+Run `restore` as root, not as the service user: it builds its work copy next to the data directory,
+in `/var/lib`, which the service user cannot write to. It creates the files as root, so the `chown`
+hands them back before the service starts. Restore runs all its checks first and writes nothing if
+one fails. Start the server, then unseal with
 the passphrase that was valid when the backup was taken. Certificates issued after the backup are not
 in it.
 
