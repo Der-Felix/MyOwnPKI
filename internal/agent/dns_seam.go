@@ -71,10 +71,18 @@ func (a *Agent) buildDNSProvider(_ context.Context, name string, cfg DNSProvider
 		err = errors.New("unknown provider type")
 	}
 	if err != nil {
-		creds.wipe()
-		return nil, fmt.Errorf("dns provider %q: %w", name, creds.redact(err))
+		return nil, providerBuildError(name, creds, err)
 	}
 	return p, nil
+}
+
+// providerBuildError is the error of a provider that could not be built, and
+// ends the life of its credentials. The order matters: the redaction finds the
+// secrets by their value, so it must run before the wipe, which empties them.
+func providerBuildError(name string, creds *dnsCredentials, err error) error {
+	out := fmt.Errorf("dns provider %q: %w", name, creds.redact(err))
+	creds.wipe()
+	return out
 }
 
 // dnsProviderFor returns the guarded provider of a dns-01 deployment. It

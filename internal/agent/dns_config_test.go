@@ -594,3 +594,18 @@ func TestCredentialsPathIsNoDeploymentTarget(t *testing.T) {
 		}
 	}
 }
+
+// A provider that could not be built reports its error with the secrets
+// removed and then wipes them: the redaction finds a secret by its value, so
+// it has to run first.
+func TestProviderBuildErrorRedactsBeforeItWipes(t *testing.T) {
+	t.Parallel()
+	creds := tsigCreds(sentinelSecret)
+	err := providerBuildError("homelab-dns", creds, fmt.Errorf("lego said: bad credentials %s", sentinelSecret))
+	if err == nil || strings.Contains(err.Error(), sentinelSecret) || !strings.Contains(err.Error(), redacted) || !strings.Contains(err.Error(), `dns provider "homelab-dns"`) {
+		t.Fatalf("error %v", err)
+	}
+	if creds.TSIGSecret.isSet() {
+		t.Fatal("the credentials were not wiped")
+	}
+}
