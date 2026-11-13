@@ -86,7 +86,7 @@ the flags of `myownpki-agent deployment add`, with `-` written as `_`:
 
 | Kind | Options |
 |---|---|
-| string | `recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `owner`, `group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `acme_directory` |
+| string | `recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `owner`, `group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `check_name`, `acme_directory`, `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`, `dns_zone`, `dns_resolver` |
 | string or list of strings (flag repeated) | `name`, `hook` (`NAME=/abs/command args`), `sandbox_write` |
 | `true` / `false` | `low_ports`, `create_dirs`, `restart` |
 
@@ -94,6 +94,76 @@ the flags of `myownpki-agent deployment add`, with `-` written as `_`:
 unquoted `0640` as a number. Leave `restart` unset: the formula runs `systemctl try-restart` when a
 deployment changed, which restarts a running agent and never starts a stopped one (`restart: true`
 would start an agent that still waits for approval).
+
+### dns-01 deployments
+
+A deployment with `challenge: dns-01` proves its names through a TXT record instead of port 80. It is
+the only way to get a wildcard (`*.homelab.lan`), and it works on a host without port 80. It needs
+no `webroot`, and `deployment add` adds no `paths` entry and no low-ports drop-in for it. The
+seven options below are the flags `--check-name` and `--dns-*` of `deployment add`:
+
+| Option | Flag | Meaning |
+|---|---|---|
+| `dns_provider` | `--dns-provider` | Required with dns-01. The name of the provider entry in `dns_providers` of `agent.yaml`, for example `homelab-dns`. Deployments that share a provider repeat the options or name only the provider |
+| `dns_type` | `--dns-type` | Defines a new provider entry: `rfc2136` (BIND, Knot, PowerDNS with TSIG) or `cloudflare` |
+| `dns_credentials` | `--dns-credentials` | Absolute path of the credentials file, for example `/etc/myownpki-agent/dns/homelab.yaml`. Never under `/home`, `/root` or `/run/user` |
+| `dns_nameserver` | `--dns-nameserver` | `rfc2136` only, required: the DNS server that accepts the update, `host` or `host:port` |
+| `dns_zone` | `--dns-zone` | `rfc2136` only, optional: the zone to update (default: found by an SOA lookup) |
+| `dns_resolver` | `--dns-resolver` | Optional: `IP` or `IP:port` used for SOA, CNAME and propagation queries |
+| `check_name` | `--check-name` | The server name (SNI) of the local TLS check; needed when every name is a wildcard and the deployment has a `check` (the nginx recipe has one) |
+
+The provider entry is written once, when its name is new and `dns_type` is given. A repeated
+`deployment add` with the same values changes nothing; a **different** definition for an existing name
+is refused (`edit agent.yaml by hand`), and so is a change of an existing deployment, as above.
+`ttl`, `propagation` and the other settings of a provider are not options: edit `dns_providers` in
+`agent.yaml` by hand (then use `absent` and `deployments` or `config_source` for the rest).
+
+```yaml
+myownpki:
+  agent:
+    deployments:
+      wild:
+        recipe: nginx
+        name: ["*.homelab.lan", homelab.lan]
+        challenge: dns-01
+        check_name: www.homelab.lan
+        dns_provider: homelab-dns
+        dns_type: rfc2136
+        dns_credentials: /etc/myownpki-agent/dns/homelab.yaml
+        dns_nameserver: 192.0.2.53
+```
+
+The formula renders `--name '*.homelab.lan'` with the quotes a shell needs.
+
+**The credentials file is a secret and the formula does not manage it.** It holds a TSIG key or an API
+token, and the agent refuses it unless it is a regular file of mode 0600 or 0400 that root or the agent's
+user owns, in a directory that only root writes. Place it with `file.managed` in the host's own state
+(a different state file than this formula), with the content from an encrypted pillar:
+
+```yaml
+/etc/myownpki-agent/dns:
+  file.directory:
+    - user: root
+    - group: root
+    - mode: "0750"
+    - makedirs: True
+
+/etc/myownpki-agent/dns/homelab.yaml:
+  file.managed:
+    - user: root
+    - group: root
+    - mode: "0600"
+    - show_changes: False
+    - contents_pillar: homelab_dns:credentials
+    - require:
+      - file: /etc/myownpki-agent/dns
+```
+
+`show_changes: False` keeps the content out of the Salt output. The order does not
+matter: Salt may run `deployment add` before the file exists. A missing or wrongly protected file is then
+a **warning** on the command's output, never an error, and the agent reads the file when an issuance
+starts, so a file that arrives later works at the next renewal without a restart.
+`myownpki-agent config check` shows its state (ok, missing, wrong mode, wrong owner) and never its content.
 
 Minimal pillar (the host waits for one approval; no deployment yet):
 
@@ -164,8 +234,9 @@ the name of the state: `state.apply` shows it, `test=True` shows only a generic 
 with `salt-call state.show_highstate`. Refused: a missing required key; a missing hash for the
 minion's architecture or an unsupported architecture; `enrollment_pass` that is not a string; an
 unknown `package.format` or an `os_family` that `auto` cannot map; `config_source` together with
-`deployments` or `absent`; an unknown deployment option or a value of the wrong type; a name in
-both `deployments` and `absent`; an unknown key (a typo) anywhere in the pillar.
+`deployments` or `absent`; an unknown deployment option or a value of the wrong type; `challenge: dns-01` without
+`dns_provider` or with `webroot`; a `dns_*` option next to another challenge; a wildcard name without
+dns-01; a name in both `deployments` and `absent`; an unknown key (a typo) anywhere in the pillar.
 
 **Updating the agent.** Update the server first. Then change `version` and `package.sha256` (and
 stage the new package). On enrolled hosts the formula installs the package and runs `setup` again;
@@ -175,8 +246,9 @@ a host that is not enrolled yet is enrolled as usual.
 
 `scripts/ci/salt-test.sh` runs in the CI job `salt formula` against **Salt 3008.5** (LTS, onedir
 for Linux x86_64, Apache-2.0). It renders every pillar in `deploy/salt/test/cases` with
-`state.show_highstate` (Debian amd64 with a pass and deployments, RedHat arm64 with
-`config_source`, a minimal pillar, an `https://` package source, and every refusal), checks which
+`state.show_highstate` (Debian amd64 with a pass and deployments, Debian amd64 with two dns-01
+deployments, RedHat arm64 with `config_source`, a minimal pillar, an `https://` package source, and
+every refusal), checks which
 states exist and which do not, checks that the pass appears nowhere in the output, and runs
 `state.apply test=True` for the cases that a Debian runner can apply. `bash scripts/ci/salt-test.sh
 --self-test` runs the checks that need no Salt (fixture hashes, YAML, example names).

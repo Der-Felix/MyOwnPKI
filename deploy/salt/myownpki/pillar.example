@@ -41,6 +41,20 @@ myownpki:
         name: minion-01.homelab.lan
         webroot: /var/www/html
         create_dirs: true
+      # A wildcard and the apex through dns-01 (RFC 2136 against the internal DNS server), no port 80.
+      # The provider entry is written once; the credentials file is a secret you place yourself with
+      # file.managed (mode 0600, show_changes: False), see the README.
+      # wild:
+      #   recipe: nginx
+      #   name: ["*.homelab.lan", homelab.lan]
+      #   challenge: dns-01
+      #   check_name: www.homelab.lan
+      #   dns_provider: homelab-dns
+      #   dns_type: rfc2136                 # or cloudflare
+      #   dns_credentials: /etc/myownpki-agent/dns/homelab.yaml
+      #   dns_nameserver: 192.0.2.53        # rfc2136 only
+      #   dns_zone: homelab.lan             # rfc2136 only, optional
+      #   dns_resolver: 192.0.2.53          # optional
     # ... and names of deployments to remove with "deployment remove":
     absent: []
     # ... or a complete agent.yaml, rendered by Salt (then neither deployments nor absent):
