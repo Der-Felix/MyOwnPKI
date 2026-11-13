@@ -14,6 +14,10 @@
 //     against the chain, store certificate, names, key and audit event in
 //     one pki.db transaction
 //
+// Steps 1 to 4 are Engine.plan, step 5 is Engine.commit; Issue is both. Plan
+// (plan.go) runs the first half alone and writes nothing, so a preview shows the
+// refusal reasons and the certificate an issuance would give.
+//
 // Refused requests are written to the tenant audit log as denied (policy)
 // or failure (sealed, internal error).
 package ca
@@ -105,6 +109,9 @@ type Request struct {
 	// the names stay exactly the order's (no base domain is added, unlike
 	// the wildcard preset).
 	acmeWildcards bool
+	// acmeDomains: set by acmeRequest, the names of the domains the order's
+	// names lie in (the policy rule that applied, shown by the preview).
+	acmeDomains []string
 }
 
 // ACMEOrder ties an issuance to an ACME order.
@@ -158,110 +165,197 @@ func (e *Engine) rand() io.Reader {
 	return rand.Reader
 }
 
+// issue is plan plus commit: the policy decides first, and only a request
+// without a reason to refuse reaches the key, the serial and the signature.
 func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued, error) {
-	if req.ACME != nil {
-		var err error
-		if req, err = e.acmeRequest(ctx, req); err != nil {
-			return nil, err
-		}
-	}
-	if err := e.authorize(req.Who, authz.IssueCert, short(req.CA), now); err != nil {
-		return nil, err
-	}
-	p, ok := e.Presets.Get(req.Preset)
-	if !ok {
-		return nil, deny("there is no preset named %q", short(req.Preset))
-	}
-	q := pkidb.New(e.PKI)
-	is, err := loadIssuer(ctx, q, req.CA)
+	p, err := e.plan(ctx, req, now, true)
 	if err != nil {
 		return nil, err
 	}
+	return e.commit(ctx, p, now)
+}
+
+// planned is the outcome of the policy half of an issuance: everything the
+// certificate is built from, all of it checked, and nothing signed yet.
+type planned struct {
+	req     Request // after acmeRequest: CA, preset and validity of an ACME order
+	is      *issuer
+	l       leaf
+	csr     *x509.CertificateRequest // nil: the server generates the key
+	notes   []string
+	dropped []string
+	// checks are the checks that ran, in order. The problems of the collected
+	// ones, concatenated, are the reasons of the DeniedError.
+	checks []Check
+	// sealed: the keyring is sealed (only recorded when plan runs without commit).
+	sealed bool
+	// stopped names the gate that ended the plan early ("" = the plan ran through).
+	stopped string
+}
+
+// pass records a check that found nothing.
+func (p *planned) pass(name string) { p.checks = append(p.checks, Check{Name: name}) }
+
+// stop records the refusal of a gate (a check that ends the plan at its first
+// problem) and returns the error unchanged. Errors that are not refusals the
+// requester or an admin can fix (failures, authorization) record nothing.
+func (p *planned) stop(name string, err error) (*planned, error) {
+	var d *DeniedError
+	if errors.As(err, &d) && d.Cause == nil {
+		p.checks = append(p.checks, Check{Name: name, Problems: slices.Clone(d.Reasons)})
+		p.stopped = name
+	}
+	return p, err
+}
+
+// plan is the first half of an issuance: every check, in the order the policy
+// has always run them, up to the refusal. It returns the planned issuance, and
+// a *DeniedError (or another error) as issuance always did. It never writes,
+// never audits and never reads randomness; the planned value is non-nil even
+// on an error and holds what was known until then.
+//
+// commit=true is issuance: a sealed keyring ends the plan with keys.ErrSealed.
+// commit=false is the preview: a sealed keyring is recorded in planned.sealed
+// and the plan goes on, so the preview still shows what the policy says. That
+// is the only difference between the two.
+func (e *Engine) plan(ctx context.Context, req Request, now time.Time, commit bool) (*planned, error) {
+	p := &planned{req: req}
+	if req.ACME != nil {
+		var err error
+		if req, err = e.acmeRequest(ctx, req); err != nil {
+			return p.stop(CheckACMEOrder, err)
+		}
+		p.req = req
+		p.pass(CheckACMEOrder)
+	}
+	if err := e.authorize(req.Who, authz.IssueCert, short(req.CA), now); err != nil {
+		return p, err
+	}
+	pr, ok := e.Presets.Get(req.Preset)
+	if !ok {
+		return p.stop(CheckPreset, deny("there is no preset named %q", short(req.Preset)))
+	}
+	p.pass(CheckPreset)
+	q := pkidb.New(e.PKI)
+	is, err := loadIssuer(ctx, q, req.CA)
+	if err != nil {
+		return p.stop(CheckCA, err)
+	}
+	p.is = is
 	// A root signs intermediate CAs and CRLs only (owner 2026-10-18; CA/B
 	// BR §6.1.7): a misissued leaf is revoked by its intermediate instead of
 	// endangering the trust anchor, and the root key isn't needed for every
 	// issuance. Imported certificates (legacy importer) are not issued here.
 	if is.ca.Kind == KindRoot {
-		return nil, deny("a root CA only signs intermediate CAs and CRLs – issue from an intermediate")
+		return p.stop(CheckCA, deny("a root CA only signs intermediate CAs and CRLs – issue from an intermediate"))
 	}
+	p.pass(CheckCA)
 	if e.Keys.Status().Sealed {
-		return nil, keys.ErrSealed
+		if commit {
+			return p, keys.ErrSealed
+		}
+		p.sealed = true
 	}
 	for i, c := range is.certs {
 		if now.Before(c.NotBefore) || now.After(c.NotAfter) {
-			return nil, deny("the certificate of CA %q is not valid now (valid from %s to %s)",
-				is.constraints[i].ca, c.NotBefore.Format(time.DateOnly), c.NotAfter.Format(time.DateOnly))
+			return p.stop(CheckCAValidity, deny("the certificate of CA %q is not valid now (valid from %s to %s)",
+				is.constraints[i].ca, c.NotBefore.Format(time.DateOnly), c.NotAfter.Format(time.DateOnly)))
 		}
 	}
+	p.pass(CheckCAValidity)
 
 	// Key: from the CSR, or generated here.
 	var csr *x509.CertificateRequest
 	l := leaf{}
 	if req.CSR != nil {
 		if req.KeyAlgorithm != "" {
-			return nil, deny("a key algorithm is only chosen for server-side key generation – a CSR brings its own key")
+			return p.stop(CheckKey, deny("a key algorithm is only chosen for server-side key generation – a CSR brings its own key"))
 		}
 		if csr, err = parseCSR(req.CSR); err != nil {
-			return nil, err
+			return p.stop(CheckKey, err)
 		}
 		if l.alg, err = keyAlgorithm(csr.PublicKey); err != nil {
-			return nil, deny("%v", err)
+			return p.stop(CheckKey, deny("%v", err))
 		}
 		l.pub = csr.PublicKey
 		if err = checkKeyNotBlocked(ctx, q, l.pub); err != nil {
-			return nil, err
+			return p.stop(CheckKey, err)
 		}
 	} else {
 		allowed, kerr := e.ServerKeygen(ctx)
 		if kerr != nil {
-			return nil, fmt.Errorf("tenant setting: %w", kerr)
+			return p, fmt.Errorf("tenant setting: %w", kerr)
 		}
 		if !allowed {
-			return nil, deny("server-side key generation is switched off for this tenant – send a CSR")
+			return p.stop(CheckKey, deny("server-side key generation is switched off for this tenant – send a CSR"))
 		}
 		l.alg = req.KeyAlgorithm
 		if l.alg == "" {
 			l.alg = DefaultKeyAlgorithm
 		}
 		if !slices.Contains(GeneratedAlgorithms, l.alg) {
-			return nil, deny("key algorithm %q can't be generated (allowed: %s)", short(l.alg), strings.Join(GeneratedAlgorithms, ", "))
+			return p.stop(CheckKey, deny("key algorithm %q can't be generated (allowed: %s)", short(l.alg), strings.Join(GeneratedAlgorithms, ", ")))
 		}
 	}
-	if l.preset, err = customize(p, req, l.alg); err != nil {
-		return nil, err
+	p.csr = csr
+	p.pass(CheckKey)
+	if l.preset, err = customize(pr, req, l.alg); err != nil {
+		p.l = l
+		return p.stop(CheckUsages, err)
 	}
+	p.pass(CheckUsages)
 
-	// Names, constraints, limits, validity – all problems at once.
+	// Names, constraints, limits, validity – all problems at once. The checks
+	// below are the collected ones; their problems, in this order, are the
+	// reasons of the refusal.
 	rq := subjectAndNames(l.preset, req, csr)
 	l.subject, l.names = rq.subject, rq.names
-	notes, reasons := rq.notes, rq.problems
-	reasons = append(reasons, checkConstraints(is.constraints, l.names, cnHost(l.subject.CommonName, l.names))...)
-	reasons = append(reasons, checkEKULimit(is.constraints, l.preset.ExtKeyUsageOIDs())...)
-	l.v = computeValidity(now, req.ValidityDays, l.preset.ValidityDays, int(is.ca.MaxValidityDays), is.certs[0].NotBefore, is.certs[0].NotAfter)
-	if l.v.problem != "" {
-		reasons = append(reasons, l.v.problem)
+	p.notes, p.dropped = rq.notes, rq.dropped
+	collect := func(name string, problems []string) {
+		p.checks = append(p.checks, Check{Name: name, Problems: problems, Collected: true})
 	}
+	collect(CheckNames, rq.problems)
+	collect(CheckConstraints, checkConstraints(is.constraints, l.names, cnHost(l.subject.CommonName, l.names)))
+	collect(CheckEKULimit, checkEKULimit(is.constraints, l.preset.ExtKeyUsageOIDs()))
+	l.v = computeValidity(now, req.ValidityDays, l.preset.ValidityDays, int(is.ca.MaxValidityDays), is.certs[0].NotBefore, is.certs[0].NotAfter)
+	var vp []string
+	if l.v.problem != "" {
+		vp = []string{l.v.problem}
+	}
+	collect(CheckValidity, vp)
+	var rp []string
 	if req.RenewalOf != "" {
 		if _, gerr := q.GetCertificate(ctx, req.RenewalOf); errors.Is(gerr, sql.ErrNoRows) {
-			reasons = append(reasons, fmt.Sprintf("certificate %q to renew doesn't exist", short(req.RenewalOf)))
+			rp = []string{fmt.Sprintf("certificate %q to renew doesn't exist", short(req.RenewalOf))}
 		} else if gerr != nil {
-			return nil, gerr
+			p.l = l
+			return p, gerr
 		}
 	}
-	if len(reasons) > 0 {
-		return nil, &DeniedError{Reasons: reasons, DroppedCSRNames: rq.dropped}
+	collect(CheckRenewal, rp)
+	p.l = l
+	p.notes = append(p.notes, l.v.notes...)
+	if reasons := p.reasons(); len(reasons) > 0 {
+		return p, &DeniedError{Reasons: reasons, DroppedCSRNames: rq.dropped}
 	}
-	notes = append(notes, l.v.notes...)
+	return p, nil
+}
 
-	// From here on nothing is the requester's fault: errors are failures.
+// commit is the second half of an issuance: generate the key if the server
+// does, build the template, sign, check the signed certificate against the
+// chain and store everything. From here on nothing is the requester's fault:
+// errors are failures. It draws the randomness in the order it always was: key,
+// serial, signature.
+func (e *Engine) commit(ctx context.Context, p *planned, now time.Time) (*Issued, error) {
+	is, l := p.is, p.l
 	var pkcs8 []byte
-	if csr == nil {
-		var priv crypto.Signer
-		if priv, err = generateKey(l.alg, e.rand()); err != nil {
+	if p.csr == nil {
+		priv, err := generateKey(l.alg, e.rand())
+		if err != nil {
 			return nil, fmt.Errorf("generate key: %w", err)
 		}
 		l.pub = priv.Public()
-		if err = checkKeyNotBlocked(ctx, q, l.pub); err != nil {
+		if err = checkKeyNotBlocked(ctx, pkidb.New(e.PKI), l.pub); err != nil {
 			return nil, err
 		}
 		if pkcs8, err = x509.MarshalPKCS8PrivateKey(priv); err != nil {
@@ -269,8 +363,11 @@ func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued
 		}
 		defer clear(pkcs8)
 	}
-	tmpl, err := buildTemplate(is, l, e.rand())
+	tmpl, err := buildTemplate(is, l)
 	if err != nil {
+		return nil, err
+	}
+	if tmpl.SerialNumber, err = newSerial(e.rand()); err != nil {
 		return nil, err
 	}
 	der, err := e.sign(ctx, is, tmpl, l.pub)
@@ -281,7 +378,7 @@ func (e *Engine) issue(ctx context.Context, req Request, now time.Time) (*Issued
 	if err != nil {
 		return nil, err
 	}
-	return e.store(ctx, req, now, is, l, cert, pkcs8, notes, rq.dropped)
+	return e.store(ctx, p.req, now, is, l, cert, pkcs8, p.notes, p.dropped)
 }
 
 // customize applies custom key usages for customizable presets.

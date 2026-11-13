@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/acme"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
@@ -28,6 +30,10 @@ type uiEnv struct {
 	h    http.Handler
 	logs bytes.Buffer
 	acme *acme.Server // nil: ACME off
+
+	// requests are the engine requests the issue wizard built (app.onRequest).
+	reqMu    sync.Mutex
+	requests []wizardRequest
 }
 
 // newUIEnv has the ACME server on; newUIEnvWith(t, false) has it off.
@@ -39,6 +45,11 @@ func newUIEnvWith(t *testing.T, acmeOn bool) *uiEnv {
 	deps := &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read,
+	}
+	deps.onRequest = func(op string, r ca.Request) {
+		v.reqMu.Lock()
+		defer v.reqMu.Unlock()
+		v.requests = append(v.requests, wizardRequest{op, r})
 	}
 	if acmeOn {
 		s, aerr := acme.New(acme.Options{Engine: v.Engine, BaseURL: "https://pki.homelab.test/acme", Clock: v.Clock})

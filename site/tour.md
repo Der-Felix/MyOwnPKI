@@ -157,11 +157,14 @@ operator or admin and a fresh second factor. **More:**
 Four steps: **Preset**, **Key**, **Names**, **Review**. Nothing is issued before the last one. The preset
 decides key usage, extended key usage, which names are required and the default validity. In the key step
 you paste a CSR (the default; the key stays on the host that made it) or let the server generate the key
-if your tenant allows that. The last step is the review. Before it signs, the engine checks the request
-against the policy and the CA's name constraints.
+if your tenant allows that. The last step is the review. Since v0.3.10 it shows, before anything is signed, the
+verdict of the policy with every reason, a table of the checks, the names, the key, the validity dates, the
+extensions, the issuing CA with its chain and the URLs that would go into the certificate. A refused request
+cannot be submitted from there. Looking at the review writes nothing, and the engine checks again when you issue.
 
 **Role:** operator or admin, and only for the CAs your role covers. **More:**
-[Issue a first certificate in the web UI]({{ '/guides/first-certificate-ui/' | relative_url }}) and
+[Issue a first certificate in the web UI]({{ '/guides/first-certificate-ui/' | relative_url }}),
+[Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}) and
 [Name constraints]({{ '/learn/name-constraints/' | relative_url }}).
 
 ## ACME accounts
@@ -285,10 +288,15 @@ instance of v0.3.9, whose two roots are both listed.
 - **Agents** and **Add host** manage hosts that run the agent. Reading is viewer or higher; adding a host,
   join tokens and approvals need admin and a fresh second factor. [Adding hosts]({{ '/hosts/' | relative_url }}).
 - **Domains** and **EAB keys** hold the ACME rules and the keys that skip approval; creating either needs
-  admin and a fresh second factor. [Domains, approvals and EAB keys]({{ '/guides/domains-and-approvals/' | relative_url }}).
+  admin and a fresh second factor. Since v0.3.10 a domain page has a *Settings* and a *History* tab (tenant-wide
+  admins only), and the list links to the *Deleted domains*.
+  [Domains, approvals and EAB keys]({{ '/guides/domains-and-approvals/' | relative_url }}),
+  [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 - **Presets** shows what each kind of certificate gets, read-only.
 - **Tenant settings** holds the step-up lifetime, the ACME rate limits, whether the server may generate
   keys, the default subject fields, the trust portal switch, the predecessor defaults and the agent
   enrollment mode. Viewers and operators read, an admin changes, and a
-  different enrollment mode needs a fresh second factor.
-  [operations guide §4]({{ '/reference/operations/' | relative_url }}#step-up-confirmation-lifetime).
+  different enrollment mode needs a fresh second factor. Every save can carry a reason, and a tenant-wide
+  admin also sees a *History* tab with the versions, their differences and a restore (since v0.3.10).
+  [operations guide §4]({{ '/reference/operations/' | relative_url }}#step-up-confirmation-lifetime),
+  [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).

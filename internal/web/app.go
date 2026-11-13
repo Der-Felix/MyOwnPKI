@@ -87,6 +87,10 @@ type AppDeps struct {
 	// nil hides the pages and the dashboard charts.
 	Reports  ReportSource
 	Analysis AnalysisSource
+
+	// onRequest, set only by tests, sees the engine request of the issue
+	// wizard's review step ("review") and of its final submit ("issue").
+	onRequest func(op string, r ca.Request)
 }
 
 // AlertSource is what the UI reads of the monitoring: the open alerts and
@@ -205,8 +209,12 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	mux.HandleFunc("GET /domains/new", a.signedIn(a.domainNew))
 	a.protected(mux, "POST /domains", a.domainCreate, "name", "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
 	mux.HandleFunc("GET /domains/{id}", a.signedIn(a.domainDetail))
-	a.protected(mux, "POST /domains/{id}", a.domainUpdate, "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
-	a.protected(mux, "POST /domains/{id}/delete", a.domainDelete)
+	a.protected(mux, "POST /domains/{id}", a.domainUpdate, "base_version", "reason", "ca", "subdomains", "wildcards", "http01", "dns01", "approval", "preset", "validity", "address", "ips")
+	a.protected(mux, "POST /domains/{id}/delete", a.domainDelete, "base_version", "reason")
+	mux.HandleFunc("GET /domains/deleted", a.signedIn(a.domainsDeleted))
+	mux.HandleFunc("GET /domains/{id}/history", a.signedIn(a.domainHistory))
+	mux.HandleFunc("GET /domains/{id}/history/{version}", a.signedIn(a.domainVersion))
+	a.protected(mux, "POST /domains/{id}/history/{version}/restore", a.domainRestore, "base_version", "reason")
 	mux.HandleFunc("GET /agents", a.signedIn(a.agentList))
 	mux.HandleFunc("GET /agents/install", a.signedIn(a.agentInstallPage))
 	a.protected(mux, "POST /agents/install", a.agentInstall, "hostname", "arch", "format", "mode", "webroot", "token")
@@ -256,8 +264,11 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /admin/users/{id}/enable", a.userEnable)
 	a.protected(mux, "POST /admin/users/{id}/unlock", a.userUnlock)
 	mux.HandleFunc("GET /admin/settings", a.signedIn(a.settingsPage))
-	a.protected(mux, "POST /admin/settings", a.saveSettings, "keygen", "o", "ou", "l", "st", "c", "acme_orders", "acme_failed", "acme_accounts", "trust_page", "agent_enrollment", "step_up_minutes",
+	a.protected(mux, "POST /admin/settings", a.saveSettings, "base_version", "reason", "keygen", "o", "ou", "l", "st", "c", "acme_orders", "acme_failed", "acme_accounts", "trust_page", "agent_enrollment", "step_up_minutes",
 		"agent_predecessor", "agent_predecessor_days", "other_predecessor", "other_predecessor_days")
+	mux.HandleFunc("GET /admin/settings/history", a.signedIn(a.settingsHistory))
+	mux.HandleFunc("GET /admin/settings/history/{version}", a.signedIn(a.settingsVersion))
+	a.protected(mux, "POST /admin/settings/history/{version}/restore", a.settingsRestore, "base_version", "reason")
 	mux.HandleFunc("GET /admin/audit", a.signedIn(a.auditLog))
 	mux.HandleFunc("GET /admin/import", a.signedIn(a.importPage))
 	a.protected(mux, "POST /admin/import", a.runImport, "dry_run", "base", "root_key", "ca_pass", "key_pass")

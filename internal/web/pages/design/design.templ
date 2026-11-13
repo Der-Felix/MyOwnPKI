@@ -3,6 +3,7 @@ package design
 import (
 	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -20,6 +21,7 @@ templ Page(p view.Page) {
 		@foldSection()
 		@formSection()
 		@detailSection()
+		@diffSection()
 		@previewSection()
 	}
 }
@@ -242,5 +244,14 @@ templ brandSection() {
 				</tbody>
 			</table>
 		</div>
+	</section>
+}
+
+templ diffSection() {
+	<section class="section" id="diff" aria-labelledby="h-diff">
+		<div class="section-head"><h2 id="h-diff">Settings diff</h2></div>
+		<p class="muted">The History page of a domain or of the tenant settings: one row per setting that differs. A list is shown as a set, every value on its own line; added and removed values carry that word, so color never carries the change.</p>
+		@components.Tabs(sampleCompare)
+		@admin.Diff(sampleDiff)
 	</section>
 }

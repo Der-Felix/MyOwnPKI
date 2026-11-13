@@ -7,6 +7,123 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-11-13
+
+Preview and versioned settings. The review step of the issue wizard and a new REST operation show what the policy would
+do with a request before anything is signed: the verdict, every reason, the checks, the names, the key, the validity, the
+extensions, the chain and the URLs. Every change to a domain and to the tenant settings is now kept as a version with who,
+when and an optional reason; a structured diff compares versions, and an old version is restored as a **new** version.
+Two admins editing the same object can no longer overwrite each other silently. The release adds two migrations and no
+dependency. The live test by the maintainer is pending.
+
+### Added
+
+- **`Engine.Plan`** (`internal/ca/plan.go`): `Engine.issue` is split into `plan` (authorize, preset, CA, key, names, name
+  constraints, EKU limits, validity: everything up to the refusal reasons) and `commit` (key, serial, signature, storage).
+  `Issue` is plan plus commit; `Plan` runs the first half and never writes, never audits and never reads the engine's
+  randomness. The checks are an ordered list (five gates and five collected checks) whose problems, concatenated, **are** the
+  refusal reasons, so a preview shows the reasons of a real issuance. A sealed key ring is recorded in the plan instead of
+  returned as an error.
+- **`POST /api/v1/certificates/preview`** (`previewCertificate`, role operator, no second factor): the body of
+  `POST /certificates`, the answer `CertificatePreview` (with `PolicyCheck`, `ChainLink` and `ExtensionInfo`). A policy
+  refusal is a **`200` with `allowed: false`** and every reason, where issuing answers `422`; the permission, format and size
+  answers are those of issuing. No serial number, CA ID or CSR in the answer. A sealed server previews and says `sealed: true`.
+- **The review step of the wizard** lists the verdict and the reasons, a table of the policy checks (*Passed*, *Refused*,
+  *Refused, stopped here*), what would be issued, the extensions, who signs, the chain with SHA-256 fingerprints and the AIA
+  and CDP URLs, and the notes and warnings. A refused plan disables *Issue certificate*; a plan that cannot be made says so
+  and leaves issuing possible. The page says that *Not before* is the moment minus 5 minutes and that the checks run again
+  when you issue.
+- **Versions of domains and tenant settings:** the append-only table `settings_versions` in `pki.db` (migration **0021**) and
+  in `system.db` (migration **0015**); the package `internal/settingsver` (closed snapshot types with a schema number, canonical
+  JSON and SHA-256, a field diff that compares lists as sets, `Append` with an expected-version check). Every domain create,
+  update and delete and every settings change writes a version in the same transaction as the change and its audit entry; the
+  first change of an object without history first writes a `baseline` version of the state before it.
+- **History and restore in the REST API:** `GET /domains/{domainId}/versions`, `GET /domains/{domainId}/versions/{version}`
+  (a diff against `previous`, `current` or a number, plus `restorable` and `restore_problems`),
+  `POST /domains/{domainId}/versions/{version}/restore`, `GET /domains/deleted`, and the same three under `/settings/versions`.
+- **History and restore in the web UI:** a *Settings* / *History* tab row on the domain page and on *Administration → Tenant
+  settings*, the history list, a page per version with the diff table (*Setting*, *Before*, *After*), the restore form and its
+  dry-run reasons, and *Deleted domains*, linked under the domain list. The diff table is in the `/design` gallery.
+- **`ETag` and `If-Match`:** the quoted version number as `ETag` on `GET /domains/{id}`, `GET /settings` and the answers of
+  their writers; an optional `If-Match` on `PATCH` and `DELETE /domains/{id}` and `PUT /settings`, required on a restore. A
+  stale value is `412` `precondition-failed` (with `current_version`, `changed_at` and, for a caller with the tenant-wide audit right, `changed_by`); a weak `W/"7"` counts as `"7"`; a missing one on a restore
+  is `428` `precondition-required`. Both are new problem types.
+- **`reason`:** an optional write-only field of 200 characters in the `POST`, `PATCH` and `PUT` bodies and in the restore
+  body, kept with the version and never copied into the audit log.
+- **Audit actions** `domain.restore` and `tenant.settings_restore`.
+- **Documentation:** the site pages *Preview a certificate* and *History and restore of settings*, operations guide chapter 16
+  and the upgrade note, and updates to the FAQ, glossary, tour, API, troubleshooting and audit-log pages.
+
+### Changed
+
+- **The edit forms of a domain and of the tenant settings** carry a hidden `base_version` and an optional *Reason (optional)*
+  field (also on the domain delete form). A save that is based on an older version is refused with a page *Changed meanwhile*
+  (409) that says when the object was changed, and by whom for a reader of the history ("somebody else" otherwise); nothing is
+  saved. A form without the field is not checked, as before.
+- **The audit entries** `domain.create`, `domain.update`, `domain.delete` and `tenant.settings` carry `version` and
+  `snapshot_sha256`.
+- **A domain has at most 256 IP ranges** (`422` beyond that, `maxItems: 256` in the OpenAPI file), so that its snapshot always
+  fits the 64 KiB limit. The audit entry of a domain change lists at most 16 ranges and counts the rest. A domain stored with more
+  can be deleted; an update that leaves its `ip_ranges` as they are is refused until the list is trimmed. Its baseline and
+  deleted state keep the first 256 ranges (`history_ip_ranges_kept`, `ip_ranges_total` in the audit details), and a restore of
+  such a version brings back only those.
+- **An invalid argument of the history,** such as a snapshot above the size limit, answers `422` `policy-violation` instead of
+  `500`. A concurrent create of the same domain name during a restore gives the same `422` "domain … exists already" as the
+  name check, and the audit entry of a refused domain restore names `restored_from`.
+- **Changing a domain that was deleted meanwhile** now answers not found; it used to be a silent update that changed no row.
+- The order of the random draws of an issuance is unchanged (key first, then the serial number), and the existing issuance,
+  ACME and agent tests ran unchanged against the split of `issue`.
+- `.form` lets its grid column shrink, so a wide table of the review step scrolls inside its wrapper instead of widening the
+  page; no class was added.
+- `api/openapi.yaml` `info.version` is 0.3.10.
+
+### Security notes
+
+- **A restore is a change.** It runs the ordinary writers, so every check of a normal change applies with the same reasons,
+  and it needs the permission and the second factor of the same change: `ca.manage` with a fresh second factor for domains,
+  `tenant.manage` plus `agent.enrollment` and a fresh second factor when the agent enrollment mode changes. **An API token
+  never satisfies a second factor.** Reading a history, and so restoring a version, needs the audit right on the whole tenant,
+  because versions name users: an admin of one CA may change a domain but cannot restore it. The name of the person who
+  changed an object is given (in a `412` and on the *Changed meanwhile* page) only to a caller with that right.
+- **Secrets cannot enter a snapshot.** A snapshot is a closed struct, never a copy of a row. Two tests fail the build when a
+  field or a column is not classified (the reflection test and the `PRAGMA table_info` test of `tenants` and `domains`). The
+  configuration file, with the notification secrets, is not in a database at all.
+- **History cannot be edited:** triggers abort `UPDATE` and `DELETE` of a version and an `INSERT` that collides with an
+  existing one (`INSERT OR REPLACE` would otherwise remove a row without the `DELETE` trigger), and a version is written in
+  the transaction of its change, so a rolled-back change leaves none.
+- **The preview writes nothing:** no row, key, serial number, random bytes or audit entry; tests assert the row counts and
+  run the engine with a random source that fails when read. The CSR is never echoed, and names from it are escaped on the page
+  and are data in the API. The preview needs the permission of issuing, and its reasons are the ones issuing gives that caller.
+- **The reason is untrusted text:** at most 200 characters, no control and no invisible formatting characters (bidi overrides,
+  zero-width characters), escaped on output, and kept out of the
+  audit log.
+- **An independent security review found no blocker; its findings were fixed before the release.**
+- **No new dependency**; `go.mod` and `THIRD_PARTY.md` are unchanged.
+
+### Known limitations
+
+- **The live test by the maintainer is pending.** The preview, the history pages and the restore are covered by the test
+  suites (and the review step was looked at in a browser at 375 px, in light and dark), not run on a live installation.
+- **The wizard does not apply the tenant subject defaults that the REST path applies,** and the wizard ignores the names of a
+  CSR where REST uses them. The preview shows what each path really does. Which behavior should win is an **open decision**.
+- **No retention limit:** every version is kept, with no pruning, export or import. A snapshot is small (estimated at 0.5 KiB).
+- **The history is admin-only** (audit right on the whole tenant): an operator, a viewer and an admin of one CA cannot read it,
+  and an admin of one CA cannot restore a version of a domain they may change.
+- **The actor name in a version is personal data in an append-only table** and cannot be scrubbed later, like the audit log.
+- **Presets and CA limits are not versioned,** nor are per-account and per-agent settings, agent names and secrets.
+- **The check is per object:** two admins editing different fields of one object still conflict.
+- **`If-Match` is optional on the old calls,** so a script without it keeps last-writer-wins.
+- **No preview for ACME orders, renewals or agent issuance,** and no dry run for edits; the preview has no rate limit of its
+  own. A conflict page does not keep the values you typed.
+- Changes made before the update are not in the history; the first change afterward stores the old state as version 1.
+
+### Upgrade notes
+
+- `pki.db` migration 0021 and `system.db` migration 0015 add a table each (additive). An older binary refuses the migrated
+  databases, so going back means restoring the backup from before the update. No configuration change, no change to the agent.
+- Scripts keep working: `If-Match` is optional on `PATCH`, `DELETE` and `PUT`. Browser forms that were open during the update
+  have no `base_version` and are not checked.
+
 ## [0.3.9] - 2026-11-13
 
 The trust portal. The page at `/` of the public listener now guesses the visitor's system from the browser, lets the
@@ -1125,7 +1242,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.10...HEAD
+[0.3.10]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...v0.3.7

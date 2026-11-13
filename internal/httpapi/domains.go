@@ -50,12 +50,15 @@ type domainSettingsJSON struct {
 	ValidityDays      *int     `json:"validity_days"`
 	AddressPolicy     *string  `json:"address_policy"`
 	IPRanges          []string `json:"ip_ranges"`
+	// Reason is optional free text for the version history (never in the audit log).
+	Reason string `json:"reason"`
 }
 
 func (a *API) domainSettings(c *call, in domainSettingsJSON) (ca.DomainSettings, error) {
 	s := ca.DomainSettings{
 		IncludeSubdomains: in.IncludeSubdomains, Wildcards: in.Wildcards, ChallengeTypes: in.ChallengeTypes,
 		Approval: in.Approval, Preset: in.Preset, ValidityDays: in.ValidityDays, AddressPolicy: in.AddressPolicy, IPRanges: in.IPRanges,
+		Options: ca.ChangeOptions{Reason: in.Reason},
 	}
 	if in.CAID != nil {
 		if !idPattern.MatchString(*in.CAID) {
@@ -102,6 +105,7 @@ func (a *API) createDomain(c *call) error {
 		return err
 	}
 	c.w.Header().Set("Location", BasePath+"/domains/"+d.ID)
+	c.setETag(d.Version)
 	return c.reply(http.StatusCreated, toDomainJSON(d))
 }
 
@@ -122,6 +126,7 @@ func (a *API) getDomain(c *call) error {
 	if err != nil {
 		return err
 	}
+	c.setETag(d.Version)
 	return c.reply(http.StatusOK, toDomainJSON(d))
 }
 
@@ -138,10 +143,14 @@ func (a *API) updateDomain(c *call) error {
 	if err != nil {
 		return err
 	}
+	if s.Options.ExpectedVersion, err = c.ifMatch(); err != nil {
+		return err
+	}
 	d, err := a.d.Engine.UpdateDomain(c.ctx(), id, s, c.who())
 	if err != nil {
 		return err
 	}
+	c.setETag(d.Version)
 	return c.reply(http.StatusOK, toDomainJSON(d))
 }
 
@@ -150,7 +159,11 @@ func (a *API) deleteDomain(c *call) error {
 	if err != nil {
 		return err
 	}
-	if err := a.d.Engine.DeleteDomain(c.ctx(), id, c.who()); err != nil {
+	opts := ca.ChangeOptions{}
+	if opts.ExpectedVersion, err = c.ifMatch(); err != nil {
+		return err
+	}
+	if err := a.d.Engine.DeleteDomainWith(c.ctx(), id, opts, c.who()); err != nil {
 		return err
 	}
 	c.status = http.StatusNoContent

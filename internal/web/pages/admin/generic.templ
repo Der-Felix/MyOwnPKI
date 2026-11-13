@@ -37,6 +37,7 @@ type Pre struct {
 // FormData is a form with its fields.
 type FormData struct {
 	Messages  []view.Message
+	Tabs      []view.Tab // a tab row under the messages (FormPage only)
 	Steps     []components.Step // a wizard step line above the form
 	Title     string // a heading above the form (in sections)
 	Intro     []string
@@ -58,6 +59,9 @@ templ FormPage(p view.Page, d FormData) {
 			@components.Steps(d.Steps)
 		}
 		@components.Messages(d.Messages)
+		if len(d.Tabs) > 0 {
+			@components.Tabs(d.Tabs)
+		}
 		@Form(d)
 	}
 }
@@ -216,6 +220,7 @@ type TableData struct {
 	RefreshURL string // optional passive fragment polling
 	Adaptive  bool   // wrap every column instead of scrolling narrow tables
 	Messages []view.Message
+	Tabs     []view.Tab // a tab row under the messages (TablePage only)
 	Title    string // a heading (in sections)
 	Commands []Command
 	Filters  *FormData
@@ -230,6 +235,9 @@ type TableData struct {
 templ TablePage(p view.Page, d TableData) {
 	@layout.App(p) {
 		@components.Messages(d.Messages)
+		if len(d.Tabs) > 0 {
+			@components.Tabs(d.Tabs)
+		}
 		@Table(d)
 	}
 }
@@ -359,12 +367,16 @@ type Section struct {
 	KV    []view.KV
 	Pre   []Pre
 	Table *TableData
+	// Tabs switch the view of the table or diff below (each tab is a link).
+	Tabs  []view.Tab
+	Diff  *DiffTable
 	Forms []FormData
 }
 
 // DetailData is a detail page: commands and sections.
 type DetailData struct {
 	Messages []view.Message
+	Tabs     []view.Tab // a tab row under the messages
 	Steps    []components.Step // a wizard step line above the sections
 	Commands []Command
 	Sections []Section
@@ -377,6 +389,9 @@ templ DetailPage(p view.Page, d DetailData) {
 			@components.Steps(d.Steps)
 		}
 		@components.Messages(d.Messages)
+		if len(d.Tabs) > 0 {
+			@components.Tabs(d.Tabs)
+		}
 		if len(d.Commands) > 0 {
 			@components.CommandBar("Commands") {
 				@components.CommandGroup("Commands") {
@@ -404,8 +419,14 @@ templ DetailPage(p view.Page, d DetailData) {
 				for _, b := range s.Pre {
 					@preBlock(b)
 				}
+				if len(s.Tabs) > 0 {
+					@components.Tabs(s.Tabs)
+				}
 				if s.Table != nil {
 					@Table(*s.Table)
+				}
+				if s.Diff != nil {
+					@Diff(*s.Diff)
 				}
 				for _, f := range s.Forms {
 					@Form(f)

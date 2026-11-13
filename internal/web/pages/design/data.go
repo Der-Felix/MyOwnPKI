@@ -8,6 +8,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/report"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
 
@@ -168,4 +169,18 @@ func darkChart() view.Chart {
 	c := charts.Issuances(sampleIssuances)
 	c.ID = "chart-preview"
 	return c
+}
+
+var sampleCompare = []view.Tab{
+	{Label: "The previous version", Href: "#diff", Active: true},
+	{Label: "The current state", Href: "#diff"},
+}
+
+var sampleDiff = admin.DiffTable{
+	Caption: "Settings that differ", BeforeLabel: "Before (version 3)", AfterLabel: "Version 4",
+	Rows: []admin.DiffRow{
+		{Label: "Approval", Before: []admin.DiffValue{{Text: "account"}}, After: []admin.DiffValue{{Text: "open"}}},
+		{Label: "Challenge types", Before: []admin.DiffValue{{Text: "http-01", Mark: "removed"}, {Text: "dns-01"}}, After: []admin.DiffValue{{Text: "dns-01"}}},
+		{Label: "IP ranges", Before: nil, After: []admin.DiffValue{{Text: "192.0.2.0/24", Mark: "added"}}},
+	},
 }

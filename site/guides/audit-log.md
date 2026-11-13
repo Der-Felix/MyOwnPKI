@@ -47,7 +47,8 @@ actions:
 | `certificate.issue`, `certificate.revoke` | Certificates |
 | `ca.create`, `ca.import_root`, `ca.csr_create`, `ca.certificate_install`, `ca.renew`, `ca.retire` | CA lifecycle |
 | `crl.upload`, `import.legacy` | CRL upload, the legacy import |
-| `tenant.settings` | A change of the tenant settings (in the instance log) |
+| `tenant.settings`, `tenant.settings_restore` | A change, or the restore of an old version, of the tenant settings (in the instance log); since v0.3.10 with `version` and `snapshot_sha256` |
+| `domain.create`, `domain.update`, `domain.delete`, `domain.restore` | A change of a domain, or the restore of an old version or of a deleted domain. Since v0.3.10 the details carry `version` and `snapshot_sha256`, the hash of the stored state ([History and restore of settings]({{ '/guides/settings-history/' | relative_url }})) |
 | `audit.checkpoint` | A signed checkpoint of the log itself |
 
 A command at the server's console is logged too, with an actor such as `console:root`.

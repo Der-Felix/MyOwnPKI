@@ -272,6 +272,8 @@ func (a *app) settingsPage(c *rc) {
 		Intro:  []string{"Subject defaults fill fields that neither a request nor its CSR gives – like pki.conf of pki.sh. The common name is never filled."},
 		Action: "/admin/settings", Submit: "Save settings",
 		Fields: []admin.Field{
+			baseVersionField(s.Version),
+			reasonField(),
 			{ID: "keygen", Label: "Let the server generate keys (a CSR is always possible)", Type: "checkbox", Checked: s.AllowServerKeygen},
 			{ID: "o", Label: "Organization (O)", Value: s.Organization},
 			{ID: "ou", Label: "Organizational unit (OU)", Value: s.OrganizationalUnit},
@@ -296,6 +298,9 @@ func (a *app) settingsPage(c *rc) {
 	if !c.may(authz.ManageTenant, "") {
 		d.Intro = append(d.Intro, "Only a tenant admin can change these.")
 	}
+	if c.canReadHistory() {
+		d.Tabs = historyTabs("/admin/settings", false)
+	}
 	render(c.w, c.r, a.log, http.StatusOK, admin.FormPage(c.page("Tenant settings", "settings", adminCrumbs()...), d))
 }
 
@@ -319,10 +324,17 @@ func (a *app) saveSettings(c *rc) {
 	}
 	agentPolicy := predecessorFromForm(f, "agent_predecessor", "agent_predecessor_days")
 	otherPolicy := predecessorFromForm(f, "other_predecessor", "other_predecessor_days")
-	err := a.d.Settings.Set(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
+	var opts tenant.ChangeOptions
+	var err error
+	if opts.ExpectedVersion, err = baseVersion(c); err != nil {
+		c.refused(err, "/admin/settings")
+		return
+	}
+	opts.Reason = reasonOf(c)
+	_, err = a.d.Settings.SetWith(c.r.Context(), a.d.Tenant, tenant.Settings{AllowServerKeygen: yes(f("keygen")), Organization: strings.TrimSpace(f("o")),
 		OrganizationalUnit: strings.TrimSpace(f("ou")), Locality: strings.TrimSpace(f("l")), State: strings.TrimSpace(f("st")), Country: strings.TrimSpace(f("c")),
 		ACME:      &tenant.ACMELimits{OrdersPerAccount: num("acme_orders"), FailedPerName: num("acme_failed"), AccountsPerIP: num("acme_accounts")},
-		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}, c.who())
+		TrustPage: &trust, AgentEnrollment: mode, StepUpMinutes: stepUp, AgentPredecessor: &agentPolicy, OtherPredecessor: &otherPolicy}, opts, c.who())
 	if err != nil {
 		c.refused(err, "/admin/settings")
 		return

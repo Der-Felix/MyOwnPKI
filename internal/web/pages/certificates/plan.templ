@@ -1,0 +1,251 @@
+package certificates
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// PlanView is the preview of the review step: what the engine would do with
+// the request, as plain strings. Every string may contain requested names or
+// text from a CSR – the templates escape it, nothing here is markup.
+type PlanView struct {
+	Allowed bool
+	Sealed  bool
+	// Prepared is the time of the plan ("14:03 UTC").
+	Prepared string
+	Reasons  []string
+	// StoppedAt is the title of the check that ended the plan early ("" = every check ran).
+	StoppedAt string
+	Checks    []PlanCheck
+
+	Preset, CA, CAFacts string
+	Subject             string
+	Names               []view.KV
+	Dropped             []string
+	Key                 string
+	NotBefore, NotAfter string
+	Days                string
+	KeyUsage            string
+	ExtKeyUsage         string
+	Extensions          []PlanExtension
+	Chain               []PlanLink
+	AIA, CDP            string
+
+	Notes, Warnings []string
+}
+
+// PlanCheck is one row of the policy table.
+type PlanCheck struct {
+	Title    string
+	Passed   bool
+	Stopped  bool // a gate that ended the plan: the checks after it did not run
+	Problems []string
+}
+
+// PlanExtension is one extension of the certificate to be issued.
+type PlanExtension struct {
+	Name, OID, Detail string
+	Critical          bool
+}
+
+// PlanLink is one CA certificate on the way to the root.
+type PlanLink struct {
+	Role, Subject, Expires string
+	// SHA256 is the fingerprint in two lines of 16 bytes, to compare line by line.
+	SHA256 []string
+}
+
+// planReview is the review step with a plan: the verdict and the policy
+// first, then what would be issued and who signs it.
+templ planReview(p *PlanView) {
+	<section class="section" aria-labelledby="h-verdict">
+		<h2 id="h-verdict" class="section-head">Review</h2>
+		<p>
+			if p.Allowed {
+				@components.Status(view.StatusOK, "Allowed")
+				{ " The policy would issue this certificate." }
+			} else {
+				@components.Status(view.StatusCrit, "Refused")
+				{ " The policy would refuse this request. Nothing can be issued until the reasons below are resolved." }
+			}
+		</p>
+		for _, r := range p.Reasons {
+			@components.MessageBar(view.Message{Kind: view.MessageError, Text: r})
+		}
+		if p.Sealed {
+			@components.MessageBar(view.Message{Kind: view.MessageWarning, Text: "The server is sealed – issuing is possible after an unseal."})
+		}
+		if !p.Allowed {
+			@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "Use Back to change the preset, the names, the key or the validity. The Issue certificate button is off while the request is refused."})
+		}
+		<p class="muted">{ "Prepared at " + p.Prepared + ". This is a forecast, not a promise: the checks run again when you issue, and the CA or the rules may have changed by then." }</p>
+	</section>
+	<section class="section" aria-labelledby="h-policy">
+		<h2 id="h-policy" class="section-head">Policy checks</h2>
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th scope="col">Check</th>
+						<th scope="col">Result</th>
+						<th scope="col">Problems</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, c := range p.Checks {
+						<tr>
+							<td class="nowrap">{ c.Title }</td>
+							<td class="nowrap">
+								if c.Passed {
+									@components.Status(view.StatusOK, "Passed")
+								} else if c.Stopped {
+									@components.Status(view.StatusCrit, "Refused, stopped here")
+								} else {
+									@components.Status(view.StatusCrit, "Refused")
+								}
+							</td>
+							<td class="break">
+								for _, problem := range c.Problems {
+									<div>{ problem }</div>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+		if p.StoppedAt != "" {
+			@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "The checks stopped at \"" + p.StoppedAt + "\". The checks after it were not run, so more reasons can appear once this one is resolved. A check that is not marked \"stopped here\" lists every problem it found."})
+		} else if !p.Allowed {
+			@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "Every check ran and each one lists every problem it found."})
+		}
+	</section>
+	<section class="section" aria-labelledby="h-issued">
+		<h2 id="h-issued" class="section-head">What would be issued</h2>
+		@components.KVList(p.issuedRows())
+		if p.NotBefore != "" {
+			@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: "Not before is this moment minus 5 minutes (a clock-skew allowance), not the time you submit; the CA state may change before you submit, and issuing checks everything again."})
+		}
+	</section>
+	if len(p.Extensions) > 0 {
+		<section class="section" aria-labelledby="h-ext">
+			<h2 id="h-ext" class="section-head">Extensions</h2>
+			<p class="muted">Extensions come from the preset and the issuing CA – never from the request.</p>
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
+						<tr>
+							<th scope="col">Extension</th>
+							<th scope="col">OID</th>
+							<th scope="col">Critical</th>
+							<th scope="col">Detail</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, e := range p.Extensions {
+							<tr>
+								<td class="nowrap">{ e.Name }</td>
+								<td class="mono">{ e.OID }</td>
+								<td>
+									if e.Critical {
+										Yes
+									} else {
+										No
+									}
+								</td>
+								<td class="break">{ e.Detail }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+	}
+	if p.CA != "" {
+		<section class="section" aria-labelledby="h-signs">
+			<h2 id="h-signs" class="section-head">Who signs</h2>
+			@components.KVList(p.signRows())
+		</section>
+	}
+	if len(p.Chain) > 0 {
+		<section class="section" aria-labelledby="h-chain">
+			<h2 id="h-chain" class="section-head">Chain</h2>
+			<p class="muted">The issuing CA first, the root last. The SHA-256 fingerprint identifies each CA certificate.</p>
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
+						<tr>
+							<th scope="col">Role</th>
+							<th scope="col">Subject</th>
+							<th scope="col">SHA-256</th>
+							<th scope="col">Expires</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, l := range p.Chain {
+							<tr>
+								<td class="nowrap">{ l.Role }</td>
+								<td class="break">{ l.Subject }</td>
+								<td class="mono">
+									for _, line := range l.SHA256 {
+										<div>{ line }</div>
+									}
+								</td>
+								<td class="nowrap">{ l.Expires }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+	}
+	if len(p.Notes) > 0 || len(p.Warnings) > 0 {
+		<section class="section" aria-labelledby="h-notes">
+			<h2 id="h-notes" class="section-head">Notes and warnings</h2>
+			for _, n := range p.Notes {
+				@components.MessageBar(view.Message{Kind: view.MessageInfo, Text: n + "."})
+			}
+			for _, w := range p.Warnings {
+				@components.MessageBar(view.Message{Kind: view.MessageWarning, Text: w + "."})
+			}
+		</section>
+	}
+}
+
+// issuedRows are the facts about the certificate; rows the plan did not reach
+// (a refused plan) are left out.
+func (p *PlanView) issuedRows() []view.KV {
+	var rows []view.KV
+	add := func(key, value string, mono bool) {
+		if value != "" {
+			rows = append(rows, view.KV{Key: key, Value: value, Mono: mono})
+		}
+	}
+	add("Preset", p.Preset, false)
+	add("Subject", p.Subject, true)
+	rows = append(rows, p.Names...)
+	for _, d := range p.Dropped {
+		add("Left out of the request", d+" – the preset doesn't take this type", false)
+	}
+	add("Key", p.Key, false)
+	add("Not before", p.NotBefore, false)
+	add("Not after", p.NotAfter, false)
+	add("Validity", p.Days, false)
+	add("Key usage", p.KeyUsage, false)
+	add("Extended key usage", p.ExtKeyUsage, false)
+	return rows
+}
+
+func (p *PlanView) signRows() []view.KV {
+	rows := []view.KV{{Key: "Issuing CA", Value: p.CA}}
+	if p.CAFacts != "" {
+		rows = append(rows, view.KV{Key: "CA key", Value: p.CAFacts})
+	}
+	if p.AIA != "" {
+		rows = append(rows, view.KV{Key: "CA certificate URL (AIA)", Value: p.AIA, Mono: true})
+	}
+	if p.CDP != "" {
+		rows = append(rows, view.KV{Key: "CRL URL (CDP)", Value: p.CDP, Mono: true})
+	}
+	return rows
+}

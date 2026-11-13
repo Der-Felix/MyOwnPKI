@@ -74,6 +74,11 @@ The parts, and who talks to whom:
   certificates per CA, the alert history and the agent fleet, and ten rules that point out what no alert
   covers, such as a weak key, a renewal loop or a certificate that no scanned endpoint serves. The server draws the charts
   itself; no script runs in the browser.
+- **Preview and history** (since v0.3.10): the review step of the issue wizard and `POST /certificates/preview` show what the
+  policy would do with a request before anything is signed, and every change to a domain or to the tenant settings is
+  kept as a version that can be compared and restored as a new one. Two admins no longer overwrite each other
+  silently: [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}),
+  [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 - **Backup and restore**, a daily backup timer, and an import of the old `pki.sh` Bash suite.
 
 ## Who it is for
@@ -115,6 +120,8 @@ level 3 when you want the server to see what is deployed where and to renew on a
 | Set up nginx, Postfix, Dovecot or Proxmox VE with the agent | [Recipes]({{ '/recipes/' | relative_url }}) |
 | Get a wildcard certificate, or a certificate for a host without port 80, with the agent | [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}) |
 | Roll the agent out with the Salt formula | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
+| See what a certificate would look like before I issue it | [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}) |
+| Undo a change to a domain or a setting | [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}) |
 | Be told when something expires or breaks | [Monitoring]({{ '/monitoring/' | relative_url }}) |
 | Check that a host really serves the certificate it should | [TLS scan]({{ '/tls-scan/' | relative_url }}) |
 | See the state of the PKI in charts and what looks odd | [Reports and analysis]({{ '/reports/' | relative_url }}) |

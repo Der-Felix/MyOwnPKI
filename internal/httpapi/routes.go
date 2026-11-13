@@ -33,6 +33,9 @@ func (a *API) table() []Route {
 		{OperationID: "revokeToken", Method: http.MethodDelete, Path: "/tokens/{tokenId}", access: signedIn, handle: a.revokeToken},
 		{OperationID: "getSettings", Method: http.MethodGet, Path: "/settings", access: signedIn, handle: a.getSettings},
 		{OperationID: "updateSettings", Method: http.MethodPut, Path: "/settings", access: signedIn, body: true, handle: a.putSettings},
+		{OperationID: "listSettingsVersions", Method: http.MethodGet, Path: "/settings/versions", access: signedIn, handle: a.listSettingsVersions},
+		{OperationID: "getSettingsVersion", Method: http.MethodGet, Path: "/settings/versions/{version}", access: signedIn, handle: a.getSettingsVersion},
+		{OperationID: "restoreSettingsVersion", Method: http.MethodPost, Path: "/settings/versions/{version}/restore", access: signedIn, body: true, handle: a.restoreSettingsVersion},
 		{OperationID: "listWebAuthnCredentials", Method: http.MethodGet, Path: "/users/me/webauthn", access: signedIn, handle: a.listPasskeys},
 		{OperationID: "beginWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/begin", access: signedIn, body: true, handle: a.passkeyRegisterBegin},
 		{OperationID: "finishWebAuthnRegistration", Method: http.MethodPost, Path: "/users/me/webauthn/finish", access: signedIn, body: true, handle: a.passkeyRegisterFinish},
@@ -43,6 +46,10 @@ func (a *API) table() []Route {
 		{OperationID: "getDomain", Method: http.MethodGet, Path: "/domains/{domainId}", access: signedIn, handle: a.getDomain},
 		{OperationID: "updateDomain", Method: http.MethodPatch, Path: "/domains/{domainId}", access: signedIn, body: true, handle: a.updateDomain},
 		{OperationID: "deleteDomain", Method: http.MethodDelete, Path: "/domains/{domainId}", access: signedIn, handle: a.deleteDomain},
+		{OperationID: "listDeletedDomains", Method: http.MethodGet, Path: "/domains/deleted", access: signedIn, handle: a.listDeletedDomains},
+		{OperationID: "listDomainVersions", Method: http.MethodGet, Path: "/domains/{domainId}/versions", access: signedIn, handle: a.listDomainVersions},
+		{OperationID: "getDomainVersion", Method: http.MethodGet, Path: "/domains/{domainId}/versions/{version}", access: signedIn, handle: a.getDomainVersion},
+		{OperationID: "restoreDomainVersion", Method: http.MethodPost, Path: "/domains/{domainId}/versions/{version}/restore", access: signedIn, body: true, handle: a.restoreDomainVersion},
 
 		{OperationID: "listPresets", Method: http.MethodGet, Path: "/presets", access: signedIn, handle: a.listPresets},
 		{OperationID: "getPreset", Method: http.MethodGet, Path: "/presets/{presetName}", access: signedIn, handle: a.getPreset},
@@ -64,6 +71,7 @@ func (a *API) table() []Route {
 
 		{OperationID: "listCertificates", Method: http.MethodGet, Path: "/certificates", access: signedIn, handle: a.listCertificates},
 		{OperationID: "issueCertificate", Method: http.MethodPost, Path: "/certificates", access: signedIn, body: true, handle: a.issueCertificate},
+		{OperationID: "previewCertificate", Method: http.MethodPost, Path: "/certificates/preview", access: signedIn, body: true, handle: a.previewCertificate},
 		{OperationID: "getCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}", access: signedIn, handle: a.getCertificate},
 		{OperationID: "downloadCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}/download/{format}", access: signedIn, handle: a.downloadCertificate},
 		{OperationID: "exportCertificateWithKey", Method: http.MethodPost, Path: "/certificates/{certificateId}/export", access: signedIn, body: true, handle: a.exportKey},
