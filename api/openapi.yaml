@@ -757,10 +757,16 @@ paths:
       tags: [settings]
       operationId: getSettings
       summary: Settings of this tenant
+      description: |
+        The `ETag` is the version number of the settings, quoted (`"7"`; `"0"` = never changed
+        since the version history began). Send it back as `If-Match` with `PUT /settings` and the
+        change is refused with `412` when somebody else changed the settings in between.
       x-required-role: viewer
       responses:
         "200":
           description: Settings
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TenantSettings" }
@@ -785,7 +791,14 @@ paths:
         nothing is stored. A request that leaves the mode as it is (same value, or the field left
         out) and every other setting need no second factor. This is why the operation carries no
         `x-step-up: true`, which would mean every call needs one.
+
+        Every change is recorded as a version of the settings (who, when, the full state, the
+        optional `reason`). `If-Match` is optional: with the `ETag` of the last read it protects
+        against overwriting a change made in the meantime (`412`, problem type
+        `precondition-failed`, nothing is stored); without it the last writer wins, as before.
       x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         description: "The settings"
         required: true
@@ -795,12 +808,15 @@ paths:
       responses:
         "200":
           description: Stored
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TenantSettings" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
@@ -831,6 +847,7 @@ paths:
         the domain), the challenges that prove control, the approval level, preset and validity.
         Absent settings take the defaults: sub-domains included, no wildcards, http-01 and dns-01,
         approval `account`, preset `server`, 90 days, address policy `internal`.
+        The creation is recorded as version 1 of the domain (the `ETag`).
       x-required-role: admin
       x-step-up: true
       requestBody:
@@ -846,6 +863,7 @@ paths:
             Location:
               description: URL of the new domain
               schema: { type: string }
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Domain" }
@@ -864,10 +882,15 @@ paths:
       tags: [domains]
       operationId: getDomain
       summary: Get a domain
+      description: |
+        The `ETag` is the version number of the domain, quoted (`"3"`; `"0"` = never changed since
+        the version history began). Send it back as `If-Match` with `PATCH` or `DELETE`.
       x-required-role: viewer
       responses:
         "200":
           description: Domain
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Domain" }
@@ -877,9 +900,16 @@ paths:
       tags: [domains]
       operationId: updateDomain
       summary: Change a domain's settings
-      description: The name never changes. Absent fields keep their value.
+      description: |
+        The name never changes. Absent fields keep their value. Every change is recorded as a
+        version of the domain (who, when, the full state, the optional `reason`). `If-Match` is
+        optional: with the `ETag` of the last read it protects against overwriting a change made
+        in the meantime (`412`, problem type `precondition-failed`, nothing is stored); without it
+        the last writer wins, as before.
       x-required-role: admin
       x-step-up: true
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         description: "The settings to change"
         required: true
@@ -889,6 +919,8 @@ paths:
       responses:
         "200":
           description: Changed
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Domain" }
@@ -896,6 +928,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/PolicyViolation" }
@@ -905,14 +938,19 @@ paths:
       summary: Delete a domain
       description: |
         Issued certificates stay. Open ACME orders for its names fail at finalize, which checks the
-        domain again.
+        domain again. The deleted state is kept as the last version of the domain. `If-Match` is
+        optional: with the `ETag` of the last read the delete is refused with `412` (problem type
+        `precondition-failed`) when the domain was changed in the meantime.
       x-required-role: admin
       x-step-up: true
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
 
   # ---------------------------------------------------------------- agents (v0.3)
   /agents:
@@ -2642,6 +2680,13 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
 
 components:
+  headers:
+    ETag:
+      description: |
+        Version number of the object, quoted (`"7"`; `"0"` = never changed since the version
+        history began). Send it as `If-Match` to protect a change against a lost update.
+      schema: { type: string, pattern: '^"[0-9]+"$' }
+
   securitySchemes:
     session:
       type: apiKey
@@ -2659,6 +2704,14 @@ components:
       description: "API token (`Authorization: Bearer <token>`); scoped and expiring."
 
   parameters:
+    IfMatch:
+      description: |
+        The `ETag` of the last read, quoted (`"7"`). When it is not the current version of the
+        object, nothing is changed and the answer is `412` (`precondition-failed`). Optional.
+      name: If-Match
+      in: header
+      required: false
+      schema: { type: string, pattern: '^"[0-9]+"$', maxLength: 22 }
     Limit:
       description: "Maximum number of items per page"
       name: limit
@@ -2752,6 +2805,13 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    PreconditionFailed:
+      description: |
+        `If-Match` is not the current version of the object: somebody else changed it after it
+        was read. Nothing was changed. The answer names the current version, who made it and when.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/PreconditionProblem" }
     Conflict:
       description: State doesn't allow the action (e.g. already revoked, already unsealed)
       content:
@@ -2816,7 +2876,9 @@ components:
           description: |
             One of `about:blank` or `urn:myownpki:problem:` + bad-request, unauthorized,
             forbidden, step-up-required, not-found, conflict, too-large, unsupported-media-type,
-            policy-violation, wrong-secret, rate-limited, busy, sealed, internal
+            policy-violation, wrong-secret, rate-limited, busy, sealed, internal,
+            precondition-failed (412: `If-Match` is not the current version) and
+            precondition-required (428: a call that needs `If-Match` came without it)
           examples: ["urn:myownpki:problem:step-up-required"]
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
@@ -2825,6 +2887,16 @@ components:
         request_id:
           type: string
           description: Correlates with server logs (also the X-Request-ID header)
+
+    PreconditionProblem:
+      description: "Problem details of a failed `If-Match`: the version that is current now"
+      allOf:
+        - $ref: "#/components/schemas/Problem"
+        - type: object
+          properties:
+            current_version: { type: integer, minimum: 0, description: "The current version number (the new ETag)" }
+            changed_by: { type: string, description: "Name of the actor of the current version; empty if there is none yet" }
+            changed_at: { type: string, format: date-time, description: "When the current version was made" }
 
     ValidationProblem:
       description: "Problem details with one entry per invalid field"
@@ -3438,6 +3510,14 @@ components:
             Off, the public listener serves only what certificates point to (CA certificates,
             CRLs) and the PEM copies.
           type: boolean
+        reason:
+          description: |
+            Why the settings change (since 0.3.10, optional in a change, at most 200 characters,
+            no control characters). Kept with the version of the settings, never in the audit log
+            and never in an answer.
+          type: string
+          maxLength: 200
+          writeOnly: true
         agent_enrollment:
           description: |
             How agents are admitted (since 0.3, ADR-18): `auto` – a valid join token or a passed
@@ -3573,6 +3653,13 @@ components:
       description: "Changeable settings of a domain"
       type: object
       properties:
+        reason:
+          type: string
+          maxLength: 200
+          writeOnly: true
+          description: |
+            Why the domain changes (since 0.3.10, optional, no control characters). Kept with the
+            version of the domain, never in the audit log and never in an answer.
         ca_id: { $ref: "#/components/schemas/ID" }
         include_subdomains: { type: boolean, description: "Names below the domain are covered too" }
         wildcards: { type: boolean, description: "`*.name` may be ordered (dns-01 only; needs include_subdomains)" }
