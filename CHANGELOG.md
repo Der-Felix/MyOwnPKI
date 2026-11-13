@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.7]
+## [0.3.7] - 2026-11-13
 
 dns-01 in the agent. A deployment can prove its names through a DNS TXT record, so the agent can get
 **wildcard certificates**, certificates for a service **without port 80** and for a host **behind NAT**.
