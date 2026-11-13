@@ -760,12 +760,13 @@ func (s *Server) buildHTTP(demo bool) error {
 		TrustedProxies: trusted, Version: s.opt.Version, Demo: demo,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, Tenant: store.DefaultTenant,
 		TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read, Agents: s.Agents(), ACME: s.acme, Alerts: s.Alerts(), Notify: s.Notifier(), Endpoints: s.EndpointAdmin(),
+		Reports: s.Reports(), Analysis: s.Analysis(),
 	})
 	ui, err := web.NewHandler(web.Options{Logger: s.log, App: &web.AppDeps{
 		Auth: s.auth, Engine: s.engine, Keys: s.ring, Presets: s.engine.Presets, Clock: s.clk,
 		TrustedProxies: trusted, Demo: demo, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: s.sys.Write, Clock: s.clk, Wake: s.wakeUp}, TenantAudit: s.ta.Read, InstanceAudit: s.ia.Read,
-		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(), Endpoints: s.endpointAdmin(),
+		ACME: s.acmeAdmin(), ACMEDirectory: s.acmeDirectory(), ServerAttention: s.attention, Alerts: s.alertSource(), Notifier: s.notifier(), Endpoints: s.endpointAdmin(), Reports: s.reportSource(), Analysis: s.analysisSource(),
 		Agents: s.Agents(), AgentDist: agentdist.New(s.opt.Config.Agent.PackageDir, s.opt.Release),
 		AgentBaseURL: s.opt.Config.Agent.BaseURL, AgentTLSIssuer: s.opt.Config.Agent.TLSIssuer, ServerVersion: s.opt.Release,
 	}})

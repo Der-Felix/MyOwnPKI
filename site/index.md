@@ -66,6 +66,10 @@ The parts, and who talks to whom:
 - **TLS scan:** the server connects to the endpoints you enter, reads the certificate each one really
   serves and alerts when it is not the one this PKI issued, for example after a renewal that never
   reached the web server.
+- **Reports and analysis:** charts of the expiry of the current week and the next 12 weeks, the issuances by source, the
+  certificates per CA, the alert history and the agent fleet, and ten rules that point out what no alert
+  covers, such as a weak key, a renewal loop or a certificate that no scanned endpoint serves. The server draws the charts
+  itself; no script runs in the browser.
 - **Backup and restore**, a daily backup timer, and an import of the old `pki.sh` Bash suite.
 
 ## Who it is for
@@ -108,6 +112,7 @@ level 3 when you want the server to see what is deployed where and to renew on a
 | Roll the agent out with the Salt formula | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
 | Be told when something expires or breaks | [Monitoring]({{ '/monitoring/' | relative_url }}) |
 | Check that a host really serves the certificate it should | [TLS scan]({{ '/tls-scan/' | relative_url }}) |
+| See the state of the PKI in charts and what looks odd | [Reports and analysis]({{ '/reports/' | relative_url }}) |
 | Know what to do and what to avoid | [Best practices]({{ '/best-practices/' | relative_url }}) |
 | Fix something that does not work | [Troubleshooting]({{ '/troubleshooting/' | relative_url }}) |
 | Look up a command, a key or an API call | [Reference]({{ '/reference/' | relative_url }}) |

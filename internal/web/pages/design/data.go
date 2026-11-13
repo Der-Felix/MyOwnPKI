@@ -3,6 +3,10 @@
 package design
 
 import (
+	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/report"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -96,4 +100,72 @@ var brandColors = []view.KV{
 	{Key: "Navy", Value: "#1B2B45 – shield and document on light backgrounds"},
 	{Key: "Light", Value: "#E6ECF5 – shield and document on dark backgrounds"},
 	{Key: "Gold", Value: "#C27F12 – the seal, logo only"},
+}
+
+// Sample data of the chart gallery: fixed dates, so the page is the same
+// every time. The shapes are the datasets of internal/report.
+var (
+	sampleWeek0 = time.Date(2026, time.November, 9, 0, 0, 0, 0, time.UTC) // a Monday
+
+	sampleExpiry = report.Expiry{Weeks: weeks(sampleWeek0, 13, func(i int, start time.Time) report.ExpiryWeek {
+		counts := []int{2, 1, 0, 3, 0, 0, 2, 5, 4, 12, 8, 6, 3}
+		window := report.WindowNone
+		switch {
+		case i == 0:
+			window = report.WindowCritical
+		case i <= 4:
+			window = report.WindowWarning
+		}
+		return report.ExpiryWeek{Start: start, Count: counts[i], Window: window}
+	})}
+
+	sampleIssuances = report.Issuances{Weeks: weeks(sampleWeek0.AddDate(0, 0, -11*7), 12, func(i int, start time.Time) report.IssuanceWeek {
+		acme := []int{4, 6, 5, 7, 9, 8, 12, 10, 11, 9, 13, 6}
+		agent := []int{0, 1, 0, 2, 3, 2, 4, 3, 5, 4, 6, 2}
+		ui := []int{1, 0, 2, 0, 1, 0, 0, 3, 1, 0, 1, 1}
+		return report.IssuanceWeek{Start: start, ACME: acme[i], Agent: agent[i], UI: ui[i]}
+	})}
+
+	sampleAuthorities = []report.Authority{
+		{ID: "ca-1", Name: "homelab-issuing", Valid: 1100, Expiring: 17, Expired: 23, Revoked: 3},
+		{ID: "ca-2", Name: "homelab-users", Valid: 86, Expiring: 0, Expired: 4, Revoked: 1},
+		{ID: "ca-3", Name: "homelab-intermediate-issuing-ca-2026", Valid: 12, Expiring: 2, Expired: 0, Revoked: 0},
+		{External: true, Valid: 43, Expiring: 4, Expired: 6, Revoked: 0},
+	}
+
+	sampleAlerts = report.Alerts{RetentionDays: 30, Open: 2, Weeks: weeks(sampleWeek0.AddDate(0, 0, -4*7), 5, func(i int, start time.Time) report.AlertWeek {
+		warn := []int{3, 1, 0, 4, 2}
+		crit := []int{0, 1, 0, 0, 1}
+		return report.AlertWeek{Start: start, Warning: warn[i], Critical: crit[i]}
+	})}
+
+	sampleFleet = &report.Fleet{
+		Active: 4, SilentWarning: 1, Disabled: 1,
+		Version:     report.VersionCounts{Current: 3, Older: 2},
+		Deployments: report.DeploymentCounts{Deployed: 9, Pending: 1, Failed: 1, RolledBack: 1},
+	}
+)
+
+// weeks builds n consecutive weeks from first.
+func weeks[T any](first time.Time, n int, build func(i int, start time.Time) T) []T {
+	out := make([]T, n)
+	for i := range out {
+		out[i] = build(i, first.AddDate(0, 0, 7*i))
+	}
+	return out
+}
+
+// sampleEmptyExpiry has no certificate in any week.
+var sampleEmptyExpiry = report.Expiry{Weeks: weeks(sampleWeek0, 13, func(_ int, start time.Time) report.ExpiryWeek {
+	return report.ExpiryWeek{Start: start, Window: report.WindowNone}
+})}
+
+// darkChart is the issuance chart for the dark preview. It has its own id: the
+// hatch patterns of a chart are found by id, and two ids on one page would
+// make the second chart use the pattern of the first (which has the colors of
+// the other theme).
+func darkChart() view.Chart {
+	c := charts.Issuances(sampleIssuances)
+	c.ID = "chart-preview"
+	return c
 }

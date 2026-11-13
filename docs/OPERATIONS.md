@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.7
+v=0.3.8
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -509,6 +509,13 @@ From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`)
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
+
+From v0.3.7 to v0.3.8: pki.db migration 0020 adds two indexes (`certificates_created_at` and the partial
+`acme_orders_certificate`) for the issuance chart; it is indexes only, so no column, row or constraint changes.
+There is no configuration change and no change to the agent or its protocol. The release adds the *Reports* and
+*Analysis* pages, two charts on the dashboard and `GET /api/v1/reports` and `GET /api/v1/analysis`
+([chapter 15](#15-reports-and-analysis)); they need the tenant-wide read permission and nothing to set up. An older
+binary refuses the migrated database, so going back means the backup from step 1.
 
 From v0.3.6 to v0.3.7: no migration and no change to the server's behavior (`myownpki db status` shows
 the same versions), so going back needs no restore. The release adds dns-01 to the agent
@@ -1084,15 +1091,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.7
+v=0.3.8
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.7_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.8_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.7_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.7_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.8_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.8_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -2929,3 +2936,175 @@ and a channel from chapter 13.
 
 If step 3 produces no alert after about twelve minutes with `scan_interval: 5m`, go through §14.10 and
 then §13.10.
+
+## 15. Reports and analysis
+
+Since v0.3.8 the web UI has two pages that answer "what is the state of the PKI, and why?": **Reports** (charts
+of the expiry of the current week and the next 12 weeks, the issuances, the certificates per CA, the alert history and the agent
+fleet) and **Analysis** (ten fixed rules that name what no alert covers). The dashboard shows two of the charts.
+Everything is computed on the server from data it already holds. Nothing is sent to an outside service, nothing
+new is stored (§15.5), and nothing needs to be configured.
+
+The alerts of [chapter 13](#13-monitoring-and-notifications) say that something needs action now. These pages are
+for looking, for example once a week. The analysis is advice: it raises no alert, sends no message and has no
+dismiss button.
+
+### 15.1 The Reports page
+
+*Reports* is under *Overview*, between *Alerts* and *Analysis*. It has five sections, each a fold (`<details>`).
+*Expiry* and *Authorities* are open, the rest closed; the state is not remembered. Each section has a sentence that
+says what is counted, a chart with a summary sentence, and the same numbers as a table in a closed fold *Numbers*.
+The page says when it was computed. **Weeks are ISO weeks in UTC** (Monday 00:00 to Sunday), labeled `W47`; empty
+weeks are shown, not skipped. A section with nothing to count shows a sentence instead of a chart.
+
+| Section | Chart | What is counted | Left out |
+|---|---|---|---|
+| Expiry | *Expiry timeline*: 13 weekly columns, the current week and 12 more; the first counts only certificates that end after the moment of the build | Every certificate that is not revoked and ends in that week, whatever its source | Revoked certificates; the identity certificates of agents |
+| Issuances | *Issuances per week*: 12 weekly columns ending with the current week, stacked by source | Certificates with the source `issued`, by creation time | Imported and external certificates; the identity certificates of agents |
+| Authorities | *Certificates per CA and status*: one horizontal bar per CA, stacked by valid, expiring (30 days), expired, revoked | The certificates of each CA; those without a CA of this server as *External certificates*, last | The identity certificates of agents; a CA without certificates that is not active |
+| Alerts | *Alerts opened per week*: 5 weekly columns (the current week and four before), stacked by warning and critical, and the number of alerts open now | The alerts the server still keeps, counted in the week they opened, with the severity they have now | Anything older than the 30 days the server keeps resolved alerts |
+| Agents | *Agents by state*, *Agent versions compared with the server*, *Deployments by state* | See below | Only shown while the agent listener is on |
+
+**Expiry windows.** A column is *critical* when its week starts inside the critical expiry limit of the monitor, counted
+from the moment of the build, and *warning* when it starts inside the warning limit (`monitor.expiry_days`, default 3
+and 14 days, §13.7), else *later*. The current week starts at the moment of the build. The table has the window in
+a *Window* column. The chart counts every certificate that ends, also one that a newer certificate with the same names
+replaces already; `cert_expiry` (§13.6) opens only when nothing newer covers the names.
+
+**Source classes** (issuances). The server records no field for how a certificate was requested, so the class comes from
+the ACME orders: *ACME* when an order points at the certificate and the order's account has no agent link, *Agent* when
+the account is an agent's, *UI and API* when no order points at it (the UI and the REST API are one engine call and cannot be
+told apart).
+
+**Agents.** *Agents by state* counts Active, Silent (warning), Silent (critical), Disabled and Revoked. Silent uses the
+limits of the `agent_silent` alert (1 hour and 24 hours by default); an agent that never reported counts as Active, as in the
+monitor. *Versions* and *Deployments* count the agents that are neither disabled nor revoked: versions as Current or newer,
+Older and Unknown (not a release number, or a server that is a development build); deployments as Deployed, Pending,
+Failed and Rolled back, without the removed ones.
+
+**Dashboard.** For a role that may read the reports, the dashboard shows the *Expiry* and *Authorities* charts below the
+table of certificates that expire in 30 days, each in an open fold, with a link *All reports*. If the report cannot be
+built, the dashboard shows one warning line and the rest still works; the cause is in the server log.
+
+### 15.2 The Analysis page
+
+*Analysis* shows, from top to bottom: a summary line (for example *3 findings: 1 critical, 1 warning, 1 info; 2 rules
+cannot be assessed.*), the **findings** as a table (*Severity*, *Rule*, *Subject* with a link to the page of the
+certificate, CA, agent, domain or account, *What was seen*, *Why it matters*, *What to do*), the **rules** with state and
+number of findings, and a short *How this works*. `?rule=<id>` limits the findings to one rule; an id that is no rule is a 400
+page. The tables scroll sideways on a small screen. At most 200 findings per rule are kept; the rest is counted.
+
+Every rule is in exactly one **state**: `ok`; `findings` (if part of its input could not be judged, the page adds
+*N not assessed* and the reason); or `unknown`, when the input is missing. **`unknown` is not a problem and never a
+finding**; the reason is shown. A finding states only what the data shows ("no scanned endpoint served this certificate in
+the last 7 days", never "unused"). The thresholds are constants in `internal/analysis/rules.go`, not configuration, and
+defaults to be judged on a real installation.
+
+| Rule | Fires when | Thresholds | Severity | Unknown when |
+|---|---|---|---|---|
+| `orphaned_certificate` | A valid, current certificate (no valid one with the same names ends later) is old enough, no agent deployment in state `deployed` reports it, and no scanned endpoint that covers one of its names serves it, although at least one such endpoint was scanned and served something else | Certificate at least 14 days old; a witness is a covering endpoint scanned successfully in the last 7 days that has served another certificate for at least 7 days | info | The TLS scan is off; or, for certificates without a witness, the reason counts them (they are never judged one by one) |
+| `duplicate_certificates` | Valid `issued` certificates with the identical set of names from at least two different sources (UI and API, an ACME account, an agent), or three or more from one source | Each has more than a third of its lifetime left, so the overlap of a renewal does not count | warning (two sources), info (one source) | The source of a certificate in a group is not known |
+| `renewal_loop` | Certificates for the same set of names created within a short time, whatever their status now | 3 or more in 24 hours (warning), 6 or more in 24 hours (critical), 8 or more in 7 days (warning) | warning, critical | never |
+| `expiry_wave` | One ISO week in which many valid certificates end | At least 10 certificates in the week and at least 30 percent of all valid certificates | warning | Fewer than 20 valid certificates |
+| `weak_key` | A valid certificate with an RSA key under 2048 bits | RSA 2048 is not flagged | critical | The key size cannot be read |
+| `weak_signature` | A valid certificate, or the certificate of a current intermediate CA, signed with SHA-1, MD5 or MD2 (ECDSA and DSA with SHA-1 count too) | The signature of a root is not judged | critical | The algorithm is not known to the program |
+| `ca_cliff` | An issuing CA (active, key on this server) whose current certificate ends sooner than the default validity of the certificates it issues | The default is the longest `validity_days` of the CA's domains, 90 days if it has none; critical when less than 14 days are left or it has ended | warning, critical | The CA has no signed certificate yet |
+| `outdated_agent` | An active agent whose version is older than the server's | A different major or minor version is a warning, only a patch behind is info | warning, info | The agent listener is off; the server is a development build; an agent version that is not a release number |
+| `unused_acme_account` | A valid ACME account without agent link | At least 30 days old and no order in 90 days, or none ever | info | never |
+| `unused_domain` | A domain for which no certificate of the tenant, of any status, has a name it covers | At least 30 days old | info | never |
+
+The findings hold names that come from CSRs, ACME clients and agents, clipped to 120 characters in the API and
+escaped in the page. The links go only to pages of the UI.
+
+### 15.3 Who sees what
+
+| | Role | Notes |
+|---|---|---|
+| *Reports* and *Analysis* pages, the dashboard charts, `GET /api/v1/reports`, `GET /api/v1/analysis` | tenant-wide **viewer** or higher (permission `pki.read`) | The pages name the CAs, hosts, accounts, agents and domains of the whole tenant, so a role limited to one CA gets 403 (the 403 page in the UI), has no menu entry and no dashboard charts. An API token follows its roles: tenant-wide reads, limited to one CA is 403. Works while sealed. |
+| Anything that changes | nobody | There is no setting, button or write operation: the pages read and calculate. |
+
+A request that fails the check reads no data: the permission is the first thing the report and analysis services
+test, and the cache is not consulted before it.
+
+### 15.4 The REST API
+
+Both operations are in `api/openapi.yaml` (tag `monitoring`, `x-required-role: viewer`). Times are RFC 3339 in UTC, every
+string is plain text, never HTML, and the answer has `Cache-Control: no-store`.
+
+- `GET /api/v1/reports`: `generated_at` (whole seconds), `expiry.weeks[]` (`start`, `count`, `window` = `critical`,
+  `warning` or `none`), `issuances.weeks[]` (`start`, `acme`, `agent`, `ui`), `authorities[]` (`id`, `name`, `valid`,
+  `expiring`, `expired`, `revoked`), `alerts` (`retention_days`, `weeks[]` with `start`, `warning`, `critical`, and `open`)
+  and `agents` (`null` while the agent listener is off). `valid` includes `expiring`; the certificates without a CA are
+  the entry with an empty `id` and `name`, last.
+- `GET /api/v1/analysis`: `generated_at`, `summary` (`critical`, `warning`, `info`, `unknown`: the last is the number of
+  rules in state `unknown`), `rules[]` (`id`, `title`, `state`, `count`, `unknown_reason`) and `findings[]` (`key`, `rule`,
+  `severity`, `subject`, `seen`, `why`, `recommendation`, `href`). `count` is every finding of the rule, `findings` at most
+  200 per rule. `key` is `rule:` plus the subject's ID and stays the same between runs.
+- `GET /api/v1/analysis?rule=<id>` returns one rule and a summary of that rule only. An unknown id is `400`
+  (`bad-request`, field `rule`, the valid ids named, the input not echoed); the id is checked before anything is read, so
+  a caller without the permission who sends a bad id also gets 400.
+
+```bash
+curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" https://pki.homelab.lan:9443/api/v1/analysis | jq -c '.rules[] | {id, state}'
+```
+
+### 15.5 Cache, what is stored, and cost
+
+- **One report and one analysis per tenant, shared by every caller who passes the permission check, built at most once
+  a minute.** The check comes first; the cache has no key that comes from a request. A reload within the minute shows the
+  same numbers (`generated_at` stays), and a build runs one at a time, so a burst of reloads cannot hammer the database.
+- **Nothing is stored.** No table, no file and no setting holds a report or a finding; a restart starts with an empty
+  cache. There is no history beyond what the monitor keeps: resolved alerts for 30 days.
+- **Migration `pki.db` 0020** (`0020_report_indexes.sql`) adds two indexes: `certificates_created_at` on `certificates
+  (created_at)` and the partial `acme_orders_certificate` on `acme_orders (certificate_id)` where it is not null. They
+  serve the issuance chart. Nothing else changes in the database: no column, row or constraint.
+- **Cost.** The expiry and issuance charts read the `not_after` and `created_at` of the certificates in their window
+  through those indexes. The analysis reads the valid certificates and parses their DER once per build to find the key size
+  and the signature algorithm; the list pages do not parse DER. The analysis walks the agents (one read per agent for its
+  deployments), the ACME accounts, the domains and the stored result of the last TLS scan. It **never starts a scan** and opens
+  no connection: the two packages import no network package, which a test checks.
+- **No new dependency, no script.** `go.mod` and `THIRD_PARTY.md` did not change for these pages.
+
+### 15.6 Charts without JavaScript
+
+The charts are inline SVG written by the server and styled by the same style sheet as the rest of the UI. No script runs
+on these pages, and the Content Security Policy (`script-src 'self'; style-src 'self'`, no inline code or style) is
+unchanged. The project plan names Apache ECharts as an island; v0.3.8 does not use it. There is no JavaScript pipeline in the
+repository and esbuild is not an approved dependency, and the HTML tooltip of ECharts is reported to write inline `style`
+attributes, which that policy refuses (not verified for the current version). ECharts stays approved and unused; the
+decision is recorded in PLAN §7 and PHASE3 §14.3.
+
+What that means for you: no zoom or legend toggle, a bar has the browser's own tooltip (an SVG `<title>`). Accessibility:
+every chart is a `<figure>` with a caption and a one-sentence summary; the SVG has a title and a description; the exact
+numbers are a real table under it; every series has a text label and the second and third also a hatch pattern, so
+color is never the only information; nothing animates. A test checks 3:1 contrast of the chart colors against the
+background in the light, dark and OS-follow themes. Text that comes from data is cleaned of control characters, clipped
+(18 characters on an axis, 48 in the table and tooltip) and escaped by the template.
+
+### 15.7 When a number or a finding looks wrong
+
+| Symptom | Cause and check |
+|---|---|
+| A new certificate, revocation or alert is not in the numbers | The report is built at most once a minute; look at *Computed at* and reload after a minute. |
+| The expiry or authority numbers differ from *Certificates* | *Certificates* hides agent identity certificates by default; compare with its filters `valid`, `expired` and `revoked` and `?status=expiring`. The expiry chart counts every certificate that ends in the week, also one that a newer certificate replaces, and does not count revoked ones. |
+| No *Agents* section in *Reports* | The agent listener is off (§12.1). |
+| *Orphaned certificate* says `unknown` | The TLS scan is off (§14), or no scanned endpoint covers the certificates with a stable result from the last 7 days. Add the endpoint (§14.4). |
+| *Expiry wave* says `unknown` | Fewer than 20 valid certificates. |
+| *Outdated agent* says `unknown` | The agent listener is off, or the server runs a development build. |
+| 403 on the page or the API | The role or the token is limited to one CA (§15.3). |
+| 400 on `GET /api/v1/analysis?rule=…` | The id is not one of the ten; the message lists them. |
+| Reports and Analysis are missing from the menu | The role cannot read the whole tenant. |
+
+### 15.8 An end-to-end check
+
+Do this after the update to v0.3.8, as an admin. It has not been run on a live installation at the time of writing.
+
+1. `myownpki db status` shows `pki.db` 0020.
+2. *Reports*: compare *Certificates per CA and status* with *Certificates* filtered by `status=valid`, `expired` and
+   `revoked`, and the *Expiry timeline* with *Certificates* filtered by `status=expiring`: the totals should agree.
+3. Issue one certificate in the UI and one with an ACME client. After a minute, reload *Reports*: the current week of
+   *Issuances per week* shows one *UI and API* and one *ACME* (or *Agent*) certificate, and the *Numbers* table says the same.
+4. Open both pages with the keyboard (Tab, Enter on a fold) and in the dark theme; the browser console shows no
+   Content Security Policy violation.
+5. *Analysis*: read each finding and judge it. With the TLS scan off, *Orphaned certificate* must say `unknown`.
+6. `curl` both endpoints with a token of a viewer (200) and of a viewer limited to one CA (403).

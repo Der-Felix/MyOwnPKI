@@ -1793,6 +1793,364 @@ Measured on this branch with a probe module (the same `go.mod`, a program using 
 
 ---
 
+## 14. Charts, reports and analysis: v0.3.8
+
+v0.3.8 answers "what is the state of the PKI, and why?" in the web UI: **charts** on the dashboard, a calm
+**Reports** page, and an **Analysis** page with rule-based findings that each say what was seen, why it
+matters and what to do. Everything is computed on the server from data it already holds; nothing is sent to
+an external service. The UI inventory (a screenshot walk through every page) ends in a gap list for the
+maintainer. Written on 2026-11-13 while the maintainer was away: the decisions in §14.2 are cautious
+defaults for review, not agreements.
+
+Goal, measured on the live installation: *Reports* shows the expiry forecast, issuances by source, the
+certificates per CA and status, the alert history and the agent fleet, and every number matches the
+certificate list and the agent page; *Analysis* names the real oddities of the homelab with reasons and says
+"unknown" where it has no data; both pages work with the strict CSP, without a single console violation.
+
+**Facts found in the repository (2026-11-13, `origin/main` 7b9d687)** that shape the plan:
+
+- **There is no JavaScript pipeline.** `go.mod` has no esbuild, `web/islands/` does not exist, `web/web.go`
+  embeds `styles/*.css` only, `staticFiles` knows no `.js` type, no template may contain `<script>`
+  (`TestNoInlineStylesOrScripts` and the `.templ` scan forbid it), and htmx is **not** loaded (the `hx-*`
+  attributes in `admin/generic.templ` are inert; the host progress page uses `<meta http-equiv=refresh>`).
+  v0.3.8 would be the first script the product ever served. The passkey button waits for the same
+  mechanism (PLAN: "No passkey button in the UI until esbuild (ADR-04) or one plain script is approved").
+- **ADR-04** reads "Islands for interactivity: Web Components + ECharts, bundled with esbuild-as-a-Go-library".
+  esbuild is a separate, **not approved** dependency; `frontend.md` repeats the plan.
+- **Strict CSP** (`internal/web/server.go`): `default-src 'self'; script-src 'self'; style-src 'self'; img-src
+  'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`. No `unsafe-*`.
+- **No source column.** `certificates.source` is `issued | imported | external`. ACME, agent and UI/API
+  issuance are told apart only by joins: `acme_orders.certificate_id` and `acme_accounts.agent_id`.
+- Alerts are pruned after 30 days (`monitorKeep`); `monitor.Rules` holds every threshold; `Evaluator` already
+  builds the certificate set, the endpoint states and the agent findings; `Engine.CertificateCounts`
+  already gives the counts per CA and status, scoped by the caller's roles.
+- The screenshot tool (`internal/tools/screenshots`) already runs the real UI on a throwaway demo instance and
+  captures with a headless Edge/Chrome in light and dark. The demo instance has no agents, alerts or endpoints.
+
+### 14.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 45 | 0.3.8 | **Data layer for reports.** New package `internal/report`. Migration `pki.db` **0020** (next free number; additive, indexes only): `certificates (created_at)` and `acme_orders (certificate_id) WHERE certificate_id IS NOT NULL`. sqlc queries in `internal/store/queries/pki/reports.sql` (`ExpiryTimes`: `not_after` of non-revoked certificates in a window; `IssuanceSources`: `created_at` plus the class of every `source='issued'` certificate of a window, D6) and two read methods on `ca.Engine` that keep the CA scoping of `CertificateCounts`. `report.Build(ctx, Deps, now)` returns the five datasets of §14.2 (ISO weeks in UTC, Monday start; buckets are filled in Go, empty weeks included). A 60-second cache per tenant with a mutex (one build at a time). Deps are interfaces (engine, agents, alerts store, rules, clock). Tests: fake clock, week borders (Sunday 23:59:59 and Monday 00:00:00), a 53-week year, empty tenant, revoked and agent identity certificates excluded, source classes against a real engine with an ACME order, an agent-linked account and a UI issuance, the cache (second call does not query, the next minute does), a CA-scoped role gets `authz.ErrDenied` before any query | `task generate`, `go test ./internal/report/... ./internal/ca/... ./internal/store/...`, `task check` |
+| 46 | 0.3.8 | **Analysis rules.** New package `internal/analysis`: `Snapshot` (plain structs, §14.2), `Load` (reads through the engine, agents, ACME, domains and scan services with the system principal and builds the snapshot), ten rule functions `func(Snapshot) Result` with the ids, thresholds and texts of §14.2, `Run(snapshot) []Result` sorted by severity, rule and subject (at most 200 findings per rule, the rest only counted). One engine method `ca.Engine.CertificateTraits` returns signature algorithm and key size parsed from `cert_der` for the valid certificates (not a field of `CertificateInfo`, so list pages do not parse DER). The package imports no network package (a test checks the import list). Tests: a table per rule with the cases "fires", "does not fire", "boundary" and "unknown"; fixtures are built in the test; the SHA-1 and RSA-1024 DER cases use two committed, clearly marked fixture PEMs (Go refuses to sign them; the generation command is in the test comment); texts are asserted so a rule cannot claim more than its input shows | `go test -race ./internal/analysis/...`, `task check` |
+| 47 | 0.3.8 | **REST and OpenAPI first.** `api/openapi.yaml`: `GET /reports` and `GET /analysis` (tag `monitoring`, `x-required-role: viewer`, 403 for a role limited to one CA, works while sealed, shapes in §14.2), schemas `Report`, `ReportWeek`, `Analysis`, `AnalysisRule`, `Finding`. Handlers in `internal/httpapi/reports.go` call `report.Build` and `analysis.Load/Run` after the permission check; `GET /analysis?rule=<id>` filters. Contract tests, a permission test per role (viewer ok, CA-scoped viewer 403, no session 401), a test that a finding with a hostile name (`<script>`, `"`, 4,000 characters) comes back as JSON data and clipped | `task check` (contract tests), `task lint:api` |
+| 48 | 0.3.8 | **Chart rendering, server side.** New package `internal/web/chart`: `Spec` (kinds `columns`, `stacked`, `bars`; series with label, token class and pattern; categories; values; a one-sentence summary) and a templ component that writes a `<figure>` with `<figcaption>`, one `<svg class="chart-svg" role="img" aria-labelledby>` with `<title>` and `<desc>`, text labels and a legend (swatch plus text), and a `<details>` "Numbers" with the same data as a `.table`. Classes in `components.css` (`.chart .chart-svg .ch-bar .ch-axis .ch-grid .ch-label .ch-legend .ch-ok .ch-warn .ch-crit .ch-neutral .ch-s1 .ch-s2 .ch-s3`, hatch patterns for s2 and s3), tokens `--chart-s1..s3` and `--chart-grid` in `tokens.css` for light, dark and the OS-follow block (a test checks that every chart token has at least 3:1 contrast against `--bg` in both themes, WCAG 1.4.11). Status series use the fixed status tokens only. Test changes: `<svg>` is allowed only as `<svg class="chart-svg" …>` from this package, and inside it `<image>`, `<foreignObject>`, `<use>`, `href`, `style` and `on*` stay forbidden; the `.templ` scan exempts `internal/web/chart/` for `<svg` only. A gallery entry in `/design`. Tests: golden SVG per kind, label escaping (`<`, `&`, quotes; 5,000 characters clipped to 32 runes), zero values, one series, 13 and 26 categories, determinism (same input, same bytes) | `task generate`, `go test ./internal/web/...`, `task check` |
+| 49 | 0.3.8 | **Pages.** `GET /reports` (`internal/web/app_reports.go`, `pages/reports`): five sections, each a `<details open>` with a heading, the chart, the summary sentence and the numbers table, plus "Computed at <time> UTC, refreshed every minute". `GET /analysis` (`app_analysis.go`, `pages/analysis`): a summary line ("3 findings: 1 critical, 1 warning, 1 info; 2 rules cannot be assessed"), the findings as a table (Severity, Rule, Subject, What was seen, Why it matters, What to do), then "Rules" with the state of every rule (ok, findings, unknown plus the reason) and a short "How this works" paragraph (rules in Go, nothing leaves the server). Dashboard: two charts (expiry timeline, certificates per CA and status) below the number row, each in a `<details open>`. The two sidebar entries and the dashboard charts appear only for a role that passes the tenant-wide `authz.ReadPKI` check (the test the alerts use). Tests: render for viewer, operator and admin and for a CA-scoped viewer (403 page, no nav entry), no inline style or script, every class defined, hostile CA, domain and certificate names escaped | `go test ./internal/web/...`, `task check` |
+| 50 | 0.3.8 | **UI inventory.** `-inventory` mode for `internal/tools/screenshots`: shoots every parameterless GET page of the real UI (the route list is a Go slice next to `shots`; a test fails when `registerApp` gains a route that is neither in the list nor on an exclusion list) in light and dark at 1400 x 900 into `.tmp/ui-inventory/` (gitignored, never committed). The demo instance gets cheap seeds so the pages are not empty: alerts through the monitor store, endpoints through the scan store, back-dated issuances (a settable fake clock for the seeding only, then the real one); agent pages that need a live agent are read from their templ source and marked "not shot". The step then looks at each image and writes **`docs/UI-GAPS.md`**: one row per page (what was seen in light and dark, what is missing or odd, candidate fix, size S/M/L) and a ranked list of gaps; the roadmap candidates (global search, host view, chain view, CSV export, audit log filters, notification settings in the UI) are checked against what exists. No product code changes | `task screenshots -- -inventory` (browser path as for the normal run), `go test ./internal/tools/screenshots/...` |
+| 51 | 0.3.8 | **Docs and release.** New `site/reports.md` (reading each chart and each finding, the rules table, "unknown" explained, what to do), `site/monitoring.md` and `site/tour.md` (pointers), `site/faq.md` and `site/glossary.md` (expiry wave, renewal loop, orphaned certificate, signature algorithm), `site/_data/nav.yml` (group Operate), a paragraph in `site/learn/lifetimes.md` on waves and jitter; OPERATIONS new §15 (pages, API, permission, cache, what is not stored, rules table); CHANGELOG `[0.3.8]` undated; the version bump in the files of `git show d30bf6f --stat`; PLAN §10.1 row v0.3.8, §7 "Technology: Charts" and the ECharts open point updated for D1; four new shots (`reports`, `analysis`, and their `-dark` variants) added to `shots`, `task screenshots` run once if a browser is there; this section gets "Built" notes | `scripts/ci/site-check.sh`, `task ci:local` (report every SKIP), `git diff --check` |
+
+**Live test for the maintainer** (after the PR is merged to a test server; names are examples):
+
+1. Update the server to v0.3.8. `myownpki db status` shows `pki.db` 0020; nothing else changed in the database.
+2. Sign in as admin, open *Reports*. Compare "certificates per CA and status" with *Certificates* (`?status=valid`,
+   `expired`, `revoked`) and the expiry timeline with *Certificates*, `?status=expiring`: the totals agree.
+3. Issue one certificate in the UI and one with `certbot` or the agent, wait a minute, reload: the current
+   week of "Issuances per week" shows one UI and one ACME or agent certificate; the table under the chart
+   shows the same numbers. Tab through the page with the keyboard: every `<details>` opens, the focus is visible.
+4. Switch to dark and to the OS theme; look at the legend and the hatching.
+5. Open the browser console on both pages: **no CSP violation**, no failed request.
+6. *Analysis*: read each finding and judge it. Expect the real oddities of the homelab (agents older than the
+   server, domains nobody uses). Check one "orphaned certificate" finding by hand with `openssl s_client` on the
+   host. With the TLS scan off, that rule must say "cannot be assessed", not "orphaned".
+7. Issue the same name from two sources (UI and ACME): the duplicate rule fires and names both. Re-issue one
+   name four times within a day with a script: the renewal loop fires.
+8. As a viewer limited to one CA: no *Reports* or *Analysis* entry, and `GET /api/v1/reports` is 403.
+9. `curl -s -H "Authorization: Bearer $TOKEN" https://pki.homelab.lan:9443/api/v1/analysis | jq '.rules[] | {id,state}'`.
+10. Read `docs/UI-GAPS.md` and mark what to build next.
+
+### 14.2 Rules and defaults
+
+**Decisions** (D1 to D3 answer the hard questions of the brief; the maintainer reviews them later):
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | **Charts are server-rendered SVG in v0.3.8**: Go builds calm bars and columns, templ emits them as inline `<svg>` with global CSS classes, **no JavaScript**. The approved ECharts stays approved but unused; `THIRD_PARTY.md` gets no entry. The island path is §14.3, a separate step if the maintainer wants it | The six charts are bars and columns. ECharts has a documented, unresolved CSP problem (its HTML tooltip writes inline `style`: apache/echarts #19938, open, no maintainer answer; the fix PR #19717 was closed unmerged); whether 6.1.0 behaves is **not verified**. The product has no script pipeline, no `.js` content type and tests that forbid `<script>`, so an island adds a whole class of surface and about 1.1 MB for six simple charts. SVG works under the CSP today, follows dark mode through tokens, needs no JS and is testable as text |
+| D2 | **No bundler, no esbuild.** Nothing in `go.mod` or the build changes; no Node anywhere | esbuild is a second dependency that is not approved (ADR-04, CLAUDE.md); D1 needs none |
+| D3 | **The CSP is not loosened**, not for charts and not for a probe. If a later island cannot run under it, the island does not ship | A CA's admin UI with `unsafe-inline` is not acceptable for a chart |
+| D4 | **Permission: the tenant-wide `authz.ReadPKI` check, like the alerts.** No new permission. A role limited to one CA gets 403 (API and UI) and no navigation entry | Reports and findings name CAs, hosts, accounts and domains of the whole tenant; a per-CA slice of alerts and agents does not exist. A new permission would add a role matrix for no gain |
+| D5 | **Data is loaded through the existing services** with a system principal inside `report.Build` and `analysis.Load`, after the caller passed D4; the result is cached 60 seconds **per tenant** | Same reads as the monitor, no raw SQL in the web layer; everyone who passes D4 may see all of it, so a shared cache leaks nothing. A reload stays cheap with 10,000 certificates |
+| D6 | **Source classes** (only `source = 'issued'`; imported and external certificates are not issuances): `acme` = an `acme_orders` row points at the certificate and its account has no `agent_id`; `agent` = same, the account has an `agent_id`; `ui` = no order (UI and API issuance, one class: same engine call). Agent identity certificates (`preset = 'client'`, `requested_by` an agent, as in `HideAgentCertificates`) are left out everywhere and the page says so | The only way the data tells them apart (§14 facts); documented so the numbers can be rebuilt by hand |
+| D7 | **Weeks** are ISO weeks in UTC (Monday 00:00). Expiry timeline: the current week and 12 more (13 columns); the first counts only certificates that end after now. Issuances: 12 weeks ending with the current one. Alert history: what the store keeps, 30 days (5 weekly columns), and the caption says so; retention is not changed. A bar is `ch-crit` when its week starts inside the critical window, `ch-warn` inside the warning window (`monitor.Rules`), else neutral; the table repeats it as a "Window" column | Stable labels (2026-W47), testable borders, no clock in the SVG; color is never the only carrier |
+| D8 | **Analysis is advice, not an alarm:** rules are pure functions over a snapshot, nothing is stored, **no dismiss or acknowledge** in v0.3.8, no new configuration keys (thresholds are constants in `internal/analysis/rules.go`, listed below), findings never produce alerts, e-mail or webhooks | A dismissal table needs a `system.db` migration and invites silencing; derived findings are recomputed. The monitor stays the one place that alarms (no duplicate of `cert_expiry`) |
+| D9 | **Three states per rule: ok, findings, unknown.** A rule whose input is missing says `unknown` plus the reason ("the TLS scan is off") and produces no finding. Texts are fixed templates with numbers; a finding never states more than the snapshot shows ("no scanned endpoint served this certificate in 7 days", never "not used") | The brief's "no false claims"; an admin may revoke on the strength of a finding |
+| D10 | **Severity is `info`, `warning` or `critical`**, shown as text and mapped to `--status-info`, `--status-warn`, `--status-crit`; an `info` finding is never a call to act | Fixed status colors (ADR-12); three levels are enough |
+| D11 | **Nothing leaves the server.** `internal/analysis` and `internal/report` import no network package (tests); no external AI, no telemetry, no font or script from elsewhere | Findings contain internal names; PLAN says the page stays local |
+| D12 | **Collapsing is `<details>`, the state is not remembered** (no JS, no storage). Reports: all sections open. Dashboard: two charts, both open | Native and keyboard-operable; remembering needs a cookie or a script (open point 6) |
+| D13 | **UI inventory by the existing screenshot tool**, output untracked, the deliverable is `docs/UI-GAPS.md` | No browser-automation dependency, no committed images (every image stays in Git history); the maintainer reads one list |
+
+**Data per chart** (all UTC; step 45 adds the queries named here):
+
+| Chart | Source | Notes |
+|---|---|---|
+| Expiry timeline, 13 weeks | `ExpiryTimes`: `not_after` of non-revoked, non-agent certificates in (now, now + 13 weeks), via `certificates_not_after` | Bucketed in Go; contains the dashboard's "Expire in 30 days" |
+| Issuances per week by source | `IssuanceSources` (D6), `created_at` from the start of the week 12 weeks ago, the new indexes of 0020 | At 85 issuances a day (PLAN scaling) about 7,000 rows; the cache absorbs reloads |
+| Certificates per CA and status | `Engine.CertificateCounts(HideAgentCertificates)`: valid, expiring (30 days), expired, revoked per CA | Already scoped; status tokens ok, warn, crit, neutral, with text labels |
+| Alert history | `monitor.Store.Since(now - 30 days)`: opened per week by severity, plus how many are still open | Tenant-wide `ReadPKI`, like the Alerts page |
+| Agent fleet health | `agents.ListAgents` (plus the deployments; one extra sqlc query if the list does not carry them): active and seen within `AgentSilentWarn`, silent (warning, critical), disabled, revoked; version current, older, unknown; deployments by state | Hidden when the agent listener is off |
+
+**Analysis rules.** The id is stable and appears in the API. `Snapshot` holds: now, the server version, the valid
+end-entity certificates (name set, class, issuer key, CA, creation time, fingerprint, traits), the CA generations,
+agents with deployments, endpoints with their last scan, ACME accounts with their last order, domains, `monitor.Rules`.
+
+| Id | Fires when | Severity | Text (seen, why, what to do) | Unknown when |
+|---|---|---|---|---|
+| `orphaned_certificate` | a valid, current certificate is at least 14 days old, **no** agent deployment reports its serial as deployed, and at least one endpoint that covers one of its names was scanned successfully in the last 7 days and none of those scans saw its fingerprint | info | "No scanned endpoint and no agent served this certificate in 7 days. It may belong to a host that is gone. Check the host, then revoke it (second factor)." | scanning is off or no endpoint covers its names: then **one** summary line "N certificates are not covered by any scanned endpoint", never a per-certificate finding |
+| `duplicate_certificates` | two or more valid certificates with the identical name set from at least two different issuer keys (ACME account, agent, UI), each with more than a third of its lifetime left; or three or more from one issuer key | warning (two sources) / info | "Two sources issue for the same names; the renewal overlap of one source is normal and ignored. One of them may be forgotten." Names the sources | the class of a certificate cannot be determined |
+| `renewal_loop` | three or more certificates for the same name set created within 24 hours (critical at six), or eight within 7 days | warning / critical | "A client got N certificates for these names in a day. Usually a deploy hook that fails and rolls back, or a job that never stores the result. ACME servers rate-limit this." Names the source | never |
+| `expiry_wave` | one calendar week holds at least 10 valid certificates **and** at least 30% of all valid end-entity certificates (the tenant has at least 20) | warning | "N of M certificates end in week W. Renewals that fail together become one big incident. Let ACME clients renew at two thirds of the lifetime and add jitter." | fewer than 20 valid certificates |
+| `weak_key` | a valid certificate has an RSA key under 2048 bits (typically an import from `pki.sh` or an external certificate) | critical | "RSA N bits can be factored with moderate effort. Reissue with ECDSA P-256 or RSA 3072 and revoke the old one." RSA 2048 is **not** flagged | the key size cannot be parsed |
+| `weak_signature` | a valid end-entity or intermediate CA certificate is signed with SHA-1, MD5 or MD2 (a root's own signature is irrelevant and ignored) | critical | "SHA-1 collisions are practical; the CA/B Forum Baseline Requirements ban SHA-1 for new certificates. Reissue from a CA that signs with SHA-256 or better." | the algorithm is unknown to Go |
+| `ca_cliff` | the current generation of an issuing CA ends in less than the default validity new certificates get (the domain's `validity_days`, else 90): the engine shortens a default validity to the CA's end (`computeValidity`) and refuses a longer explicit request | warning; critical under 14 days | "This CA ends on D. Every certificate it issues from now on ends on D at the latest; K valid certificates already end that day. Renew the CA first (second factor)." The monitor's `ca_expiry` stays the alarm | the CA has no signed generation yet |
+| `outdated_agent` | an active agent's version is older than the server's (`internal/version.Compare`): a minor or more behind is a warning, a patch only info | warning / info | "Agent X runs 0.3.2, the server runs 0.3.8. Update it from *Agents*, Update, or with the Salt formula." | the server version is `dev` or a version is not strict semver |
+| `unused_acme_account` | a valid account without agent link is at least 30 days old and has no order in 90 days (or never) | info | "No orders for N days. It may belong to a retired client. An ACME client deactivates an account (RFC 8555 section 7.3.6); the UI cannot yet." Contacts are not shown | never |
+| `unused_domain` | a domain at least 30 days old for which no certificate (any status) of the tenant has a name that `Domain.Covers` | info | "Nothing was ever issued under this domain. An approved name space nobody uses is a standing permission. Remove it or issue a first certificate." | never |
+
+**REST shapes** (step 47; times RFC 3339 UTC; both answer `Cache-Control: no-store`):
+
+- `GET /api/v1/reports` returns `generated_at`, `expiry.weeks[{start, count, window}]` (`critical|warning|none`),
+  `issuances.weeks[{start, acme, agent, ui}]`, `authorities[{id, name, valid, expiring, expired, revoked}]`,
+  `alerts{retention_days, weeks[{start, warning, critical}], open}` and `agents` (null when the listener is off:
+  `{active, silent_warning, silent_critical, disabled, revoked, version{current, older, unknown}, deployments{deployed, pending, failed, rolled_back}}`).
+- `GET /api/v1/analysis[?rule=id]` returns `generated_at`, `summary{critical, warning, info, unknown}`,
+  `rules[{id, title, state: ok|findings|unknown, count, unknown_reason}]`, `findings[{key, rule, severity, subject,
+  seen, why, recommendation, href}]`. `key` is `rule:subject id`, stable between runs. No field holds HTML.
+
+**Accessibility.** Every chart is a `<figure>` with a caption and a one-sentence summary; the SVG has `role="img"`
+with `<title>` and `<desc>`; the exact numbers are a real table in a `<details>` (keyboard operable, readable by
+screen readers); every series has a text label and a pattern, so color never carries information alone; nothing
+animates, so `prefers-reduced-motion` needs no special case; text is at least 12 px (`--fs-caption`); the SVG scales
+with its `viewBox`, so the C-layout width works.
+
+### 14.3 Dependency note and the island path (not built in v0.3.8)
+
+**v0.3.8 adds no dependency.** No Go module, no JavaScript, no tool: `go.mod`, `go.sum` and `THIRD_PARTY.md` stay
+unchanged (check after step 51: `git diff origin/main -- go.mod go.sum THIRD_PARTY.md` is empty). The maintainer's
+approval of ECharts is kept for a later step. What that step takes (so the choice is cheap):
+
+- **Artifact.** `dist/echarts.min.js` from the npm tarball of `echarts@6.1.0` (published 2026-05-19, older than
+  two weeks; `latest` on 2026-11-13; Apache-2.0 per the registry). Size 1,121,883 bytes (jsDelivr file listing).
+  Prebuilt subsets exist: `echarts.common.min.js` 715,020 bytes and `echarts.simple.min.js` 500,315 bytes (their
+  content is not checked). A smaller **custom build needs Node and a bundler**, so it is not possible under
+  ADR-04's no-Node rule; with esbuild approved, a tree-shaken build (bar, line, SVG renderer, grid, legend,
+  tooltip) would be a fraction of that (an estimate, not measured).
+- **Where and how.** `web/vendor/echarts/echarts.min.js` plus `LICENSE` (11,990 bytes), `NOTICE` (168 bytes) and the
+  license of the bundled **zrender** (BSD-3-Clause as far as known; read it in the tarball), embedded with `//go:embed`
+  and served as `/static/vendor/echarts/echarts.min.js?v=<first 12 hex of its SHA-256>` with `text/javascript;
+  charset=utf-8` (add `.js` to `staticTypes`; on Windows Go takes types from the registry) and `Cache-Control: public,
+  max-age=31536000, immutable` for the hashed URL only. Only the Reports page and the dashboard load it
+  (`view.Page.Scripts`). `THIRD_PARTY.md` records version, date, license, size, SHA-256 and the registry's
+  `dist.integrity` (sha512); a test hashes the embedded file and fails on a difference. The maintainer fetches the
+  tarball (`curl -O https://registry.npmjs.org/echarts/-/echarts-6.1.0.tgz`) and compares it with the registry's
+  integrity value; no `npm` in the build.
+- **Island without a bundler.** `web/islands/pki-chart.js`, hand-written ES2020, one `customElements.define`, reads
+  its data from a `data-spec` attribute the server fills (JSON, escaped by templ) and builds the option from the CSS
+  tokens (`getComputedStyle`); the server-rendered SVG and table stay inside the element as the fallback. The test
+  rules relax to "`<script src="/static/…">` without a body". If esbuild is approved later, the island becomes
+  TypeScript in `web/islands/*.ts`, bundled during `go generate`, and the vendored file gives way to tree-shaken imports.
+- **CSP, facts and gaps.** Known: the HTML tooltip of 5.5.0 writes inline `style` through `innerHTML` and violates
+  `style-src 'self'` (issue #19938); `renderMode: 'richText'` was suggested there, with no reported result. `style`
+  set through the CSSOM (`el.style.x = …`, `cssText`) is allowed by CSP; `setAttribute('style', …)` and markup are
+  not. The `unsafe-eval` error reported for "ECharts" in a Grafana forum thread came from a plugin that evaluates
+  user strings, not from the core, as far as the thread shows. **Not verified:** the behavior of 6.1.0, which style
+  writes zrender's SVG renderer makes, and any `eval` in the core. The probe (first sub-step of the later island
+  step): a test page served with the product's exact CSP, a `securitypolicyviolation` listener that writes into the
+  DOM, ECharts with `renderer: 'svg'`, `animation: false`, `tooltip.renderMode: 'richText'`, and `msedge --headless=new
+  --dump-dom`. Zero events: the island may ship. Any event: it does not (D3).
+
+### 14.4 Security review list (for an independent reviewer)
+
+1. **Permission before data:** `/reports`, `/analysis`, both API routes and the dashboard charts check the tenant-wide
+   `authz.ReadPKI` first; the cache is read only after that. A viewer limited to one CA gets 403 and no nav entry;
+   check that no parameter (`?rule=`) skips the check.
+2. **Tenant isolation:** every query runs on the tenant's own `pki.db` handle; the alert read filters on `tenant`.
+   Check that no cache key comes from request input and that two tenants cannot share an entry.
+3. **Attacker text in output:** CA, domain, agent and certificate names come from CSRs, ACME and agents. Check that
+   chart labels and findings go only through templ (no `templ.Raw`, no string-built SVG), that labels are clipped,
+   that JSON fields hold no HTML, and that finding texts are fixed templates plus escaped values.
+4. **CSP and markup:** no `style` attribute, no `<style>`, no script, no `href` or `<image>` inside the SVG; the test
+   relaxation allows exactly one tag shape. Look at the console of a real browser for violations.
+5. **No false claims:** the `unknown` path of each rule (no scan, no endpoint, a `dev` server version); an orphaned
+   finding needs a successful scan within 7 days; texts say "not seen", never "unused".
+6. **Read-only:** the routes are GET, change nothing and write no audit entry (reads are not audited today); the
+   builder uses the system principal only after item 1 and never returns data to a caller who failed it.
+7. **Resource use:** at most one build per tenant per minute, bounded loops (200 findings per rule, group sizes), no
+   DER parsing of the certificate table outside the cache; a reload storm cannot hammer SQLite.
+8. **Nothing leaves the server:** no outbound call in the two packages; no new dependency (§14.3).
+9. **Migration 0020:** indexes only, no data change; a failed migration leaves 0019 intact (forward-only runner).
+10. **Fixtures:** the two committed PEM fixtures are marked, contain no real name and no private key.
+
+### 14.5 Risks
+
+| Risk | Handling |
+|---|---|
+| ECharts is what the roadmap and ADR-04 name; D1 deviates | Flagged in §14.7 and, by step 51, in PLAN §10.1; the approval stays; §14.3 keeps the later step cheap |
+| Inline `<svg>` needs a relaxed test and a new CSS family | The relaxation allows one tag shape from one package and forbids the dangerous children; the gallery shows every class (ADR-12) |
+| Findings that cry wolf (duplicates during renewal overlap, a wave in a small tenant) | Overlap ignored, minimum counts, `info` for soft rules, `unknown` for missing data; the live test judges each finding |
+| An orphan finding makes someone revoke a certificate that is in use (a host the scan cannot reach) | Needs a scan of a covering endpoint; the text says "not seen" and says to check first; revocation needs a second factor anyway |
+| Migration number 0020 collides with `release/v0.3.7` or another branch | Take the next free number when the step starts; the live test names the number actually used |
+| Seeding back-dated issuances in the demo instance (step 50) disturbs session or key timing | Fake clock only around the seed, restored before the first sign-in; if it proves fragile, seed by direct inserts in the tool and say so |
+| No headless Edge or Chrome on the build machine | Steps 50 and 51 report "screenshots not taken" and finish the rest; `-browser PATH` as before |
+| The cache hides a change for up to a minute | The page says when it was computed; a minute is the monitor's period |
+
+### 14.6 Not in v0.3.8
+
+- **ECharts, the `<pki-chart>` island, esbuild, any script** (§14.3); gridstack and a movable dashboard grid.
+- **Dismiss, acknowledge or snooze** of findings, notifications or alerts from the analysis, thresholds in the configuration.
+- **A longer alert history** (retention stays 30 days), per-CA or per-domain report slices, CSV or image export, a date picker, saved views.
+- **The renewal heatmap and the key algorithm distribution** of PLAN §7 "Dashboards (initial scope)".
+- **UI work from the gap list** (global search, host view, chain view, CSV export, audit filters, notification
+  settings): only the list is delivered.
+- **No ADR change** (ADR-04 stays; open point 1 asks), no change to the agent, ACME, CA signing or the agent protocol.
+
+### 14.7 Open points (for the maintainer)
+
+1. **D1:** server-side SVG instead of the ECharts island. Say yes (PLAN §10.1 and §7 follow), or ask for the island: then it
+   becomes a step 48b with the CSP probe first (§14.3), and the script mechanism could serve the passkey button too.
+2. **ADR-04** still says esbuild; D1 does not need it. Decide later whether to approve it (passkey button, TypeScript islands).
+3. Are `ui` (UI and API together) and the exclusion of agent identity certificates the right source classes (D6)?
+4. The thresholds of §14.2 (14 and 7 days, 20 certificates, 30%, 3 per 24 hours, 30 and 90 days) are defaults to try;
+   configuration keys only if one proves wrong.
+5. Dismiss or acknowledge for findings (needs a `system.db` migration) and a longer alert retention.
+6. Should the open or closed state of the report sections be remembered per user (cookie, like the appearance)?
+7. Not verifiable here, to check in the steps: the zrender license text, the content of the ECharts subsets, whether a role
+   limited to one CA should get a reduced Reports page instead of 403, whether the deployments come with `ListAgents`,
+   and whether a browser is available for steps 50 and 51.
+
+### 14.8 Built notes
+
+**Steps 45 and 46 (data layer and analysis rules).** What differs from the plan text, and why:
+
+- **Migration `pki.db` 0020** is `0020_report_indexes.sql`: `certificates_created_at` and the partial
+  `acme_orders_certificate`, nothing else (a test compares the schema before and after). `created_at` is stored with
+  milliseconds (`audit.TimeFormat`) while `not_after` has whole seconds, so `IssuanceSources` takes its bounds in the
+  millisecond format; compared as text, the two formats do not sort the same at a whole second.
+- **`report.Service`** is the way in for the API and the pages (`Get(ctx, who)`: the tenant-wide `ReadPKI` check, then
+  the one-minute cache); `report.Build` does no permission check. `analysis.Service` is the same for the analysis
+  (`analysis.Analyze` = `Load` + `Run`). Both caches are fields of the tenant's service, not keyed by anything.
+- **Deployments** come with `agents.GetAgent` per agent, like the monitor (open point 7): `ListAgents` carries none, so
+  no extra sqlc query. The agent fleet counts an active agent that never reported as active (the monitor does not call
+  it silent either); version and deployment counts cover the agents that are neither disabled nor revoked.
+- **`Valid` of an authority includes `Expiring`** (the same as the Certificates page with `status=valid`); the stacked
+  chart draws `Valid - Expiring`, `Expiring`, `Expired`, `Revoked`.
+- **Extra engine reads** beyond `CertificateTraits`, because the rules need them: `CertificateOrigins` (issuer key and
+  class by certificate), `CertificateNames` (every DNS name and IP, for `unused_domain`), `ACMEAccountActivity` (account,
+  agent link, last order, for `unused_acme_account`), and the signature algorithm of a CA generation
+  (`GenerationInfo.SignatureAlgorithm`, for `weak_signature` of intermediates). All keep the CA scoping.
+- **`Snapshot` has `Recent`**: the certificates created in the last 7 days whatever their status. `renewal_loop` counts
+  certificates, not valid certificates, so a loop whose predecessors are revoked or expired is still seen. It has no
+  `monitor.Rules` field: no rule uses one, the thresholds are the constants of `rules.go`.
+- **`orphaned_certificate`** needs more than "a scan did not see it": the endpoint stores only the fingerprint of its
+  last good scan, so a witness is a covering endpoint that was scanned successfully in the last 7 days **and has served
+  another certificate for at least 7 days** (`FingerprintSince`). Without such an endpoint the certificate is counted in
+  the one summary line, never judged. A covering endpoint that serves the certificate, or an agent deployment in state
+  `deployed` (matched by serial, ID or fingerprint), ends the check.
+- **`Run` returns one `Result` per rule** in the order of the table; `Findings(results)` flattens them sorted by
+  severity, rule and subject; `Summarize` counts every finding, also those beyond the 200 kept per rule.
+- **A rule can be `unknown` for part of its input**: `Result.Unassessed` and `UnknownReason` also qualify a result with
+  findings ("and N could not be assessed"). `duplicate_certificates` and `ca_cliff` use this for a certificate of unknown
+  origin and a CA without a signed generation. `ca_cliff` also reports a CA that already ended (critical, own text).
+- **`internal/analysis` imports `tlsscan`** for the endpoint type and the name matching; it reads the stored result of
+  the last scan and never starts one. The import test bans `net`, `net/http`, `net/url`, `crypto/tls` and the other
+  network packages in both new packages; `net/netip` only parses addresses.
+- **Fixtures:** `internal/analysis/testdata/weak-key-rsa1024.pem` and `weak-signature-sha1.pem` (self-signed, names under
+  `.invalid`, no private key; the OpenSSL command is in the header of each file).
+- Not run on this machine: `go test -race` (no C compiler here; the packages are pure Go and the build is `CGO_ENABLED=0`).
+
+**Step 47 (REST and OpenAPI).** What differs from the plan text, and why:
+
+- **The handlers call `report.Service.Get` and `analysis.Service.Get`**, not `Build` and `Load`/`Run`: the services do the
+  tenant-wide `authz.ReadPKI` check and the one-minute cache. The server builds both once (`Server.Reports()`,
+  `Server.Analysis()`, in `internal/server/monitor.go`) with the monitor's `Rules` and `Release` as server version;
+  `httpapi.Deps` has `Reports` and `Analysis`. The pages of step 49 take the same two services.
+- **An unknown `?rule=` is 400** (`bad-request`, field `rule`, the valid ids named, the input never echoed), like a bad
+  `?state=` of `GET /alerts`. The id is checked against the fixed rule list before anything is read, so a refused
+  caller with a bad id sees 400 instead of 403; the list of ids is not a secret. An empty `?rule=` means no filter.
+- **Schemas:** besides `Report`, `ReportWeek`, `Analysis`, `AnalysisRule` and `Finding` the spec has `ReportIssuanceWeek`,
+  `ReportAuthority`, `ReportAlertWeek` and `ReportFleet`, so every week row has a named shape. `AnalysisRule.id` is an
+  enum of the ten ids. There is no `external` flag on an authority: the certificates without a CA are the entry with an
+  empty `id` and an empty `name`, last in the list.
+- **`generated_at` is cut to whole seconds** in the JSON. `agents` is `null` while the agent listener is off (the key stays).
+  An active agent that never reported counts as `active`. `Report.authorities[].valid` includes `expiring`.
+- **`AnalysisRule.unknown_reason`** is a string, empty when there is none (an `ok` rule, or `findings` without a gap);
+  `count` is every finding of the rule, `findings` holds at most 200 per rule. With `?rule=` the summary covers that rule only.
+- **Tests:** the contract run covers both operations (viewer 200, a role limited to one CA 403, no role 403, no session 401,
+  the 400); `internal/httpapi/reports_test.go` covers shapes, the cache by content, roles, API tokens (tenant-wide 200,
+  limited to one CA 403), the refusal of a user of another tenant on the service the API uses, and a CA named with
+  `<script>`, quotes and 4,000 characters (the finding clips it, the body holds no literal `<`). The API is bound to one
+  tenant and takes none from the request, so "another tenant" is tested on the service, not over HTTP; the separate cache per
+  tenant is tested in `internal/report`. `internal/server/monitor_test.go` checks the wiring.
+- No CLI help or docs change: the plan names none; the API reference page of the site is step 51.
+
+**Step 48 (chart rendering).** What differs from the plan text, and why:
+
+- **No `internal/web/chart` package.** The chart is a templ component in the existing `components` package
+  (`components.Chart(view.Chart)`, `chart.templ` and `chart.go` for the geometry), the plain description is
+  `view.Chart` (the `view` and `components` packages import nothing else of the product), and the texts and the
+  mapping from `report.Report` live in the new Go-only package `internal/web/charts` (`Expiry`, `Issuances`,
+  `Authorities`, `Alerts`, `Fleet`). The step 49 pages call `components.Chart(charts.Expiry(rep.Expiry))` and so on;
+  `charts.Fleet` returns three bar charts (states, versions, deployments) or nil while the listener is off.
+- **Kinds:** `columns` and `bars` (one value per category, the color comes from the category's series: expiry windows,
+  agent states) and `stacked` and `stackedbars` (one value per series). The CA chart is horizontal (`stackedbars`)
+  because names are long; the other stacked charts and the expiry timeline are vertical.
+- **The legend is drawn inside the SVG** (swatch plus text, wrapped in Go), not as HTML, so the hatch patterns
+  (`pattern` per chart id: `s2` diagonal, `s3` horizontal lines) are the same in the plot and the legend. Chart ids are
+  page constants (`chart-expiry` ...) and must be unique on a page: the patterns are found by id (the gallery's dark
+  preview uses its own id for that reason).
+- **Tokens:** `--chart-s1..s3` (light, dark, OS-follow) and `--chart-w` (480 px, the widest chart; the SVG scales below
+  it, the viewBox is 360 units wide so a phone shows 12 px text at about 1:1). No `--chart-grid`: grid lines use
+  `--border`, the axis `--border-strong`, text `--text-muted`. `TestChartColorsHaveContrast` checks 3:1 against `--bg`
+  for the three series and the five status tokens in all three blocks.
+- **Text safety:** every string from data is stripped of control and format characters (line breaks, bidi overrides),
+  clipped (18 runes on an axis, 48 in the table and tooltip, 24 for series, 200 for title and summary; the plan said 32)
+  and written by templ; attributes are plain decimals or constants; class names come from a fixed list.
+- **Empty and extreme data:** all zero (or no category) renders the empty-state sentence and the caption, no SVG and no
+  table; a zero value draws no bar; a non-zero value is at least 2 units; values are clamped to 0 .. 2^50.
+- **Test rule:** `svg_rules_test.go` holds `svgViolations`: an `<svg` must be exactly
+  `<svg class="chart-svg" role="img" aria-labelledby="..." viewBox="0 0 W H">`, not nested, closed, and with no
+  `<script>`, `<foreignObject>`, `<image>`, `<use>`, `<style>`, `<a>`, `<animate*>`, `<set>`, `href`, `src`, `style=`, `on*=`
+  or `javascript:` inside. The render tests use it on every page; the `.templ` scan allows `<svg` only in
+  `components/chart.templ`, in the template form of the same shape.
+- The gallery has a "Charts" section with sample data (fixed dates), the empty state, and one chart in the dark preview.
+
+**Step 49 (pages).** What differs from the plan text, and why:
+
+- **Routes and names:** `GET /reports` (nav key `reports`, label "Reports") and `GET /analysis` (`analysis`, "Analysis"), both in
+  the navigation group Overview between Alerts and Endpoints and both `Primary`, so layout C and the top navigation of a
+  small screen show them like Alerts. The code is `internal/web/app_reports.go`, `app_analysis.go` and the page packages
+  `pages/reports` and `pages/analysis`. `AppDeps` has `Reports` and `Analysis` (interfaces `ReportSource` and
+  `AnalysisSource`, one `Get(ctx, who)` each); `Server` hands the monitor's services over as `reportSource()` and
+  `analysisSource()` (nil, not a typed nil, without monitoring: then the pages answer 404 "Monitoring is off." and the
+  navigation has no entry). The permission is the services' own tenant-wide `authz.ReadPKI` check: a role limited to one
+  CA gets the 403 page; the navigation entry is hidden by the same check as the Alerts entry.
+- **New component `components.Fold(id, title, open)`:** a native `<details class="fold">` whose `<summary>` holds the `<h2>`
+  (so each section has a heading for a screen reader, and the page has one `<h1>`). Classes `fold` and `fold-body` in
+  `components.css`, a "Folds" entry in the gallery, `TestFoldStylesAreCalm`. The state is not remembered (D12).
+- **Reports:** sections Expiry and Authorities open, Issuances, Alerts and Agents closed (the task for step 49 differs from D12's
+  "all open"). The Agents section is left out when `rep.Agents` is nil (agent listener off). A plain
+  sentence under each heading says what is counted and left out (revoked and agent identity certificates, the D6 source
+  classes, 30 days of alerts). "Computed at <time> UTC. The numbers are refreshed at most once a minute." is the page
+  description. A chart without data shows its empty-state sentence and, by the component's design (step 48), no numbers table.
+- **Analysis:** the order is the summary line, Findings (a table: Severity as the status dot plus text, Rule, Subject as a link
+  to the affected page when the finding has a path inside the UI, What was seen, Why it matters, What to do), Rules (rule,
+  state, count) and "How this works". The rules table links a rule that has findings to `?rule=<id>`; `?rule=` limits the
+  findings table and says so with a "Show all findings" link; an unknown id is a 400 page that does not echo it. A rule in
+  state `unknown` shows as `unknown: <reason>` in the neutral status and never as a finding; a rule with findings and a gap
+  says "findings; N not assessed: <reason>". The tables scroll sideways on a phone (not the adaptive layout: six wrapped
+  columns were unreadable at 375 px). A finding link that is not a path starting with one `/` is dropped, the row stays.
+- **Dashboard:** the two charts (expiry, authorities) sit below the "Expiring in the next 30 days" table, each in an open fold,
+  with an "All reports" link, only for a caller who passes `ReadPKI`. A failed build costs the charts (a warning line, the
+  cause in the server log), not the dashboard.
+- **Tests:** `app_reports_page_test.go` covers the roles (viewer, operator and admin 200, a CA-limited role 403 with no entry and
+  no dashboard charts, anonymous redirect to the sign-in page), the sealed server (both pages render with the sealed notice),
+  no monitoring, hostile CA, subject, reason and link text, empty states, the unknown rule, the filter, unique ids, one h1
+  and the h2 list per page. `reportPages` feeds the new pages into the HTML rules of `server_test.go` (no inline style or
+  script, every class defined, tokens only, SVG shape).
+- **Browser check** on the pages with canned data (light, dark, 375 px): no horizontal page scroll, legend and hatching
+  readable in both themes. `serve --dev` is the prototype and has no real pages (Reports and Analysis are real-UI entries, shown
+  disabled there), so the check used the real handler of the test instance.
+
+---
+
 ## 16. Preview and versioned settings: v0.3.10
 
 v0.3.10 gives two "undo" building blocks (PLAN §10.1). A **preview** shows, before anything is signed, what an

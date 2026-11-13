@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/agentdist"
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
@@ -52,13 +53,42 @@ type instance struct {
 	detailID   string // the certificate shown on the detail page
 	pendingID  string // an intermediate that waits for the offline root (step 19)
 	close      func()
+
+	// What the inventory seeds (seed.go) need of the instance; the ids are
+	// set by seedInventory.
+	engine                                                   *ca.Engine
+	sys, pki                                                 *store.DB
+	settings                                                 *tenant.Store
+	domainID, agentID, accountID, agentAccountID, enrollHost string
+	userID, issuingID, agentOldID                            string
+	packageDir                                               string
+	dist                                                     *agentdist.Store
+	history                                                  map[string]string // name -> certificate id of seedHistory
+	shift                                                    *shiftClock       // set with the inventory seeds only
 }
 
+// newInstance is the demo instance of the README screenshots.
 func newInstance(ctx context.Context, dir string) (*instance, error) {
+	return newInstanceWith(ctx, dir, false)
+}
+
+// newInstanceWith is newInstance; with inventory it also fills the pages
+// the README shots do not show (agents, alerts, TLS endpoints, reports) and
+// switches them on (seed.go).
+func newInstanceWith(ctx context.Context, dir string, inventory bool) (*instance, error) {
 	cfg := config.Default()
 	cfg.DataDir = dir
+	// The inventory sets the instance up fourteen weeks ago, so that its CAs
+	// are valid for the back-dated issuances of seedHistory.
+	var clk clock.Clock = clock.System{}
+	var shift *shiftClock
+	if inventory {
+		shift = &shiftClock{}
+		shift.set(14 * week)
+		clk = shift
+	}
 	res, err := setup.Run(ctx, setup.Options{
-		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: "http://pki.homelab.example", Hostname: "Homelab", Who: console,
+		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: "http://pki.homelab.example", Hostname: "Homelab", Who: console, Clock: clk,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		return nil, fmt.Errorf("init --demo: %w", err)
@@ -67,7 +97,10 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	in := &instance{}
+	in := &instance{shift: shift, packageDir: filepath.Join(filepath.Dir(dir), "packages")}
+	if shift != nil {
+		shift.set(0)
+	}
 	var password, secret string
 	for line := range strings.SplitSeq(string(demo), "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -123,7 +156,6 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 		in.close()
 		return nil, err
 	}
-	clk := clock.System{}
 	in.ring = keys.New(sys.Write, ia.Write, clk)
 	engine := &ca.Engine{
 		PKI: pki.Write, Audit: ta.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: in.ring, Presets: presets, Clock: clk,
@@ -133,7 +165,14 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 	settings := &tenant.Store{DB: sys.Write, Clock: clk}
 	in.deps = web.AppDeps{Auth: authSvc, Engine: engine, Keys: in.ring, Presets: presets, Clock: clk, Demo: true, Tenant: store.DefaultTenant,
 		Settings: settings, TenantAudit: ta.Read, InstanceAudit: ia.Read}
+	in.engine, in.sys, in.pki, in.settings = engine, sys, pki, settings
 
+	if inventory {
+		if serr := in.seedHistory(ctx); serr != nil {
+			in.close()
+			return nil, fmt.Errorf("inventory history: %w", serr)
+		}
+	}
 	if serr := in.sampleCertificates(ctx, engine); serr != nil {
 		in.close()
 		return nil, serr
@@ -151,6 +190,12 @@ func newInstance(ctx context.Context, dir string) (*instance, error) {
 	in.close = func() {
 		acmeServer.Close()
 		closeDBs()
+	}
+	if inventory {
+		if serr := in.seedInventory(ctx, clk); serr != nil {
+			in.close()
+			return nil, fmt.Errorf("inventory seeds: %w", serr)
+		}
 	}
 	if in.session, err = signIn(ctx, authSvc, password, secret); err != nil {
 		in.close()

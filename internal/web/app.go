@@ -83,6 +83,10 @@ type AppDeps struct {
 	Notifier NotifyTester
 	// Endpoints are the TLS scan endpoints (v0.3.4); nil hides the page.
 	Endpoints EndpointAdmin
+	// Reports and Analysis are the report and analysis services (v0.3.8);
+	// nil hides the pages and the dashboard charts.
+	Reports  ReportSource
+	Analysis AnalysisSource
 }
 
 // AlertSource is what the UI reads of the monitoring: the open alerts and
@@ -161,6 +165,8 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /endpoints", a.endpointCreate, "host", "port", "sni")
 	a.protected(mux, "POST /endpoints/scan", a.endpointScan, "id")
 	a.protected(mux, "POST /endpoints/delete", a.endpointDelete, "id")
+	mux.HandleFunc("GET /reports", a.signedIn(a.reportsPage))
+	mux.HandleFunc("GET /analysis", a.signedIn(a.analysisPage))
 	mux.HandleFunc("GET /alerts", a.signedIn(a.alertsPage))
 	a.protected(mux, "POST /alerts/test", a.alertsTest)
 	mux.HandleFunc("GET /certificates", a.signedIn(a.certificateList))
@@ -519,6 +525,12 @@ func (c *rc) page(title, section string, crumbs ...view.Crumb) view.Page {
 	}
 	if c.a.d.Alerts == nil || !c.may(authz.ReadPKI, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "alerts")
+	}
+	if c.a.d.Reports == nil || !c.may(authz.ReadPKI, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "reports")
+	}
+	if c.a.d.Analysis == nil || !c.may(authz.ReadPKI, "") {
+		p.Session.Hidden = append(p.Session.Hidden, "analysis")
 	}
 	if c.a.d.Endpoints == nil || !c.may(authz.ReadPKI, "") {
 		p.Session.Hidden = append(p.Session.Hidden, "endpoints")

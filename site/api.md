@@ -57,7 +57,7 @@ code can make a token fresh. Such a request answers `403` with the problem type 
   setting, or the same mode, works with a token);
 - creating other API tokens.
 
-Issuing and renewing certificates, reading CAs, certificates, agents, alerts and the audit log,
+Issuing and renewing certificates, reading CAs, certificates, agents, alerts, reports, the analysis and the audit log,
 sending the test notification, and adding, scanning and removing TLS endpoints (see
 [TLS scan]({{ '/tls-scan/' | relative_url }})) are allowed for the right role. A sign-in session in the browser can do
 everything its roles allow, after the step-up.
@@ -92,7 +92,7 @@ everything its roles allow, after the step-up.
 | imports | legacy `pki.sh` import, external certificates | admin |
 | audit | `GET /audit`, `POST /audit/verify` | per operation, see the OpenAPI file |
 | agents | `GET /agents` and `/agent-enrollments` (both with an optional `?hostname=`), `/agent-join-tokens` (join tokens and enrollment passes, no secrets), `GET /agent-install` (the facts for installing the agent without a browser), `…/deployments/{name}/renew` | viewer reads, operator renews, admin manages (creating, revoking and approving need the second factor, so never a token) |
-| monitoring | `GET /alerts`, `POST /notifications/test` | viewer reads, admin tests |
+| monitoring | `GET /alerts`, `GET /reports` and `GET /analysis` (see [Reports and analysis]({{ '/reports/' | relative_url }}#rest-api)), `POST /notifications/test` | viewer reads (tenant-wide), admin tests |
 
 The OpenAPI file has the exact paths, parameters and the role each operation needs (`x-required-role`),
 and marks operations that need a fresh second factor (`x-step-up: true`).

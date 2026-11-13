@@ -1,0 +1,105 @@
+package components
+
+import "github.com/Der-Felix/MyOwnPKI/internal/web/view"
+
+// Chart renders a server-side SVG chart (docs/PHASE3.md D1) as a figure: a
+// caption with a one-sentence summary, the SVG, and the same numbers as a
+// table in a closed details element (the accessible version; color is never
+// the only carrier).
+//
+// All text goes through templ's escaping and is cleaned and clipped first
+// (chart.go); the attributes are numbers or constants. This is the only
+// component that writes an inline SVG, and it always writes the one tag shape
+// the web tests allow: class="chart-svg" role="img" aria-labelledby=…
+// viewBox=… and no other attribute. No style attribute, no script, no link, no image.
+templ Chart(c view.Chart) {
+	{{ m := buildChart(c) }}
+	<figure class="chart">
+		<figcaption class="chart-caption">
+			<span class="chart-title">{ m.Title }</span>
+			if m.Empty == "" {
+				<span class="chart-summary">{ m.Summary }</span>
+			}
+		</figcaption>
+		if m.Empty != "" {
+			<p class="empty">{ m.Empty }</p>
+		} else {
+			<svg class="chart-svg" role="img" aria-labelledby={ m.TitleID + " " + m.DescID } viewBox={ m.ViewBox }>
+				<title id={ m.TitleID }>{ m.Title }</title>
+				<desc id={ m.DescID }>{ m.Summary }</desc>
+				if len(m.Patterns) > 0 {
+					<defs>
+						for _, p := range m.Patterns {
+							if p.Diagonal {
+								<pattern id={ p.ID } width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+									<rect class={ p.Class } width="6" height="6"></rect>
+									<line class="ch-hatch" x1="1" y1="0" x2="1" y2="6"></line>
+								</pattern>
+							} else {
+								<pattern id={ p.ID } width="6" height="6" patternUnits="userSpaceOnUse">
+									<rect class={ p.Class } width="6" height="6"></rect>
+									<line class="ch-hatch" x1="0" y1="1" x2="6" y2="1"></line>
+								</pattern>
+							}
+						}
+					</defs>
+				}
+				for _, l := range m.Lines {
+					<line class={ l.Class } x1={ l.X1 } y1={ l.Y1 } x2={ l.X2 } y2={ l.Y2 }></line>
+				}
+				for _, r := range m.Rects {
+					<rect
+						class={ r.Class }
+						x={ r.X }
+						y={ r.Y }
+						width={ r.W }
+						height={ r.H }
+						if r.Fill != "" {
+							fill={ r.Fill }
+						}
+					>
+						if r.Title != "" {
+							<title>{ r.Title }</title>
+						}
+					</rect>
+				}
+				for _, t := range m.Texts {
+					<text class={ t.Class } x={ t.X } y={ t.Y }>{ t.Text }</text>
+				}
+			</svg>
+			<details class="chart-numbers">
+				<summary>{ m.NumbersLabel }</summary>
+				<div class="table-wrap">
+					<table class="table">
+						<caption class="visually-hidden">{ m.Title }</caption>
+						<thead>
+							<tr>
+								for _, h := range m.Headers {
+									if h.Num {
+										<th scope="col" class="ch-num">{ h.Text }</th>
+									} else {
+										<th scope="col">{ h.Text }</th>
+									}
+								}
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range m.Rows {
+								<tr>
+									<th scope="row">{ r.Name }</th>
+									for _, cell := range r.Cells {
+										if cell.Num {
+											<td class="ch-num">{ cell.Text }</td>
+										} else {
+											<td>{ cell.Text }</td>
+										}
+									}
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</details>
+		}
+	</figure>
+}

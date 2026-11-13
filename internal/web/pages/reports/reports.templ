@@ -1,0 +1,43 @@
+package reports
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Section is one group of charts under an h2 that opens and closes.
+type Section struct {
+	// ID is a constant of the page ("sec-expiry"), unique on it.
+	ID    string
+	Title string
+	// Note is one plain sentence under the heading: what is counted and
+	// what is left out.
+	Note   string
+	Open   bool
+	Charts []view.Chart
+}
+
+// Data is the content of the Reports page.
+type Data struct {
+	Messages []view.Message
+	Sections []Section
+}
+
+// Page renders the Reports page: one section per chart group, each chart
+// with its summary sentence and its numbers as a table.
+templ Page(p view.Page, d Data) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		for _, s := range d.Sections {
+			@components.Fold(s.ID, s.Title, s.Open) {
+				if s.Note != "" {
+					<p class="muted">{ s.Note }</p>
+				}
+				for _, c := range s.Charts {
+					@components.Chart(c)
+				}
+			}
+		}
+	}
+}

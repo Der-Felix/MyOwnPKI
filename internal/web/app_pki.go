@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/authorities"
@@ -185,6 +187,20 @@ func (a *app) dashboard(c *rc) {
 		default:
 			c.fail(alertErr)
 			return
+		}
+	}
+	if a.d.Reports != nil {
+		// A role limited to one CA doesn't see the reports of the tenant. A
+		// failed build costs the two charts, not the dashboard.
+		rep, repErr := a.d.Reports.Get(ctx, c.who())
+		switch {
+		case repErr == nil:
+			expiry, authorities := charts.Expiry(rep.Expiry), charts.Authorities(rep.Authorities)
+			d.Expiry, d.Authorities = &expiry, &authorities
+		case errors.Is(repErr, authz.ErrDenied):
+		default:
+			a.log.ErrorContext(ctx, "dashboard charts", slog.Any("error", repErr))
+			d.Messages = append(d.Messages, view.Message{Kind: view.MessageWarning, Text: "The charts could not be built. The server log has the details."})
 		}
 	}
 	sealed := a.d.Keys.Status().Sealed
