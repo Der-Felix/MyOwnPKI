@@ -232,6 +232,15 @@ func (a *Agent) plan(ctx context.Context, d Deployment, plans map[string]*renewa
 	}
 	polled := false
 	if allowARI && !a.Now().Before(p.nextARI) {
+		// An issuance holds passMu for as long as it runs, and a dns-01 one
+		// may wait up to 15 minutes for the record. The ARI lookup is optional,
+		// so it does not queue behind it: this tick goes without, the next one asks.
+		if !a.passMu.TryLock() {
+			if a.log != nil {
+				a.log.Debug("skipping the ARI check: an issuance is running", slog.String("deployment", d.Name))
+			}
+			return p, false
+		}
 		polled = true
 		p.nextARI = a.Now().Add(6 * time.Hour)
 		get := a.renewalInfo
@@ -241,7 +250,6 @@ func (a *Agent) plan(ctx context.Context, d Deployment, plans map[string]*renewa
 		// One short ARI lookup per tick keeps operator requests responsive
 		// even when the directory or renewal-info endpoint is unreachable.
 		ariCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		a.passMu.Lock()
 		window, err := get(ariCtx, leaf)
 		a.passMu.Unlock()
 		cancel()
