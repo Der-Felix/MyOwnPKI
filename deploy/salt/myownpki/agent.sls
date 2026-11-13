@@ -157,6 +157,23 @@ myownpki-agent-pass-absent:
     - require:
       - cmd: myownpki-agent-setup
 
+{% if m['system_trust'] %}
+# The root in the system trust store (docs/PHASE3.md section 15): a root-run command of the agent
+# that checks the pin against the root setup verified, writes one file and runs the hook of the
+# distribution. Not part of the service, so there is no restart and no change to the unit. The
+# guard asks for the same pin, so a new root_sha256 in the pillar runs the command again, and a
+# second apply changes nothing. A host that waits for approval gets it too: the root does not
+# depend on the approval. false and absent create no state: "trust remove" is a command by hand.
+# With config_source Salt owns agent.yaml, so the command must not write the key into it.
+myownpki-agent-system-trust:
+  cmd.run:
+    - name: {{ (bin ~ ' trust install --root-sha256 ' ~ m['root_sha256'] ~ (' --no-record' if m['config_source'] != '' else '')) | yaml_dquote }}
+    - unless: {{ (bin ~ ' trust status --quiet --root-sha256 ' ~ m['root_sha256']) | yaml_dquote }}
+    - timeout: 120
+    - require:
+      - cmd: myownpki-agent-setup
+{% endif %}
+
 {% set restart_on = [] %}
 
 {% if m['config_source'] != '' %}

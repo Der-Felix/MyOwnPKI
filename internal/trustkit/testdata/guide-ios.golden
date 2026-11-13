@@ -1,0 +1,6 @@
+## Configuration profile
+1. Open this page in Safari and tap the profile link above. Allow the download of the configuration profile.
+2. Open Settings. Profile Downloaded appears at the top (or General, VPN & Device Management). Choose the profile, tap Install and enter your passcode.
+3. iOS shows the profile as Not Signed. That is expected: it holds only the public root certificate and cannot be signed with a certificate your device does not trust yet. Compare the SHA-256 of the certificate with your trusted value before you install.
+4. Open Settings, General, About, Certificate Trust Settings and switch on full trust for the root. Without this step the root is installed but not trusted for web sites.
+Note: Menu names differ between iOS versions.

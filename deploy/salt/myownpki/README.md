@@ -41,7 +41,7 @@ fileserver_backend: [gitfs, roots]
 gitfs_remotes:
   - https://github.com/Der-Felix/MyOwnPKI.git:
     - root: deploy/salt
-    - base: v0.3.7
+    - base: v0.3.9
 ```
 
 Put the root certificate and the packages where `root_source` and `package.source` point, by
@@ -66,7 +66,7 @@ Defaults are in `defaults.yaml` and merged with the pillar in `map.jinja`. A val
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
-| `version` | yes | none | The release to install, for example `0.3.7`. Part of the package file name |
+| `version` | yes | none | The release to install, for example `0.3.9`. Part of the package file name |
 | `server` | yes | none | Agent listener, `https://pki.homelab.lan:8444` (https, no path) |
 | `acme_directory` | yes | none | ACME directory URL (https); `setup --acme-directory` writes it into a new `agent.yaml` |
 | `root_source` | yes | none | `salt://` source of the root certificate (PEM) |
@@ -76,6 +76,7 @@ Defaults are in `defaults.yaml` and merged with the pillar in `map.jinja`. A val
 | `package.format` | no | `auto` | `auto` (deb for `os_family` Debian, rpm for RedHat and Suse), `deb` or `rpm` |
 | `webroot` | no | unset | Existing directory for the enrollment check (http-01). Unset: standalone on port 80 |
 | `low_ports` | no | `false` | `true` passes `--low-ports` to `setup` |
+| `system_trust` | no | `false` | `true` puts the root into the system trust store of the host: after `setup` the state runs `myownpki-agent trust install --root-sha256 <root_sha256>` (agent 0.3.9 or later, Debian and RedHat families only, see "System trust store" below). `false` and unset create no state: removal is `myownpki-agent trust remove` by hand. Must be a boolean |
 | `enrollment_pass` | no | unset | The pass, a string. Only used while `/var/lib/myownpki-agent/agent.crt` does not exist. An empty string counts as unset |
 | `config_source` | no | unset | `salt://` source of a complete `agent.yaml` |
 | `deployments` | no | `{}` | Map deployment name -> options, applied with `deployment add` |
@@ -170,7 +171,7 @@ Minimal pillar (the host waits for one approval; no deployment yet):
 ```yaml
 myownpki:
   agent:
-    version: "0.3.7"
+    version: "0.3.9"
     server: https://pki.homelab.lan:8444
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://myownpki/files/root.pem
@@ -193,6 +194,7 @@ Full example: `pillar.example` (pass, webroot, deployments, `absent`, the altern
 | `myownpki-agent-root` | stages the root certificate |
 | `myownpki-agent-pass` | the pass as a file (only with `enrollment_pass`, only until the agent certificate exists) |
 | `myownpki-agent-pass-absent` | removes `/root/myownpki-join-token` once the agent certificate exists, with or without `enrollment_pass` in the pillar. Never before: a host that still waits needs the file for the next `setup` |
+| `myownpki-agent-system-trust` | only with `system_trust: true`: `trust install`, `unless` `trust status --quiet` already answers yes for the same pin; after `setup`; no restart and no change to the unit |
 | `myownpki-agent-config` | `config_source` mode: `/etc/myownpki-agent/agent.yaml` |
 | `myownpki-agent-setup-update` | package changed on an enrolled host: `setup` again (refreshes the unit and drop-ins, restarts the agent), as the update instructions say |
 | `myownpki-agent-setup` | enrollment; `creates` the agent certificate; timeout 180 seconds |
@@ -236,7 +238,20 @@ minion's architecture or an unsupported architecture; `enrollment_pass` that is 
 unknown `package.format` or an `os_family` that `auto` cannot map; `config_source` together with
 `deployments` or `absent`; an unknown deployment option or a value of the wrong type; `challenge: dns-01` without
 `dns_provider` or with `webroot`; a `dns_*` option next to another challenge; a wildcard name without
-dns-01; a name in both `deployments` and `absent`; an unknown key (a typo) anywhere in the pillar.
+dns-01; a name in both `deployments` and `absent`; `system_trust` that is not a boolean, `true` on a minion whose `os_family` is not Debian or RedHat, or `true` with a `version` older than 0.3.9 (the command `trust install` does not exist there); an unknown key (a typo) anywhere in the pillar.
+
+**System trust store.** `system_trust: true` makes every program on the host trust the root of this PKI, for
+every name (name constraints on the intermediates are the only limit). It adds no new decision: the root is the one
+`setup` verified against `root_sha256`; the command checks that file again against the same pin, writes one fixed
+file (`/usr/local/share/ca-certificates/myownpki-agent-root.crt` and `update-ca-certificates` on Debian,
+`/etc/pki/ca-trust/source/anchors/myownpki-agent-root.pem` and `update-ca-trust` on RedHat) and runs the hook of
+the distribution. The service never does this, so the sandbox of the unit does not change. The state runs once: `unless`
+the installed file is the pinned root. A new `root_sha256` runs it again (run `setup` again by hand first when the root
+itself was renewed, because `ca_bundle` is only replaced by `setup`). With `config_source` Salt owns `agent.yaml`, so the
+state passes `--no-record` and the key is not written; add `system_trust: {root_sha256: "<the same value>"}` to your own
+file if `myownpki-agent config check` should show the block. Removal is not done by the formula (it would surprise): set
+the key to `false` or take it out, then run `myownpki-agent trust remove` on the host (with `--root-sha256 <hex>` when its `agent.yaml` has no `system_trust` key). Update the agents before you set
+the key: an older agent has no `trust` command.
 
 **Updating the agent.** Update the server first. Then change `version` and `package.sha256` (and
 stage the new package). On enrolled hosts the formula installs the package and runs `setup` again;
@@ -247,7 +262,7 @@ a host that is not enrolled yet is enrolled as usual.
 `scripts/ci/salt-test.sh` runs in the CI job `salt formula` against **Salt 3008.5** (LTS, onedir
 for Linux x86_64, Apache-2.0). It renders every pillar in `deploy/salt/test/cases` with
 `state.show_highstate` (Debian amd64 with a pass and deployments, Debian amd64 with two dns-01
-deployments, RedHat arm64 with `config_source`, a minimal pillar, an `https://` package source, and
+deployments, Debian amd64 with `system_trust`, RedHat arm64 with `config_source`, a minimal pillar, an `https://` package source, and
 every refusal), checks which
 states exist and which do not, checks that the pass appears nowhere in the output, and runs
 `state.apply test=True` for the cases that a Debian runner can apply. `bash scripts/ci/salt-test.sh

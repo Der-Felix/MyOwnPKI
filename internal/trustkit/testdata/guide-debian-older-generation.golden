@@ -1,0 +1,10 @@
+## Command line
+```
+tmp=$(mktemp -d) && cd "$tmp" \
+  && curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/2.crt' \
+  && echo 'ff91eaaeb57e418aa50c8c3589ec4922bca0f995a1f9ce1390bf2960b6606690  root.crt' | sha256sum -c - \
+  && openssl x509 -inform DER -in root.crt -out myownpki-fixture-root-2-ff91eaae.crt \
+  && sudo install -m 0644 myownpki-fixture-root-2-ff91eaae.crt /usr/local/share/ca-certificates/myownpki-fixture-root-2-ff91eaae.crt \
+  && sudo update-ca-certificates
+```
+Note: The value in this command only checks the download against this page. It does not show that the page is genuine: compare the SHA-256 with the admin UI or your administrator first. curl, wget, Python and most programs use this store; Firefox and Chrome on Linux keep their own.

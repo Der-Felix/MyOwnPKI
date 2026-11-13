@@ -49,8 +49,11 @@ type SetupOptions struct {
 	Version       string
 	PackageFormat string
 	ACMEDirectory string // https URL of the ACME directory, written into a new agent.yaml
-	Stdout        io.Writer
-	Stderr        io.Writer
+	// SystemTrust installs the root into the system trust store after enrollment
+	// and records system_trust in agent.yaml (docs/PHASE3.md §15).
+	SystemTrust bool
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 type setupAgent interface {
@@ -137,6 +140,12 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 	if err = setupPlatformCheck(); err != nil {
 		return err
 	}
+	if opts.SystemTrust {
+		// Refuse an unsupported host before any file is written.
+		if _, err = trustHost().detect(); err != nil {
+			return fmt.Errorf("--system-trust: %w; no host files were changed", err)
+		}
+	}
 
 	configPath := opts.ConfigPath
 	if configPath == "" {
@@ -215,7 +224,7 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 			return err
 		}
 		_, _ = fmt.Fprintf(opts.Stdout, "Agent %s is enrolled; myownpki-agent is enabled and running.\n", res.AgentID)
-		return nil
+		return setupSystemTrust(ctx, opts, configPath)
 	case res.State == agentv1.EnrollState_ENROLL_STATE_DENIED, res.State == agentv1.EnrollState_ENROLL_STATE_EXPIRED:
 		return fmt.Errorf("enrollment ended: %s", res.Message)
 	default:
@@ -223,7 +232,7 @@ func Setup(ctx context.Context, opts SetupOptions) error {
 			return err
 		}
 		_, _ = fmt.Fprintf(opts.Stdout, "Enrollment is pending: %s\nThe service remains disabled. After approval run: systemctl enable --now myownpki-agent\n", res.Message)
-		return nil
+		return setupSystemTrust(ctx, opts, configPath)
 	}
 }
 
@@ -498,6 +507,21 @@ func atomicSetupFile(path string, data []byte, mode os.FileMode) error {
 	// #nosec G703 -- atomically replace the validated local destination.
 	if renameErr := os.Rename(tmpName, path); renameErr != nil {
 		return fmt.Errorf("replace %s: %w", path, renameErr)
+	}
+	return nil
+}
+
+// setupSystemTrust is the last step of "setup --system-trust": the root the
+// host just verified goes into the system trust store, and agent.yaml records
+// the pin. It runs for an admitted and for a waiting host (the root does not
+// depend on the approval), and never for a denied one.
+func setupSystemTrust(ctx context.Context, opts SetupOptions, configPath string) error {
+	if !opts.SystemTrust {
+		return nil
+	}
+	err := installTrust(ctx, trustHost(), TrustOptions{ConfigPath: configPath, RootSHA256: opts.RootSHA256, Stdout: opts.Stdout, Stderr: opts.Stderr})
+	if err != nil {
+		return fmt.Errorf("setup is done, but --system-trust failed: %w; run \"myownpki-agent trust install --root-sha256 ...\" after fixing it", err)
 	}
 	return nil
 }

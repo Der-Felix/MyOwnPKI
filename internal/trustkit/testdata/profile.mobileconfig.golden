@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadCertificateFileName</key>
+			<string>fixture-root-ff91eaae.crt</string>
+			<key>PayloadContent</key>
+			<data>
+			MIIBvjCCAWWgAwIBAgIBATAKBggqhkjOPQQDAjBHMR4wHAYDVQQKExV0cnVzdGtp
+			dCB0ZXN0IGZpeHR1cmUxJTAjBgNVBAMTHEZpeHR1cmUgUm9vdCBDQSAobmV2ZXIg
+			cmVhbCkwHhcNMjYwMTAxMDAwMDAwWhcNNDYwMTAxMDAwMDAwWjBHMR4wHAYDVQQK
+			ExV0cnVzdGtpdCB0ZXN0IGZpeHR1cmUxJTAjBgNVBAMTHEZpeHR1cmUgUm9vdCBD
+			QSAobmV2ZXIgcmVhbCkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAShNCB1SEhB
+			spIc3Obej6QwpSP4ekC9ixdV0oFH35lBz7wn6uBoXbuFvcmWeffG5gPpIuKyUjin
+			JTX3iXij645Jo0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAd
+			BgNVHQ4EFgQUJtBDclD9yJ6t6BHEAHXDhPJ/txEwCgYIKoZIzj0EAwIDRwAwRAIg
+			Befuk4ZWNAZStk1/TPSlwX0GNb9Ui24TIV9rY5UNIAgCICShsWLFWDMisSXaR7IV
+			zUkIHS6ZmVk2NyN2lMPrJEj6
+			</data>
+			<key>PayloadDescription</key>
+			<string>Root certificate of this PKI.</string>
+			<key>PayloadDisplayName</key>
+			<string>Fixture Root CA (never real)</string>
+			<key>PayloadIdentifier</key>
+			<string>local.myownpki.root.ff91eaaeb57e418aa50c8c3589ec4922.cert</string>
+			<key>PayloadType</key>
+			<string>com.apple.security.root</string>
+			<key>PayloadUUID</key>
+			<string>8525283E-5420-82B1-B94C-EEFE0044B3F0</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Adds the root certificate of this PKI to the trusted certificates of this device. This profile is not signed: check the SHA-256 fingerprint of the certificate against a value you got another way before you install it.</string>
+	<key>PayloadDisplayName</key>
+	<string>Fixture Root CA (never real)</string>
+	<key>PayloadIdentifier</key>
+	<string>local.myownpki.root.ff91eaaeb57e418aa50c8c3589ec4922</string>
+	<key>PayloadRemovalDisallowed</key>
+	<false/>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>E70A7BED-38B3-8238-90C6-E1916EEFE305</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>

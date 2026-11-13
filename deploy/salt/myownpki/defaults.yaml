@@ -12,6 +12,7 @@ agent:
     format: auto
   webroot: null
   low_ports: false
+  system_trust: false
   enrollment_pass: null
   config_source: null
   deployments: {}

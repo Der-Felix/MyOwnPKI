@@ -103,6 +103,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--s-8);
+  margin-bottom: var(--s-12);
 }
 
 /* ---------- Command bar: groups create | edit | dangerous ---------- */

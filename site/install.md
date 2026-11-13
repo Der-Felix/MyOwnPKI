@@ -20,7 +20,7 @@ installation.
 | Part | What it does | Default | Who needs to reach it |
 |---|---|---|---|
 | Admin listener | Web UI and REST API, HTTPS only | `127.0.0.1:9443` (`0.0.0.0:9443` with `install.sh`) | Administrators only. Never the internet. |
-| Public listener | CRLs, CA certificates and the trust page over plain HTTP, no login | `:8080` (`:80` with `--public-port-80`) | Every client that checks revocation or loads a CA certificate |
+| Public listener | CRLs, CA certificates and the trust portal over plain HTTP, no login | `:8080` (`:80` with `--public-port-80`) | Every client that checks revocation or loads a CA certificate |
 | ACME listener | The ACME server | Off until `acme.base_url` is set; `127.0.0.1:8081` behind a proxy, `:443` with its own TLS | ACME clients, or only your reverse proxy |
 | Agent listener | The agents of your hosts, mutual TLS | Off until `agent.base_url` is set; `:8444` | The hosts that run `myownpki-agent` |
 | Data directory | Databases, audit log, keys (encrypted), bootstrap certificates | `/var/lib/myownpki` | The service user only (mode 0700) |
@@ -313,10 +313,10 @@ compromised you replace it; replacing a root means touching every client.
   `root` and `issuing`) in one go, for testing and for homelabs that accept an online root:
   `init --with-ca --ca-base-url http://pki.homelab.lan`. The base URL cannot be changed later.
 
-Give your clients the root: the **trust page** at `http://pki.homelab.lan/` (the public listener)
-shows every root with its SHA-256 fingerprint, downloads and a guide for Windows, macOS, iOS,
-Android, Linux and Firefox. Always compare the fingerprint with the one in the admin UI, because the
-page comes over plain HTTP.
+Give your clients the root: the **trust portal** at `http://pki.homelab.lan/` (the public listener)
+shows every root with its SHA-256 fingerprint and downloads, guesses the visitor's system and gives the steps and
+commands for it ([The trust portal]({{ '/trust-portal/' | relative_url }})). Always compare the fingerprint with the one in
+the admin UI, because the page comes over plain HTTP.
 
 **The first certificate.** On the host that will use it, make a key and a request. The key never
 leaves that host:
@@ -358,7 +358,7 @@ Go through this once after the installation. Each line should be true.
    runuser -u myownpki -- /usr/local/bin/myownpki config check --config /etc/myownpki/config.yaml
    ```
 
-4. The public listener answers from a client machine (200 is the trust page; 404 means you switched
+4. The public listener answers from a client machine (200 is the trust portal; 404 means you switched
    it off, which is fine). Use the port you chose: 80 behind a proxy or with `--public-port-80`,
    otherwise `:8080`:
 

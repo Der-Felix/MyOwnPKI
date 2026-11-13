@@ -1,0 +1,5 @@
+## User certificate
+1. Download the certificate file (the link above).
+2. Open Settings, Security and privacy, More security settings, Encryption and credentials, Install a certificate, CA certificate. Menu names differ between vendors and Android versions. Confirm the warning and choose the file.
+3. Android may ask you to set a screen lock first.
+Note: Chrome and most browsers accept such a user CA. Apps that target Android 7 (API 24) or higher ignore user CAs unless their network security configuration opts in. A device management (MDM) can install the root for all apps.

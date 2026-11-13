@@ -60,6 +60,10 @@ The parts, and who talks to whom:
   [recipes]({{ '/recipes/' | relative_url }}) cover nginx, Postfix, Dovecot and Proxmox VE (the last
   three are unverified examples). A deployment can also use **dns-01** (since v0.3.7) for wildcard
   certificates and hosts without port 80: [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
+- **Trust portal** (since v0.3.9): the page at `/` of the public listener hands your root to people. It guesses the
+  visitor's system and gives the steps and commands for Windows, macOS, iPhone and iPad (with a configuration
+  profile), Android, Linux, Firefox and Java, and it tells everyone to compare the fingerprint, because the page is
+  plain HTTP. An agent host can also add the root to its own system trust store: [The trust portal]({{ '/trust-portal/' | relative_url }}).
 - **Monitoring:** the server checks itself every minute and tells you by e-mail or webhook when a
   certificate or a CA is about to expire, a CRL goes stale, the server is sealed or an agent is
   silent.
@@ -102,6 +106,7 @@ level 3 when you want the server to see what is deployed where and to renew on a
 | Decide how to set it all up | [Choose your setup]({{ '/choose/' | relative_url }}) |
 | Understand how a CA, trust, ACME and revocation work | [Learn]({{ '/learn/' | relative_url }}) |
 | Do one task: issue, renew, revoke, trust the root, back up | [Guides]({{ '/guides/' | relative_url }}) |
+| Get my users' devices to trust the root | [The trust portal]({{ '/trust-portal/' | relative_url }}) |
 | Find a quick answer or look up a term | [FAQ]({{ '/faq/' | relative_url }}), [Glossary]({{ '/glossary/' | relative_url }}) |
 | See what the web UI looks like | [A tour of the web UI]({{ '/tour/' | relative_url }}) |
 | Install the server | [Installation]({{ '/install/' | relative_url }}) |

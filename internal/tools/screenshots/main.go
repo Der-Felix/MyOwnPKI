@@ -7,6 +7,12 @@
 //
 // Usage: task screenshots [-- -browser PATH]
 //
+// With -only it shoots the images whose name starts with one of the
+// comma-separated prefixes and leaves the other files alone, for example
+// task screenshots -- -only trust-portal -out .tmp/portal. The two images of
+// the trust portal (the page of the public listener) are listed in shots like
+// the others; the site copies them to site/assets/screens/tour-portal-*.png.
+//
 // With -inventory it shoots every page of the UI, light and dark, against a
 // demo instance that has agents, alerts, endpoints and reports, into the
 // untracked directory .tmp/ui-inventory (docs/PHASE3.md step 50, docs/UI-GAPS.md).
@@ -31,6 +37,8 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
+	"github.com/Der-Felix/MyOwnPKI/internal/publish"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/web"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
 )
@@ -51,6 +59,11 @@ const (
 	// Only the inventory (inventory.go) shoots these two.
 	anonymousDark // the sign-in page in the dark theme
 	sealedDark    // signed in, sealed, dark theme
+
+	// public is the public listener of the demo instance: the trust portal at
+	// /, with no session and no cookie. The tenant setting trust_page is on
+	// (the default).
+	public
 )
 
 type shot struct {
@@ -80,6 +93,27 @@ var shots = []shot{
 	{"users-dark", "/admin/users", dark},
 	{"acme-accounts-dark", "/acme/accounts", dark},
 	{"acme-names-dark", "/acme/names", dark},
+	// The portal picks the platform from the User-Agent; the headless browser's
+	// own string would decide otherwise, so each shot names its platform.
+	{"trust-portal", "/?os=windows", public},
+	{"trust-portal-ios", "/?os=ios", public},
+}
+
+// shotSizes are the window sizes (width, height in CSS pixels) of the shots
+// that do not use -width and -height: the portal is a narrow, long page.
+var shotSizes = map[string][2]int{
+	"trust-portal":     {900, 2000},
+	"trust-portal-ios": {900, 1500},
+}
+
+// flagsOf are the extra browser flags a view needs. The public pages have no
+// theme cookie (the portal follows the system setting), so the browser is
+// asked for the light scheme: light is what the site shows.
+func flagsOf(k viewKind) []string {
+	if k == public {
+		return []string{"--blink-settings=preferredColorScheme=1"}
+	}
+	return nil
 }
 
 func main() {
@@ -91,7 +125,7 @@ func run(stdout, stderr io.Writer) int {
 		"path to Edge, Chrome or Chromium (default: $MYOWNPKI_BROWSER, then auto-detect)")
 	inventory := flag.Bool("inventory", false, "shoot every page of the UI, light and dark, into .tmp/ui-inventory (untracked) against a demo instance with more data")
 	out := flag.String("out", "", "output directory (default docs/screenshots, with -inventory .tmp/ui-inventory)")
-	only := flag.String("only", "", "with -inventory: only the pages whose name starts with one of these comma-separated prefixes")
+	only := flag.String("only", "", "only the images (with -inventory: pages) whose name starts with one of these comma-separated prefixes; other files stay as they are")
 	width := flag.Int("width", 1400, "window width in CSS pixels")
 	height := flag.Int("height", 900, "window height in CSS pixels (-inventory: 1500, pages are long)")
 	flag.Parse()
@@ -148,6 +182,9 @@ func run(stdout, stderr io.Writer) int {
 	failed := false
 	unsealed := false
 	for _, s := range shots {
+		if !selected(s.name, *only) {
+			continue
+		}
 		if needsUnseal(s.kind) && !unsealed {
 			if err := in.ring.Unseal(ctx, []byte(in.passphrase), console); err != nil {
 				fmt.Fprintln(stderr, err)
@@ -158,7 +195,11 @@ func run(stdout, stderr io.Writer) int {
 		base := bases[s.kind]
 		path := strings.NewReplacer("{detail}", in.detailID, "{pending}", in.pendingID).Replace(s.path)
 		file := filepath.Join(*out, s.name+".png")
-		if err := capture(*browser, base+path, file, *width, *height); err != nil {
+		w, h := *width, *height
+		if size, ok := shotSizes[s.name]; ok {
+			w, h = size[0], size[1]
+		}
+		if err := capture(*browser, base+path, file, w, h, flagsOf(s.kind)...); err != nil {
 			fmt.Fprintf(stderr, "FAILED %s: %v\n", s.name, err)
 			failed = true
 			continue
@@ -195,7 +236,13 @@ func startServers(in *instance) (bases map[viewKind]string, stop func(), err err
 	prefs := view.DefaultPrefs()
 	prefs.Theme = view.ThemeDark
 	session := auth.CookieName + "=" + in.session
+	// The public listener: the trust portal reads the CAs of the demo's PKI
+	// database and asks the tenant setting per request, like the server does.
+	portal := publish.New(in.pki.Read, slog.New(slog.DiscardHandler)).WithTrustPage(publish.TrustPage{
+		Enabled: func(ctx context.Context) (bool, error) { return in.settings.TrustPage(ctx, store.DefaultTenant) },
+	})
 	handlers := map[viewKind]http.Handler{
+		public:        portal,
 		anonymous:     handler,
 		sealed:        withCookie(handler, session),
 		light:         withCookie(handler, session),
@@ -234,7 +281,7 @@ func withCookie(h http.Handler, cookie string) http.Handler {
 
 // capture loads url in a headless browser with a fresh profile and saves a
 // screenshot of the window to file.
-func capture(browser, url, file string, width, height int) error {
+func capture(browser, url, file string, width, height int, extra ...string) error {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		return err
@@ -248,19 +295,21 @@ func capture(browser, url, file string, width, height int) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	// The browser path is chosen by the developer running the task.
-	cmd := exec.CommandContext(ctx, browser, //nolint:gosec // see above
+	args := []string{
 		"--headless=new",
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-extensions",
 		"--hide-scrollbars",
 		"--force-device-scale-factor=1",
-		"--user-data-dir="+profile,
-		"--window-size="+strconv.Itoa(width)+","+strconv.Itoa(height),
-		"--screenshot="+abs,
-		url,
-	)
+		"--user-data-dir=" + profile,
+		"--window-size=" + strconv.Itoa(width) + "," + strconv.Itoa(height),
+		"--screenshot=" + abs,
+	}
+	args = append(args, extra...)
+	args = append(args, url)
+	// The browser path is chosen by the developer running the task.
+	cmd := exec.CommandContext(ctx, browser, args...) //nolint:gosec // see above
 	output, runErr := cmd.CombinedOutput()
 	// Edge's launcher may return at once and write the file a moment later:
 	// wait until it exists and its size stays the same.

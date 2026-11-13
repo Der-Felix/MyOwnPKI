@@ -109,9 +109,12 @@ self_test() {
   for f in init.sls agent.sls map.jinja defaults.yaml pillar.example README.md; do
     [ -f "$formula/$f" ] || fail "$formula/$f is missing"
   done
-  for f in files/myownpki-agent_0.3.6_linux_amd64.deb files/myownpki-agent_0.3.6_linux_arm64.rpm files/root.pem files/agent.yaml minion.tmpl; do
+  for f in files/myownpki-agent_0.3.6_linux_amd64.deb files/myownpki-agent_0.3.6_linux_arm64.rpm files/myownpki-agent_0.3.9_linux_amd64.deb files/myownpki-agent_0.3.9_linux_arm64.rpm files/root.pem files/agent.yaml minion.tmpl; do
     [ -f "$testdir/$f" ] || fail "$testdir/$f is missing"
   done
+  # The 0.3.9 fixtures (the cases with system_trust need agent 0.3.9) are copies of the 0.3.6 ones, so the hashes in the pillars stay the same.
+  cmp -s "$testdir/files/myownpki-agent_0.3.6_linux_amd64.deb" "$testdir/files/myownpki-agent_0.3.9_linux_amd64.deb" || fail "the 0.3.9 deb fixture differs from the 0.3.6 one"
+  cmp -s "$testdir/files/myownpki-agent_0.3.6_linux_arm64.rpm" "$testdir/files/myownpki-agent_0.3.9_linux_arm64.rpm" || fail "the 0.3.9 rpm fixture differs from the 0.3.6 one"
   [ "$failures" -eq 0 ] || return 1
 
   deb=$(sha256sum "$testdir/files/myownpki-agent_0.3.6_linux_amd64.deb" | cut -d' ' -f1)

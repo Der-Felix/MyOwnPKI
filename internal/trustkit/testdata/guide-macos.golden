@@ -1,0 +1,15 @@
+## Configuration profile
+1. Download the profile (the link above). macOS saves it and does not install it yet.
+2. Open System Settings, Privacy & Security, Profiles (older macOS: System Preferences, Profiles), choose the profile and click Install.
+3. macOS shows the profile as Not Signed. That is expected: it holds only the public root certificate and cannot be signed with a certificate your Mac does not trust yet. Compare the SHA-256 of the certificate with your trusted value before you install.
+4. If Keychain Access still shows the certificate as not trusted, double-click it, open Trust and set When using this certificate to Always Trust.
+Note: An iPad that asks for the desktop version of web sites looks like a Mac to this page: use the iPhone and iPad steps on it.
+
+## Terminal
+```
+tmp=$(mktemp -d) && cd "$tmp" \
+  && curl -fsS -o root.crt 'http://pki.example.test/ca/fixture-root/1.crt' \
+  && echo 'ff91eaaeb57e418aa50c8c3589ec4922bca0f995a1f9ce1390bf2960b6606690  root.crt' | shasum -a 256 -c - \
+  && sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt
+```
+Note: The value in this command only checks the download against this page. It does not show that the page is genuine: compare the SHA-256 with the admin UI or your administrator first. Safari, Chrome and Edge use the keychain.

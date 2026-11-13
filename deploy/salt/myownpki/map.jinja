@@ -65,7 +65,7 @@
 
 {% set version = cfg['version'] if cfg['version'] is string else '' %}
 {% if version != '' and not (version | regex_match('^[0-9][0-9A-Za-z.+~_-]*$')) %}
-{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.7') %}
+{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.9') %}
 {% endif %}
 
 {% set server = cfg['server'] if cfg['server'] is string else '' %}
@@ -100,6 +100,28 @@
 
 {% if cfg['low_ports'] is not sameas true and cfg['low_ports'] is not sameas false %}
 {%   set _ = errors.append('myownpki:agent:low_ports must be true or false') %}
+{% endif %}
+
+{#- The root in the system trust store (docs/PHASE3.md section 15): a boolean, off by default. -#}
+{% if cfg['system_trust'] is not sameas true and cfg['system_trust'] is not sameas false %}
+{%   set _ = errors.append('myownpki:agent:system_trust must be true or false') %}
+{% elif cfg['system_trust'] and grains.get('os_family') not in ['Debian', 'RedHat'] %}
+{%   set _ = errors.append('myownpki:agent:system_trust: the agent supports the system trust store of Debian and RedHat family hosts only, this minion has os_family "' ~ grains.get('os_family') ~ '"') %}
+{% endif %}
+
+{#- "trust install" exists in agent 0.3.9 and later. Refuse an older version here: the state would
+    fail after the old package is already installed. The version is compared as dotted numbers,
+    the first three parts; each part counts up to its first character that is not a digit
+    (0.3.9-rc1 is 0.3.9), and a part with no digits counts as 0. -#}
+{% if cfg['system_trust'] is sameas true and version != '' %}
+{%   set vparts = version.split('.') + ['0', '0', '0'] %}
+{%   set vnum = [] %}
+{%   for i in [0, 1, 2] %}
+{%     set _ = vnum.append(vparts[i].split('-')[0].split('+')[0].split('~')[0].split('_')[0] | int) %}
+{%   endfor %}
+{%   if vnum[0] * 1000000 + vnum[1] * 1000 + vnum[2] < 3009 %}
+{%     set _ = errors.append('myownpki:agent:system_trust needs agent 0.3.9 or later (the command "trust install" does not exist before), the pillar version is "' ~ version ~ '"') %}
+{%   endif %}
 {% endif %}
 
 {% set config_source = '' %}
@@ -314,6 +336,7 @@
   'acme_directory': acme_directory,
   'webroot': webroot,
   'low_ports': cfg['low_ports'] is sameas true,
+  'system_trust': cfg['system_trust'] is sameas true,
   'pass_set': pass_set,
   'deployments': deployment_list,
   'absent': absent,
