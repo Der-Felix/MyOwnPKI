@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.8]
+## [0.3.8] - 2026-11-13
 
 Charts, reports and analysis: a *Reports* page with the expiry of the current week and the next 12 weeks, the issuances by source,
 the certificates per CA, the alert history and the agent fleet, two of the charts on the dashboard, and an
