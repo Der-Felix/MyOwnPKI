@@ -20,10 +20,17 @@
     <a class="top-link" href="{{ site.repository_url }}">Source on GitHub</a>
   </header>
 
-  <div class="layout">
-    <nav class="nav" aria-label="Documentation">
+  {%- comment %}
+    The navigation is built once and printed twice: in a <details> element for
+    narrow screens and as a plain list for wide ones (CSS shows one of them).
+  {%- endcomment %}
+  {%- capture nav_list %}
+  <ul class="nav-groups">
+    {%- for group in site.data.nav %}
+    <li>
+      <p class="nav-group">{{ group.group }}</p>
       <ul>
-        {%- for item in site.data.nav %}
+        {%- for item in group.items %}
         {%- assign is_current = false %}
         {%- assign show_children = false %}
         {%- if page.url == item.url %}{% assign is_current = true %}{% endif %}
@@ -43,12 +50,57 @@
         </li>
         {%- endfor %}
       </ul>
+    </li>
+    {%- endfor %}
+  </ul>
+  {%- endcapture %}
+
+  {%- comment %}
+    The "On this page" list is made from the h2 and h3 headings of the rendered
+    page (kramdown gives them ids). It is shown in a right column on wide
+    screens, and only when the page has at least three headings.
+  {%- endcomment %}
+  {%- assign toc_count = 0 %}
+  {%- capture toc_list %}
+    {%- assign heading_chunks = content | split: '<h' %}
+    {%- for chunk in heading_chunks offset: 1 %}
+      {%- assign level = chunk | slice: 0, 1 %}
+      {%- if level == '2' or level == '3' %}
+        {%- assign head = chunk | split: '</h' | first %}
+        {%- if head contains ' id="' %}
+          {%- assign toc_id = head | split: ' id="' | last | split: '"' | first %}
+          {%- assign tag_open = head | split: '>' | first %}
+          {%- assign toc_text = head | remove_first: tag_open | remove_first: '>' | strip_html | strip %}
+          {%- assign toc_count = toc_count | plus: 1 %}
+    <li{% if level == '3' %} class="toc-sub"{% endif %}><a href="#{{ toc_id }}">{{ toc_text }}</a></li>
+        {%- endif %}
+      {%- endif %}
+    {%- endfor %}
+  {%- endcapture %}
+
+  <div class="layout{% if toc_count >= 3 %} has-toc{% endif %}">
+    <nav class="nav" aria-label="Documentation">
+      <details class="nav-menu">
+        <summary>Menu</summary>
+        {{ nav_list }}
+      </details>
+      <div class="nav-full">
+        {{ nav_list }}
+      </div>
     </nav>
 
     <main id="content" tabindex="-1">
       <h1>{{ page.title }}</h1>
       {{ content }}
     </main>
+
+    {%- if toc_count >= 3 %}
+    <nav class="toc" aria-label="On this page">
+      <p class="toc-title">On this page</p>
+      <ul>{{ toc_list }}
+      </ul>
+    </nav>
+    {%- endif %}
   </div>
 
   <footer class="foot">

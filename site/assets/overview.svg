@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 500" role="img" aria-labelledby="overview-title overview-desc">
+<title id="overview-title">How the parts of MyOwnPKI fit together</title>
+<desc id="overview-desc">Browsers and API clients reach the web UI and REST API of the server over HTTPS. ACME clients, and the agent on a host, get certificates from the ACME server. The agent also reports to the agent listener and deploys the certificate to a service such as nginx. The server holds the certificate authorities. From the server, alerts go out by e-mail or webhook, the TLS scan connects to your TLS endpoints, and backups are written to backup storage.</desc>
+<g fill="none" stroke="currentColor" stroke-width="1.5">
+<rect class="box" x="8" y="86" width="144" height="64"/>
+<rect class="box" x="168" y="86" width="144" height="64"/>
+<rect class="frame" x="328" y="16" width="144" height="134"/>
+<rect class="box" x="336" y="48" width="128" height="32"/>
+<rect class="box" x="336" y="100" width="128" height="40"/>
+<rect class="frame" x="8" y="212" width="464" height="168"/>
+<rect class="box" x="16" y="250" width="128" height="60"/>
+<rect class="box" x="176" y="250" width="128" height="60"/>
+<rect class="box" x="336" y="250" width="128" height="60"/>
+<rect class="box" x="16" y="326" width="448" height="38"/>
+<rect class="box" x="16" y="440" width="128" height="50"/>
+<rect class="box" x="176" y="440" width="128" height="50"/>
+<rect class="box" x="336" y="440" width="128" height="50"/>
+<path class="line" d="M80 150V241"/>
+<path class="line" d="M240 150V241"/>
+<path class="line" d="M400 150V241"/>
+<path class="line" d="M340 150L303 242.6"/>
+<path class="line" d="M400 80V91"/>
+<path class="line" d="M80 310V326"/>
+<path class="line" d="M240 310V326"/>
+<path class="line" d="M400 310V326"/>
+<path class="line" d="M80 380V431"/>
+<path class="line" d="M240 380V431"/>
+<path class="line" d="M400 380V431"/>
+</g>
+<g fill="currentColor" stroke="none">
+<polygon points="76,242 80,250 84,242"/>
+<polygon points="236,242 240,250 244,242"/>
+<polygon points="396,242 400,250 404,242"/>
+<polygon points="306.7,244.1 300,250 299.3,241.1"/>
+<polygon points="396,92 400,100 404,92"/>
+<polygon points="76,432 80,440 84,432"/>
+<polygon points="236,432 240,440 244,432"/>
+<polygon points="396,432 400,440 404,432"/>
+</g>
+<g fill="currentColor" stroke="none" font-family="sans-serif" font-size="14" text-anchor="middle">
+<text x="80" y="113">Browser or</text>
+<text x="80" y="131">API client</text>
+<text x="240" y="106">ACME client,</text>
+<text x="240" y="123">such as certbot</text>
+<text x="240" y="140">or Traefik</text>
+<text class="title" x="400" y="37">Host with agent</text>
+<text x="400" y="69">myownpki-agent</text>
+<text x="400" y="118">service,</text>
+<text x="400" y="134">e.g. nginx</text>
+<text class="title" x="104" y="234" text-anchor="start">MyOwnPKI server</text>
+<text x="80" y="276">Web UI and</text>
+<text x="80" y="294">REST API</text>
+<text x="240" y="285">ACME server</text>
+<text x="400" y="276">Agent listener</text>
+<text x="400" y="294">mutual TLS</text>
+<text x="240" y="350">Certificate authorities</text>
+<text x="80" y="461">E-mail or</text>
+<text x="80" y="479">webhook</text>
+<text x="240" y="461">Your TLS</text>
+<text x="240" y="479">endpoints</text>
+<text x="400" y="461">Backup</text>
+<text x="400" y="479">storage</text>
+</g>
+<g class="label" fill="currentColor" stroke="none" font-family="sans-serif" font-size="13">
+<text x="88" y="190">HTTPS</text>
+<text x="248" y="190">ACME</text>
+<text x="326" y="206">ACME</text>
+<text x="408" y="190">reports</text>
+<text x="408" y="95">deploys</text>
+<text x="88" y="414">alerts</text>
+<text x="248" y="414">TLS scan</text>
+<text x="408" y="414">backups</text>
+</g>
+</svg>

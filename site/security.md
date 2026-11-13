@@ -26,7 +26,7 @@ in [SECURITY.md](https://github.com/Der-Felix/MyOwnPKI/blob/main/SECURITY.md).
 | The root | Can be offline. A root signs only intermediate CAs and CRLs; the engine refuses to issue end-entity certificates with it. |
 | Backups | Contain the CA keys, encrypted. A backup alone cannot sign; a backup plus the passphrase or the recovery key can. |
 | Certificate content | Extensions come from the preset and the policy, **never from the CSR**. CSRs, uploads and ACME payloads are treated as attacker input. Name constraints are enforced before signing, not only by clients. |
-| People | A second factor (authenticator or passkey) is mandatory. Sensitive actions ask for a fresh code (step-up): revoking, downloading keys, CA operations, user management, agent management, switching the agent enrollment mode. Wrong passwords lock the account for 15 minutes. |
+| People | A second factor (an authenticator app with recovery codes) is mandatory. Passkeys work only through the REST API, not in the web UI. Sensitive actions ask for a fresh code (step-up): revoking, downloading keys, CA operations, user management, agent management, switching the agent enrollment mode. Wrong passwords lock the account for 15 minutes. |
 | Roles | *viewer*, *operator* and *admin* per tenant or per CA; instance admins unseal and manage users. |
 | API tokens | Never more than their owner has, one year at most, and they can never satisfy step-up. |
 | Audit log | Every action is logged in a hash chain with signed checkpoints. `myownpki audit verify` checks it; with the checkpoint key fingerprint from `init` it can prove that the log is the one you had. |
