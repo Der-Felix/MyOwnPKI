@@ -6,6 +6,11 @@
 // every new image stays in the Git history for good (frontend.md).
 //
 // Usage: task screenshots [-- -browser PATH]
+//
+// With -inventory it shoots every page of the UI, light and dark, against a
+// demo instance that has agents, alerts, endpoints and reports, into the
+// untracked directory .tmp/ui-inventory (docs/PHASE3.md step 50, docs/UI-GAPS.md).
+// task screenshots -- -inventory
 package main
 
 import (
@@ -42,6 +47,10 @@ const (
 	sealed                    // signed in, sealed: the unseal page
 	light                     // signed in, unsealed
 	dark                      // the same in the dark theme
+
+	// Only the inventory (inventory.go) shoots these two.
+	anonymousDark // the sign-in page in the dark theme
+	sealedDark    // signed in, sealed, dark theme
 )
 
 type shot struct {
@@ -80,10 +89,25 @@ func main() {
 func run(stdout, stderr io.Writer) int {
 	browser := flag.String("browser", os.Getenv("MYOWNPKI_BROWSER"),
 		"path to Edge, Chrome or Chromium (default: $MYOWNPKI_BROWSER, then auto-detect)")
-	out := flag.String("out", filepath.Join("docs", "screenshots"), "output directory")
+	inventory := flag.Bool("inventory", false, "shoot every page of the UI, light and dark, into .tmp/ui-inventory (untracked) against a demo instance with more data")
+	out := flag.String("out", "", "output directory (default docs/screenshots, with -inventory .tmp/ui-inventory)")
+	only := flag.String("only", "", "with -inventory: only the pages whose name starts with one of these comma-separated prefixes")
 	width := flag.Int("width", 1400, "window width in CSS pixels")
-	height := flag.Int("height", 900, "window height in CSS pixels")
+	height := flag.Int("height", 900, "window height in CSS pixels (-inventory: 1500, pages are long)")
 	flag.Parse()
+	if *out == "" {
+		*out = filepath.Join("docs", "screenshots")
+		if *inventory {
+			*out = filepath.Join(".tmp", "ui-inventory")
+		}
+	}
+	if *inventory {
+		heightSet := false
+		flag.Visit(func(f *flag.Flag) { heightSet = heightSet || f.Name == "height" })
+		if !heightSet {
+			*height = 1500
+		}
+	}
 
 	if *browser == "" {
 		*browser = findBrowser()
@@ -104,7 +128,7 @@ func run(stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer cleanup()
-	in, err := newInstance(ctx, dir)
+	in, err := newInstanceWith(ctx, dir, *inventory)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -118,10 +142,13 @@ func run(stdout, stderr io.Writer) int {
 	defer stop()
 
 	fmt.Fprintf(stdout, "browser: %s\n", *browser)
+	if *inventory {
+		return runInventory(ctx, in, bases, *browser, *out, *only, *width, *height, stdout, stderr)
+	}
 	failed := false
 	unsealed := false
 	for _, s := range shots {
-		if s.kind >= light && !unsealed {
+		if needsUnseal(s.kind) && !unsealed {
 			if err := in.ring.Unseal(ctx, []byte(in.passphrase), console); err != nil {
 				fmt.Fprintln(stderr, err)
 				return 1
@@ -154,6 +181,9 @@ func run(stdout, stderr io.Writer) int {
 	return 0
 }
 
+// needsUnseal reports whether a view is shot after the unseal.
+func needsUnseal(k viewKind) bool { return k == light || k == dark }
+
 // startServers serves the real UI of the demo instance on loopback ports,
 // one per view: the cookies (session, dark theme) are set on every request
 // by a wrapper, so the product needs no screenshot-only switch.
@@ -166,10 +196,12 @@ func startServers(in *instance) (bases map[viewKind]string, stop func(), err err
 	prefs.Theme = view.ThemeDark
 	session := auth.CookieName + "=" + in.session
 	handlers := map[viewKind]http.Handler{
-		anonymous: handler,
-		sealed:    withCookie(handler, session),
-		light:     withCookie(handler, session),
-		dark:      withCookie(handler, session+"; "+view.PrefsCookie+"="+prefs.String()),
+		anonymous:     handler,
+		sealed:        withCookie(handler, session),
+		light:         withCookie(handler, session),
+		dark:          withCookie(handler, session+"; "+view.PrefsCookie+"="+prefs.String()),
+		anonymousDark: withCookie(handler, view.PrefsCookie+"="+prefs.String()),
+		sealedDark:    withCookie(handler, session+"; "+view.PrefsCookie+"="+prefs.String()),
 	}
 	var servers []*http.Server
 	stop = func() {

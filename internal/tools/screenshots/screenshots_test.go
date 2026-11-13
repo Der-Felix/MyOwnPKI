@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -143,5 +147,130 @@ func TestServersShowTheRealUI(t *testing.T) {
 	host, _ := os.Hostname()
 	if html := get(bases[light] + "/authorities"); !strings.Contains(html, "O=Homelab") || (host != "" && strings.Contains(strings.ToLower(html), strings.ToLower(host))) {
 		t.Error("the CAs must be named neutrally, without the host name")
+	}
+}
+
+// registeredGETRoutes reads the GET patterns of registerApp from its source:
+// a ServeMux can't list its routes, and the UI must not gain a page the
+// inventory does not know about.
+func registeredGETRoutes(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join("..", "..", "web", "app.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routes []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "registerApp" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				if pattern, err := strconv.Unquote(lit.Value); err == nil {
+					if route, ok := strings.CutPrefix(pattern, "GET "); ok {
+						routes = append(routes, route)
+					}
+				}
+			}
+			return true
+		})
+		return false
+	})
+	if len(routes) < 40 {
+		t.Fatalf("found only %d GET routes in registerApp: the parser no longer understands it", len(routes))
+	}
+	return routes
+}
+
+// TestInventoryCoversEveryRoute: a new page in registerApp fails this test
+// until it is in inventoryPages or, with a reason, in inventoryExcluded; a
+// route that was removed fails it too.
+func TestInventoryCoversEveryRoute(t *testing.T) {
+	t.Parallel()
+	registered := map[string]bool{}
+	covered := inventoryRoutes()
+	for _, r := range registeredGETRoutes(t) {
+		registered[r] = true
+		if !covered[r] {
+			t.Errorf("GET %s is registered by registerApp but is neither in inventoryPages nor in inventoryExcluded (internal/tools/screenshots/inventory.go)", r)
+		}
+	}
+	for r := range covered {
+		if !registered[r] {
+			t.Errorf("the inventory lists GET %s, which registerApp no longer registers", r)
+		}
+	}
+	names := map[string]bool{}
+	for _, p := range inventoryPages {
+		if names[p.name] {
+			t.Errorf("page name %q is used twice", p.name)
+		}
+		names[p.name] = true
+		if p.kind != anonymous && p.kind != sealed && p.kind != light {
+			t.Errorf("page %q: only anonymous, sealed and light pages are listed (dark is shot for each)", p.name)
+		}
+	}
+	for r, why := range inventoryExcluded {
+		if why == "" {
+			t.Errorf("excluded route %s needs a reason", r)
+		}
+	}
+}
+
+// TestInventoryInstanceShowsData: with the inventory seeds every page the
+// plan names answers 200 and shows data, not an empty state; the seeds go
+// through the real services, so this also proves that they still fit them.
+func TestInventoryInstanceShowsData(t *testing.T) {
+	t.Parallel()
+	in, err := newInstanceWith(t.Context(), filepath.Join(t.TempDir(), "data"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.close()
+	bases, stop, err := startServers(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if err := in.ring.Unseal(t.Context(), []byte(in.passphrase), console); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) (int, string) {
+		t.Helper()
+		resp, err := http.Get(bases[light] + path) //nolint:noctx // test against the local screenshot servers
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode, string(body)
+	}
+	for path, want := range map[string]string{
+		"/reports":                       "Expiry",
+		"/analysis":                      "Renewal loop",
+		"/alerts":                        "Agent silent",
+		"/endpoints":                     "ci-runner.homelab.example",
+		"/agents":                        "proxy-02.homelab.example",
+		"/agents/enrollments":            "printer.homelab.example",
+		"/agents/" + in.agentID:          "proxy-01.homelab.example",
+		"/domains/" + in.domainID:        "corp.example",
+		"/acme/accounts/" + in.accountID: "mailto:admin@homelab.example",
+		"/admin/users/" + in.userID:      "alex",
+		"/hosts/add/" + in.enrollHost:    "printer.homelab.example",
+	} {
+		status, body := get(path)
+		if status != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("GET %s: status %d, contains %q: %v", path, status, want, strings.Contains(body, want))
+		}
 	}
 }

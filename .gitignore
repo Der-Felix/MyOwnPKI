@@ -52,6 +52,9 @@ Thumbs.db
 .claude/settings.local.json
 CLAUDE.local.md
 
+# Scratch output of tools (the UI inventory of internal/tools/screenshots): never committed
+/.tmp/
+
 # Test tools built by tasks (lego, pebble) – never committed
 /.tools/
 
