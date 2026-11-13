@@ -201,6 +201,11 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
+	// A DNS provider is configured by agent.yaml and its credentials file only:
+	// never by a variable of the process environment (docs/PHASE3.md §13.2).
+	if removed := agent.ScrubProviderEnvironment(); len(removed) > 0 {
+		log.Warn("ignoring environment variables that would configure a DNS provider or lego, or change which CAs the DNS API is trusted through; use agent.yaml and the credentials file", slog.Any("names", removed))
+	}
 	a, err := agent.New(cfg, log, version.Get().Version)
 	if err != nil {
 		log.Error("start", slog.Any("error", err))
@@ -268,8 +273,29 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) int {
 	} else {
 		_, _ = fmt.Fprint(stdout, sandbox)
 	}
+	// DNS providers: only the state of each credentials file, never its content.
+	unusable := 0
+	if statuses := cfg.DNSProviderStatuses(); len(statuses) > 0 {
+		_, _ = fmt.Fprintln(stdout, "  dns providers")
+		for _, s := range statuses {
+			line := fmt.Sprintf("    %s  %s  %s: %s", s.Name, s.Type, s.Path, s.State)
+			if s.Detail != "" {
+				line += ": " + s.Detail
+			}
+			if len(s.Users) == 0 {
+				line += " (no deployment uses it)"
+			} else if !s.OK() {
+				unusable++
+			}
+			_, _ = fmt.Fprintln(stdout, line)
+		}
+	}
 	for _, w := range cfg.Warnings() {
 		_, _ = fmt.Fprintln(stdout, "  warning      ", w)
+	}
+	if unusable > 0 {
+		_, _ = fmt.Fprintf(stderr, "\nThe configuration is valid, but %d DNS credentials file(s) used by a deployment cannot be used (see \"dns providers\" above).\n", unusable)
+		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0

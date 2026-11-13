@@ -107,6 +107,22 @@ linters:
               desc: "decode-only and frozen – pick a maintained PKCS#12 library (ask first, ADR-14)"
             - pkg: golang.org/x/crypto/openpgp
               desc: "unmaintained and unsafe by design (GO-2026-5932) – not needed by a PKI"
+        # dns-01 lives in the agent only (docs/PHASE3.md §13.3). The server
+        # never answers a DNS challenge and must not carry the ACME client
+        # library or the DNS library; cmd/myownpki/deps_test.go checks the
+        # built binaries (indirect imports included).
+        agent-only-dns:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!**/internal/agent/**"
+            - "!**/cmd/myownpki-agent/**"
+            - "!**/internal/testutil/**"
+          deny:
+            - pkg: github.com/go-acme/lego
+              desc: "the ACME client library belongs to the agent (internal/agent) – the server must not carry it (docs/PHASE3.md §13.3)"
+            - pkg: github.com/miekg/dns
+              desc: "the DNS library belongs to the agent and to internal/testutil/dnsserver – the server must not carry it (docs/PHASE3.md §13.3)"
 
     forbidigo:
       analyze-types: true

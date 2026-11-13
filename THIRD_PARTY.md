@@ -19,8 +19,22 @@ Two-week rule: a version older than 2026-10-10 (docs/PHASE3.md §4).
 | `connectrpc.com/connect` | v1.21.1 (2026-10-14) | Apache-2.0 | the agent protocol (Connect-RPC, ADR-10) in server and agent; its generator `protoc-gen-connect-go` as `go tool` | `github.com/google/go-cmp` v0.7.0 (BSD-3) – only in connect's own tests, not built in. Approved as v1.21.0; raised to v1.21.1 on 2026-11-12 (Dependabot, public for more than two weeks) |
 | `google.golang.org/protobuf` | v1.36.12 (2026-08-10) | BSD-3-Clause | protobuf messages of the agent protocol; its generator `protoc-gen-go` as `go tool` | nothing |
 | [buf](https://github.com/bufbuild/buf) CLI | v1.73.0 (2026-09-11) | Apache-2.0 | `task generate`: lint and code generation of `proto/` (local plugins only, no registry) – a development tool, never in `go.mod` or a binary | fetched by `internal/tools/buf` into `.tools/` and checked against the SHA-256 of the release's `sha256.txt` (pins in that file) |
-| `github.com/go-acme/lego/v4` | v4.35.2 (2026-04-24) | MIT | ACME library in the agent (block C); direct imports only `lego`, `certificate`, `registration`; the existing contained responder implements the HTTP provider interface | `github.com/go-jose/go-jose/v4` v4.1.4 (2026-03-31, Apache-2.0), `github.com/miekg/dns` v1.1.72 (2026-01-22, BSD-3), `github.com/cenkalti/backoff/v5` v5.0.3 (2025-07-23, MIT). No DNS provider or provider SDK is built in; existing higher `golang.org/x/*` versions stay unchanged |
+| `github.com/go-acme/lego/v4` | v4.35.2 (2026-04-24) | MIT | ACME library in the agent (block C); direct imports `lego`, `certificate`, `registration` (v0.3.0) and, since v0.3.7, `challenge`, `challenge/dns01`, `log` and `providers/dns/cloudflare` (see the v0.3.7 section below); the existing contained responder implements the HTTP provider interface | `github.com/go-jose/go-jose/v4` v4.1.4 (2026-03-31, Apache-2.0), `github.com/miekg/dns` v1.1.72 (2026-01-22, BSD-3), `github.com/cenkalti/backoff/v5` v5.0.3 (2025-07-23, MIT). Existing higher `golang.org/x/*` versions stay unchanged. Only the Cloudflare provider of lego is built in since v0.3.7 (its package imports lego itself and `miekg/dns`), no provider SDK |
 | `nginx:1.29.2-trixie` | 2025-10-07 | BSD-2-Clause | nginx in the Linux `agent end-to-end` CI job only; not shipped | multi-architecture index `sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903` |
+
+## dns-01 in the agent (v0.3.7)
+
+No module is added and no version changes (`go list -m all` is the same; `go.sum` is unchanged). Two things
+change (docs/PHASE3.md §13.3):
+
+| Module / package | Version (release date) | License | For | Change |
+|---|---|---|---|---|
+| `github.com/go-acme/lego/v4` packages `challenge`, `challenge/dns01`, `log`, `providers/dns/cloudflare` | v4.35.2 (2026-04-24) | MIT | the dns-01 solver and the Cloudflare provider of the agent | more packages of a module that is already pinned; they bring no module (the linux/amd64 agent (`-s -w`) grows from 11,886,752 to 12,513,440 bytes with the two providers, the guard and the own RFC 2136 code) |
+| `github.com/miekg/dns` | v1.1.72 (2026-01-22) | BSD-3-Clause | the agent's own RFC 2136 provider (UPDATE over TCP with TSIG) and the in-process test DNS server `internal/testutil/dnsserver` | `// indirect` becomes a direct requirement in `go.mod` |
+| lego `providers/dns/rfc2136` | – | – | **not used**: it brings `bodgit/tsig` and a Kerberos stack (12 modules in the Linux build) for GSS-TSIG, which this release does not offer | – |
+
+The server binaries carry neither lego nor `miekg/dns`: `cmd/myownpki/deps_test.go` and the depguard rule
+`agent-only-dns` check it.
 
 ## CI-only tool for the Salt formula (v0.3.6)
 

@@ -45,7 +45,7 @@ MyOwnPKI as a service with one command. Download it with the checksum file, chec
 never pipe a script from the internet into a shell:
 
 ```bash
-v=0.3.6
+v=0.3.7
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -510,6 +510,15 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.6 to v0.3.7: no migration and no change to the server's behavior (`myownpki db status` shows
+the same versions), so going back needs no restore. The release adds dns-01 to the agent
+([§12.11](#1211-dns-01-in-the-agent)), the `deployment add` flags `--challenge dns-01`, `--dns-*` and
+`--check-name`, and the same options in the Salt formula. **Update the agent before you add a dns-01
+deployment:** an agent of v0.3.6 or older refuses an `agent.yaml` that has `dns_providers`, `dns_provider`
+or `check_name` (unknown keys are errors on purpose) and does not start. An existing `agent.yaml` works
+with v0.3.7 unchanged. To go back to an older agent, remove the dns-01 deployments (`deployment remove NAME`)
+and the `dns_providers` block first. Update the server first, as always.
+
 From v0.3.5 to v0.3.6: no migration, no configuration change and no change to the server or the agent
 code. The release adds the Salt formula in the repository ([§12.10](#1210-rolling-out-with-salt));
 nothing uses it until you copy it to a Salt master. Update the server first, as always. With the
@@ -859,7 +868,9 @@ The **validator** – the part of MyOwnPKI that checks a challenge – connects 
 - dns-01: the TXT record `_acme-challenge.<name>` must be in the zone the resolver reads. With split
   DNS that is the **internal** zone – point the client's DNS plugin (e.g. certbot-dns-rfc2136) at
   the internal server. A zone hosted at a provider works the same way with the provider's plugin
-  (e.g. certbot-dns-cloudflare), as long as `acme.resolver` sees that zone.
+  (e.g. certbot-dns-cloudflare), as long as `acme.resolver` sees that zone. Since v0.3.7 the agent
+  writes the record itself (RFC 2136 or Cloudflare), so an agent host needs no client-side plugin:
+  [§12.11](#1211-dns-01-in-the-agent).
 - The error a client gets names only the kind of problem ("could not connect", "answered with
   status 404", "no TXT record") – never what the target answered. The server log (level info) has
   the addresses.
@@ -988,8 +999,9 @@ another independent channel; never copy an expectation from the download page or
 
 ## 12. Agent
 
-`myownpki-agent` enrolls a Linux host, obtains certificates through ACME with http-01 and installs
-them with the `nginx` or `file` profile. It writes only below local `paths`, runs only hooks from
+`myownpki-agent` enrolls a Linux host, obtains certificates through ACME with http-01 (since v0.3.7
+also with dns-01, [§12.11](#1211-dns-01-in-the-agent)) and installs them with the `nginx` or `file`
+profile. It writes only below local `paths`, runs only hooks from
 local `agent.yaml`, and receives desired state rather than commands from the server. Linux is the
 supported deployment platform in v0.3.0; Windows, macOS and FreeBSD are build/test targets only.
 
@@ -1072,15 +1084,15 @@ and its signature. Verify `checksums.txt` with cosign as described in the README
 selected artifact before installing it. Never pipe a download into a shell:
 
 ```bash
-v=0.3.6
+v=0.3.7
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
-# Also download myownpki-agent_0.3.6_linux_amd64.deb (or the artifact you use).
+# Also download myownpki-agent_0.3.7_linux_amd64.deb (or the artifact you use).
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Install a package with `sudo dpkg -i myownpki-agent_0.3.6_linux_amd64.deb` or
-`sudo rpm -Uvh myownpki-agent_0.3.6_linux_amd64.rpm`. Packages contain the binary, the pristine
+Install a package with `sudo dpkg -i myownpki-agent_0.3.7_linux_amd64.deb` or
+`sudo rpm -Uvh myownpki-agent_0.3.7_linux_amd64.rpm`. Packages contain the binary, the pristine
 `/etc/myownpki-agent/agent.yaml` conffile (`noreplace`), and unit/drop-in examples below
 `/usr/share/myownpki-agent/examples`. They have no maintainer scripts and never enable or start the
 service. For a tarball, verify and unpack it, then install `myownpki-agent` as
@@ -1187,6 +1199,33 @@ The `file` profile fits existing paths and nginx configuration. Replace the depl
     reload_hook: nginx-reload
     check: "127.0.0.1:443"
 ```
+
+**dns-01 (since v0.3.7).** A deployment may set `challenge: dns-01` instead of `standalone` or `webroot`.
+It then names an entry of the new top-level map `dns_providers` with `dns_provider`, takes no `webroot`,
+and may carry wildcard names (`*.homelab.lan`, only with dns-01). The optional `check_name` is the SNI of
+the local TLS `check`; it is required when every name is a wildcard:
+
+```yaml
+dns_providers:
+  homelab-dns:
+    type: rfc2136                 # or cloudflare
+    credentials_file: "/etc/myownpki-agent/dns/homelab.yaml"
+    nameserver: "192.0.2.53"      # rfc2136 only, required
+deployments:
+  - name: wild
+    profile: nginx
+    names: ["*.homelab.lan", "homelab.lan"]
+    challenge: dns-01
+    dns_provider: homelab-dns
+    dir: "/etc/nginx/myownpki/wild"
+    test_hook: nginx-test
+    reload_hook: nginx-reload
+    check: "127.0.0.1:443"
+    check_name: "www.homelab.lan"
+```
+
+Every key of `dns_providers`, the credentials file and the DNS server settings are in
+[§12.11](#1211-dns-01-in-the-agent).
 
 `files.certificate` and `files.chain` are available when separate files are needed. Optional
 `owner`, `group` and `key_mode` apply locally. Deployments sharing a nonempty reload hook are staged,
@@ -1308,10 +1347,16 @@ and package hashes, enrolls through `setup`, and updates an older enrolled agent
 | Agent host | Server | 8444/tcp | agent channel with mTLS |
 | Agent host | Server | ACME HTTPS port (443 or the reverse proxy) | certificate orders |
 | Server | Agent host | 80/tcp | http-01 for enrollment and orders |
+| Agent host | the DNS server of a provider | 53/tcp | dns-01 with RFC 2136: the update and the SOA lookup |
+| Agent host | the resolver (`resolver` or `/etc/resolv.conf`) | 53/udp, 53/tcp | dns-01: CNAME check, `propagation: resolver` |
+| Agent host | the authoritative servers of the zone | 53/udp, 53/tcp | dns-01 with `propagation: authoritative` (default) |
+| Agent host | `api.cloudflare.com` | 443/tcp, through `proxy:` if set | dns-01 with Cloudflare |
 
 Nothing else needs to be opened on the host. Standalone port 80 is listened on only while a check
 runs; the web server must answer it in webroot mode. The agent makes outbound connections; the
-server never connects to an administrative agent port.
+server never connects to an administrative agent port. The server-to-host port 80 row is not needed for a
+deployment that uses dns-01 (the host still enrolls with http-01 or an approval); the four rows for
+dns-01 are needed only for such deployments ([§12.11](#1211-dns-01-in-the-agent)).
 
 ### 12.5 Status and troubleshooting
 
@@ -1333,6 +1378,10 @@ three missed reports. An open renewal on a silent agent stays pending and can be
   policy. In webroot mode the directory must exist and be below `paths`.
 - **Name refused:** the ACME server checks every name against *Names it may order* at order and
   issuance. Add the exact name or a suitable `*.suffix` pattern; the UI marks uncovered names.
+- **dns-01 fails:** `myownpki-agent config check` shows the state of each DNS credentials file; the
+  error of the deployment names the provider and the problem and holds no secret
+  ([§12.11](#1211-dns-01-in-the-agent)). A wildcard also needs the identical `*.` pattern in the agent's
+  *Names it may order* and a domain with *Wildcards*.
 - **Permission or sandbox errors:** `myownpki-agent config check` prints the effective `ReadWritePaths`
   and says whether the drop-ins match; if they differ, run `myownpki-agent sandbox sync` (§12.7). A
   hook that writes somewhere other than `paths` needs that directory in `sandbox.write` (nginx:
@@ -1687,6 +1736,171 @@ applies it with `test=True` under Salt 3008.5. The maintainer also applied it fo
 Debian amd64 hosts (agent 0.3.2 to 0.3.5, a second apply changed nothing). **Not tested live:** the
 enrollment of a new host with an enrollment pass, `rpm` hosts, `arm64`, `config_source`, the gitfs
 install and other Salt versions. Try the formula on one minion before you roll out.
+
+### 12.11 dns-01 in the agent
+
+Since v0.3.7 a deployment may prove its names with **dns-01** instead of http-01: the agent writes the TXT
+record `_acme-challenge.<name>` into a DNS zone, waits until it is visible, lets the ACME server read it
+and removes it again. The server only reads the record (through `acme.resolver`, [§10.7](#107-split-dns-and-the-network)),
+so the server is unchanged. Use it for **wildcards** (`*.homelab.lan` can only be proven with dns-01, RFC 8555
+§7.1.3), for a service **without port 80** and for a host **behind NAT**. It costs a credential that can
+change a zone, so keep http-01 where it works. Enrollment of a host stays http-01 (or an approval); only the
+certificates use dns-01. The page for administrators, with a worked example, is
+[dns-01 and wildcard certificates](https://der-felix.github.io/MyOwnPKI/dns-01/).
+
+**What the server must allow.** The ACME server decides; the agent never asks about policy, so a refusal comes
+back as the server's own message. The domain that covers the name needs dns-01 among its challenges, and
+for a wildcard *Wildcards* (which needs *Names below the domain too* and dns-01,
+[§10.5](#105-domains-approvals-and-eab-keys)). The agent's *Names it may order* must cover every name of the
+deployment, and **a wildcard is covered only by the identical pattern**: `*.homelab.lan` in the list covers
+`www.homelab.lan` but not `homelab.lan`, and `homelab.lan` does not cover `*.homelab.lan`. An enrollment
+pass grants the host name only, so add the pattern by hand. A deployment of `*.homelab.lan` and `homelab.lan`
+is one certificate with two names; the agent writes two values at the one TXT name `_acme-challenge.homelab.lan`
+and removes both.
+
+**`agent.yaml`.** A deployment sets `challenge: dns-01` and `dns_provider: NAME`; `NAME` is a key of the
+top-level map `dns_providers`, which holds no secret:
+
+| Key of `dns_providers.NAME` | Default | Meaning |
+|---|---|---|
+| `type` | required | `rfc2136` or `cloudflare` |
+| `credentials_file` | required | Absolute path of the credentials file |
+| `nameserver` | required for `rfc2136` | `host` or `host:port` (port 53) of the DNS server that accepts the update; not for Cloudflare |
+| `zone` | looked up | `rfc2136`: the zone to update. Without it the agent asks the nameserver for the SOA of the name and its parents |
+| `ttl` | 120 | TTL of the record in seconds: 30 to 3600 for `rfc2136`, 120 to 3600 for Cloudflare |
+| `resolver` | `/etc/resolv.conf` | `IP` or `IP:port` for the SOA, CNAME and propagation queries; the agent never falls back to public resolvers and fails when it has none |
+| `propagation` | `authoritative` | `authoritative`, `resolver` or `wait` (below) |
+| `propagation_wait` | 0 | A pause in seconds before the first check, 0 to 300 |
+| `propagation_timeout` | 120 | Seconds the agent polls (every 2 seconds), 1 to 600 |
+
+Unknown keys are errors and `config check` reports every problem at once. A wildcard name is allowed only with
+dns-01; a dns-01 deployment takes no `webroot`; a provider no deployment uses is a warning. A provider
+entry serves several deployments. `deployment add` writes an entry once, when its name is new and
+`--dns-type` is given; it refuses a different definition of an existing name ("edit agent.yaml by hand"),
+and `ttl`, `propagation*` and a changed `zone` are edited by hand. `check_name` is the SNI of the local TLS
+check; without it the agent uses the first name that is not a wildcard, and a deployment of wildcards only
+that has a `check` needs it.
+
+**The credentials file.** A file of its own, never `agent.yaml`, a command line or an environment variable
+(`agent run` removes every variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or `RFC2136_`, and
+also `SSL_CERT_FILE` and `SSL_CERT_DIR`, logs their names and ignores them). The last two choose the
+system roots on Linux, which the Cloudflare calls trust, so they would choose which CA may receive the API
+token; the agent's own connections use the `ca_bundle` of `agent.yaml` and never read them. **Hooks inherit
+the cleaned environment**: they see none of these variables, and a hook that talks TLS uses the system's
+default trust. YAML with strict keys; an unknown key, an empty value, a repeated key, an
+alias or a second document is an error:
+
+| Provider | Keys |
+|---|---|
+| `rfc2136` | `tsig_key_name` and `tsig_secret` (base64, as in BIND's `key` statement) required; `tsig_algorithm` optional: `hmac-sha256` (default), `hmac-sha384`, `hmac-sha512`. `hmac-md5` and `hmac-sha1` are refused |
+| `cloudflare` | `api_token` required (an API token, not the legacy global key); `zone_token` optional, a second token with *Zone / Zone / Read* only |
+
+The agent opens the file without following a symbolic link and checks the **open** file: a regular file of at
+most 4 KiB, mode 0600 or 0400 with no setuid, setgid or sticky bit, owned by root or the agent's user, in a
+directory that group and others cannot write and that root or the agent's user owns. The path must be
+absolute, without `..`, and **not** under `/home`, `/root` or `/run/user` (the unit hides them with
+`ProtectHome=yes`), `state_dir`, `paths` or a deployment target. Use `/etc/myownpki-agent/dns/`; `/etc` is
+readable under `ProtectSystem=strict`, so the systemd drop-ins do not change. The file is read **when an
+issuance starts** and wiped from memory afterwards, so a rotated secret works at the next renewal without a
+restart. A failing check names the state (`missing`, `wrong mode`, `wrong owner`, `unsafe directory`,
+`symbolic link`, `not a regular file`, `too large`, `invalid`) and the path, never the content; no secret
+reaches a log, an error, the report to the server or `agent status`. `myownpki-agent config check` prints a block
+*dns providers* with the state of each file and exits 1 when a deployment uses a file that cannot be used.
+`deployment add` shows the same problems as a **warning**, because a configuration tool may run it before the
+secret file exists.
+
+**RFC 2136 (BIND, Knot, PowerDNS).** One signed UPDATE message adds the TXT record and one removes exactly
+this run's value, both **over TCP** to `nameserver`; the zone SOA lookup goes to the same server over TCP. The
+agent accepts a success only when the answer's own TSIG verifies. The key needs to be allowed to add and
+remove TXT records at `_acme-challenge.<name>`. In BIND, with `tsig-keygen -a hmac-sha256 acme-agent` for the key:
+
+```
+zone "homelab.lan" {
+    type primary;
+    file "db.homelab.lan";
+    update-policy {
+        grant acme-agent name _acme-challenge.homelab.lan. TXT;
+    };
+};
+```
+
+A certificate for `*.homelab.lan` and `homelab.lan` needs this one `grant`; every other name needs its own line
+(`_acme-challenge.www.homelab.lan.`). `update-policy` and `allow-update` cannot be combined in one zone.
+**This `update-policy` is not verified:** the BIND test of the CI job uses `allow-update`. Check it on a test
+zone. TSIG signatures carry the time (the agent sends a tolerance of 300 seconds), so keep both clocks on NTP.
+A CNAME from `_acme-challenge.<name>` to another zone is followed and the update goes to the target's zone,
+so the key must be valid there; leave `zone` unset in that case, because with `zone` set a target outside
+that zone is refused before any message is sent (`rfc2136: zone mismatch: …`).
+
+**Cloudflare.** The agent looks the zone up by name, creates a TXT record and deletes it by its ID. The
+token therefore needs *Zone / Zone / Read* and *Zone / DNS / Edit*, scoped to the **one zone**; these are the
+permissions of the lego Cloudflare provider that the agent uses, so **check the names against Cloudflare's
+current documentation**. `zone_token` may carry the read permission alone. The calls use the system trust
+store (not `ca_bundle`), TLS 1.2 or newer and the `proxy:` of `agent.yaml` (never `HTTPS_PROXY`); error
+answers are cut to their codes and short messages. The zone is found by an SOA lookup through `resolver`, so
+that resolver must return the zone as Cloudflare hosts it.
+
+**Propagation.** After it writes the record the agent checks that it is visible before it tells the ACME
+server to look. `authoritative` (default): the TXT record is on every authoritative name server of the zone
+(port 53), robust against negative caching. `resolver`: only the configured resolver, for hosts that cannot query the name
+servers. `wait`: no query, only `propagation_wait`. `propagation_wait` is added once before the first check in
+every mode. The ACME server's own read goes through `acme.resolver`, which must see the zone the agent writes.
+
+**Cleanup.** The agent removes its record on success, failure, cancellation and timeout, and only this run's
+value. Each removal gets 30 seconds and is not cancelled with the issuance. Once the issuance is cancelled
+(the agent is stopping), all removals of one issuance share **12 seconds**, below the 30 seconds of the
+unit's `TimeoutStopSec`, so that a hanging DNS server and two records no longer end in `SIGKILL` during the
+second removal; a record that has no time left is not sent and counts as a failed removal. A cleanup failure
+is logged as `dns-01 cleanup failed: a TXT record may be left behind; remove it by hand if it stays` (with
+the reason), and it is reported in the deployment's *Last error*: `dns-01 cleanup failed: a TXT record may
+remain at _acme-challenge.<name>; remove it by hand if it stays (the agent log has the details)`, with up to
+three names and then `and N more`. That text carries no provider message and no secret. The issuance keeps
+its result: a deployed deployment stays `deployed`, and when the issuance failed too, the notice stands in
+front of the error. The next pass without a cleanup problem clears it. With Cloudflare the notice appears
+only when the create request may have worked (a network error, an answer that is not the API's JSON, a 5xx or
+a 2xx), because only then a record can exist that the agent cannot delete by ID; a create that was refused
+with a 4xx wrote nothing and stays quiet.
+`SIGKILL` or a power cut leaves a record, and the Cloudflare record IDs live in memory only, so remove such a
+record by hand. It does not harm validation. The agent refuses a challenge for a name that is not one of the
+deployment's names. `log_level: debug` shows lego's lines on the waiting and the checks.
+
+**Renewal checks during an issuance.** An issuance holds the agent's pass lock for as long as it runs, and a
+dns-01 one can wait up to `propagation_timeout` (15 minutes at most). The optional ARI lookup of a pass therefore does not queue
+behind it: while an issuance runs, the agent skips the lookup (debug log: `skipping the ARI check: an issuance
+is running`) and asks again at the next pass.
+
+**When it fails.** The error is the deployment's *Last error* on the agent page and in `myownpki-agent
+status`. Frequent texts: `credentials file …: wrong mode: is 0640, want 0600 or 0400` (the other states
+likewise); `dns-01 needs a resolver of its own and /etc/resolv.conf has none` (set `resolver`);
+`rfc2136: … NOTAUTH from …` (wrong key name, secret or algorithm, or `nameserver` is not authoritative);
+`REFUSED from …: the server refuses this key to change this name` (fix `update-policy` or `allow-update`);
+`the answer's TSIG time differs too much from this host's clock; check NTP`; `rfc2136: zone lookup: … has no
+SOA record …` (point `nameserver` at the primary or set `zone`); `propagation: time limit exceeded: last
+error: NS … did not return the expected TXT record` (try `propagation: resolver` or `wait`, check port 53);
+`cloudflare: … [status code 403] …` (the token's zone or permissions); the server's `… is not in this agent's
+allowed names`, `no domain covers …` and `_acme-challenge.… has no TXT record` (the server's resolver does not
+see the zone). A failed validation counts against the failure limit of the ACME server
+([§10.8](#108-sealed-server-rate-limits-audit)). The complete list is in
+[Troubleshooting](https://der-felix.github.io/MyOwnPKI/troubleshooting/#dns-01-in-the-agent).
+
+**Not supported.** GSS-TSIG (Kerberos, Active Directory DNS: run the ACME zone on BIND, Knot or PowerDNS, or
+delegate `_acme-challenge` by CNAME), other DNS providers (use an ACME client with its DNS plugin), the legacy
+Cloudflare global API key, DNS updates over HTTPS or TLS, TSIG with MD5 or SHA-1, more than one provider per
+deployment, dns-01 for enrollment, a sweep of stale records, and dns-01 in the *Add host* assistant (it ends in
+a pasted command and cannot place a secret file; run `deployment add` by hand).
+
+**What is tested.** CI runs the agent's RFC 2136 code against an in-process DNS server and, in the job *ACME
+conformance*, against a real BIND with a TSIG key (`propagation: resolver`); the Cloudflare code against a
+stub; and the whole path, wildcard included, against the real ACME server of the repository. **Not tested
+live:** the real Cloudflare API, a BIND `update-policy` on the maintainer's server, `propagation:
+authoritative` against name servers on port 53, and the Salt formula's dns-01 deployments. Try it on one test
+host before you rely on it.
+
+An end-to-end check: add the deployment with `--dry-run`, then without it, restart the agent, press *Renew
+now*; the deployment turns *deployed*; `openssl s_client -connect minion-01.homelab.lan:443 -servername
+x.homelab.lan` shows both names; `dig +short TXT _acme-challenge.homelab.lan @192.0.2.53` prints nothing.
+Put a wrong secret in the file and the renewal fails with a message that names the provider and holds no part
+of the secret; correct the file and the next attempt works without a restart.
 
 ## 13. Monitoring and notifications
 

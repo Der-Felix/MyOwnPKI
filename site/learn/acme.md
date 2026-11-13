@@ -69,13 +69,15 @@ MyOwnPKI's server only **reads** the record, through the resolver in `acme.resol
 internal DNS if you use split DNS. The **client** sets the record, for example with certbot's
 `dns-rfc2136` or `dns-cloudflare` plug-in.
 
-> **Note:** dns-01 **in the MyOwnPKI agent is not built yet.** The agent (v0.3.6) proves names with
-> http-01 only, standalone or webroot. dns-01 through the lego providers for RFC 2136 and Cloudflare
-> is planned as v0.3.7, which needs a new dependency and the maintainer's approval. Until then use an ACME
-> client with a DNS plug-in on hosts that need a wildcard or have no port 80.
+> **Note:** Since v0.3.7 the **MyOwnPKI agent does dns-01 too**. A deployment with `challenge: dns-01` writes
+> the TXT record itself, through RFC 2136 (BIND, Knot, PowerDNS with a TSIG key) or the Cloudflare API, waits
+> until it is visible and removes it afterwards. That is how an agent gets a wildcard certificate or a
+> certificate for a host without port 80. The setup, the credentials file and the errors are on
+> [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). Earlier agents (up to v0.3.6) prove names
+> with http-01 only; for other DNS providers, use an ACME client with a DNS plug-in.
 {: .note}
 
-The server does not support tls-alpn-01 either. It is planned for after v1.0.
+The server does not support tls-alpn-01. It is planned for after v1.0.
 
 ## Renewal
 

@@ -149,6 +149,11 @@ self_test() {
     grep -qE "^[[:space:]#]*$key:" "$formula/pillar.example" || fail "pillar.example does not mention $key"
     [ "$key" = package ] || grep -qF "\`$key\`" "$formula/README.md" || fail "README.md does not mention \`$key\`"
   done < <(sed -nE 's/^  ([a-z_0-9]+):.*/\1/p' "$formula/defaults.yaml")
+  # Every deployment option of map.jinja is in the README (the flags of "deployment add").
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    grep -qF "\`$key\`" "$formula/README.md" || fail "README.md does not mention the deployment option \`$key\`"
+  done < <(sed -nE "s/^\\{% set opts_(string|list|bool) = \\[(.*)\\] %\\}\$/\\2/p" "$formula/map.jinja" | tr -d "' " | tr ',' '\n')
   for key in package.sha256 package.source package.format; do
     grep -qF "\`$key\`" "$formula/README.md" || fail "README.md does not mention \`$key\`"
   done

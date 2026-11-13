@@ -32,10 +32,12 @@ const (
 	maxConfigSize     = 1 << 20
 )
 
-// Challenge modes for http-01 (owner 2026-10-24).
+// Challenge modes: http-01 standalone or through a webroot (owner
+// 2026-10-24), and dns-01 through a DNS provider (docs/PHASE3.md §13).
 const (
 	ChallengeStandalone = "standalone"
 	ChallengeWebroot    = "webroot"
+	ChallengeDNS01      = "dns-01"
 )
 
 // Profiles (docs/PHASE3.md step 5).
@@ -65,11 +67,15 @@ type Config struct {
 	// LogLevel: debug, info, warn, error.
 	LogLevel string `yaml:"log_level"`
 
-	Enrollment  Enrollment          `yaml:"enrollment"`
-	Hooks       map[string][]string `yaml:"hooks"`
-	Paths       []string            `yaml:"paths"`
-	Sandbox     Sandbox             `yaml:"sandbox"`
-	Deployments []Deployment        `yaml:"deployments"`
+	Enrollment Enrollment `yaml:"enrollment"`
+	// DNSProviders are the dns-01 settings a deployment refers to by name
+	// (docs/PHASE3.md §13.2). They never hold a secret, only the path of the
+	// credentials file.
+	DNSProviders map[string]DNSProvider `yaml:"dns_providers"`
+	Hooks        map[string][]string    `yaml:"hooks"`
+	Paths        []string               `yaml:"paths"`
+	Sandbox      Sandbox                `yaml:"sandbox"`
+	Deployments  []Deployment           `yaml:"deployments"`
 }
 
 // Sandbox is the part of the systemd sandbox that agent.yaml cannot derive
@@ -93,19 +99,25 @@ type Enrollment struct {
 
 // Deployment is one certificate the agent keeps in place (block C).
 type Deployment struct {
-	Name       string   `yaml:"name"`
-	Profile    string   `yaml:"profile"`
-	Names      []string `yaml:"names"`
-	Challenge  string   `yaml:"challenge"`
-	Webroot    string   `yaml:"webroot"`
-	Dir        string   `yaml:"dir"`
-	Files      Files    `yaml:"files"`
-	Owner      string   `yaml:"owner"`
-	Group      string   `yaml:"group"`
-	KeyMode    string   `yaml:"key_mode"`
-	TestHook   string   `yaml:"test_hook"`
-	ReloadHook string   `yaml:"reload_hook"`
-	Check      string   `yaml:"check"`
+	Name      string   `yaml:"name"`
+	Profile   string   `yaml:"profile"`
+	Names     []string `yaml:"names"`
+	Challenge string   `yaml:"challenge"`
+	Webroot   string   `yaml:"webroot"`
+	// DNSProvider names an entry of dns_providers; required for dns-01.
+	DNSProvider string `yaml:"dns_provider"`
+	Dir         string `yaml:"dir"`
+	Files       Files  `yaml:"files"`
+	Owner       string `yaml:"owner"`
+	Group       string `yaml:"group"`
+	KeyMode     string `yaml:"key_mode"`
+	TestHook    string `yaml:"test_hook"`
+	ReloadHook  string `yaml:"reload_hook"`
+	Check       string `yaml:"check"`
+	// CheckName is the TLS server name (SNI) of the local check; "" = the
+	// first name without "*". A wildcard is not a host name, so a deployment
+	// of wildcard names only needs it when it has a check.
+	CheckName string `yaml:"check_name"`
 }
 
 // Files are the targets of the file profile.
@@ -266,7 +278,16 @@ func (c *Config) Validate() error {
 			add("%s: names: 1 to 100 DNS names", where)
 		}
 		for _, n := range d.Names {
-			if err := checkHost(n); err != nil {
+			if rest, wild := strings.CutPrefix(n, "*."); wild {
+				// RFC 8555 §7.1.3: a wildcard is proven by dns-01 only. The
+				// rest must be a name of two labels or more (like the
+				// patterns of the server's agents.CheckPattern).
+				if d.Challenge != ChallengeDNS01 {
+					add("%s: names: %q: a wildcard needs challenge: dns-01 (RFC 8555 §7.1.3)", where, n)
+				} else if err := checkHost(rest); err != nil {
+					add("%s: names: %q: after \"*.\": %v", where, n, err)
+				}
+			} else if err := checkHost(n); err != nil {
 				add("%s: names: %q: %v", where, n, err)
 			}
 		}
@@ -274,8 +295,22 @@ func (c *Config) Validate() error {
 		case ChallengeStandalone:
 		case ChallengeWebroot:
 			under(where+": webroot", d.Webroot)
+		case ChallengeDNS01:
+			if d.Webroot != "" {
+				add("%s: webroot: not with challenge: dns-01 (it binds no port and writes no file)", where)
+			}
 		default:
-			add("%s: challenge: standalone or webroot", where)
+			add("%s: challenge: standalone, webroot or dns-01", where)
+		}
+		switch {
+		case d.Challenge == ChallengeDNS01 && d.DNSProvider == "":
+			add("%s: dns_provider: challenge: dns-01 needs the name of an entry of dns_providers", where)
+		case d.Challenge == ChallengeDNS01:
+			if _, ok := c.DNSProviders[d.DNSProvider]; !ok {
+				add("%s: dns_provider: %q is not under dns_providers", where, d.DNSProvider)
+			}
+		case d.DNSProvider != "":
+			add("%s: dns_provider: only with challenge: dns-01", where)
 		}
 		switch d.Profile {
 		case ProfileNginx:
@@ -304,6 +339,17 @@ func (c *Config) Validate() error {
 				add("%s: check: host:port of the service, e.g. 127.0.0.1:443", where)
 			}
 		}
+		switch {
+		case d.CheckName != "" && d.Check == "":
+			add("%s: check_name: only together with check", where)
+		case d.CheckName != "":
+			// A wildcard is no host name: checkHost refuses "*" as a label.
+			if err := checkHost(d.CheckName); err != nil {
+				add("%s: check_name: %q: %v", where, d.CheckName, err)
+			}
+		case d.Check != "" && serverName(d) == "":
+			add("%s: check_name: every name is a wildcard, so the TLS check needs a concrete name, e.g. www.homelab.lan", where)
+		}
 		f := deploymentPaths(d)
 		for _, target := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
 			if target == "" {
@@ -327,6 +373,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	c.validateDNSProviders(add)
 	if len(errs) > 0 {
 		slices.Sort(errs)
 		return fmt.Errorf("%w:\n  %s", ErrInvalid, strings.Join(errs, "\n  "))
@@ -382,6 +429,9 @@ func (c *Config) Warnings() []string {
 	var out []string
 	if c.Sandbox.LowPorts != nil && !*c.Sandbox.LowPorts && lowPortsWanted(&Config{Enrollment: c.Enrollment, Deployments: c.Deployments}, false) == lowPortsYes {
 		out = append(out, "sandbox.low_ports is false, but a standalone challenge binds port 80 – it fails without CAP_NET_BIND_SERVICE")
+	}
+	for _, name := range c.unusedDNSProviders() {
+		out = append(out, fmt.Sprintf("dns_providers.%s: no deployment uses it (challenge: dns-01, dns_provider: %s)", name, name))
 	}
 	for _, e := range []struct {
 		field string

@@ -163,8 +163,8 @@ The complete table is
 
 ## Next steps
 
-- Wildcard certificates need dns-01 and a DNS plug-in of the proxy; the server supports it, the MyOwnPKI
-  **agent** does not yet.
+- Wildcard certificates need dns-01 and a DNS plug-in of the proxy; the server supports it. The MyOwnPKI
+  **agent** can do dns-01 since v0.3.7 ([dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }})).
 - The proxy that fronts MyOwnPKI itself needs a certificate before any client can talk ACME, so the first one
   comes by hand: [Reverse proxies]({{ '/guides/reverse-proxies/' | relative_url }}).
 - Other clients: [certbot]({{ '/guides/certbot/' | relative_url }}), [lego]({{ '/guides/lego/' | relative_url }}).

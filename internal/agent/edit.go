@@ -31,7 +31,7 @@ var errYAMLFeatures = errors.New("agent.yaml uses anchors, aliases or several do
 // topLevelOrder is the order in which new top-level keys are inserted: before
 // the first existing key that comes later in this list, else at the end.
 var topLevelOrder = []string{"server", "ca_bundle", "hostname", "acme_directory", "proxy", "state_dir", "log_level",
-	"enrollment", "hooks", "paths", "sandbox", "deployments"}
+	"enrollment", "dns_providers", "hooks", "paths", "sandbox", "deployments"}
 
 type yamlEditor struct {
 	orig    []byte
@@ -316,6 +316,7 @@ func (e *yamlEditor) deploymentNode(d Deployment) *yaml.Node {
 	m.Content = append(m.Content, plainKey("names"), e.flowList(false, d.Names...))
 	addStr(m, "challenge", d.Challenge)
 	addStr(m, "webroot", d.Webroot)
+	addStr(m, "dns_provider", d.DNSProvider)
 	addStr(m, "dir", d.Dir)
 	if d.Files != (Files{}) {
 		files := newCollection(yaml.MappingNode)
@@ -331,7 +332,32 @@ func (e *yamlEditor) deploymentNode(d Deployment) *yaml.Node {
 	addStr(m, "test_hook", d.TestHook)
 	addStr(m, "reload_hook", d.ReloadHook)
 	addStr(m, "check", d.Check)
+	addStr(m, "check_name", d.CheckName)
 	return m
+}
+
+// addDNSProvider adds the entry dns_providers.<name>; the caller has already
+// checked that the name is free. Only the keys that were given are written, so
+// ttl and propagation stay at their defaults until somebody sets them.
+func (e *yamlEditor) addDNSProvider(name string, p DNSProvider) error {
+	m, err := e.ensure(e.root, "dns_providers", yaml.MappingNode)
+	if err != nil {
+		return err
+	}
+	block(m)
+	if mapGet(m, name) != nil {
+		return fmt.Errorf("agent.yaml: dns_providers.%s exists – edit it by hand", name)
+	}
+	entry := newCollection(yaml.MappingNode)
+	for _, kv := range []struct{ key, value string }{{"type", p.Type}, {"credentials_file", p.CredentialsFile},
+		{"nameserver", p.Nameserver}, {"zone", p.Zone}, {"resolver", p.Resolver}} {
+		if kv.value != "" {
+			entry.Content = append(entry.Content, plainKey(kv.key), e.str(kv.value))
+		}
+	}
+	m.Content = append(m.Content, plainKey(name), entry)
+	e.changed = true
+	return nil
 }
 
 func (e *yamlEditor) addDeployment(d Deployment) error {

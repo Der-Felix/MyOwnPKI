@@ -1,0 +1,48 @@
+# MyOwnPKI agent on proxy1 - edited by hand over the years.
+
+server: "https://pki.homelab.lan:8444" # the agent listener
+ca_bundle: "@ROOT@/etc/root.pem"
+hostname: "proxy1.homelab.lan"
+acme_directory: "https://pki.homelab.lan/acme/directory"
+state_dir: "@ROOT@/state"
+log_level: info
+
+enrollment:
+  challenge: webroot
+  webroot: "@ROOT@/www"
+dns_providers:
+  homelab-dns:
+    type: "rfc2136"
+    credentials_file: "@ROOT@/etc/dns/homelab.yaml"
+    nameserver: "192.0.2.53"
+
+# Hooks: no shell, absolute path first.
+hooks:
+  # nginx -t needs /var/log/nginx in the sandbox
+  nginx-test: ["@ROOT@/bin/nginx", "-t"]
+  nginx-reload: ["@ROOT@/bin/systemctl", "reload", "nginx"]
+
+# Directories the agent may write.
+paths: ["@ROOT@/www", "@ROOT@/ssl"]
+
+deployments:
+  # the public site
+  - name: site
+    profile: nginx
+    names: [site.homelab.lan]
+    challenge: webroot
+    webroot: "@ROOT@/www"
+    dir: "@ROOT@/ssl/site" # fullchain.pem and privkey.pem
+    test_hook: nginx-test
+    reload_hook: nginx-reload
+    check: 127.0.0.1:443
+  - name: "wild"
+    profile: "nginx"
+    names: ["*.homelab.lan", "homelab.lan"]
+    challenge: "dns-01"
+    dns_provider: "homelab-dns"
+    dir: "@ROOT@/ssl/wild"
+    test_hook: "nginx-test"
+    reload_hook: "nginx-reload"
+    check: "127.0.0.1:443"
+    check_name: "www.homelab.lan"

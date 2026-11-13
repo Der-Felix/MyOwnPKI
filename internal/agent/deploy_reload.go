@@ -60,6 +60,11 @@ func (a *Agent) checkServed(ctx context.Context, d Deployment, want string) (str
 	if d.Check == "" {
 		return "", nil
 	}
+	// The SNI is a concrete name: a wildcard is no host name (check_name).
+	sni := serverName(d)
+	if sni == "" {
+		return "", fmt.Errorf("TLS check for deployment %q: no concrete name for the server name; set check_name", d.Name)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	var got string
@@ -74,7 +79,7 @@ func (a *Agent) checkServed(ctx context.Context, d Deployment, want string) (str
 		// the saved old certificate). This exact pin replaces CA validation
 		// for a local served-certificate check, including during rollback.
 		dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 2 * time.Second}, Config: &tls.Config{
-			MinVersion: tls.VersionTLS12, ServerName: d.Names[0],
+			MinVersion: tls.VersionTLS12, ServerName: sni,
 			InsecureSkipVerify: true, // #nosec G402 -- VerifyConnection requires the exact expected leaf
 			VerifyConnection: func(state tls.ConnectionState) error {
 				if len(state.PeerCertificates) == 0 {

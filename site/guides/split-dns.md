@@ -74,8 +74,9 @@ The key fact: the **validator**, the part of MyOwnPKI that checks a challenge, r
 5. **dns-01** (the server reads a TXT record): the record `_acme-challenge.<name>` must be in the zone
    that `acme.resolver` reads. With split DNS that is the **internal** zone: point the client's DNS plug-in
    (for example certbot-dns-rfc2136) at the internal DNS server. A zone at a provider works the same way
-   with the provider's plug-in, as long as the resolver can see that zone. The agent does not do
-   dns-01 yet; the ACME clients do.
+   with the provider's plug-in, as long as the resolver can see that zone. The agent does dns-01 too since
+   v0.3.7: with RFC 2136 it writes the record into the **internal** zone itself ([dns-01 and wildcard
+   certificates]({{ '/dns-01/' | relative_url }})), and `acme.resolver` must read that zone.
 6. **Choose the address policy of the domain.** On the domain page, *Addresses http-01 may reach* is either
    *internal networks too (homelab)*, the default, or *public addresses only*. The next section says
    what both refuse.
@@ -128,5 +129,6 @@ examples are in [Troubleshooting]({{ '/troubleshooting/' | relative_url }}#acme-
 - Background and the other ACME rules (sealed server, rate limits, audit):
   [§10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network) and
   [§10.8]({{ '/reference/operations/' | relative_url }}#108-sealed-server-rate-limits-audit).
-- Wildcard certificates (dns-01) with ACME clients: see Learn for the concept; the agent does not support
-  them yet.
+- Wildcard certificates (dns-01): see Learn for the concept ([ACME explained]({{ '/learn/acme/' | relative_url }}#the-challenge-dns-01)).
+  With ACME clients use their DNS plug-ins; the agent does it since v0.3.7:
+  [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).

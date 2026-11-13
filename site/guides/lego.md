@@ -121,7 +121,8 @@ The complete table is
 ## Next steps
 
 - DNS validation (dns-01, for wildcard names) exists on the server; lego has many DNS providers of its
-  own. The **agent** does not do dns-01 yet. See
+  own. The **agent** does dns-01 too since v0.3.7 for RFC 2136 and Cloudflare
+  ([dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }})). See
   [§10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network).
 - Use one account (one `--path`) per host: hosts that share an account and the same names retire each
   other's certificates.

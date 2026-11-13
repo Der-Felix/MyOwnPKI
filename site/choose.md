@@ -54,7 +54,9 @@ The agent asks more of the server than the other two levels: an agent CA, the ag
 8444 open to the hosts and an ACME domain that covers the host names. The list is under
 [What the server needs first]({{ '/hosts/' | relative_url }}#what-the-server-needs-first). The
 [recipes]({{ '/recipes/' | relative_url }}) set up nginx, Postfix, Dovecot and Proxmox VE with the
-agent.
+agent. For a **wildcard** certificate, a service without port 80 or a host behind NAT, a deployment can prove its names
+through DNS instead (dns-01, since v0.3.7): [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). It needs a DNS
+credential on the host, so use it only where http-01 cannot work.
 
 ## 3. Rolling out the agent
 

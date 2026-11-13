@@ -23,7 +23,7 @@ agent; the rest of this list follows up to v1.0:
 - **ACME client** for public certificates from Let's Encrypt / ZeroSSL (http-01, dns-01)
 - **Optional agent** that deploys certificates to Linux, Windows and FreeBSD hosts, reloads
   services safely and monitors what is actually being served *(v0.3.0: Linux, nginx and files,
-  with rollback)*
+  with rollback; v0.3.7: dns-01 for wildcard certificates, through RFC 2136 or Cloudflare)*
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 
@@ -78,7 +78,7 @@ distributions; amd64 or arm64). Download the script with the checksum file, chec
 never pipe it into a shell:
 
 ```sh
-v=0.3.6
+v=0.3.7
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -99,7 +99,7 @@ single `myownpki` binary, the operations guide, an example configuration, the sy
 `install.sh`.
 
 ```sh
-v=0.3.6
+v=0.3.7
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -140,8 +140,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.3.6 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.6" \
+cosign verify ghcr.io/der-felix/myownpki:0.3.7 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.7" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

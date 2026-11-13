@@ -7,6 +7,90 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-13
+
+dns-01 in the agent. A deployment can prove its names through a DNS TXT record, so the agent can get
+**wildcard certificates**, certificates for a service **without port 80** and for a host **behind NAT**.
+The agent writes the record through RFC 2136 (BIND, Knot, PowerDNS with a TSIG key) or the Cloudflare API,
+waits until it is visible, lets the ACME server read it and removes it again. The server is unchanged: it
+already only reads the record. The live test by the maintainer is pending.
+
+### Added
+
+- **`challenge: dns-01` for a deployment**, with a new top-level `dns_providers` map in `agent.yaml`: `type`
+  (`rfc2136` or `cloudflare`), `credentials_file`, `nameserver` and `zone` (RFC 2136), `ttl`, `resolver`,
+  `propagation` (`authoritative`, the default, `resolver` or `wait`), `propagation_wait` and
+  `propagation_timeout`. A deployment names its provider with `dns_provider`. A wildcard name (`*.homelab.lan`)
+  is allowed only with dns-01, a dns-01 deployment takes no `webroot`, and `config check` reports every
+  problem at once. A new deployment key `check_name` sets the server name of the local TLS check, which a
+  deployment of wildcard names needs.
+- **A credentials file of its own** for the secret (a TSIG key, or a Cloudflare API token and optionally a
+  second token that may only read zones): YAML with strict keys, never in `agent.yaml`, never on a command
+  line or in the environment. The agent opens it without following a symbolic link and checks the open file:
+  regular, mode 0600 or 0400, owned by root or the agent's user, at most 4 KiB, in a directory that only
+  root or that user can write; the path may not be under `/home`, `/root` or `/run/user`, `state_dir`,
+  `paths` or a deployment target. It is read when an issuance starts, so a rotated secret works at the next
+  renewal without a restart. `myownpki-agent config check` lists the state of every credentials file
+  (`ok`, `missing`, `wrong mode`, `wrong owner`, `unsafe directory`, `symbolic link`, `invalid`, ...) and
+  exits 1 when a deployment uses one that cannot be used; it never prints a content.
+- **RFC 2136 provider** (the agent's own, on `miekg/dns`): one TSIG-signed UPDATE over TCP adds the record and
+  one removes exactly this run's value; `hmac-sha256` (default), `hmac-sha384` and `hmac-sha512`
+  (`hmac-md5` and `hmac-sha1` are refused); a success is accepted only with an answer whose own TSIG
+  verifies; the zone comes from `zone` or from an SOA lookup at the nameserver; a CNAME delegation of
+  `_acme-challenge` is followed.
+- **Cloudflare provider** (lego's, with the agent's own HTTP client): the system trust store, TLS 1.2, a
+  30-second timeout and the `proxy:` of `agent.yaml`, never `HTTPS_PROXY`. Error answers are cut to their
+  codes and short messages; a failed delete, which lego only logs, is reported as a cleanup failure.
+- **Propagation check and cleanup:** `authoritative` waits until every authoritative name server of the zone
+  has the record, `resolver` until the configured resolver has it, `wait` only sleeps. The agent uses its own
+  resolver (`resolver`, else `/etc/resolv.conf`) and never falls back to public resolvers. The record is
+  removed on success, failure, cancellation and timeout. Each removal gets 30 seconds; while the agent is
+  stopping, all removals of one issuance share 12 seconds, so that systemd does not kill it in the middle of
+  the second record. A failed removal is logged and shown in the deployment's *Last error*
+  (`dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; …`, without provider text or
+  secrets); it does not fail the issuance, the deployment stays `deployed`, and the next pass without a
+  cleanup problem clears the text. With Cloudflare the notice appears when the create request may have
+  worked (a network error, an answer that is not the API's JSON, a 5xx or a 2xx), not for a request the API
+  refused with a 4xx. A challenge for a name that is not one of the deployment's names is refused.
+- **`deployment add` flags:** `--challenge dns-01`, `--dns-provider`, `--dns-type`, `--dns-credentials`,
+  `--dns-nameserver`, `--dns-zone`, `--dns-resolver` and `--check-name`. `--dns-type` defines a new provider
+  entry; the same flags again change nothing and a different definition of an existing name is refused ("edit
+  agent.yaml by hand"). A missing or wrongly protected credentials file is a warning, not an error, because
+  a configuration tool may run `deployment add` before the secret file exists. `--dry-run` shows the diff.
+- **Salt formula:** the seven options `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`,
+  `dns_zone`, `dns_resolver` and `check_name` of a deployment, with refusals for a dns-01 deployment without
+  `dns_provider` or with `webroot`, a `dns_*` option next to another challenge and a wildcard name without
+  dns-01. The credentials file is not managed by the formula: place it with `file.managed` (`mode: 0600`,
+  `show_changes: False`) in the host's own state.
+- **Documentation:** the page [dns-01 and wildcard certificates](https://der-felix.github.io/MyOwnPKI/dns-01/)
+  and the operations guide §12.11; the pages on adding hosts, the command line, recipes, the Salt formula,
+  best practices, troubleshooting, upgrading, ACME explained, split DNS, the FAQ and the glossary no longer say
+  that the agent has no dns-01.
+- **Tests:** an in-process DNS server with a zone store (`internal/testutil/dnsserver`, imported by tests only)
+  and a Cloudflare stub; the real agent against the real ACME server for a wildcard and its base name through
+  RFC 2136 and through the stub, with the refusals (name missing in the agent's names, domain without
+  wildcards, a record that never appears, a wrong key) and an empty zone after every case; a conformance
+  test of the agent against the BIND of `test/conformance` in the job `ACME conformance`.
+
+### Changed
+
+- **Dependencies:** no new module and no version change. `github.com/miekg/dns` v1.1.72 is now a direct
+  requirement in `go.mod` (it was indirect, through lego) and the lego packages `challenge`,
+  `challenge/dns01`, `log` and `providers/dns/cloudflare` are used in addition to those of 0.3.0. lego's own
+  RFC 2136 provider is **not** used: it would bring a Kerberos stack for GSS-TSIG (12 modules in the Linux
+  build) that this release does not offer. The agent binary grows by about 0.6 MB. **The server binary
+  carries neither lego nor `miekg/dns`**, checked by a test of `go list -deps` and a depguard rule.
+  `THIRD_PARTY.md` has the details.
+- `agent run` removes every environment variable that starts with `LEGO_`, `CLOUDFLARE_`, `CF_` or
+  `RFC2136_`, and `SSL_CERT_FILE` and `SSL_CERT_DIR`, and logs their names, so nothing outside `agent.yaml`
+  and the credentials file configures a DNS provider, turns on lego's debug output or chooses the system
+  roots that the Cloudflare calls trust. The agent's own connections use the `ca_bundle` of `agent.yaml`. The
+  hooks inherit the cleaned environment: they see none of these variables.
+- The optional ARI lookup of a renewal pass is skipped while an issuance runs (a dns-01 issuance can wait up
+  to 15 minutes) and asked again at the next pass, so it no longer stalls the pass.
+- The local TLS check of a deployment uses `check_name`, else the first name that is not a wildcard, as its
+  server name.
+
 ### Fixed
 
 - **Restore instructions: run `restore` as root, then `chown`.** `myownpki restore` builds its work copy
@@ -16,6 +100,51 @@ change the API, the configuration and the database schema; the release notes say
   §6 and the CLI page now say to stop the service, move the old data directory away, create an empty one,
   run `restore` as root, `chown -R myownpki:myownpki /var/lib/myownpki` and start the service. The
   program is unchanged.
+
+### Security notes
+
+- A TSIG key or an API token decides who may change a zone, so it is handled like a private key: a separate
+  root-only file, checked on the open file, held in a type that prints as `[redacted]` in every log line,
+  error, report and `%v`, removed from error texts and wiped when the issuance ends. No secret reaches the
+  report to the server (the *Last error* of a deployment), `agent status`, lego's log or a panic text.
+- Give the credential the least it needs: a TSIG key that may only add and remove TXT records at
+  `_acme-challenge.<name>` (BIND `update-policy`), a Cloudflare token for **one** zone with *Zone / Read* and
+  *DNS / Edit*. The pages say so; check the permission names against Cloudflare's documentation.
+- The agent never asks the server about policy: the ACME server decides which names the agent may order. A
+  wildcard is covered only by the identical `*.` pattern in the agent's names, and an enrollment pass still
+  grants the host name only.
+- A host that holds the key of a wildcard certificate can present itself as any name below it: give a `*.`
+  pattern only to the agents that need it.
+- An independent security review found no blocker; its six findings were fixed before the release. The
+  fixes cover the redaction of the build error of a DNS provider (it ran after the secrets were wiped), a
+  race between the wipe of a TSIG secret and a cleanup that was still running, the report of a failed
+  cleanup in the deployment's status, a Cloudflare record that may remain although the agent holds no ID,
+  one shared time budget for the cleanups while the agent stops, `SSL_CERT_FILE` and `SSL_CERT_DIR` in the
+  agent's environment, and an ARI lookup that queued behind a running issuance; a test now pins that a CNAME
+  target outside a configured `zone` is refused.
+
+### Upgrade notes
+
+- No migration, no change to the server's behavior and no configuration change; going back needs no restore.
+  Update the server first, as always.
+- **Update the agent before you add a dns-01 deployment.** An agent of 0.3.6 or older refuses an
+  `agent.yaml` with `dns_providers`, `dns_provider` or `check_name` and does not start (unknown keys are
+  errors on purpose). An existing `agent.yaml` works with 0.3.7 unchanged. To go back, remove the dns-01
+  deployments and the `dns_providers` block first.
+
+### Known limitations
+
+- **The live test by the maintainer is pending.** Not tested against the real thing: the Cloudflare code
+  against the real API (CI uses a stub), a BIND `update-policy` on the maintainer's server (the CI test uses
+  `allow-update`), the default `propagation: authoritative` against name servers on port 53 (CI uses
+  `propagation: resolver`), the Salt formula's dns-01 deployments on live minions, and macOS.
+- Not supported: GSS-TSIG (Kerberos, Active Directory DNS), other DNS providers, the legacy Cloudflare global
+  API key, DNS updates over HTTPS or TLS, more than one provider per deployment, **dns-01 for enrollment**
+  (a host without port 80 enrolls with a join token and one approval) and dns-01 in the *Add host* assistant.
+- A killed agent (`SIGKILL`, a power cut) can leave a TXT record behind, and the Cloudflare record IDs are
+  kept in memory only. The record does no harm to validation; remove it by hand. There is no sweep.
+- A changed option of an existing dns-01 deployment in a Salt pillar is not applied (remove it through
+  `absent` first), as for every deployment.
 
 ## [0.3.6] - 2026-11-12
 
@@ -791,7 +920,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.3...v0.3.4
