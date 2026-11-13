@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 	"github.com/Der-Felix/MyOwnPKI/internal/trustkit"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/authorities"
@@ -24,6 +26,7 @@ func TestPortalRow(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, base, fingerprint string
+		unlisted                string
 		enabled                 bool
 		row                     string // exact row, or "" = a hint without an address
 		message                 bool
@@ -33,6 +36,8 @@ func TestPortalRow(t *testing.T) {
 		{name: "trailing slash", base: "http://pki.homelab.lan/", fingerprint: portalFingerprint, enabled: true, row: "http://pki.homelab.lan/", message: true},
 		{name: "port and path", base: "https://pki.homelab.lan:8443/pki", fingerprint: portalFingerprint, enabled: true, row: "https://pki.homelab.lan:8443/pki/", message: true},
 		{name: "not signed yet", base: "http://pki.homelab.lan", enabled: true, row: "http://pki.homelab.lan/"},
+		{name: "not listed", base: "http://pki.homelab.lan", fingerprint: portalFingerprint, enabled: true, unlisted: "expired", hint: "This root is not offered on the portal (status: expired)."},
+		{name: "not listed and off", base: "http://pki.homelab.lan", fingerprint: portalFingerprint, unlisted: "expired", hint: portalOff},
 		{name: "switched off", base: "http://pki.homelab.lan", fingerprint: portalFingerprint, hint: portalOff},
 		{name: "empty", base: "", fingerprint: portalFingerprint, enabled: true, hint: "No address"},
 		{name: "javascript", base: "javascript:alert(1)", fingerprint: portalFingerprint, enabled: true, hint: "No address"},
@@ -47,7 +52,7 @@ func TestPortalRow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			row, message := portal("root", tc.base, tc.fingerprint, tc.enabled)
+			row, message := portal("root", tc.base, tc.fingerprint, tc.enabled, tc.unlisted)
 			if tc.row != "" && row != tc.row {
 				t.Errorf("row = %q, want %q", row, tc.row)
 			}
@@ -67,12 +72,63 @@ func TestPortalRow(t *testing.T) {
 	}
 }
 
+// TestPortalUnlisted: the portal lists active CAs only, with a signed
+// certificate that is not revoked and valid now; the admin page mirrors that
+// and shows no address and no message for a root the portal does not list.
+func TestPortalUnlisted(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	valid := ca.GenerationInfo{Generation: 1, Current: true, NotBefore: "2026-01-01T00:00:00Z", NotAfter: "2036-01-01T00:00:00Z", Fingerprint: portalFingerprint}
+	for _, tc := range []struct {
+		name   string
+		status string
+		mutate func(*ca.GenerationInfo)
+		none   bool // the root has no current generation
+		want   string
+	}{
+		{name: "listed", status: ca.StatusActive},
+		{name: "pending CA", status: ca.StatusPendingSignature, want: "waits for its signature"},
+		{name: "retired", status: ca.StatusRetired, want: "retired"},
+		{name: "no generation", status: ca.StatusActive, none: true, want: "no certificate"},
+		{name: "unsigned generation", status: ca.StatusActive, mutate: func(g *ca.GenerationInfo) { g.Pending = true }, want: "waits for its signature"},
+		{name: "revoked", status: ca.StatusActive, mutate: func(g *ca.GenerationInfo) { g.Revoked = "keyCompromise on 2026-05-01" }, want: "revoked"},
+		{name: "expired", status: ca.StatusActive, mutate: func(g *ca.GenerationInfo) { g.NotAfter = "2026-05-01T00:00:00Z" }, want: "expired"},
+		{name: "not valid yet", status: ca.StatusActive, mutate: func(g *ca.GenerationInfo) { g.NotBefore = "2026-07-01T00:00:00Z" }, want: "not valid yet"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			g := valid
+			if tc.mutate != nil {
+				tc.mutate(&g)
+			}
+			info := ca.CAInfo{Kind: ca.KindRoot, Status: tc.status}
+			got := portalUnlisted(info, g, !tc.none, now)
+			if got != tc.want {
+				t.Fatalf("portalUnlisted = %q, want %q", got, tc.want)
+			}
+			row, message := portal("root", "http://pki.homelab.lan", portalFingerprint, true, got)
+			if tc.want == "" {
+				if row != "http://pki.homelab.lan/" || message == "" {
+					t.Errorf("a listed root: row %q, message %d bytes", row, len(message))
+				}
+				return
+			}
+			if want := "This root is not offered on the portal (status: " + tc.want + ")."; row != want {
+				t.Errorf("row = %q, want %q", row, want)
+			}
+			if message != "" || strings.Contains(row, "pki.homelab.lan") {
+				t.Errorf("an unlisted root offers an address or a message: %q %q", row, message)
+			}
+		})
+	}
+}
+
 // TestUserMessage pins the text: the address, the root's name, the SHA-256 in
 // the colon form of the certificate dialogs, the sentence to compare it and the
 // second step on an iPhone. It never claims a transport protection.
 func TestUserMessage(t *testing.T) {
 	t.Parallel()
-	_, message := portal("lab-root", "http://pki.homelab.lan", portalFingerprint, true)
+	_, message := portal("lab-root", "http://pki.homelab.lan", portalFingerprint, true, "")
 	for _, want := range []string{
 		`our root certificate "lab-root"`,
 		"Open this address in your browser: http://pki.homelab.lan/\n",

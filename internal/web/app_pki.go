@@ -17,6 +17,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/trustkit"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/authorities"
@@ -604,7 +605,14 @@ func (a *app) authorityDetail(c *rc) {
 		d.Properties = slices.Insert(d.Properties, 6, fingerprints...)
 	}
 	if info.Kind == ca.KindRoot {
-		row, message := a.portalFor(ctx, info.Name, info.BaseURL, g.Fingerprint)
+		// The fingerprint in the message is computed from the certificate itself;
+		// the stored column stays the fallback.
+		fingerprint := g.Fingerprint
+		if chain, chainErr := a.d.Engine.CAChain(ctx, c.who(), info.ID); chainErr == nil && len(chain) > 0 {
+			fingerprint = trustkit.SHA256Hex(chain[0])
+		}
+		_, hasGeneration := current(*info)
+		row, message := a.portalFor(ctx, info.Name, info.BaseURL, fingerprint, portalUnlisted(*info, g, hasGeneration, a.now()))
 		d.Properties = append(d.Properties, view.KV{Key: "Trust portal", Value: row})
 		d.UserMessage = message
 		d.IssuedEmpty = "A root CA issues no end-entity certificates – it signs intermediate CAs and CRLs."
