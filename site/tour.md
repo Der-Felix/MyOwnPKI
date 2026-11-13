@@ -145,9 +145,9 @@ factor. **More:** [Domains, approvals and EAB keys]({{ '/guides/domains-and-appr
 ![ACME new names: a name that waits for a decision, a form to decide and a form to approve a name in advance]({{ '/assets/screens/tour-acme-names.png' | relative_url }})
 
 Under the approval level *new names*, the first certificate for a name waits here; once you approve it,
-every later order for that name passes. The client keeps asking while it waits and continues on its next
-try. You can also approve a name in advance, for a host that has not asked yet, as `dns:nas.homelab.lan` or
-`ip:192.0.2.10`.
+every later order for that name passes. The first order is refused with *unauthorized … is a new name … waits
+for approval*; the client does not wait, so run it again after you approved the name. You can also approve a
+name in advance, for a host that has not asked yet, as `dns:nas.homelab.lan` or `ip:192.0.2.10`.
 
 **Role:** the same as for accounts: read with a tenant-wide viewer role, decide with **admin** and a fresh
 second factor. **More:**
