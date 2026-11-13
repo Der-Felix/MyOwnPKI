@@ -31,7 +31,7 @@ var errYAMLFeatures = errors.New("agent.yaml uses anchors, aliases or several do
 // topLevelOrder is the order in which new top-level keys are inserted: before
 // the first existing key that comes later in this list, else at the end.
 var topLevelOrder = []string{"server", "ca_bundle", "hostname", "acme_directory", "proxy", "state_dir", "log_level",
-	"enrollment", "hooks", "paths", "sandbox", "deployments"}
+	"enrollment", "dns_providers", "hooks", "paths", "sandbox", "deployments"}
 
 type yamlEditor struct {
 	orig    []byte

@@ -155,6 +155,15 @@ func (a *Agent) Obtain(ctx context.Context, d Deployment) (*Material, error) {
 }
 
 func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
+	// dns-01 binds no port and writes no token: the provider replaces the
+	// responder. Building it first fails before any network traffic.
+	var dns dnsProvider
+	if d.Challenge == ChallengeDNS01 {
+		var perr error
+		if dns, perr = a.dnsProviderFor(ctx, d); perr != nil {
+			return nil, fmt.Errorf("deployment %q: %w", d.Name, perr)
+		}
+	}
 	u, base, err := a.account()
 	if err != nil {
 		return nil, err
@@ -175,7 +184,7 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		return nil, err
 	}
 	defer closeClient()
-	return a.obtainWithClient(ctx, d, u, base, ac, roots)
+	return a.obtainWithClient(ctx, d, u, base, ac, roots, dns)
 }
 
 // legoClient is shared by issuance and ARI. Both ignore environment trust
@@ -215,7 +224,7 @@ func (a *Agent) legoClient(ctx context.Context, u *accountUser) (*lego.Client, *
 	return ac, roots, transport.CloseIdleConnections, nil
 }
 
-func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUser, base string, ac *lego.Client, roots *x509.CertPool) (*Material, error) {
+func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUser, base string, ac *lego.Client, roots *x509.CertPool, dns dnsProvider) (*Material, error) {
 	var err error
 	if u.reg == nil {
 		u.reg, err = ac.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
@@ -229,6 +238,16 @@ func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUs
 		if werr := a.durableState(base+".json", data); werr != nil {
 			return nil, werr
 		}
+	}
+	if d.Challenge == ChallengeDNS01 {
+		// No responder, so no port 80 and no token file. Step 40 connects dns
+		// to lego together with the agent's own resolvers (§13.2, decision 8):
+		// connecting it here without them would let lego fall back to public
+		// resolvers.
+		if dns == nil {
+			return nil, errors.New("dns-01: no DNS provider")
+		}
+		return nil, errDNSNotWired
 	}
 	r := newResponder(d.Challenge, d.Webroot, a.cfg.Paths, a.st, a.StandaloneAddr, a.log)
 	if perr := ac.Challenge.SetHTTP01Provider(httpProvider{r}); perr != nil {
