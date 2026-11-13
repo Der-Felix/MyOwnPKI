@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.10]
+## [0.3.10] - 2026-11-13
 
 Preview and versioned settings. The review step of the issue wizard and a new REST operation show what the policy would
 do with a request before anything is signed: the verdict, every reason, the checks, the names, the key, the validity, the
