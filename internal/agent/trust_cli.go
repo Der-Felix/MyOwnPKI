@@ -108,7 +108,7 @@ func installTrust(ctx context.Context, env trustEnv, opts TrustOptions) error {
 	if changed {
 		_, _ = fmt.Fprintf(out, "Installed the root certificate (SHA-256 %s) as %s.\nRan %s.\n", pinHex, t.File, joinArgv(fam.Install))
 	} else {
-		_, _ = fmt.Fprintf(out, "The root certificate is already installed as %s; nothing was changed.\n", t.File)
+		_, _ = fmt.Fprintf(out, "The root certificate is already installed as %s; the file is unchanged.\nRan %s.\n", t.File, joinArgv(fam.Install))
 	}
 	if opts.NoRecord {
 		return nil
@@ -153,12 +153,19 @@ func removeTrust(ctx context.Context, env trustEnv, opts TrustOptions) error {
 		if _, err = verifiedRoot(t.Current, pin); err != nil {
 			return fmt.Errorf("%s does not hold the root with SHA-256 %s (%w); not removing it", t.File, pinHex, err)
 		}
-		if err = env.removeTrustFile(ctx, fam, t); err != nil {
-			return err
-		}
+	}
+	// Without the file the hook still runs, so a bundle that is stale (the file
+	// was deleted by hand) is built again; the command ends with 0 then.
+	if err = env.removeTrustFile(ctx, fam, t); err != nil {
+		return err
+	}
+	switch {
+	case t.NoDir:
+		_, _ = fmt.Fprintf(out, "%s does not exist (the CA certificates package is not installed); nothing to remove.\n", t.Dir)
+	case t.Have:
 		_, _ = fmt.Fprintf(out, "Removed %s.\nRan %s.\n", t.File, joinArgv(fam.Remove))
-	} else {
-		_, _ = fmt.Fprintf(out, "%s does not exist; nothing to remove.\n", t.File)
+	default:
+		_, _ = fmt.Fprintf(out, "%s does not exist; nothing to remove.\nRan %s, so a stale bundle is built again.\n", t.File, joinArgv(fam.Remove))
 	}
 	wrote, err := editConfigFile(configPath, func(e *yamlEditor) error { e.removeSystemTrust(); return nil })
 	if err != nil {

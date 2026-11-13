@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -27,6 +28,8 @@ type fakeTrustRunner struct {
 	envs   [][]string
 	err    error
 	output string
+	// errFn, when set, answers per call (1 is the first) instead of err.
+	errFn func(call int) error
 	// onRun runs while the "hook" runs, to look at the file system then.
 	onRun func(argv []string)
 }
@@ -36,6 +39,9 @@ func (f *fakeTrustRunner) Run(_ context.Context, argv, env []string) (string, er
 	f.envs = append(f.envs, append([]string(nil), env...))
 	if f.onRun != nil {
 		f.onRun(argv)
+	}
+	if f.errFn != nil {
+		return f.output, f.errFn(len(f.calls))
 	}
 	return f.output, f.err
 }
@@ -224,14 +230,33 @@ func TestInstallIsIdempotent(t *testing.T) {
 	if err := f.install(); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.runner.calls) != 1 {
-		t.Fatalf("a second run called the hook again: %v", f.runner.calls)
+	// The file is not rewritten, but the hook runs again: that makes a file
+	// that was dropped in by hand effective. (The Salt formula asks "trust
+	// status --quiet" first, so its state stays idempotent.)
+	if len(f.runner.calls) != 2 || strings.Join(f.runner.calls[1], " ") != "/usr/sbin/update-ca-certificates" {
+		t.Fatalf("a second run did not run the hook once more: %v", f.runner.calls)
 	}
 	if got := f.read(f.config); got != config {
 		t.Errorf("a second run changed agent.yaml:\n%s", got)
 	}
-	if !strings.Contains(f.stdout.String(), "already installed") {
-		t.Errorf("output = %q", f.stdout.String())
+	if out := f.stdout.String(); !strings.Contains(out, "already installed") || !strings.Contains(out, "unchanged") || !strings.Contains(out, "Ran /usr/sbin/update-ca-certificates") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+// TestInstallWithTheSameBytesAndAFailingHook: the file already holds the root,
+// so there is nothing to put back and no second run; the error says so.
+func TestInstallWithTheSameBytesAndAFailingHook(t *testing.T) {
+	t.Parallel()
+	f := newTrustFixture(t, osReleaseDebian)
+	writeTestFile(t, f.target(), f.pem, 0o644)
+	f.runner.err = errors.New("exit status 1")
+	err := f.install()
+	if err == nil || !strings.Contains(err.Error(), "left as it is") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.runner.calls) != 1 || f.read(f.target()) != string(f.pem) {
+		t.Errorf("calls = %v", f.runner.calls)
 	}
 }
 
@@ -295,13 +320,54 @@ func TestFailedHookRestoresTheOldState(t *testing.T) {
 				t.Error("agent.yaml was changed although the hook failed")
 			}
 			msg := err.Error()
-			if len(msg) > 1400 || !strings.Contains(msg, "update-ca-certificates") || !strings.Contains(msg, "restored") || strings.ContainsAny(msg, "\x1b\x00") {
+			if len(msg) > 2000 || !strings.Contains(msg, "update-ca-certificates") || !strings.Contains(msg, "restored") || strings.ContainsAny(msg, "\x1b\x00") {
 				t.Errorf("error is not bounded and clean (%d bytes): %q", len(msg), msg)
 			}
 			if !strings.Contains(msg, "end of the output") {
 				t.Errorf("the tail of the output is missing: %q", msg)
 			}
+			// The failed hook may already have rewritten the bundle: it runs again
+			// on the restored state, and the second failure does not hide the first.
+			if len(f.runner.calls) != 2 || strings.Join(f.runner.calls[0], " ") != strings.Join(f.runner.calls[1], " ") {
+				t.Errorf("calls = %v, want the same hook twice", f.runner.calls)
+			}
+			if !strings.Contains(msg, `could not be regenerated again: hook "update-ca-certificates" failed`) {
+				t.Errorf("the second failure is not reported: %q", msg)
+			}
 		})
+	}
+}
+
+// TestFailedHookIsRunAgainOnTheRestoredState: the second run sees the restored
+// state, succeeds, and the message says so; a failing second run is named and
+// the first error stays.
+func TestFailedHookIsRunAgainOnTheRestoredState(t *testing.T) {
+	t.Parallel()
+	f := newTrustFixture(t, osReleaseDebian)
+	f.runner.errFn = func(call int) error {
+		if call == 1 {
+			return errors.New("timed out")
+		}
+		return nil
+	}
+	f.runner.onRun = func([]string) {
+		if len(f.runner.calls) == 2 && f.exists(f.target()) {
+			t.Error("the second run saw the new file although there was none before")
+		}
+	}
+	err := f.install()
+	if err == nil || len(f.runner.calls) != 2 {
+		t.Fatalf("err = %v, calls = %v", err, f.runner.calls)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "timed out") || !strings.Contains(msg, "restored; the trust store was regenerated again") || strings.Contains(msg, "could not") {
+		t.Errorf("message = %q", msg)
+	}
+	// The second run fails with another reason: both are in the text.
+	g := newTrustFixture(t, osReleaseDebian)
+	g.runner.errFn = func(call int) error { return fmt.Errorf("failure number %d", call) }
+	err = g.install()
+	if err == nil || !strings.Contains(err.Error(), "failure number 1") || !strings.Contains(err.Error(), "could not be regenerated again: ") || !strings.Contains(err.Error(), "failure number 2") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -524,6 +590,7 @@ func TestRemoveWithAFailingHookPutsTheFileBack(t *testing.T) {
 	if err := f.install(); err != nil {
 		t.Fatal(err)
 	}
+	f.runner.calls = nil
 	config := f.read(f.config)
 	f.runner.err = errors.New("exit status 1")
 	f.runner.output = "no way"
@@ -533,6 +600,79 @@ func TestRemoveWithAFailingHookPutsTheFileBack(t *testing.T) {
 	}
 	if f.read(f.target()) != string(f.pem) || f.read(f.config) != config {
 		t.Fatal("the state is not as before the failed removal")
+	}
+	// The failed hook may already have dropped the root from the bundle: it runs
+	// again with the file back, and a failing second run is reported next to the first.
+	if len(f.runner.calls) != 2 {
+		t.Fatalf("calls = %v, want the hook twice", f.runner.calls)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "no way") || !strings.Contains(msg, "could not be regenerated again: ") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+// TestRemoveRegeneratesAgainAfterAFailedHook: the second run of the hook works
+// and is named in the message.
+func TestRemoveRegeneratesAgainAfterAFailedHook(t *testing.T) {
+	t.Parallel()
+	f := newTrustFixture(t, osReleaseRocky)
+	if err := f.install(); err != nil {
+		t.Fatal(err)
+	}
+	f.runner.calls = nil
+	f.runner.errFn = func(call int) error {
+		if call == 1 {
+			return errors.New("exit status 1")
+		}
+		return nil
+	}
+	f.runner.onRun = func([]string) {
+		if len(f.runner.calls) == 2 && f.read(f.target()) != string(f.pem) {
+			t.Error("the second run did not see the file that was put back")
+		}
+	}
+	err := removeTrust(context.Background(), f.env, TrustOptions{ConfigPath: f.config})
+	if err == nil || len(f.runner.calls) != 2 || !strings.Contains(err.Error(), "put back; the trust store was regenerated again") {
+		t.Fatalf("err = %v, calls = %v", err, f.runner.calls)
+	}
+}
+
+// TestRemoveWithoutTheFileStillRunsTheHook: a stale bundle is built again; the
+// result is success. Without the anchors directory there is no hook to run.
+func TestRemoveWithoutTheFileStillRunsTheHook(t *testing.T) {
+	t.Parallel()
+	f := newTrustFixture(t, osReleaseDebian)
+	f.writeConfig("system_trust:\n  root_sha256: \"" + f.pin + "\"\n")
+	if err := removeTrust(context.Background(), f.env, TrustOptions{ConfigPath: f.config, Stdout: f.stdout}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.runner.calls) != 1 || strings.Join(f.runner.calls[0], " ") != "/usr/sbin/update-ca-certificates" {
+		t.Fatalf("calls = %v", f.runner.calls)
+	}
+	if !strings.Contains(f.stdout.String(), "nothing to remove") || strings.Contains(f.read(f.config), "system_trust") {
+		t.Errorf("output %q, config:\n%s", f.stdout.String(), f.read(f.config))
+	}
+	// The hook fails: that is an error, and the key stays so the command can run again.
+	g := newTrustFixture(t, osReleaseDebian)
+	g.writeConfig("system_trust:\n  root_sha256: \"" + g.pin + "\"\n")
+	g.runner.err = errors.New("exit status 1")
+	if err := removeTrust(context.Background(), g.env, TrustOptions{ConfigPath: g.config}); err == nil || !strings.Contains(err.Error(), "no file to put back") || len(g.runner.calls) != 1 {
+		t.Fatalf("err = %v, calls = %v", err, g.runner.calls)
+	}
+	if !strings.Contains(g.read(g.config), "system_trust") {
+		t.Error("the key was dropped although the hook failed")
+	}
+	// No anchors directory: the package is not installed, nothing runs.
+	h := newTrustFixture(t, osReleaseDebian)
+	h.writeConfig("system_trust:\n  root_sha256: \"" + h.pin + "\"\n")
+	if err := os.RemoveAll(filepath.Dir(h.target())); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeTrust(context.Background(), h.env, TrustOptions{ConfigPath: h.config, Stdout: h.stdout}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.runner.calls) != 0 || !strings.Contains(h.stdout.String(), "not installed") {
+		t.Errorf("calls %v, output %q", h.runner.calls, h.stdout.String())
 	}
 }
 
@@ -546,12 +686,13 @@ func TestRemoveNeedsAPinAndRoot(t *testing.T) {
 	if err := removeTrust(context.Background(), f.env, TrustOptions{ConfigPath: f.config, RootSHA256: f.pin}); err == nil || !strings.Contains(err.Error(), "must run as root") {
 		t.Fatalf("err = %v", err)
 	}
-	// With the pin on the command line and no file: nothing to remove, no hook.
+	// With the pin on the command line and no file: nothing to remove, the hook
+	// runs once so a stale bundle is built again, and the result is success.
 	f.env.EUID = func() int { return 0 }
 	if err := removeTrust(context.Background(), f.env, TrustOptions{ConfigPath: f.config, RootSHA256: f.pin, Stdout: f.stdout}); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.runner.calls) != 0 || !strings.Contains(f.stdout.String(), "nothing to remove") {
+	if len(f.runner.calls) != 1 || !strings.Contains(f.stdout.String(), "nothing to remove") {
 		t.Fatalf("calls %v, output %q", f.runner.calls, f.stdout.String())
 	}
 }

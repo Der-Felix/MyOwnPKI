@@ -27,7 +27,10 @@ import (
 //   - the target and the hook are fixed per family; nothing from agent.yaml
 //     reaches a path or an argument vector
 //   - a failed hook puts the previous state back, so "file present" means "the
-//     hook succeeded"
+//     hook succeeded"; the hook then runs once more, best effort, because the
+//     failed one may already have rewritten the bundle (update-ca-certificates
+//     writes ca-certificates.crt before its own hooks run), and the bundle must
+//     not keep a root that "trust status" calls absent, or the other way round
 
 // trustFamily is one family of Linux distributions with its fixed targets.
 type trustFamily struct {
@@ -183,6 +186,9 @@ type trustTarget struct {
 	// Have: the file exists; Current is its content.
 	Have    bool
 	Current []byte
+	// NoDir: the anchors directory does not exist (remove and status only): the
+	// CA certificates package is not installed, so there is no hook to run.
+	NoDir bool
 }
 
 // target inspects the fixed directory and file. Neither may be a symlink. A
@@ -197,6 +203,7 @@ func (e trustEnv) target(f *trustFamily, forInstall bool) (*trustTarget, error) 
 		if forInstall {
 			return nil, fmt.Errorf("%s does not exist: is the CA certificates package of this %s host installed? nothing was changed", t.Dir, f.Name)
 		}
+		t.NoDir = true
 		return t, nil
 	case err != nil:
 		return nil, fmt.Errorf("check %s: %w", t.Dir, err)
@@ -239,36 +246,64 @@ func restoreTrustFile(t *trustTarget) error {
 	return nil
 }
 
-// installTrustFile writes the checked certificate and runs the hook. A failed
-// hook restores the previous state. changed is false when the file already
-// held exactly these bytes: then nothing is written and no hook runs.
-func (e trustEnv) installTrustFile(ctx context.Context, f *trustFamily, t *trustTarget, pem []byte) (changed bool, err error) {
-	if t.Have && bytes.Equal(t.Current, pem) {
-		return false, nil
+// regenerate runs the hook once more after the file was put back and says how
+// that went, for the end of an error text. A hook that failed or timed out may
+// already have rewritten the bundle, so the bundle has to be built again from
+// the files that are there now. It is best effort: a failure here is reported
+// and never hides the first error. The run is not cut short by a cancelled
+// context (an interrupt included): the state has to end up consistent.
+func (e trustEnv) regenerate(ctx context.Context, argv []string) string {
+	if err := e.runHook(context.WithoutCancel(ctx), argv); err != nil {
+		return "the trust store could not be regenerated again: " + clipUTF8(err.Error(), 400, false)
 	}
-	if err = atomicSetupFile(t.File, pem, 0o644); err != nil {
-		return false, err
+	return "the trust store was regenerated again"
+}
+
+// installTrustFile writes the checked certificate and runs the hook. A failed
+// hook restores the previous state and runs the hook once more. changed is
+// false when the file already held exactly these bytes: then nothing is
+// written, but the hook still runs, which makes a file that was dropped in by
+// hand effective and is cheap (the Salt formula asks "trust status" first).
+func (e trustEnv) installTrustFile(ctx context.Context, f *trustFamily, t *trustTarget, pem []byte) (changed bool, err error) {
+	same := t.Have && bytes.Equal(t.Current, pem)
+	if !same {
+		if err = atomicSetupFile(t.File, pem, 0o644); err != nil {
+			return false, err
+		}
 	}
 	if err = e.runHook(ctx, f.Install); err != nil {
+		if same {
+			return false, fmt.Errorf("%w; %s already held this root and was left as it is", err, t.File)
+		}
 		if restoreErr := restoreTrustFile(t); restoreErr != nil {
 			return false, fmt.Errorf("%w; putting the previous state back failed too, check %s: %w", err, t.File, restoreErr)
 		}
-		return false, fmt.Errorf("%w; the previous state of %s was restored", err, t.File)
+		return false, fmt.Errorf("%w; the previous state of %s was restored; %s", err, t.File, e.regenerate(ctx, f.Install))
 	}
-	return true, nil
+	return !same, nil
 }
 
-// removeTrustFile deletes the file and runs the hook; a failed hook puts the
-// file back, because the store still holds the root.
+// removeTrustFile deletes the file (when there is one) and runs the hook, also
+// when the file is already gone: a stale bundle is built again then. A failed
+// hook puts the file back, because the store may still hold the root, and runs
+// the hook once more. Without an anchors directory there is nothing to do.
 func (e trustEnv) removeTrustFile(ctx context.Context, f *trustFamily, t *trustTarget) error {
-	if err := os.Remove(t.File); err != nil {
-		return fmt.Errorf("remove %s: %w", t.File, err)
+	if t.NoDir {
+		return nil
+	}
+	if t.Have {
+		if err := os.Remove(t.File); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", t.File, err)
+		}
 	}
 	if err := e.runHook(ctx, f.Remove); err != nil {
+		if !t.Have {
+			return fmt.Errorf("%w; there was no file to put back", err)
+		}
 		if restoreErr := restoreTrustFile(t); restoreErr != nil {
 			return fmt.Errorf("%w; putting the file back failed too, check %s: %w", err, t.File, restoreErr)
 		}
-		return fmt.Errorf("%w; %s was put back", err, t.File)
+		return fmt.Errorf("%w; %s was put back; %s", err, t.File, e.regenerate(ctx, f.Remove))
 	}
 	return nil
 }
