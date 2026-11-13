@@ -55,9 +55,12 @@ code can make a token fresh. Such a request answers `403` with the problem type 
   agent. (Reading them is allowed.)
 - changing the agent enrollment mode: `PUT /settings` with a different `agent_enrollment` (any other
   setting, or the same mode, works with a token);
+- creating, changing and deleting domains, and restoring a domain version (`POST /domains/{domainId}/versions/{version}/restore`);
+  restoring settings that change the agent enrollment mode;
 - creating other API tokens.
 
-Issuing and renewing certificates, reading CAs, certificates, agents, alerts, reports, the analysis and the audit log,
+Issuing and renewing certificates, previewing an issuance (`POST /certificates/preview`), reading CAs, certificates,
+agents, alerts, reports, the analysis, the audit log and the history of domains and settings (with the tenant-wide admin role),
 sending the test notification, and adding, scanning and removing TLS endpoints (see
 [TLS scan]({{ '/tls-scan/' | relative_url }})) are allowed for the right role. A sign-in session in the browser can do
 everything its roles allow, after the step-up.
@@ -76,7 +79,12 @@ everything its roles allow, after the step-up.
   read but not change answers `403`.
 - A browser session sends the cookie `__Host-myownpki_session` and an `X-CSRF-Token` header on
   changing requests. A token needs neither.
-- While the server is sealed, operations that sign answer `503`; reading works.
+- While the server is sealed, operations that sign answer `503`; reading works. A preview works on a sealed
+  server and says `sealed: true`.
+- Domains and the settings carry a version number as an `ETag` (quoted, `"0"` = no history yet). `If-Match`
+  with that value protects a change from overwriting a newer one (`412`, problem type `precondition-failed`);
+  it is optional on `PATCH` and `DELETE /domains/{id}` and `PUT /settings`, and required on a restore (`428`,
+  `precondition-required`). See [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 
 ## Operation groups
 
@@ -85,10 +93,10 @@ everything its roles allow, after the step-up.
 | system | `GET /system/status`, `POST /system/unseal`, `POST /system/seal` | signed in; unseal and seal need an instance admin |
 | auth, users | sign-in, step-up, `GET /users`, own password and second factor | varies |
 | tokens | `GET /tokens`, `POST /tokens`, `DELETE /tokens/{tokenId}` | signed in |
-| settings | `GET /settings`, `PUT /settings` | viewer reads, admin changes (a different enrollment mode needs the second factor) |
-| domains, acme | `GET /domains`, ACME accounts and their predecessor policies | viewer / admin |
+| settings | `GET /settings`, `PUT /settings`, `GET /settings/versions`, `GET /settings/versions/{version}`, `POST /settings/versions/{version}/restore` | viewer reads, admin changes (a different enrollment mode needs the second factor); the history and the restore need the admin role on the whole tenant |
+| domains, acme | `GET /domains`, `GET /domains/{domainId}/versions`, `GET /domains/deleted`, the restore of a domain version, ACME accounts and their predecessor policies | viewer / admin (the history needs the admin role on the whole tenant; a restore needs the second factor) |
 | cas | `GET /cas`, `POST /cas`, `/cas/{caId}/certificate`, `/cas/{caId}/crl` | viewer reads, admin changes |
-| certificates | `GET /certificates`, `/certificates/{id}/download/{format}`, `…/renew`, `…/revoke` | viewer reads; operator issues, renews and revokes (revoking needs the second factor) |
+| certificates | `GET /certificates`, `POST /certificates/preview`, `/certificates/{id}/download/{format}`, `…/renew`, `…/revoke` | viewer reads; operator issues, previews, renews and revokes (revoking needs the second factor) |
 | imports | legacy `pki.sh` import, external certificates | admin |
 | audit | `GET /audit`, `POST /audit/verify` | per operation, see the OpenAPI file |
 | agents | `GET /agents` and `/agent-enrollments` (both with an optional `?hostname=`), `/agent-join-tokens` (join tokens and enrollment passes, no secrets), `GET /agent-install` (the facts for installing the agent without a browser), `…/deployments/{name}/renew` | viewer reads, operator renews, admin manages (creating, revoking and approving need the second factor, so never a token) |
@@ -121,6 +129,19 @@ The first 20 certificates:
 
 ```bash
 curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" "https://pki.homelab.lan:9443/api/v1/certificates?limit=20"
+```
+
+What issuing a request would produce, without signing anything (the body is the one of `POST /certificates`; a
+refusal is a `200` with `allowed: false`; see [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }})):
+
+```bash
+curl -sS --cacert root.pem -X POST -H "Authorization: Bearer $MYOWNPKI_TOKEN" -H "Content-Type: application/json" --data @preview.json https://pki.homelab.lan:9443/api/v1/certificates/preview | jq '{allowed, reasons}'
+```
+
+The history of the tenant settings (the token needs the tenant *admin* role):
+
+```bash
+curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" "https://pki.homelab.lan:9443/api/v1/settings/versions?limit=10"
 ```
 
 A test message through the notification channels (the token needs the tenant *admin* role):
