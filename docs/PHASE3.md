@@ -1841,3 +1841,43 @@ approval of ECharts is kept for a later step. What that step takes (so the choic
 7. Not verifiable here, to check in the steps: the zrender license text, the content of the ECharts subsets, whether a role
    limited to one CA should get a reduced Reports page instead of 403, whether the deployments come with `ListAgents`,
    and whether a browser is available for steps 50 and 51.
+
+### 14.8 Built notes
+
+**Steps 45 and 46 (data layer and analysis rules).** What differs from the plan text, and why:
+
+- **Migration `pki.db` 0020** is `0020_report_indexes.sql`: `certificates_created_at` and the partial
+  `acme_orders_certificate`, nothing else (a test compares the schema before and after). `created_at` is stored with
+  milliseconds (`audit.TimeFormat`) while `not_after` has whole seconds, so `IssuanceSources` takes its bounds in the
+  millisecond format; compared as text, the two formats do not sort the same at a whole second.
+- **`report.Service`** is the way in for the API and the pages (`Get(ctx, who)`: the tenant-wide `ReadPKI` check, then
+  the one-minute cache); `report.Build` does no permission check. `analysis.Service` is the same for the analysis
+  (`analysis.Analyze` = `Load` + `Run`). Both caches are fields of the tenant's service, not keyed by anything.
+- **Deployments** come with `agents.GetAgent` per agent, like the monitor (open point 7): `ListAgents` carries none, so
+  no extra sqlc query. The agent fleet counts an active agent that never reported as active (the monitor does not call
+  it silent either); version and deployment counts cover the agents that are neither disabled nor revoked.
+- **`Valid` of an authority includes `Expiring`** (the same as the Certificates page with `status=valid`); the stacked
+  chart draws `Valid - Expiring`, `Expiring`, `Expired`, `Revoked`.
+- **Extra engine reads** beyond `CertificateTraits`, because the rules need them: `CertificateOrigins` (issuer key and
+  class by certificate), `CertificateNames` (every DNS name and IP, for `unused_domain`), `ACMEAccountActivity` (account,
+  agent link, last order, for `unused_acme_account`), and the signature algorithm of a CA generation
+  (`GenerationInfo.SignatureAlgorithm`, for `weak_signature` of intermediates). All keep the CA scoping.
+- **`Snapshot` has `Recent`**: the certificates created in the last 7 days whatever their status. `renewal_loop` counts
+  certificates, not valid certificates, so a loop whose predecessors are revoked or expired is still seen. It has no
+  `monitor.Rules` field: no rule uses one, the thresholds are the constants of `rules.go`.
+- **`orphaned_certificate`** needs more than "a scan did not see it": the endpoint stores only the fingerprint of its
+  last good scan, so a witness is a covering endpoint that was scanned successfully in the last 7 days **and has served
+  another certificate for at least 7 days** (`FingerprintSince`). Without such an endpoint the certificate is counted in
+  the one summary line, never judged. A covering endpoint that serves the certificate, or an agent deployment in state
+  `deployed` (matched by serial, ID or fingerprint), ends the check.
+- **`Run` returns one `Result` per rule** in the order of the table; `Findings(results)` flattens them sorted by
+  severity, rule and subject; `Summarize` counts every finding, also those beyond the 200 kept per rule.
+- **A rule can be `unknown` for part of its input**: `Result.Unassessed` and `UnknownReason` also qualify a result with
+  findings ("and N could not be assessed"). `duplicate_certificates` and `ca_cliff` use this for a certificate of unknown
+  origin and a CA without a signed generation. `ca_cliff` also reports a CA that already ended (critical, own text).
+- **`internal/analysis` imports `tlsscan`** for the endpoint type and the name matching; it reads the stored result of
+  the last scan and never starts one. The import test bans `net`, `net/http`, `net/url`, `crypto/tls` and the other
+  network packages in both new packages; `net/netip` only parses addresses.
+- **Fixtures:** `internal/analysis/testdata/weak-key-rsa1024.pem` and `weak-signature-sha1.pem` (self-signed, names under
+  `.invalid`, no private key; the OpenSSL command is in the header of each file).
+- Not run on this machine: `go test -race` (no C compiler here; the packages are pure Go and the build is `CGO_ENABLED=0`).
