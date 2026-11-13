@@ -184,10 +184,12 @@ func (e Entry) validate() error {
 
 // CheckReason refuses a reason that is longer than MaxReason characters or
 // holds a control character (a newline would break a log line and a table
-// cell; the reason is shown to other admins).
+// cell) or an invisible formatting character (Unicode category Cf: bidi
+// overrides, zero-width characters, a byte order mark – they let a reason
+// pose as something else). The reason is shown to other admins.
 func CheckReason(reason string) error {
-	if utf8.RuneCountInString(reason) > MaxReason || hasControl(reason) || !utf8.ValidString(reason) {
-		return fmt.Errorf("%w: reason: at most %d characters, no control characters", ErrInvalid, MaxReason)
+	if utf8.RuneCountInString(reason) > MaxReason || hasControl(reason) || strings.ContainsFunc(reason, isFormat) || !utf8.ValidString(reason) {
+		return fmt.Errorf("%w: reason: at most %d characters, no control or invisible formatting characters", ErrInvalid, MaxReason)
 	}
 	return nil
 }
@@ -233,3 +235,6 @@ func Get(ctx context.Context, b Backend, kind, objectID string, number int64) (V
 	}
 	return b.Get(ctx, kind, objectID, number)
 }
+
+// isFormat reports a Unicode format character (category Cf).
+func isFormat(r rune) bool { return unicode.Is(unicode.Cf, r) }

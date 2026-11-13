@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -511,9 +512,9 @@ func TestHostileStringsStayData(t *testing.T) {
 					snap = s
 				}
 				id := "obj" + string(rune('A'+i))
-				// The actor is hostile too; the reason must be clean (control characters are refused).
+				// The actor is hostile too; the reason must be clean (control and format characters are refused).
 				reason := strings.Map(func(r rune) rune {
-					if r < 0x20 {
+					if r < 0x20 || unicode.Is(unicode.Cf, r) {
 						return -1
 					}
 					return r
@@ -656,3 +657,36 @@ func TestCanonicalIsStable(t *testing.T) {
 }
 
 func reflectEqual(a, b any) bool { return reflect.DeepEqual(a, b) }
+
+func TestCheckReason(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		reason string
+		ok     bool
+	}{
+		"empty":               {"", true},
+		"plain text":          {"renewed the wildcard – Müller & Söhne, 日本語", true},
+		"newline":             {"a\nb", false},
+		"tab":                 {"a\tb", false},
+		"escape":              {"a\x1bb", false},
+		"bidi override":       {"safe " + string(rune(0x202e)) + "gnp.exe", false},
+		"bidi isolate":        {"a" + string(rune(0x2066)) + "b", false},
+		"zero width space":    {"a" + string(rune(0x200b)) + "b", false},
+		"zero width joiner":   {"a" + string(rune(0x200d)) + "b", false},
+		"byte order mark":     {string(rune(0xfeff)) + "reason", false},
+		"soft hyphen":         {"a" + string(rune(0xad)) + "b", false},
+		"invalid UTF-8":       {"a\xffb", false},
+		"200 characters":      {strings.Repeat("ä", MaxReason), true},
+		"more than 200":       {strings.Repeat("ä", MaxReason+1), false},
+		"no-break space":      {"a" + string(rune(0xa0)) + "b", true},
+		"emoji without joins": {"done 🎉", true},
+	} {
+		err := CheckReason(tc.reason)
+		if tc.ok != (err == nil) {
+			t.Errorf("%s: CheckReason = %v", name, err)
+		}
+		if err != nil && !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v does not wrap ErrInvalid", name, err)
+		}
+	}
+}

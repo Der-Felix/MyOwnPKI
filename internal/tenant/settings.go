@@ -204,7 +204,7 @@ func (s *Store) SetWith(ctx context.Context, tenant string, v Settings, opts Cha
 func validate(v Settings, reason string) []string {
 	var problems []string
 	if settingsver.CheckReason(reason) != nil {
-		problems = append(problems, fmt.Sprintf("reason: at most %d characters, no control characters", settingsver.MaxReason))
+		problems = append(problems, fmt.Sprintf("reason: at most %d characters, no control or invisible formatting characters", settingsver.MaxReason))
 	}
 	check := func(field, value string, n int) {
 		if utf8.RuneCountInString(value) > n || strings.ContainsFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
