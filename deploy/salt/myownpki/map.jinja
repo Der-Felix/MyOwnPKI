@@ -65,7 +65,7 @@
 
 {% set version = cfg['version'] if cfg['version'] is string else '' %}
 {% if version != '' and not (version | regex_match('^[0-9][0-9A-Za-z.+~_-]*$')) %}
-{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.6') %}
+{%   set _ = errors.append('myownpki:agent:version "' ~ version ~ '" is not a release version such as 0.3.7') %}
 {% endif %}
 
 {% set server = cfg['server'] if cfg['server'] is string else '' %}
@@ -204,7 +204,7 @@
 
 {#- The options of "myownpki-agent deployment add" (internal/agent/deployment_cli.go) except
     --dry-run (a state that never writes) and --config (the path stays the default). -#}
-{% set opts_string = ['recipe', 'profile', 'challenge', 'webroot', 'dir', 'certificate', 'chain', 'fullchain', 'key', 'owner', 'group', 'key_mode', 'test_hook', 'reload_hook', 'check', 'acme_directory'] %}
+{% set opts_string = ['recipe', 'profile', 'challenge', 'webroot', 'dir', 'certificate', 'chain', 'fullchain', 'key', 'owner', 'group', 'key_mode', 'test_hook', 'reload_hook', 'check', 'check_name', 'acme_directory', 'dns_provider', 'dns_type', 'dns_credentials', 'dns_nameserver', 'dns_zone', 'dns_resolver'] %}
 {% set opts_list = ['name', 'hook', 'sandbox_write'] %}
 {% set opts_bool = ['low_ports', 'create_dirs', 'restart'] %}
 {% set opts_allowed = opts_string + opts_list + opts_bool %}
@@ -223,6 +223,41 @@
 {%         set _ = errors.append('deployment "' ~ dname ~ '": unknown option "' ~ o ~ '"; allowed: ' ~ (opts_allowed | join(', '))) %}
 {%       endif %}
 {%     endfor %}
+{#-   dns-01 (docs/PHASE3.md section 13): the provider is named by the deployment and defined by
+      the dns_* options, which belong to dns-01 only. The agent checks the rest (the path rules of
+      the credentials file, the form of the nameserver). The credentials file itself is a secret
+      and is not managed here: place it with file.managed in the host's own state (README). -#}
+{%     set challenge = opts.get('challenge') %}
+{%     set dns_given = [] %}
+{%     for o in ['dns_provider', 'dns_type', 'dns_credentials', 'dns_nameserver', 'dns_zone', 'dns_resolver'] %}
+{%       if opts.get(o) is not none %}
+{%         set _ = dns_given.append(o) %}
+{%       endif %}
+{%     endfor %}
+{%     set wild = [] %}
+{%     for n in ([opts.get('name')] if opts.get('name') is string else (opts.get('name') if opts.get('name') is iterable and opts.get('name') is not mapping else [])) %}
+{%       if n is string and n.startswith('*.') %}
+{%         set _ = wild.append(n) %}
+{%       endif %}
+{%     endfor %}
+{%     if challenge == 'dns-01' %}
+{%       if not (opts.get('dns_provider') is string and opts.get('dns_provider') != '') %}
+{%         set _ = errors.append('deployment "' ~ dname ~ '": challenge dns-01 needs the option dns_provider (the name of the provider entry, for example homelab-dns)') %}
+{%       endif %}
+{%       if opts.get('webroot') is not none %}
+{%         set _ = errors.append('deployment "' ~ dname ~ '": the option webroot does not go with challenge dns-01') %}
+{%       endif %}
+{%       if opts.get('dns_type') is not none and opts.get('dns_type') not in ['rfc2136', 'cloudflare'] %}
+{%         set _ = errors.append('deployment "' ~ dname ~ '": dns_type must be rfc2136 or cloudflare') %}
+{%       endif %}
+{%       if opts.get('dns_credentials') is string and not (opts.get('dns_credentials') | regex_match('^/.+')) %}
+{%         set _ = errors.append('deployment "' ~ dname ~ '": dns_credentials must be an absolute path') %}
+{%       endif %}
+{%     elif dns_given | length > 0 %}
+{%       set _ = errors.append('deployment "' ~ dname ~ '": the options ' ~ (dns_given | join(', ')) ~ ' only go with challenge: dns-01') %}
+{%     elif wild | length > 0 %}
+{%       set _ = errors.append('deployment "' ~ dname ~ '": the wildcard name "' ~ wild[0] ~ '" needs challenge: dns-01 (and dns_provider)') %}
+{%     endif %}
 {%     for o in opts_allowed %}
 {%       if o in opts and opts[o] is not none %}
 {%         set v = opts[o] %}

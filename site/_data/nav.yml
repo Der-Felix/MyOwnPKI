@@ -95,6 +95,8 @@
           url: /hosts/salt/
     - title: Recipes
       url: /recipes/
+    - title: dns-01 and wildcards
+      url: /dns-01/
 - group: Help
   items:
     - title: FAQ

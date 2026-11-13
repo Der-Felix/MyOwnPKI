@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, the Salt formula, notifications, the TLS scan, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, the Salt formula, dns-01 in the agent, notifications, the TLS scan, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -203,6 +203,30 @@ refusals and what they mean.
 | A new `paths` entry still gives `permission denied` | `paths` was edited by hand and `10-paths.conf` was not brought in step, or `daemon-reload` was not run | `myownpki-agent config check` says whether the drop-ins match; `myownpki-agent sandbox sync` writes them. Then `systemctl restart myownpki-agent`. See what systemd applies with `systemctl show myownpki-agent -p ReadWritePaths`. |
 | A hook with `sudo` does nothing | `NoNewPrivileges=yes` | The agent runs as root already; remove `sudo` |
 | The renewed certificate is on disk but the site serves the old one | A `check` is set and no reload happened, or nginx does not use the agent's files | Check that the server block points to the `fullchain.pem` and `privkey.pem` in `dir`; look at `check` |
+
+## dns-01 in the agent
+
+Since v0.3.7, for a deployment with `challenge: dns-01` (wildcards, hosts without port 80). The full table
+of messages, with the cause behind each, is
+[When it fails]({{ '/dns-01/' | relative_url }}#when-it-fails) on the dns-01 page. None of these messages
+contains a secret.
+
+| Symptom or message | Likely cause | Fix |
+|---|---|---|
+| `myownpki-agent config check` ends with `The configuration is valid, but 1 DNS credentials file(s) used by a deployment cannot be used` and exits 1 | The block *dns providers* above it names the state: `missing`, `wrong mode`, `wrong owner`, `unsafe directory`, `symbolic link`, `invalid` | Make the file a regular file of mode 0600 owned by root, in a directory only root can write, with the keys of its type ([the credentials file]({{ '/dns-01/' | relative_url }}#the-credentials-file)) |
+| `a wildcard needs challenge: dns-01 (RFC 8555 §7.1.3)` | A `*.` name on http-01 | `--challenge dns-01` with `--dns-provider` |
+| `credentials_file: "…" is under /home, which the agent's systemd unit hides (ProtectHome=yes)` | The path is under `/home`, `/root` or `/run/user` | Use `/etc/myownpki-agent/dns/` |
+| `dns-01 needs a resolver of its own and /etc/resolv.conf has none` | No resolver to ask, and the agent never falls back to public ones | Set `resolver:` of the `dns_providers` entry |
+| `rfc2136: … NOTAUTH from …` / `REFUSED from …` | Wrong key name, secret or algorithm; or the key may not change `_acme-challenge.<name>` | Compare `tsig_key_name`, `tsig_secret` and the algorithm with the server's `key` statement; check its `update-policy` or `allow-update` |
+| `the answer's TSIG time differs too much from this host's clock; check NTP` | The clocks of the host and the DNS server differ | Fix NTP |
+| `propagation: time limit exceeded: last error: NS … did not return the expected TXT record` | The record is not visible within `propagation_timeout`, or port 53 to the name servers is blocked | `dig TXT _acme-challenge.<name> @<name server>` from the host; use `propagation: resolver` or `wait`, or wait longer |
+| `cloudflare: … [status code 403] …` | The token lacks *Zone / Read* or *DNS / Edit* for the zone, or is for another zone | A token for that zone with both permissions |
+| `… is not in this agent's allowed names` | *Names it may order* lacks the name; a wildcard needs the identical `*.` pattern | Add `*.homelab.lan` and `homelab.lan` on the agent's page |
+| `no domain covers *.homelab.lan – an admin of the PKI must add one` | No domain covers the name, or it has no *Wildcards*, or dns-01 is not allowed | *ACME → Domains* |
+| `_acme-challenge.… has no TXT record` (from the server) | The agent saw its record, but the **server's** resolver does not | `acme.resolver` must read the zone the agent writes ([Split DNS]({{ '/guides/split-dns/' | relative_url }})) |
+| The *Last error* of a deployed deployment says `dns-01 cleanup failed: a TXT record may remain at _acme-challenge.…` (and the log has `a TXT record may be left behind`) | The certificate was issued and stays deployed, but the agent could not remove its record, had no time left while stopping, or (Cloudflare) the create request may have worked without an answer the agent could use | Remove the `_acme-challenge` TXT record by hand; it does no harm to validation. The log has the reason. The next pass without a cleanup problem clears the text |
+| `rfc2136: zone mismatch: … is not inside the configured zone …` | `zone` is set, and the name, or the target of a CNAME delegation, is outside it | Leave `zone` unset so that the target's zone is looked up |
+| An older agent refuses to start after `agent.yaml` got `dns_providers` | Agents before 0.3.7 do not know the keys | Update the agent first ([Upgrade]({{ '/upgrade/' | relative_url }}#notes-per-release)); remove the keys to go back |
 
 ## Notifications
 

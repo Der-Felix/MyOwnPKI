@@ -58,7 +58,8 @@ The parts, and who talks to whom:
   assistant takes a new host from its name to a deployed certificate, the
   [Salt formula]({{ '/hosts/salt/' | relative_url }}) rolls the agent out to many hosts, and
   [recipes]({{ '/recipes/' | relative_url }}) cover nginx, Postfix, Dovecot and Proxmox VE (the last
-  three are unverified examples).
+  three are unverified examples). A deployment can also use **dns-01** (since v0.3.7) for wildcard
+  certificates and hosts without port 80: [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
 - **Monitoring:** the server checks itself every minute and tells you by e-mail or webhook when a
   certificate or a CA is about to expire, a CRL goes stale, the server is sealed or an agent is
   silent.
@@ -107,6 +108,7 @@ level 3 when you want the server to see what is deployed where and to renew on a
 | Update to a new release | [Upgrade]({{ '/upgrade/' | relative_url }}) |
 | Get certificates onto a host, with or without the agent | [Adding hosts]({{ '/hosts/' | relative_url }}) |
 | Set up nginx, Postfix, Dovecot or Proxmox VE with the agent | [Recipes]({{ '/recipes/' | relative_url }}) |
+| Get a wildcard certificate, or a certificate for a host without port 80, with the agent | [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}) |
 | Roll the agent out with the Salt formula | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
 | Be told when something expires or breaks | [Monitoring]({{ '/monitoring/' | relative_url }}) |
 | Check that a host really serves the certificate it should | [TLS scan]({{ '/tls-scan/' | relative_url }}) |

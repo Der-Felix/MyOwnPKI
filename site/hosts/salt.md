@@ -13,7 +13,8 @@ checks that tell you it worked.
 > **Note:** The CI job renders every test pillar and applies it with `test=True` under Salt 3008.5. The
 > maintainer also tested the formula live on five enrolled Debian amd64 hosts: it upgraded the agent from
 > 0.3.2 to 0.3.5 and a second apply changed nothing. **Not tested live:** the enrollment of a new host with
-> an enrollment pass, `rpm` hosts, `arm64`, `config_source`, the gitfs install and other Salt versions.
+> an enrollment pass, `rpm` hosts, `arm64`, `config_source`, the gitfs install, other Salt versions and the
+> [dns-01 deployments](#dns-01-deployments) of v0.3.7.
 > Run it on **one minion** first, and read the formula before you roll it out: it runs as root on every
 > minion that gets the pillar.
 {: .note}
@@ -221,7 +222,7 @@ The repository has the same file with comments: `deploy/salt/myownpki/pillar.exa
 
 The options of a deployment are the flags of `myownpki-agent deployment add` with `-` written as `_`:
 `recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `owner`,
-`group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `acme_directory` (strings), `name`, `hook`,
+`group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `acme_directory` (strings), the seven options of [dns-01](#dns-01-deployments) (`check_name`, `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`, `dns_zone`, `dns_resolver`), `name`, `hook`,
 `sandbox_write` (a string or a list; the flag is repeated) and `low_ports`, `create_dirs`, `restart`
 (`true` or `false`). Leave `restart` unset: the formula restarts the agent itself with `try-restart`,
 and `restart: true` would start an agent that still waits for approval. The recipes are on
@@ -349,6 +350,86 @@ Then put the deployment back into `deployments`, take the name out of `absent`, 
 in both lists is refused. With `config_source` you change the file instead: edit `agent.yaml` on the
 master and apply; the formula runs `sandbox sync` and restarts the agent when it changed.
 
+## dns-01 deployments
+
+Since v0.3.7 (formula and agent) a deployment can use `challenge: dns-01`: a wildcard certificate, or a
+host without port 80 ([dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}) explains the
+concept, the DNS server and the errors). The formula passes seven more options to `deployment add`:
+
+| Option | Flag | Meaning |
+|---|---|---|
+| `dns_provider` | `--dns-provider` | **Required** with dns-01: the name of the provider entry in `dns_providers` of `agent.yaml`, for example `homelab-dns` |
+| `dns_type` | `--dns-type` | Defines a **new** entry: `rfc2136` or `cloudflare` |
+| `dns_credentials` | `--dns-credentials` | The absolute path of the credentials file, for example `/etc/myownpki-agent/dns/homelab.yaml` |
+| `dns_nameserver` | `--dns-nameserver` | `rfc2136` only, required for a new entry: `host` or `host:port` of the DNS server that accepts the update |
+| `dns_zone` | `--dns-zone` | `rfc2136` only, optional: the zone to update (default: found by an SOA lookup) |
+| `dns_resolver` | `--dns-resolver` | Optional: `IP` or `IP:port` for the SOA, CNAME and propagation queries |
+| `check_name` | `--check-name` | The SNI of the local TLS check; needed when every name is a wildcard and the deployment has a `check` (the nginx recipe has one) |
+
+```yaml
+myownpki:
+  agent:
+    deployments:
+      wild:
+        recipe: nginx
+        name: ["*.homelab.lan", homelab.lan]
+        challenge: dns-01
+        check_name: www.homelab.lan
+        dns_provider: homelab-dns
+        dns_type: rfc2136
+        dns_credentials: /etc/myownpki-agent/dns/homelab.yaml
+        dns_nameserver: 192.0.2.53
+```
+
+The formula writes `--name '*.homelab.lan'` with the quotes a shell needs, and it needs no `webroot` for
+dns-01. The provider entry is written once, when its name is new and `dns_type` is given. A second
+deployment on the same provider repeats the options or names only `dns_provider`; a **different**
+definition for an existing name is refused by the agent (it says "edit agent.yaml by hand"). `ttl`,
+`propagation` and the other settings of a provider have no option: edit `dns_providers` in `agent.yaml`
+(and then use `absent` or `config_source` for the rest, because the formula changes nothing of an existing
+deployment).
+
+**The credentials file is a secret, and the formula does not manage it.** It holds a TSIG key or an API
+token. The agent refuses it unless it is a regular file of mode 0600 or 0400, owned by root, in a
+directory that only root can write. Place it with `file.managed` in the host's **own** state (another
+state file than the formula), with the content from an encrypted pillar, and keep the content out of the
+Salt output with `show_changes: False`:
+
+```yaml
+/etc/myownpki-agent/dns:
+  file.directory:
+    - user: root
+    - group: root
+    - mode: "0750"
+    - makedirs: True
+
+/etc/myownpki-agent/dns/homelab.yaml:
+  file.managed:
+    - user: root
+    - group: root
+    - mode: "0600"
+    - show_changes: False
+    - contents_pillar: homelab_dns:credentials
+    - require:
+      - file: /etc/myownpki-agent/dns
+```
+
+The pillar value `homelab_dns:credentials` is the whole content of the file, for example the three keys of
+an RFC 2136 key, as one multi-line string in an encrypted pillar (a GPG renderer or your secret store). The
+order of the states does not matter: Salt may run `deployment add` before the file exists. A missing or
+wrongly protected file is then a **warning** in the output of the command (it names the state and the
+path, never a value), not an error. The agent reads the file when an issuance starts, so a file that arrives
+later works at the next renewal, without a restart. `myownpki-agent config check` shows its state:
+
+```bash
+salt 'minion-01.homelab.lan' cmd.run '/usr/local/bin/myownpki-agent config check'
+```
+
+The agent must be 0.3.7 on the host before the first dns-01 deployment: an older agent refuses an
+`agent.yaml` that has `dns_providers` and does not start. Update the agent first, with the formula
+([Update the agents](#update-the-agents)), and add the deployment in a second step. The formula's own test
+cases render a dns-01 pillar and apply it with `test=True`; **the maintainer has not yet run it live.**
+
 ## When the formula refuses or fails
 
 The formula **fails closed**: it checks the pillar before it does anything. A pillar it cannot use renders
@@ -367,6 +448,11 @@ one failing state, `myownpki-agent-refused`, and nothing is installed. Read the 
 | `deployment "<name>": unknown option "<x>"` | Use the flags of `deployment add`, with `_` for `-` (the message lists them) |
 | `deployment "<name>": option "key_mode" must be a non-empty string` | Quote it: `"0640"` |
 | `deployment "<name>" is in deployments and in absent` | Remove the name from one of them |
+| `deployment "<name>": challenge dns-01 needs the option dns_provider …` | Add `dns_provider` (the name of the entry in `dns_providers`) |
+| `deployment "<name>": the option webroot does not go with challenge dns-01` | Remove `webroot` from that deployment |
+| `deployment "<name>": the options dns_… only go with challenge: dns-01` | Add `challenge: dns-01`, or remove the `dns_*` options |
+| `deployment "<name>": the wildcard name "*.…" needs challenge: dns-01 (and dns_provider)` | A wildcard is proven by dns-01 only |
+| `deployment "<name>": dns_type must be rfc2136 or cloudflare` / `dns_credentials must be an absolute path` | Correct the value |
 | `enrollment_pass must be a string` | Quote the value in the pillar |
 
 Failures at run time:

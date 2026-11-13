@@ -5,7 +5,7 @@
 myownpki:
   agent:
     # Required. The release to install; part of the package file name.
-    version: "0.3.6"
+    version: "0.3.7"
     # Required. The agent listener of the server: https, host and port, no path.
     server: https://pki.homelab.lan:8444
     # Required. The ACME directory the agent uses (goes into a new agent.yaml).
@@ -18,8 +18,8 @@ myownpki:
       # Required. The SHA-256 of the package of each architecture, from the admin UI.
       # Quote the values. Only the architectures you roll out are needed.
       sha256:
-        amd64: "<SHA-256 of myownpki-agent_0.3.6_linux_amd64.deb or .rpm>"
-        arm64: "<SHA-256 of myownpki-agent_0.3.6_linux_arm64.deb or .rpm>"
+        amd64: "<SHA-256 of myownpki-agent_0.3.7_linux_amd64.deb or .rpm>"
+        arm64: "<SHA-256 of myownpki-agent_0.3.7_linux_arm64.deb or .rpm>"
       # Where the package comes from. {name} is myownpki-agent_<version>_linux_<arch>.<deb|rpm>.
       # salt:// or https:// only; the SHA-256 above is checked either way. This is the default.
       source: salt://myownpki/files/{name}
@@ -41,6 +41,20 @@ myownpki:
         name: minion-01.homelab.lan
         webroot: /var/www/html
         create_dirs: true
+      # A wildcard and the apex through dns-01 (RFC 2136 against the internal DNS server), no port 80.
+      # The provider entry is written once; the credentials file is a secret you place yourself with
+      # file.managed (mode 0600, show_changes: False), see the README.
+      # wild:
+      #   recipe: nginx
+      #   name: ["*.homelab.lan", homelab.lan]
+      #   challenge: dns-01
+      #   check_name: www.homelab.lan
+      #   dns_provider: homelab-dns
+      #   dns_type: rfc2136                 # or cloudflare
+      #   dns_credentials: /etc/myownpki-agent/dns/homelab.yaml
+      #   dns_nameserver: 192.0.2.53        # rfc2136 only
+      #   dns_zone: homelab.lan             # rfc2136 only, optional
+      #   dns_resolver: 192.0.2.53          # optional
     # ... and names of deployments to remove with "deployment remove":
     absent: []
     # ... or a complete agent.yaml, rendered by Salt (then neither deployments nor absent):

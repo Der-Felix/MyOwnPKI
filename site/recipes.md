@@ -55,6 +55,13 @@ words *example recipe, test on a non-production host* and a list of what to veri
 what you expect, run it again without `--dry-run`, add `--restart`, or restart the agent yourself.
 Undo it with `deployment remove postfix`.
 
+**A wildcard, or a host without port 80.** Every recipe works with `--challenge dns-01` (agent 0.3.7):
+replace `--webroot …` with the dns-01 flags, and add `--check-name` when every name is a wildcard and the
+recipe has a check. The recipe still decides the files, hooks and sandbox; only the way the names are
+proven changes. The flags, the credentials file and the DNS settings are on
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). The assistant does not generate dns-01
+commands; run `deployment add` by hand.
+
 ## nginx
 
 The recipe the others follow. The assistant generates this block for `minion-01.homelab.lan`, service

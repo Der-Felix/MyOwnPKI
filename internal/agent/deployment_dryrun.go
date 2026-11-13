@@ -62,7 +62,7 @@ func (s *DeploymentSpec) under(root string) {
 		}
 		return root + string(filepath.Separator) + strings.TrimPrefix(filepath.FromSlash(p), string(filepath.Separator))
 	}
-	s.Webroot, s.Dir = m(s.Webroot), m(s.Dir)
+	s.Webroot, s.Dir, s.DNSCredentials = m(s.Webroot), m(s.Dir), m(s.DNSCredentials)
 	s.Files = Files{Certificate: m(s.Files.Certificate), Chain: m(s.Files.Chain), Fullchain: m(s.Files.Fullchain), Key: m(s.Files.Key)}
 	mapAll := func(dirs []string) []string {
 		out := make([]string, len(dirs))

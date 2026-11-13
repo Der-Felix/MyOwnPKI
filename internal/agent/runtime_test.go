@@ -422,3 +422,47 @@ func TestManyAgentsReconnectWithFullJitterAfterRestart(t *testing.T) {
 		}
 	}
 }
+
+// An issuance holds passMu, a dns-01 one for as long as the record needs to
+// propagate. The optional ARI lookup of a tick does not queue behind it: it
+// is skipped, and asked again at the next tick.
+func TestARICheckSkipsWhileAnIssuanceHoldsThePassLock(t *testing.T) {
+	t.Parallel()
+	r := newDeployRig(t, ProfileFile)
+	r.installOld(t)
+	d := r.a.cfg.Deployments[0]
+	asked := 0
+	r.a.ariForTest = func(context.Context, *x509.Certificate) (renewalWindow, error) {
+		asked++
+		return renewalWindow{}, errors.New("ARI unavailable")
+	}
+	plans := map[string]*renewalPlan{}
+
+	r.a.passMu.Lock() // an issuance is running
+	finished := make(chan bool, 1)
+	go func() {
+		_, polled := r.a.plan(t.Context(), d, plans, true)
+		finished <- polled
+	}()
+	select {
+	case polled := <-finished:
+		if polled || asked != 0 {
+			t.Fatalf("polled %v, asked %d times while the pass lock was taken", polled, asked)
+		}
+	case <-time.After(10 * time.Second):
+		r.a.passMu.Unlock()
+		t.Fatal("the ARI check waits for the issuance")
+	}
+	if p := plans[d.Name]; p == nil || !p.nextARI.IsZero() {
+		t.Fatalf("a skipped check must stay due: %+v", p)
+	}
+	r.a.passMu.Unlock()
+
+	if _, polled := r.a.plan(t.Context(), d, plans, true); !polled || asked != 1 {
+		t.Fatalf("polled %v, asked %d times once the lock is free", polled, asked)
+	}
+	if !r.a.passMu.TryLock() {
+		t.Fatal("the ARI check kept the pass lock")
+	}
+	r.a.passMu.Unlock()
+}

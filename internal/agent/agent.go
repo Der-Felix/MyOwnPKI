@@ -56,9 +56,13 @@ type Agent struct {
 	obtainForTest   func(context.Context, Deployment) (*Material, error)
 	runHookForTest  func(context.Context, string) error
 	openRootForTest func(string) (*os.Root, error)
-	reportWake      chan struct{}
-	runMu           sync.Mutex
-	ariForTest      func(context.Context, *x509.Certificate) (renewalWindow, error)
+	// newDNSProvider builds the provider of a dns-01 issuance (dns_seam.go);
+	// nil is the real one. dns holds what tests tune.
+	newDNSProvider dnsProviderFactory
+	dns            dnsTuning
+	reportWake     chan struct{}
+	runMu          sync.Mutex
+	ariForTest     func(context.Context, *x509.Certificate) (renewalWindow, error)
 	// Random returns a value in [0,1); tests inject stable independent streams.
 	Random func() float64
 

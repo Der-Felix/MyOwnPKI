@@ -126,4 +126,4 @@ the details of the settings are in
 - Get a certificate: [Certbot]({{ '/guides/certbot/' | relative_url }}).
 - Check that the validator can reach your hosts: [Split DNS]({{ '/guides/split-dns/' | relative_url }}).
 - Limit who may do what in the tenant: [Best practices]({{ '/best-practices/' | relative_url }}#say-in-domains-who-may-get-what).
-- dns-01 for wildcards works with ACME clients; the MyOwnPKI agent does not support dns-01 yet.
+- dns-01 for wildcards works with ACME clients, and with the MyOwnPKI agent since v0.3.7: [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). The agent's *Names it may order* must hold the identical `*.` pattern.

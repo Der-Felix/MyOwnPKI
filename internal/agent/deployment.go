@@ -70,6 +70,19 @@ type DeploymentSpec struct {
 	LowPorts      bool
 	ACMEDirectory string
 
+	// CheckName is the TLS server name of Check (check_name).
+	CheckName string
+	// DNSProvider names the dns_providers entry of a dns-01 deployment. The
+	// DNS fields below define that entry when it is new: they are written
+	// only for a name that agent.yaml does not have yet, and they must match
+	// the definition of one that it has (docs/PHASE3.md §13.1, step 42).
+	DNSProvider    string
+	DNSType        string
+	DNSCredentials string
+	DNSNameserver  string
+	DNSZone        string
+	DNSResolver    string
+
 	// Recipe names the recipe the spec was filled from ("" = none); it only
 	// changes what is printed.
 	Recipe        string
@@ -416,6 +429,7 @@ func AddDeployment(ctx context.Context, opts AddOptions) error {
 	if err != nil {
 		return err
 	}
+	s.warnCredentials(d, spec)
 	if spec.recipeExample {
 		_, _ = fmt.Fprintf(s.out, "Recipe %s: example recipe, test on a non-production host – it is written from the documentation of the service and not yet verified on a live host.\n", spec.Recipe)
 		for _, n := range spec.recipeNotes {
@@ -489,8 +503,16 @@ func (s *editSession) completeSpec(spec *DeploymentSpec) (Deployment, error) {
 		if d.Webroot != "" {
 			return d, errors.New("--webroot belongs to --challenge webroot")
 		}
+	case ChallengeDNS01:
+		// No port, no file: nothing to give the sandbox (docs/PHASE3.md §13.1).
+		if d.Webroot != "" {
+			return d, errors.New("--webroot belongs to --challenge webroot; dns-01 binds no port and writes no file")
+		}
 	default:
-		return d, errors.New("--challenge: standalone or webroot")
+		return d, errors.New("--challenge: standalone, webroot or dns-01")
+	}
+	if err := s.completeDNS(spec, &d); err != nil {
+		return d, err
 	}
 	switch {
 	case spec.ACMEDirectory != "":
@@ -645,6 +667,11 @@ func (s *editSession) editAdd(d Deployment, hooks []HookSpec, dirs, writeDirs []
 	}
 	for _, h := range hooks {
 		if err := ed.addHook(h.Name, h.Command); err != nil {
+			return err
+		}
+	}
+	if p, ok := s.newDNSProvider(d, spec); ok {
+		if err := ed.addDNSProvider(d.DNSProvider, p); err != nil {
 			return err
 		}
 	}

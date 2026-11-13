@@ -153,6 +153,7 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 		} else {
 			current, err = a.deployGroup(ctx, group, materials)
 		}
+		addNotices(current, materials)
 		for _, m := range materials {
 			clear(m.Key)
 		}
@@ -174,6 +175,25 @@ func (a *Agent) runPass(ctx context.Context, names []string, requested map[strin
 		}
 	}
 	return results, errors.Join(errs...)
+}
+
+// addNotices puts what an issuance could not clean up into the status of its
+// deployment. A deployed certificate keeps its state and carries the notice as
+// its last error text; a failed or rolled back one gets it in front of the
+// failure. The report schema is unchanged: the server shows LastError in every
+// state.
+func addNotices(results []DeploymentResult, materials map[string]*Material) {
+	for i := range results {
+		m := materials[results[i].Name]
+		if m == nil || m.Notice == "" {
+			continue
+		}
+		if results[i].LastError == "" {
+			results[i].LastError = m.Notice
+		} else {
+			results[i].LastError = clipDeployErrorText(m.Notice+"; "+results[i].LastError, deployErrorLimit)
+		}
+	}
 }
 
 func (a *Agent) applyResultHistory(current, previous []DeploymentResult, requested map[string]int64) {

@@ -41,6 +41,10 @@ type Material struct {
 	Fullchain   []byte            `json:"-"`
 	Key         []byte            `json:"-"`
 	Leaf        *x509.Certificate `json:"-"`
+	// Notice is a problem that does not make the issuance fail, for the
+	// deployment's status (a dns-01 record that could not be removed). It is
+	// free of secrets and of provider text.
+	Notice string `json:"-"`
 }
 
 func (*Material) String() string { return "certificate material (private key redacted)" }
@@ -155,6 +159,17 @@ func (a *Agent) Obtain(ctx context.Context, d Deployment) (*Material, error) {
 }
 
 func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
+	// dns-01 binds no port and writes no token: the provider replaces the
+	// responder. Building it first fails before any network traffic.
+	var dns *dnsGuard
+	if d.Challenge == ChallengeDNS01 {
+		var perr error
+		if dns, perr = a.dnsProviderFor(ctx, d); perr != nil {
+			return nil, fmt.Errorf("deployment %q: %w", d.Name, perr)
+		}
+		// Runs after the cleanup in obtainWithClient: wipes the credentials.
+		defer dns.close()
+	}
 	u, base, err := a.account()
 	if err != nil {
 		return nil, err
@@ -175,7 +190,30 @@ func (a *Agent) obtain(ctx context.Context, d Deployment) (*Material, error) {
 		return nil, err
 	}
 	defer closeClient()
-	return a.obtainWithClient(ctx, d, u, base, ac, roots)
+	m, err := a.obtainWithClient(ctx, d, u, base, ac, roots, dns)
+	// The cleanup of the records has run by now (obtainWithClient finishes the
+	// guard); what it could not remove belongs in the status of the deployment.
+	return withDNSNotice(m, err, dns)
+}
+
+// withDNSNotice adds the guard's notice to the result of an issuance: to the
+// material when it succeeded, in front of the error when it did not (the
+// status text is clipped at its end, and the notice must survive the clip).
+func withDNSNotice(m *Material, err error, g *dnsGuard) (*Material, error) {
+	if g == nil {
+		return m, err
+	}
+	notice := g.Notice()
+	if notice == "" {
+		return m, err
+	}
+	if err != nil {
+		return m, fmt.Errorf("%s; %w", notice, err)
+	}
+	if m != nil {
+		m.Notice = notice
+	}
+	return m, nil
 }
 
 // legoClient is shared by issuance and ARI. Both ignore environment trust
@@ -215,7 +253,7 @@ func (a *Agent) legoClient(ctx context.Context, u *accountUser) (*lego.Client, *
 	return ac, roots, transport.CloseIdleConnections, nil
 }
 
-func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUser, base string, ac *lego.Client, roots *x509.CertPool) (*Material, error) {
+func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUser, base string, ac *lego.Client, roots *x509.CertPool, dns *dnsGuard) (*Material, error) {
 	var err error
 	if u.reg == nil {
 		u.reg, err = ac.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
@@ -230,9 +268,21 @@ func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUs
 			return nil, werr
 		}
 	}
-	r := newResponder(d.Challenge, d.Webroot, a.cfg.Paths, a.st, a.StandaloneAddr, a.log)
-	if perr := ac.Challenge.SetHTTP01Provider(httpProvider{r}); perr != nil {
-		return nil, perr
+	if d.Challenge == ChallengeDNS01 {
+		// No responder, so no port 80 and no token file: the guarded provider
+		// answers the challenge, with the agent's own resolvers (§13.2, decision 8).
+		if cerr := a.connectDNS01(ctx, ac.Challenge.SetDNS01Provider, dns, a.cfg.DNSProviders[d.DNSProvider]); cerr != nil {
+			return nil, fmt.Errorf("deployment %q: %w", d.Name, cerr)
+		}
+		defer routeLegoLog(a.log, dns)()
+		// lego removes the records itself; this catches what it skipped, and
+		// runs also when the issuance was canceled.
+		defer dns.finish()
+	} else {
+		r := newResponder(d.Challenge, d.Webroot, a.cfg.Paths, a.st, a.StandaloneAddr, a.log)
+		if perr := ac.Challenge.SetHTTP01Provider(httpProvider{r}); perr != nil {
+			return nil, perr
+		}
 	}
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

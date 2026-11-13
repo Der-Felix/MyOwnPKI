@@ -164,6 +164,26 @@ Standalone binds port 80 and needs a capability for it; with webroot the web ser
 the challenge and the agent only writes a file. Always set a `check`, so that the agent compares what the
 host serves with what it deployed. How: [agent.yaml]({{ '/hosts/' | relative_url }}#agentyaml).
 
+### Keep the DNS credential small
+
+dns-01 needs a credential that can change your zone (since v0.3.7). Use it only where http-01 cannot
+work: wildcards, hosts without port 80, hosts behind NAT. Then keep it small:
+
+- **Scope.** A TSIG key that may only add and remove TXT records at `_acme-challenge.<name>` (a BIND
+  `update-policy`, not a key that may change the whole zone). A Cloudflare **token** for the one zone with
+  *Zone / Read* and *DNS / Edit* only, never the global API key (it is not supported anyway); check the
+  permission names against Cloudflare's current documentation.
+- **One credentials file per provider entry**, and one key or token per host if you can, so that a
+  compromised host costs you one revocation at the DNS side and not a rotation everywhere.
+- **Root-owned, mode 0600**, in `/etc/myownpki-agent/dns/`, never in `agent.yaml`, on a command line or in a
+  plain (unencrypted) pillar. The agent refuses a file with the wrong mode, owner or directory, and `config
+  check` shows why. With Salt, place it with `file.managed`, `mode: 0600` and `show_changes: False`.
+- **Wildcards on purpose.** A host that holds the key of `*.homelab.lan` can present itself as any name below
+  it. Add a `*.` pattern to *Names it may order* only for the agents that need it, and give the others exact
+  names.
+
+How: [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
+
 ### Keep paths and hooks small
 
 `paths` is the only place where the agent may write apart from its state directory; the agent derives the

@@ -492,3 +492,55 @@ func TestRecoverSelectedMemberOfReloadGroup(t *testing.T) {
 	}
 	r.assertFiles(t, r.old)
 }
+
+// A dns-01 record that could not be removed is not a failed issuance: the
+// certificate is deployed, and the deployment's status, which the agent
+// reports, says that a TXT record may remain.
+func TestRunPassPutsACleanupNoticeIntoTheStatus(t *testing.T) {
+	t.Parallel()
+	const notice = "dns-01 cleanup failed: a TXT record may remain at _acme-challenge.service0.homelab.lan; remove it by hand if it stays (the agent log has the details)"
+	r := newDeployRig(t, ProfileFile)
+	r.installOld(t)
+	r.a.obtainForTest = func(_ context.Context, d Deployment) (*Material, error) {
+		m := cloneMaterial(r.next[d.Name])
+		m.Notice = notice
+		return m, nil
+	}
+	results, err := r.a.RunPass(t.Context(), nil)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("results %+v, %v", results, err)
+	}
+	if results[0].State != "deployed" || results[0].LastError != notice {
+		t.Fatalf("result %+v", results[0])
+	}
+	stored, err := r.a.deploymentResults()
+	if err != nil || len(stored) != 1 || stored[0].LastError != notice {
+		t.Fatalf("stored %+v, %v", stored, err)
+	}
+	// What the agent reports to the server, without a change of the schema.
+	if got := reportDeployment(r.a.cfg.Deployments[0], stored[0]); got.State != "deployed" || got.LastError != notice {
+		t.Fatalf("report %+v", got)
+	}
+
+	// The next pass without a problem clears it.
+	r.a.obtainForTest = func(_ context.Context, d Deployment) (*Material, error) { return cloneMaterial(r.next[d.Name]), nil }
+	if results, err = r.a.RunPass(t.Context(), nil); err != nil || results[0].LastError != "" {
+		t.Fatalf("results %+v, %v", results, err)
+	}
+}
+
+func TestRunPassKeepsTheCleanupNoticeInFrontOfAFailure(t *testing.T) {
+	t.Parallel()
+	r := newDeployRig(t, ProfileFile)
+	r.installOld(t)
+	r.a.obtainForTest = func(_ context.Context, d Deployment) (*Material, error) {
+		return nil, fmt.Errorf("%s; %w", "dns-01 cleanup failed: a TXT record may remain at _acme-challenge.x.lan", errors.New(strings.Repeat("ACME problem ", 200)))
+	}
+	results, err := r.a.RunPass(t.Context(), nil)
+	if err == nil || len(results) != 1 || results[0].State != "failed" {
+		t.Fatalf("results %+v, %v", results, err)
+	}
+	if got := results[0].LastError; !strings.Contains(got, "a TXT record may remain at _acme-challenge.x.lan") || len(got) > deployErrorLimit {
+		t.Fatalf("status %q (%d bytes)", got, len(got))
+	}
+}

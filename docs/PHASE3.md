@@ -1619,6 +1619,180 @@ from §12.1 and §12.2 (the code decides):
   `pass-absent` after the enrollment, a pending host), `rpm` hosts, `arm64`, `config_source`, the gitfs
   install and other Salt versions.
 
+---
+
+## 13. dns-01 in the agent: v0.3.7
+
+Until now the agent proves a name with http-01 only: port 80 of the host, standalone or through a webroot.
+That fails for **wildcards** (`*.homelab.lan` can only be proven with dns-01, RFC 8555 §7.1.3), for hosts
+**without port 80** (a service on 8443 behind a firewall) and for hosts **behind NAT**. v0.3.7 gives a
+deployment the challenge `dns-01`: the agent writes the TXT record `_acme-challenge.<name>` through **RFC 2136**
+(BIND, Knot, PowerDNS with TSIG) or the **Cloudflare API**, waits until it is visible, lets the ACME
+server read it, and removes it again. The server only *reads* the TXT record (PLAN §10.1), so it stays
+unchanged unless step 41 finds a gap. The two secrets involved, a TSIG key and a Cloudflare token, decide
+the design: they live in a separate root-only file, never in `agent.yaml`, a log, a command line or a report.
+
+Goal of v0.3.7, measured on the live installation: a deployment `*.homelab.lan` plus `homelab.lan` gets
+its certificate through RFC 2136 against the internal DNS server, on a host whose port 80 is closed; the
+TXT records are gone afterwards; a wrong key fails with a message that contains no secret; a second
+deployment through Cloudflare works the same way (if the maintainer has a zone there).
+
+Where this plan differs from the task text and from PLAN §10.1 (read from the code and from `go list`; nothing was run):
+
+- **RFC 2136 does not come from lego.** lego's `providers/dns/rfc2136` imports `bodgit/tsig`, whose GSS-TSIG
+  part brings a Kerberos stack: **12 new modules** in the Linux build (`gokrb5` and five more `jcmturner/*`,
+  `hashicorp/go-multierror`, `go-uuid`, `errwrap`, `go-logr`, `jinzhu/copier`; Windows adds `alexbrainman/sspi`),
+  mostly last released between 2018 and 2023, for a feature (GSS-TSIG) this release does not offer. The plan
+  writes a small provider on `miekg/dns`, which is already in `go.mod` (indirect, through lego). **Cloudflare comes
+  from lego** and adds **no module** (its package imports only lego itself and `miekg/dns`). §13.3 and §13.7 have
+  the details and the way back.
+- **No proxy from the environment.** The task text says `HTTPS_PROXY`; the agent never reads it (the rules at the
+  top of this file, `site/cli.md`). The Cloudflare calls use `proxy:` of `agent.yaml`, like the ACME calls.
+- **Enrollment stays http-01.** ADR-18 names dns-01 as a proof of control, but `internal/agents/enroll.go` has
+  only the http-01 check. A host without port 80 enrolls with a join token and one approval; its certificates
+  then use dns-01. Enrollment by dns-01 is not part of this release (§13.6).
+- **The pages `site/learn/acme.md`, `site/guides/split-dns.md`, `choose.md`, an FAQ and a glossary do not exist** in
+  this repository. The pages to change are in step 43; the split-DNS text is `docs/OPERATIONS.md` §10.7.
+- **The server already does what the agent needs** (read from `internal/acme`): `challengeTypes` offers only dns-01 for
+  `*.` identifiers, a domain with `wildcards` must allow dns-01 (`internal/ca/domains.go`), the validator reads
+  `_acme-challenge.<name>` through `acme.resolver` and follows CNAMEs, and `acme_test.go` issues a wildcard.
+  One rule surprises: a **linked agent account may order `*.x` only if its names hold the identical pattern
+  `*.x`** (`agents.Matches`), and an enrollment pass grants the host name only (`initialNames`).
+
+### 13.1 Work plan
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 38 | 0.3.7 | **Schema, validation, seam.** `internal/agent/config.go`: `ChallengeDNS01 = "dns-01"`, `Config.DNSProviders` (`dns_providers`, a map from name to `DNSProvider`), `Deployment.DNSProvider` (`dns_provider`) and `Deployment.CheckName` (`check_name`), strict keys, the rules of §13.2 (wildcard names only with dns-01, the provider exists, no `webroot` with dns-01, path rules for `credentials_file`, bounds for `ttl` and the propagation values, a provider no deployment uses is a warning). A new `dns_seam.go`: the interface `dnsProvider` (lego's `challenge.Provider` plus `Timeout`), a factory field on `Agent` that tests replace, a default that fails with "not built" until step 40. `deploy_reload.go`: the TLS check uses a concrete SNI name (`serverName(d)`: `check_name`, else the first name without `*`; a deployment with only wildcard names and a `check` needs `check_name`). `acme.go`: no responder for dns-01. `edit.go`: `dns_providers` in `topLevelOrder` after `enrollment`. `dropin.go` needs nothing, dns-01 binds no port. **Guard for the dependency (§13.3):** a depguard rule in `.golangci.yml` and `cmd/myownpki/deps_test.go` (`go list -deps` of `./cmd/myownpki` and `./cmd/myownpki-ctl` contains neither `go-acme/lego` nor `miekg/dns`) | Table tests for every rule and refusal; an `agent.yaml` of 0.3.6 parses to the same `Config`; `task check`; `go list -deps ./cmd/myownpki` unchanged |
+| 39 | 0.3.7 | **Credentials files.** `dns_creds.go` with `dns_creds_unix.go` and `dns_creds_other.go`: `loadDNSCredentials(path, type)` opens with `O_NOFOLLOW`, then checks the *open* file: regular, mode 0600 or 0400, owner root or the agent's effective user, at most 4 KiB, parent directory not writable by group or others and owned by root or the agent's user (Windows: no mode check, like the token file). The format is YAML with strict keys (§13.2). Values are a `secret` type that prints as `[redacted]` in `%v`, `%+v`, `%#v`, slog, JSON and errors (like `Material`); a `redact()` helper removes them from any error text; buffers are cleared after the run. `agent config check` gets a block "DNS providers": type, state of the credentials file (ok, missing, wrong mode, wrong owner), exit 1 when a deployment uses a bad file; it never prints contents | Unit tests (mode 0644 and 0660, symlink, directory, foreign owner through an injected `stat`, too large, unknown key, empty value, a sentinel secret never appears in any formatted output or log line); `config check` output tests; `task check` on Linux and Windows |
+| 40 | 0.3.7 | **Providers, propagation, cleanup.** `dns_cloudflare.go` (lego `providers/dns/cloudflare`, its `Config` filled field by field: token and optional zone token from the file, TTL, timeouts, an own `http.Client` with the agent's `proxy`, the **system** trust store and TLS 1.2; no `BaseURL` key in production). `dns_rfc2136.go` (own, §13.2: UPDATE over TCP, TSIG hmac-sha256/384/512, response MAC verified, zone from `zone` or the SOA lookup). `dns_wrap.go` (the wrapper every provider runs in: refuses a domain that is not one of the deployment's names, checks the context before `Present` and in every propagation poll, runs `CleanUp` with `context.WithoutCancel` and 30 s, records cleanup errors, which lego only logs). *Built after the independent review (see the status paragraph below):* once the issuance is canceled all `CleanUp`s share one deadline of 12 s (`shutdownCleanupBudget`, below `TimeoutStopSec` of 30 s) and a record without time left is not sent but recorded; `dnsGuard.Notice` names the `_acme-challenge.<name>` records that may remain, `obtain` puts it into `Material.Notice` (in front of the error on failure) and `runPass` into the deployment's *Last error*; the build error of a provider is redacted before its secrets are wiped; the TSIG secret is signed from a copy so the wipe cannot race a late `CleanUp`; the Cloudflare provider reports a record that may exist although lego holds no ID. `acme.go`: `SetDNS01Provider` with `dns01.AddRecursiveNameservers` from `resolver` or `/etc/resolv.conf` and never lego's public fallback, `DisableAuthoritativeNssPropagationRequirement` and `PropagationWait` per `propagation`. `agent run` unsets every `LEGO_*`, `CLOUDFLARE_*`, `CF_*` and `RFC2136_*` variable and, after the review, `SSL_CERT_FILE` and `SSL_CERT_DIR` (hooks inherit the cleaned environment). The ARI lookup of a tick uses `TryLock` on `passMu` and is skipped while an issuance runs. `internal/testutil/dnsserver`: an in-process `miekg/dns` server (UDP and TCP on 127.0.0.1, zone store, UPDATE with TSIG, SOA, TXT and CNAME queries, a log of every message). `go.mod` (`miekg/dns` direct), `THIRD_PARTY.md` | Unit tests with a fake provider (order of `Present` and `CleanUp`, cleanup after failure and after cancel, wrong domain, `*.x` plus `x` give two records and two removals); the RFC 2136 provider against `dnsserver` (add, remove, idempotent, wrong secret, REFUSED, forged response MAC, zone mismatch, CNAME delegation); the Cloudflare provider against an `httptest` stub (zone lookup, create, delete by ID, token header, no token in any error); after the review also: a lost Cloudflare answer (warning, notice, no token or body in any text) and a refused create, two hanging records within the shared budget, the notice merged into the results, signing while the secret is wiped, the provider build error without a secret, both `SSL_CERT_*` variables removed, no ARI request while the lock is held, a CNAME target outside `zone` refused; `task check`, `task vuln`, `task ci:local` |
+| 41 | 0.3.7 | **End to end with the real server.** `internal/server/agent_dns01_test.go` on `newAgentEnv`: `cfg.ACME.Resolver` is the `dnsserver`, the domain has `Wildcards: true`, the agent's names hold `*.homelab.lan` and `homelab.lan`. The agent obtains both names through RFC 2136 and through the Cloudflare stub (its handler writes into the same zone store). Refusals: name missing in the agent's names, domain without wildcards, record never appears (timeout), wrong key. After every case the zone store holds no `_acme-challenge` record. A conformance test `TestConformanceAgentDNS01` (tag `conformance`) runs the same against the BIND of `test/conformance` (TSIG key in a 0600 file, `propagation: resolver`, `resolver` = `$CONF_DNS`), inside the existing job `ACME conformance` (`run.sh` already runs every `TestConformance*` of `internal/server`). **Server gaps:** none found by reading; this step proves it, and a gap found here is fixed here | `go test ./internal/server -run DNS01`, also on Windows and macOS (the matrix); the conformance job is green; `task ci:local` |
+| 42 | 0.3.7 | **`deployment add` and the Salt formula.** Flags `--dns-provider`, `--dns-type`, `--dns-credentials`, `--dns-nameserver`, `--dns-zone`, `--dns-resolver`, `--check-name` in `deployment_cli.go` and `DeploymentSpec`; `--challenge dns-01` then needs no webroot, no `paths` entry and no low-ports drop-in. A provider entry is written when `--dns-type` is given for a new name; a different definition for an existing name is refused ("edit agent.yaml by hand"). A missing or wrongly protected credentials file is a **warning** (Salt runs `deployment add` before the secret file may exist). `--dry-run` shows the diff. Salt: the seven options in `opts_string` of `deploy/salt/myownpki/map.jinja`, the README table, one test case `debian-dns01` and one refusal | Editor tests (comments kept, dry run, conflicting definition, `'*.homelab.lan'` quoting); the CI job `salt formula`; the users of `ParseDeploymentAdd` (`internal/web/hostadd_test.go`) stay green |
+| 43 | 0.3.7 | **Docs.** New `site/dns-01.md` (when to use it, the two providers, credentials file and permissions, DNS server settings with a BIND `update-policy` example, Cloudflare token scope, wildcards and the agent's names, propagation options, firewall, troubleshooting); `site/hosts.md` (flags, the wildcard line), `site/cli.md`, `site/recipes.md` (one note: any recipe works with `--challenge dns-01`), `site/troubleshooting.md` (errors of dns-01), `site/best-practices.md` (token scope, one file per provider), `site/hosts/salt.md` (the credentials file with `file.managed`, `mode: 0600`, `show_changes: False`), `site/upgrade.md` (agents first: an older agent refuses the new keys), `site/index.md`, `site/_data/nav.yml`, the README line; `docs/OPERATIONS.md` §10.7 (pointer: the agent now does it), §12.3 (schema), §12.4 (firewall rows) and a new §12.11; CHANGELOG `[0.3.7]` (undated); the live-test status in this section | `scripts/ci/site-check.sh`; every documented command checked against the code |
+| 44 | 0.3.7 | **Release.** Version bump as in `d30bf6f`: `DEFAULT_VERSION` in `deploy/install.sh` and `deploy/install-agent.sh`, `test/install/agent_functions_test.sh`, `api/openapi.yaml`, `deploy/docker-compose.yml`, README, `docs/OPERATIONS.md`, `docs/RELEASING.md`; CHANGELOG dated by the maintainer; PLAN §10.1, `CLAUDE.md` and the site after the tag | `docs/RELEASING.md` |
+
+**Live test for the maintainer** (names are examples; use a test host, not production):
+
+1. Update the server and one agent to v0.3.7. The server has no migration (`myownpki db status` unchanged). An agent of 0.3.6 or older refuses an `agent.yaml` with `dns_providers`: update the agent first.
+2. *ACME → Domains*: `homelab.lan` with wildcards and dns-01 on. *Agents → the host → Names it may order*: add `*.homelab.lan` and `homelab.lan` (a pass or the host name alone does not grant the wildcard).
+3. On the DNS server: a TSIG key (hmac-sha256) that may update only `_acme-challenge.homelab.lan` (BIND: `update-policy { grant acme-agent name _acme-challenge.homelab.lan. TXT; };`). On the host: `/etc/myownpki-agent/dns/homelab.yaml`, root, mode 0600. `myownpki-agent config check` is green; set the mode to 0640 and it fails with the mode, not the content; set it back.
+4. `deployment add wild --recipe nginx --name '*.homelab.lan' --name homelab.lan --challenge dns-01 --dns-provider homelab-dns --dns-type rfc2136 --dns-nameserver 192.0.2.53 --dns-credentials /etc/myownpki-agent/dns/homelab.yaml --check-name www.homelab.lan --dry-run`, then without `--dry-run`, restart, *Renew now*. The deployment turns *deployed*; `openssl s_client -connect host:443 -servername x.homelab.lan` shows both SANs; `dig +short TXT _acme-challenge.homelab.lan @192.0.2.53` is empty afterwards. Block port 80 from the PKI host and repeat: it still works.
+5. **Failure:** put a wrong secret in the file. The renewal fails with a message that names the provider and the problem; `journalctl -u myownpki-agent` and *Last error* on the agent page contain no part of the secret; no TXT record is left; the other deployments of the host keep renewing.
+6. **Rotation:** correct the file; the next attempt works without a restart.
+7. **Cloudflare** (only with a zone there): a token with *Zone:Read* and *DNS:Edit* for that one zone, a deployment with `--dns-type cloudflare`, with `proxy:` if the host needs one. Afterwards the zone holds no `_acme-challenge` TXT.
+8. **A wrong name:** a deployment for a name that is not in the agent's names fails with `rejectedIdentifier`, and the agent page already says "not covered by Names it may order".
+
+**Status of the live test (step 43):** pending. The documentation says so in three places: the status note of
+`site/dns-01.md`, the operations guide §12.11 (*What is tested*) and the CHANGELOG `[0.3.7]` (*Known
+limitations*). Not tested against the real thing: the Cloudflare code against the real API (CI uses a stub), a
+BIND `update-policy` on the maintainer's server (the conformance test uses `allow-update`), the default
+`propagation: authoritative` against name servers on port 53 (CI uses `propagation: resolver`), the Salt
+formula's dns-01 deployments on live minions, and macOS. **Docs against code, step 43:** when the pages were
+written, a failed cleanup was only logged (`dnsGuard.warn`; `Warnings()` was read by tests only) although the
+plan said "a warning in the status". The release branch then gained `dnsGuard.Notice` (`1c37850`), which puts
+`dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; ...` into the deployment's *Last
+error*, and the pages describe that; they must be read again if it changes. Step 43 also fixed the sentences
+"the agent does not do dns-01 yet" in `site/learn/acme.md`, `site/faq.md` and the guides for certbot, acme.sh,
+lego, Traefik and Caddy, split DNS and domains.
+
+**Independent security review (§13.4) and its fixes.** An independent reviewer read the diff and found no
+blocker; its six findings were fixed on the release branch before the release, with tests (seven fix commits:
+`d45f0d8`, `be331bf`, `1c37850`, `bef1989`, `95e68fb`, `ac29e88`, `2b03a3c`; `12b8e42` adds a test only).
+The fixes: the build error of a DNS provider is redacted before its secrets are wiped; the TSIG secret is
+signed from a copy, so the guard's wipe cannot race a `CleanUp` that timed out and still runs; a failed
+cleanup is reported as a notice in the deployment's *Last error*; a Cloudflare record that may exist although
+lego holds no ID is reported (network error, a non-JSON answer, 5xx or 2xx, not a refused 4xx); the cleanups
+share one 12 s budget while the agent stops; `SSL_CERT_FILE` and `SSL_CERT_DIR` are removed from the
+environment; the ARI lookup uses `TryLock` and is skipped while an issuance runs. The pages and the
+operations guide were aligned with this (`site/dns-01.md`, `site/troubleshooting.md`, §12.11, CHANGELOG).
+
+**Deviations from the plan text above, as built:**
+
+- **§13.2 decision 3, "30 s, not cancellable":** 30 s per `CleanUp` holds while the issuance runs; once it is
+  canceled all `CleanUp`s of the issuance share 12 s (below `TimeoutStopSec` of 30 s, the risk in §13.5), and a
+  record without time left is recorded as a failure instead of being sent.
+- **§13.2 decision 3, "a warning in the status":** built as `dnsGuard.Notice` in the deployment's *Last error*,
+  without a change of the report schema. The deployment stays `deployed`; on failure the notice stands in
+  front of the error; the next clean pass clears it. It names the records, never provider text.
+- **§13.4 "Resolver and environment":** besides `LEGO_*`, `CLOUDFLARE_*`, `CF_*` and `RFC2136_*` the agent
+  removes `SSL_CERT_FILE` and `SSL_CERT_DIR`, because the Cloudflare client trusts the system roots; the
+  hooks inherit the cleaned environment.
+- **§13.4 "Cloudflare":** a create that may have worked while lego holds no record ID is reported as a leftover
+  record; the plan only had the failed delete.
+- **Renewal tick:** the optional ARI lookup does not wait for `passMu` any more; the plan did not mention it.
+- **RFC 2136 `zone`:** with `zone` set, a CNAME target outside it was already refused by `zoneFor`; the test is new.
+
+### 13.2 Decisions
+
+The maintainer was not available; each row takes the cautious option. Review them together with §13.7.
+
+| Topic | Decision | Why |
+|---|---|---|
+| **1. Selecting dns-01** | A deployment gets `challenge: dns-01` and `dns_provider: <name>`. The name refers to an entry of the new top-level map `dns_providers`: `type` (`rfc2136` or `cloudflare`), `credentials_file` (absolute, required), `nameserver` (`host` or `host:port`, rfc2136 only, required), `zone` (rfc2136, optional), `ttl` (default 120; 120 to 3600 for Cloudflare, 30 to 3600 for rfc2136), `resolver` (`IP` or `IP:port` for SOA, CNAME and propagation queries, optional), `propagation` (`authoritative` default, `resolver`, `wait`), `propagation_wait` (seconds, default 0, at most 300), `propagation_timeout` (seconds, default 120, at most 600). Unknown keys are errors; `config check` reports every problem at once. `enrollment.challenge` stays standalone or webroot | Settings are shared by deployments, a deployment line stays short, two DNS servers are possible, and the secret is only *referenced* |
+| **1b. Wildcards** | `names` may hold `*.` plus a name of at least two labels (the rule of `agents.CheckPattern`) **only** with dns-01. `*.x` and `x` may be in one deployment (two authorizations, one TXT name, two values). The agent never asks the server about policy: the ACME server decides (domain `wildcards` on, dns-01 allowed, the agent's names hold the identical `*.x`). The refusal reaches the user as the server's `rejectedIdentifier`, and the agent page already marks names the agent may not order | One source of truth for policy (ADR-19); an agent-side copy of the server's rules would drift |
+| **2. Credentials** | `credentials_file` is read when an issuance starts, so a changed file works at the next renewal without a restart, and is cleared from memory afterwards. Checks as in step 39. Format: YAML, strict keys. `cloudflare`: `api_token` (required), `zone_token` (optional, only if you split Zone:Read from DNS:Edit). `rfc2136`: `tsig_key_name`, `tsig_algorithm` (`hmac-sha256` default, `hmac-sha384`, `hmac-sha512`; `hmac-md5` and `hmac-sha1` are refused), `tsig_secret` (base64, as in BIND's `key` statement). The path may not be under `/home`, `/root` or `/run/user` (`ProtectHome=yes` hides them from the agent), `state_dir`, `paths` or a deployment target. **No sandbox change:** `/etc` is readable under `ProtectSystem=strict` and the file is only read, so `10-paths.conf` and `sandbox sync` stay as they are. The legacy Cloudflare global API key is not supported | The token file check of `setup` is the model (regular file, 0600), plus owner and open-file checks because this secret is read at every renewal. A file beats an environment variable (visible in `/proc`) and `agent.yaml` (shared, often versioned). Salt places the file with `file.managed` in the host's own state (step 43) |
+| **3. Propagation, cleanup** | After `Present` the agent polls (every 2 s, until `propagation_timeout`) with lego's pre-check. `authoritative`: the TXT must be on every authoritative server of the zone (port 53; the lego default, robust against negative caching). `resolver`: only the configured resolver (hosts that cannot query authoritative servers). `wait`: no query, sleep `propagation_wait`. `propagation_wait` is added before the first check in every mode. `CleanUp` runs on success, failure, cancellation and timeout (30 s, not cancellable) and removes only this run's record. `Present` is idempotent (RFC 2136 adds an identical RR once; for Cloudflare a new record is made and removed by ID). A cleanup error becomes a log line and a warning in the status; the issuance keeps its result. **CNAME delegation is supported** (lego follows `_acme-challenge` CNAMEs; the update goes to the target zone, so the credentials must be valid there), tested once with `dnsserver` | A premature "ready" costs a failed authorization; a stuck record costs only tidiness. lego only logs cleanup errors (`prober.go`), so the wrapper has to record them |
+| **4. Network** | RFC 2136 needs outbound **TCP 53** to `nameserver` (updates are TCP only: signed, no size limit) and, for `authoritative`, UDP and TCP 53 to the zone's name servers. Cloudflare needs outbound **HTTPS** to `api.cloudflare.com`, through `proxy:` when set (never `HTTPS_PROXY`), with the **system** trust store (`ca_bundle` is the private root); a host without `ca-certificates` gets a hint. **No SSRF guard in the agent:** the guard protects the *server*, whose targets come from ACME clients. The agent's targets (nameserver, resolver, API) come from the root-owned `agent.yaml`, and the TXT name is built from the deployment's names, which the wrapper checks against what the ACME server returns | The agent is the client; its network inputs are as trusted as its hooks. The wrapper closes the one remote input, an authorization for a name nobody asked for |
+| **5. Tests** | A seam (`dnsProvider` factory on `Agent`) and a fake for unit tests. For integration without real providers, `miekg/dns` is already in `go.mod`: `internal/testutil/dnsserver` (imported by tests only) is both the RFC 2136 server and the zone store the ACME server reads (`acme.resolver`); the Cloudflare stub is an `httptest` server writing into that store. All of it runs on Windows, macOS and Linux. lego's authoritative check uses port 53 only, so the tests set `propagation: resolver`. CI: no new job; unit and e2e tests run in the matrix, the BIND test inside `ACME conformance` | Reuses what exists, adds no test dependency and no job |
+| **6. Server** | No change planned. Step 41 re-checks wildcard orders for a linked account, `validReport` with `challenge = "dns-01"` (bounded string, accepted today) and the UI | A protocol or schema change would break mixed fleets |
+| **7. UI, docs, Salt** | The *Add host* assistant is **not** extended: it ends in a pasted command and cannot place a secret file safely, its enrollment check is http-01, and it takes exact names only. Admins run `deployment add` by hand after the assistant (the page says so). The formula passes the new options as flags and does **not** manage secrets | Secrets belong to the host's own state or to the admin, not into a generated command |
+| **8. lego's resolver state** | lego keeps the resolver list and the DNS timeout in package variables. The agent sets them before every issuance (`resolver`, else `/etc/resolv.conf`, else an error) and never uses lego's built-in fallback to public resolvers, which would send internal names to the internet. Issuances are serialized by `passMu` | A silent fallback leaks internal names; state left by another provider would query the wrong server |
+
+### 13.3 Dependencies
+
+Measured on this branch with a probe module (the same `go.mod`, a program using the packages; `-s -w`, linux/amd64): the agent is 11.9 MB today. lego `dns01` alone: 7,676,064 bytes; plus lego Cloudflare **+77,824**; plus lego RFC 2136 **+118,784** more. The sizes are small; the module count is the real cost.
+
+| Module / package | Version (date) | License | Decision |
+|---|---|---|---|
+| `github.com/go-acme/lego/v4`: `challenge/dns01`, `providers/dns/cloudflare` | v4.35.2 (2026-04-24, pinned already) | MIT | **use**; no new module, no version change; the `THIRD_PARTY.md` row changes (its text "No DNS provider ... is built in") |
+| `github.com/miekg/dns` | v1.1.72 (2026-01-22, pinned already) | BSD-3-Clause | indirect becomes direct (own RFC 2136 provider, test server); no new module |
+| lego `providers/dns/rfc2136` | v4.35.2 | MIT | **not used.** It brings `bodgit/tsig` v1.2.2 (2023-02, BSD-3), `jcmturner/gokrb5/v8` v8.4.4 (2023-02), `aescts`, `dnsutils`, `goidentity`, `rpc` (2020 to 2022, Apache-2.0), `gofork` (BSD-3), `hashicorp/go-uuid`, `go-multierror`, `errwrap` (MPL-2.0), `go-logr/logr` v1.4.3 (Apache-2.0), `jinzhu/copier` v0.4.0 (MIT) and, on Windows, `alexbrainman/sspi` (2018, BSD-3). All permissive and older than two weeks, but a Kerberos stack the release would not use, and the provider defaults to `hmac-sha1` |
+
+**Keeping it out of the server binary.** Today `go list -deps ./cmd/myownpki` shows no lego and no `miekg/dns`; only `internal/recipe` is shared with the agent. The new code lives in `internal/agent` (imported by `cmd/myownpki-agent`); server tests import it, which does not reach the server binary. Two guards in step 38: a depguard rule and a test that runs `go list -deps` on the server and on `myownpki-ctl`. `task vuln` must stay green.
+
+### 13.4 Security review (an independent reviewer checks, with the diff only)
+
+- **Credentials:** opened without following symlinks and checked on the open descriptor (mode, owner, parent directory, size); a failing check names the problem, never the content; no secret in `agent.yaml`, `agent status`, the report to the server (`LastError`, `Challenge`), slog, lego's log, panics or a `%v` of any struct; `credentials_file` never inside `paths` or `state_dir`.
+- **TXT cleanup:** on every path (success, error, cancel, timeout, a panic in a provider, SIGTERM during the wait); only this run's value is removed; the e2e tests assert an empty zone; SIGKILL leaves a record (§13.5).
+- **Logging and errors:** provider errors go through `redact()`; no Cloudflare response body in logs; no `LEGO_DEBUG_*` (the agent unsets `LEGO_*`).
+- **The wrapper:** refuses a domain that is not a deployment name (a compromised ACME server cannot make the agent write another name's record); `*.x` maps to `_acme-challenge.x`.
+- **RFC 2136:** the TSIG MAC of the response is verified, algorithm list, TCP only, zone check, no UPDATE outside the computed zone; the docs' `update-policy` is as narrow as the product allows.
+- **Cloudflare:** token scope documented as one zone; the HTTP client uses system roots, TLS 1.2, a 30 s timeout and `proxy:` only; no `BaseURL` key.
+- **Resolver and environment:** no fallback to public resolvers; the environment never feeds a provider.
+- **Dependency tree:** the `go list -m all` diff is empty except `miekg/dns` becoming direct; `govulncheck -mode=binary` on the agent; the server binary has neither package.
+- **Config and sandbox:** unknown keys refused; paths hidden by `ProtectHome` refused; no new writable path; the `systemd-analyze security` result is unchanged.
+
+### 13.5 Risks
+
+| Risk | Handling |
+|---|---|
+| A wrong default resolver, or a firewall that blocks port 53 to the authoritative servers, hides the record from the check | `propagation: resolver` or `wait` come first in troubleshooting; the error names the failed check and the server |
+| SIGKILL, a power cut or `TimeoutStopSec` (30 s) during the wait leaves a TXT record | Harmless to validation (the server accepts any matching value) but untidy; the Cloudflare record IDs live in memory only, so no later run removes it. Documented; a sweep is a later idea (§13.6) |
+| lego's package variables bleed between providers | Set before every issuance under `passMu` (decision 8); a test issues with two providers in a row |
+| Our own RFC 2136 code has a bug a mature library would not | One UPDATE message; tested against `miekg`'s server and against BIND in CI; lego's package remains the way back (§13.7) |
+| An agent of 0.3.6 reads an `agent.yaml` with the new keys and refuses to start | `KnownFields(true)` is deliberate (typos are errors). `site/upgrade.md`: update the agents first |
+| The wildcard certificate exists but nobody may order it | The agent page says "not covered by Names it may order"; docs and live-test step 2 |
+| Windows DNS (Active Directory) accepts only GSS-TSIG updates | Not supported; the docs say so and name the options (BIND or Knot for the ACME zone, or a CNAME delegation of `_acme-challenge`) |
+
+### 13.6 Not in v0.3.7
+
+- **GSS-TSIG (Kerberos, Active Directory DNS)**, other lego providers, **the legacy Cloudflare global API key**, DNS updates over HTTPS or TLS.
+- **Enrollment by dns-01** (the ADR-18 text): the enrollment check stays http-01.
+- **Extending the Add host assistant** (secrets, wildcards, a dns-01 choice) and a server-side view of the DNS provider per deployment.
+- **A sweep of stale `_acme-challenge` records**, hooks around the DNS step, and one provider per name inside a deployment.
+- **A new CI job.** No ADR change; PLAN §10.1 gets a note after the tag (RFC 2136 is an own provider on `miekg/dns`).
+
+### 13.7 Open points for the maintainer
+
+1. **Own RFC 2136 provider instead of lego's** (§13.3): fewer modules and no Kerberos, but our code. The way back is one file (`dns_rfc2136.go` returns lego's provider) plus the 12 modules in `go.mod`; say so before step 40 if you prefer lego's.
+2. **Active Directory DNS** is common in homelabs (`homelab.lan` may be one). If yours is, RFC 2136 needs another DNS server for the ACME zone, or a CNAME delegation, or GSS-TSIG in a later release.
+3. **Default `propagation: authoritative`** needs port 53 to the zone's name servers. Say if your network blocks that.
+4. **Credentials file rules** (mode 0600 or 0400, owner root or the agent's user, outside `/home`, `/root` and `/run/user`, not under `paths` or `state_dir`) are stricter than the token file. Confirm.
+5. **`check_name`** is a key I added for the local TLS check, because the SNI `*.homelab.lan` is not a host name; the alternative (no check for wildcard-only deployments) loses the rollback guard.
+6. **Not verified:** the shape of the Cloudflare API calls for the stub (read from `providers/dns/cloudflare/internal` in step 40), whether the BIND `update-policy` line works on your server (live test 3), and the `graphify` graph was absent in this worktree (`graphify-out/` does not exist), so every reference above comes from direct file reads.
+
+---
+
 ## 14. Charts, reports and analysis: v0.3.8
 
 v0.3.8 answers "what is the state of the PKI, and why?" in the web UI: **charts** on the dashboard, a calm

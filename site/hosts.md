@@ -281,10 +281,12 @@ sudo systemctl restart myownpki-agent
 | `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Defaults for the service, see [Recipes]({{ '/recipes/' | relative_url }}). Every other flag overrides them. |
 | `--name FQDN` (repeat) | Certificate names. Default: the host name of `agent.yaml`. |
 | `--profile nginx` or `file`, `--dir DIR`, `--certificate`, `--chain`, `--fullchain`, `--key FILE` | Where the files go: `--dir` for the nginx profile, the file flags for the file profile |
-| `--challenge webroot` or `standalone`, `--webroot DIR` | Default: what the enrollment uses |
+| `--challenge webroot`, `standalone` or `dns-01`, `--webroot DIR` | Default: what the enrollment uses. **A wildcard name (`--name '*.homelab.lan'`) needs `dns-01`**, which needs no port 80 and no `--webroot`; see below. |
 | `--owner`, `--group`, `--key-mode` | Local ownership and mode of the key (no rights for others) |
 | `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | Hooks: no shell, the first element is an absolute path. An identical command line is reused, so deployments of one service share one reload and one rollback group. |
 | `--check HOST:PORT` | The local TLS check; implicit TLS only, so a STARTTLS port (25, 143, 587) cannot be checked |
+| `--check-name NAME` | The server name (SNI) of that check. Needed when every name is a wildcard: `*.homelab.lan` is not a name a server can be asked for. Default: the first name that is not a wildcard. |
+| `--dns-provider NAME`, `--dns-type rfc2136` or `cloudflare`, `--dns-credentials FILE`, `--dns-nameserver HOST[:PORT]`, `--dns-zone ZONE`, `--dns-resolver IP[:PORT]` | For `--challenge dns-01` (since v0.3.7): which provider entry to use, and how to define a new one. All explained on [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). |
 | `--sandbox-write DIR` (repeat), `--low-ports` | Directories the hooks may write (nginx: `/var/log/nginx`), and ports below 1024 for the hooks |
 | `--acme-directory URL` | Needed when `agent.yaml` has no `acme_directory` yet |
 | `--create-dirs`, `--restart`, `--dry-run`, `--config FILE` | Create missing directories; restart the agent afterwards; show the diff only; another file |
@@ -308,6 +310,23 @@ renders the whole file and then runs `sandbox sync`. A rendered file overwrites 
 [Salt formula]({{ '/hosts/salt/' | relative_url }}) offers both and refuses to mix them: the pillar has
 either `deployments` (it calls `deployment add`) or `config_source` (it renders the file and runs
 `sandbox sync`).
+
+### A wildcard or a host without port 80: dns-01
+
+Since v0.3.7 a deployment can prove its names through a DNS TXT record instead of port 80. That is the
+only way to get a **wildcard** certificate, and it works for a service without port 80 and for a host
+behind NAT. The agent writes the record through RFC 2136 (BIND, Knot, PowerDNS with a TSIG key) or through
+the Cloudflare API, with the secret in a root-only file of its own that is never part of `agent.yaml`.
+Run `deployment add` by hand for it: the *Add host* assistant does not offer dns-01.
+
+```bash
+sudo /usr/local/bin/myownpki-agent deployment add wild --recipe nginx --name '*.homelab.lan' --name homelab.lan --challenge dns-01 --dns-provider homelab-dns --dns-type rfc2136 --dns-nameserver 192.0.2.53 --dns-credentials /etc/myownpki-agent/dns/homelab.yaml --check-name www.homelab.lan --dry-run
+```
+
+The agent's *Names it may order* on the server must list `*.homelab.lan` **and** `homelab.lan` (a wildcard
+is covered only by the identical pattern), and the domain must allow wildcards. The whole procedure, the
+DNS server and Cloudflare settings and the errors are on
+[dns-01 and wildcard certificates with the agent]({{ '/dns-01/' | relative_url }}).
 
 ## agent.yaml
 
@@ -368,12 +387,15 @@ nginx server block.
 | `sandbox.low_ports` | `true`: install `20-low-ports.conf`; `false`: remove it; unset: install it for any standalone challenge, otherwise leave it as found |
 | `deployments[].name` | Lower-case letters, digits and `-`, unique |
 | `deployments[].profile` | `nginx` (writes `fullchain.pem` and `privkey.pem` into `dir`) or `file` (explicit target files) |
-| `deployments[].names` | 1 to 100 DNS names for the certificate. Each must be covered by the agent's *Names it may order* on the server. |
-| `deployments[].challenge`, `webroot` | `standalone` or `webroot` for the ACME http-01 of this certificate; the webroot lies below `paths` |
+| `deployments[].names` | 1 to 100 DNS names for the certificate. Each must be covered by the agent's *Names it may order* on the server. A name that starts with `*.` (a wildcard, at least two labels after it) is allowed only with `challenge: dns-01`. |
+| `deployments[].challenge`, `webroot` | `standalone` or `webroot` for the ACME http-01 of this certificate; the webroot lies below `paths`. `dns-01` (since v0.3.7) proves the names through a DNS TXT record: no port 80, no `webroot`, and it needs `dns_provider`. |
+| `deployments[].dns_provider` | With `dns-01`: the name of an entry in `dns_providers` |
 | `deployments[].files` | For `file`: `key` and `certificate` or `fullchain`, optionally `chain` |
 | `deployments[].owner`, `group`, `key_mode` | Local ownership and an octal mode without rights for others (for example `"0600"` or `"0640"`) |
 | `deployments[].test_hook`, `reload_hook` | Names from `hooks`: run before the reload (for example `nginx -t`) and the reload itself |
 | `deployments[].check` | `host:port` of the local TLS endpoint. After the reload the agent connects with SNI and compares the served certificate with the deployed one. |
+| `deployments[].check_name` | The SNI of that check, a concrete host name. Needed when every name is a wildcard; default: the first name that is not a wildcard. |
+| `dns_providers` | A map from a name to how the agent writes the TXT record of a dns-01 challenge: `type` (`rfc2136` or `cloudflare`), `credentials_file` (absolute path of a root-only file with the secret), `nameserver`, `zone`, `ttl`, `resolver`, `propagation`, `propagation_wait`, `propagation_timeout`. It holds no secret. Every key is in [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}#agentyaml-dns_providers). |
 
 For files you manage yourself, use the `file` profile:
 
@@ -485,13 +507,15 @@ sudo systemctl daemon-reload && sudo systemctl restart myownpki-agent
 | Agent host | Server | 8444/tcp | The agent channel, mutual TLS |
 | Agent host | Server | The ACME HTTPS port (443 or your reverse proxy) | Certificate orders |
 | **Server** | **Agent host** | **80/tcp** | **http-01** for enrollment and for every order |
+| Agent host | The DNS server, or `api.cloudflare.com` | 53/tcp, or 443/tcp | Only with dns-01: the agent writes the TXT record. More ports (the resolver, the name servers) are in [the firewall table]({{ '/dns-01/' | relative_url }}#firewall). |
 
 The agent only makes outbound connections; the server never connects to an administrative port on the
 agent. But http-01 means the **server** fetches `/.well-known/acme-challenge/…` from port 80 of the
 host, so that port must be open from the server to the host, a firewall on the host (nftables, ufw)
 included, and the name must resolve to the host from the point of view of the server
 (`acme.resolver`). In webroot mode the web server on port 80 must answer the challenge directory; in
-standalone mode port 80 is bound only while a check runs.
+standalone mode port 80 is bound only while a check runs. A deployment with `challenge: dns-01` needs
+no port 80 at all (but the host still enrolls with http-01, or with an approval).
 
 ## Renewal, "Renew now" and what the agent reports
 

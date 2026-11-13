@@ -209,8 +209,11 @@ The `crl` alert tells you when a CRL is not renewed in time
 ### Does it issue wildcard certificates?
 
 Yes, in two ways. In the UI and API the `wildcard` preset issues `*.homelab.lan` plus the base name. Over
-ACME a domain may allow wildcards; they are off by default and proven by **dns-01** only. The agent cannot
-do this yet: dns-01 in the agent (RFC 2136 and Cloudflare) is the next planned release. A wildcard covers
+ACME a domain may allow wildcards; they are off by default and proven by **dns-01** only. The agent does
+this since v0.3.7: a deployment with `challenge: dns-01` writes the TXT record through RFC 2136 (BIND, Knot,
+PowerDNS with a TSIG key) or the Cloudflare API; see
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). An ACME client such as certbot, lego or
+acme.sh with a DNS plug-in of its own works too, also for providers the agent does not have. A wildcard covers
 exactly one label, so `*.homelab.lan` does not cover `a.b.homelab.lan`. See
 [operations guide §10.5]({{ '/reference/operations/' | relative_url }}#105-domains-approvals-and-eab-keys).
 
@@ -327,10 +330,20 @@ connects to an administrative agent port. See [Security]({{ '/reference/security
 
 ### Can I use the agent on a host without port 80 or behind NAT?
 
-Not yet. Enrollment and http-01 need the server to reach port 80 of the host under its name. dns-01 in
-the agent, for hosts without port 80, behind NAT and for wildcards, is the next planned release
-(v0.3.7). Until then such a host can use an ACME client with a DNS plugin
+Yes, for the certificates, since v0.3.7. A deployment with `challenge: dns-01` proves its names through a
+DNS TXT record, so it needs no port 80 and no connection from the server to the host; it also gets
+wildcards. See [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). The agent still
+**enrolls** with http-01 or with an approval: a host without port 80 enrolls with a join token and one
+approval in the UI. For a DNS provider the agent does not have (only RFC 2136 and Cloudflare are built in),
+use an ACME client with a DNS plug-in
 ([operations guide §10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network)).
+
+### Which DNS providers can the agent use for dns-01?
+
+Two: **RFC 2136** (dynamic updates with a TSIG key, as BIND, Knot and PowerDNS offer) and **Cloudflare** (an
+API token). Not supported: Active Directory DNS (it needs GSS-TSIG), other providers and the legacy Cloudflare
+global API key. The secret lives in a root-only file of its own, never in `agent.yaml`. See
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
 
 ### How do I roll the agent out to many hosts?
 
@@ -436,7 +449,7 @@ See [Verify a download]({{ '/reference/security/' | relative_url }}#verify-a-dow
 
 ### What comes next?
 
-The plan lists dns-01 in the agent (v0.3.7), a public trust portal
-(v0.3.9), a preview before issuance and versioned settings (v0.3.10), Apache and HAProxy profiles and
-guides inside the UI (v0.3.11), then a quality round and a beta before 1.0. The order is firmer than the
-numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).
+The plan lists a public trust portal (v0.3.9), a preview before issuance and versioned settings (v0.3.10),
+Apache and HAProxy profiles and guides inside the UI (v0.3.11), then a quality round and a beta before
+1.0. dns-01 in the agent (v0.3.7) and the charts, reports and analysis pages (v0.3.8) are released. The
+order is firmer than the numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).
