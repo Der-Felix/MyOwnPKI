@@ -67,27 +67,42 @@ func TraitsOf(der []byte) (Traits, error) {
 // The work grows with the number of valid certificates; the analysis cache
 // keeps the result for a minute.
 func (e *Engine) CertificateTraits(ctx context.Context, who keys.Who) (map[string]Traits, error) {
+	return e.certificateTraits(ctx, who, traitsPageSize)
+}
+
+func (e *Engine) certificateTraits(ctx context.Context, who keys.Who, pageSize int64) (map[string]Traits, error) {
 	now := e.now()
 	q := pkidb.New(e.PKI)
 	may, err := e.readableCAs(ctx, q, who, now)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.ListValidCertificateDERs(ctx, now.Format(dbTime))
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]Traits, len(rows))
-	for _, r := range rows {
-		if !may(r.CaID.String) {
-			continue
+	// The DER is read in pages by ID, so memory holds one page of DER at a
+	// time and the map of the small results.
+	out := map[string]Traits{}
+	after := ""
+	for {
+		rows, err := q.ListValidCertificateDERs(ctx, pkidb.ListValidCertificateDERsParams{Now: now.Format(dbTime), AfterID: after, PageSize: pageSize})
+		if err != nil {
+			return nil, err
 		}
-		if t, perr := TraitsOf(r.CertDer); perr == nil {
-			out[r.ID] = t
+		for _, r := range rows {
+			if !may(r.CaID.String) {
+				continue
+			}
+			if t, perr := TraitsOf(r.CertDer); perr == nil {
+				out[r.ID] = t
+			}
 		}
+		if int64(len(rows)) < pageSize {
+			return out, nil
+		}
+		after = rows[len(rows)-1].ID
 	}
-	return out, nil
 }
+
+// traitsPageSize is how many certificates CertificateTraits reads at once.
+const traitsPageSize int64 = 500
 
 // Origin tells which source issued a certificate (docs/PHASE3.md D6).
 type Origin struct {
@@ -175,31 +190,37 @@ type AccountActivity struct {
 }
 
 // ACMEAccountActivity lists the newest ACME accounts (at most
-// MaxActivityAccounts) with their last order, for the analysis. Accounts
-// belong to no CA, so like the ACME pages it needs a tenant-wide role.
-func (e *Engine) ACMEAccountActivity(ctx context.Context, who keys.Who) ([]AccountActivity, error) {
-	if err := e.authorize(who, authz.ReadPKI, "", e.now()); err != nil {
-		return nil, err
+// MaxActivityAccounts) with their last order, for the analysis. truncated is
+// true when there are older accounts that were not read: whoever judges
+// "no order for 90 days" must then say so for the rest. Accounts belong to no
+// CA, so like the ACME pages it needs a tenant-wide role.
+func (e *Engine) ACMEAccountActivity(ctx context.Context, who keys.Who) (accounts []AccountActivity, truncated bool, err error) {
+	if aerr := e.authorize(who, authz.ReadPKI, "", e.now()); aerr != nil {
+		return nil, false, aerr
 	}
-	rows, err := pkidb.New(e.PKI).ListACMEAccountActivity(ctx, MaxActivityAccounts)
+	// One more than the bound tells whether there are older accounts.
+	rows, err := pkidb.New(e.PKI).ListACMEAccountActivity(ctx, MaxActivityAccounts+1)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if len(rows) > MaxActivityAccounts {
+		rows, truncated = rows[:MaxActivityAccounts], true
 	}
 	out := make([]AccountActivity, 0, len(rows))
 	for _, r := range rows {
 		created, err := time.Parse(time.RFC3339, r.CreatedAt)
 		if err != nil {
-			return nil, fmt.Errorf("ACME account %s created_at %q: %w", r.ID, r.CreatedAt, err)
+			return nil, false, fmt.Errorf("ACME account %s created_at %q: %w", r.ID, r.CreatedAt, err)
 		}
 		a := AccountActivity{ID: r.ID, Status: r.Status, AgentLinked: r.AgentID != "", CreatedAt: created.UTC()}
 		if r.LastOrderAt != "" {
 			last, err := time.Parse(time.RFC3339, r.LastOrderAt)
 			if err != nil {
-				return nil, fmt.Errorf("ACME account %s order time %q: %w", r.ID, r.LastOrderAt, err)
+				return nil, false, fmt.Errorf("ACME account %s order time %q: %w", r.ID, r.LastOrderAt, err)
 			}
 			a.LastOrderAt = last.UTC()
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	return out, truncated, nil
 }

@@ -25,7 +25,7 @@ type Engine interface {
 	CertificateTraits(ctx context.Context, who keys.Who) (map[string]ca.Traits, error)
 	CertificateOrigins(ctx context.Context, who keys.Who) (map[string]ca.Origin, error)
 	CertificateNames(ctx context.Context, who keys.Who) ([]ca.CertName, error)
-	ACMEAccountActivity(ctx context.Context, who keys.Who) ([]ca.AccountActivity, error)
+	ACMEAccountActivity(ctx context.Context, who keys.Who) (accounts []ca.AccountActivity, truncated bool, err error)
 	ListDomains(ctx context.Context, who keys.Who) ([]ca.Domain, error)
 }
 
@@ -133,9 +133,12 @@ func Load(ctx context.Context, d Deps, now time.Time) (Snapshot, error) {
 	if s.Domains, err = d.Engine.ListDomains(ctx, who); err != nil {
 		return s, fmt.Errorf("analysis: domains: %w", err)
 	}
-	accounts, err := d.Engine.ACMEAccountActivity(ctx, who)
+	accounts, truncated, err := d.Engine.ACMEAccountActivity(ctx, who)
 	if err != nil {
 		return s, fmt.Errorf("analysis: ACME accounts: %w", err)
+	}
+	if truncated {
+		s.AccountsLimit = ca.MaxActivityAccounts
 	}
 	for _, a := range accounts {
 		s.Accounts = append(s.Accounts, Account{ID: a.ID, Status: a.Status, AgentLinked: a.AgentLinked, CreatedAt: a.CreatedAt, LastOrderAt: a.LastOrderAt})

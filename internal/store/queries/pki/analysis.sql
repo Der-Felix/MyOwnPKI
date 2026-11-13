@@ -5,14 +5,17 @@
 
 -- The DER of every certificate that is valid at now (not revoked, ends after
 -- now), for the key size and the signature algorithm. The analysis cache
--- keeps the result of the parsing for a minute.
+-- keeps the result of the parsing for a minute. Read in pages by id (keyset):
+-- pass the last id of the previous page, the empty string for the first.
 -- name: ListValidCertificateDERs :many
 SELECT c.id, c.ca_id, c.cert_der
 FROM certificates c
 WHERE c.not_after > CAST(sqlc.arg(now) AS TEXT)
+  AND c.id > CAST(sqlc.arg(after_id) AS TEXT)
   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.certificate_id = c.id)
   AND NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by))
-ORDER BY c.id;
+ORDER BY c.id
+LIMIT sqlc.arg(page_size);
 
 -- Where each issued certificate came from: the account of the ACME order that
 -- points at it and that account's agent, both '' if there is none (UI and API

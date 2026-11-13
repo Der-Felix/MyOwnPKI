@@ -658,6 +658,12 @@ func UnusedACMEAccount(s Snapshot) Result {
 			Recommendation: "An ACME client deactivates its account (RFC 8555 section 7.3.6); the UI cannot yet. Until then it only shows here.",
 		})
 	}
+	// With more accounts than were read, the older ones were not judged: the
+	// rule must not say "ok" for them. The number is not known, so it counts
+	// as one part that is unassessed.
+	if s.AccountsLimit > 0 {
+		return finish(findings, 1, fmt.Sprintf("only the newest %d accounts were checked.", s.AccountsLimit))
+	}
 	return finish(findings, 0, "")
 }
 

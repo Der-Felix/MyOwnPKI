@@ -2,6 +2,7 @@ package ca
 
 import (
 	"crypto/x509"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -38,6 +39,14 @@ func TestCertificateTraits(t *testing.T) {
 	}
 	if len(got) != 4 {
 		t.Errorf("%d traits, want 4", len(got))
+	}
+	// The DER is read in pages by ID: a page of 1 (a boundary at every row), 2
+	// and 4 (exactly full) and 5 give the same answer as the default.
+	for _, size := range []int64{1, 2, 4, 5} {
+		paged, perr := v.e.certificateTraits(t.Context(), tester, size)
+		if perr != nil || !maps.Equal(paged, got) {
+			t.Errorf("page size %d: %d traits, %v; want %d", size, len(paged), perr, len(got))
+		}
 	}
 
 	scoped := signedIn("cv", time.Time{}, authz.Binding{CA: "root", Role: authz.Viewer})
@@ -135,9 +144,12 @@ func TestACMEAccountActivity(t *testing.T) {
 	v.exec(t, `INSERT INTO acme_accounts (id, key_thumbprint, jwk, status, contact, created_at, created_ip, updated_at)
 		VALUES ('acc-idle', 'acc-idle', '{}', 'valid', '[]', ?1, '192.0.2.1', ?1)`, later)
 
-	got, err := v.e.ACMEAccountActivity(t.Context(), tester)
+	got, truncated, err := v.e.ACMEAccountActivity(t.Context(), tester)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if truncated {
+		t.Error("three accounts are not truncated")
 	}
 	if len(got) != 3 || got[0].ID != "acc-idle" {
 		t.Fatalf("accounts %+v", got)
@@ -157,10 +169,40 @@ func TestACMEAccountActivity(t *testing.T) {
 	}
 
 	scoped := signedIn("cv", time.Time{}, authz.Binding{CA: "issuing", Role: authz.Viewer})
-	if _, err := v.e.ACMEAccountActivity(t.Context(), scoped); err == nil {
+	if _, _, err := v.e.ACMEAccountActivity(t.Context(), scoped); err == nil {
 		t.Error("a CA-scoped viewer read the ACME accounts")
 	}
-	if _, err := v.e.ACMEAccountActivity(t.Context(), keys.Who{}); err == nil {
+	if _, _, err := v.e.ACMEAccountActivity(t.Context(), keys.Who{}); err == nil {
 		t.Error("nobody read the ACME accounts")
+	}
+}
+
+// TestACMEAccountActivityLimit: with more accounts than MaxActivityAccounts the
+// newest are returned and the answer says that older ones were left out; with
+// exactly that many it does not.
+func TestACMEAccountActivityLimit(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t)
+	v.chain(t, caOpts{})
+	insert := func(n int) {
+		// Account n is n seconds after the epoch of 2026-01-01, so the newest has the highest number.
+		v.exec(t, `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ?1)
+			INSERT INTO acme_accounts (id, key_thumbprint, jwk, status, contact, created_at, created_ip, updated_at)
+			SELECT printf('acc-%06d', i), printf('acc-%06d', i), '{}', 'valid', '[]',
+			       strftime('%Y-%m-%dT%H:%M:%SZ', 1767225600 + i, 'unixepoch'), '192.0.2.1', '2026-01-01T00:00:00Z' FROM seq`, n)
+	}
+	insert(MaxActivityAccounts)
+	got, truncated, err := v.e.ACMEAccountActivity(t.Context(), tester)
+	if err != nil || truncated || len(got) != MaxActivityAccounts {
+		t.Fatalf("exactly the limit: %d accounts, truncated %v, %v", len(got), truncated, err)
+	}
+	v.exec(t, `INSERT INTO acme_accounts (id, key_thumbprint, jwk, status, contact, created_at, created_ip, updated_at)
+		VALUES ('acc-newest', 'acc-newest', '{}', 'valid', '[]', '2027-01-01T00:00:00Z', '192.0.2.1', '2027-01-01T00:00:00Z')`)
+	got, truncated, err = v.e.ACMEAccountActivity(t.Context(), tester)
+	if err != nil || !truncated || len(got) != MaxActivityAccounts {
+		t.Fatalf("one over the limit: %d accounts, truncated %v, %v", len(got), truncated, err)
+	}
+	if got[0].ID != "acc-newest" || got[len(got)-1].ID == "acc-000001" {
+		t.Errorf("the oldest account must be the one left out: first %s, last %s", got[0].ID, got[len(got)-1].ID)
 	}
 }

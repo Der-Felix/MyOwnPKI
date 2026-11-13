@@ -228,13 +228,14 @@ type fakeEngine struct {
 	who   []keys.Who
 	err   error
 
-	valid, all []ca.CertificateInfo // newest first
-	traits     map[string]ca.Traits
-	origins    map[string]ca.Origin
-	names      []ca.CertName
-	accounts   []ca.AccountActivity
-	domains    []ca.Domain
-	cas        []ca.CAInfo
+	valid, all        []ca.CertificateInfo // newest first
+	traits            map[string]ca.Traits
+	origins           map[string]ca.Origin
+	names             []ca.CertName
+	accounts          []ca.AccountActivity
+	accountsTruncated bool
+	domains           []ca.Domain
+	cas               []ca.CAInfo
 }
 
 func (f *fakeEngine) note(who keys.Who) error {
@@ -283,8 +284,8 @@ func (f *fakeEngine) CertificateNames(_ context.Context, who keys.Who) ([]ca.Cer
 	return f.names, f.note(who)
 }
 
-func (f *fakeEngine) ACMEAccountActivity(_ context.Context, who keys.Who) ([]ca.AccountActivity, error) {
-	return f.accounts, f.note(who)
+func (f *fakeEngine) ACMEAccountActivity(_ context.Context, who keys.Who) ([]ca.AccountActivity, bool, error) {
+	return f.accounts, f.accountsTruncated, f.note(who)
 }
 
 func (f *fakeEngine) ListDomains(_ context.Context, who keys.Who) ([]ca.Domain, error) {

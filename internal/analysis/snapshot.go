@@ -27,11 +27,15 @@ type Snapshot struct {
 	// whatever its status.
 	Names []ca.CertName
 
-	CAs       []CA
-	Domains   []ca.Domain
-	Accounts  []Account
-	Agents    []Agent
-	Endpoints []Endpoint
+	CAs     []CA
+	Domains []ca.Domain
+	// Accounts are the ACME accounts that were read, newest first. If there
+	// are more than the engine reads, AccountsLimit is how many it did read and
+	// the older accounts are not in the list; 0 = every account is.
+	Accounts      []Account
+	AccountsLimit int
+	Agents        []Agent
+	Endpoints     []Endpoint
 
 	// Missing says why a section is not there ("" = it is).
 	Missing Missing

@@ -151,10 +151,18 @@ const listValidCertificateDERs = `-- name: ListValidCertificateDERs :many
 SELECT c.id, c.ca_id, c.cert_der
 FROM certificates c
 WHERE c.not_after > CAST(?1 AS TEXT)
+  AND c.id > CAST(?2 AS TEXT)
   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.certificate_id = c.id)
   AND NOT (c.preset = 'client' AND EXISTS (SELECT 1 FROM agents a WHERE a.id = c.requested_by))
 ORDER BY c.id
+LIMIT ?3
 `
+
+type ListValidCertificateDERsParams struct {
+	Now      string
+	AfterID  string
+	PageSize int64
+}
 
 type ListValidCertificateDERsRow struct {
 	ID      string
@@ -168,9 +176,10 @@ type ListValidCertificateDERsRow struct {
 // the engine can drop the CAs the caller may not read.
 // The DER of every certificate that is valid at now (not revoked, ends after
 // now), for the key size and the signature algorithm. The analysis cache
-// keeps the result of the parsing for a minute.
-func (q *Queries) ListValidCertificateDERs(ctx context.Context, now string) ([]ListValidCertificateDERsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listValidCertificateDERs, now)
+// keeps the result of the parsing for a minute. Read in pages by id (keyset):
+// pass the last id of the previous page, the empty string for the first.
+func (q *Queries) ListValidCertificateDERs(ctx context.Context, arg ListValidCertificateDERsParams) ([]ListValidCertificateDERsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listValidCertificateDERs, arg.Now, arg.AfterID, arg.PageSize)
 	if err != nil {
 		return nil, err
 	}
