@@ -15,7 +15,7 @@ channels live in the configuration file and their secrets in files next to it, n
 Without a channel nothing breaks; the alerts still open and show in the UI, only nobody is told.
 Since v0.3.4 the server can also check what a host really serves; that is the
 [TLS scan]({{ '/tls-scan/' | relative_url }}). Since v0.3.8 the *Reports* page charts what the alerts
-leave out (the expiry of the next 13 weeks, the alert history, the agent fleet) and the *Analysis* page
+leave out (the expiry of the current week and the next 12 weeks, the alert history, the agent fleet) and the *Analysis* page
 points out oddities that no alert covers; both are on [Reports and analysis]({{ '/reports/' | relative_url }}).
 This page is the condensed version of
 [operations guide chapter 13]({{ '/reference/operations/' | relative_url }}#13-monitoring-and-notifications).

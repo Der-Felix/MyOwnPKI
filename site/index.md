@@ -65,7 +65,7 @@ The parts, and who talks to whom:
 - **TLS scan:** the server connects to the endpoints you enter, reads the certificate each one really
   serves and alerts when it is not the one this PKI issued, for example after a renewal that never
   reached the web server.
-- **Reports and analysis:** charts of the expiry of the next 13 weeks, the issuances by source, the
+- **Reports and analysis:** charts of the expiry of the current week and the next 12 weeks, the issuances by source, the
   certificates per CA, the alert history and the agent fleet, and ten rules that point out what no alert
   covers, such as a weak key, a renewal loop or a certificate that no scanned endpoint serves. The server draws the charts
   itself; no script runs in the browser.

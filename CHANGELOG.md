@@ -19,7 +19,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [0.3.8]
 
-Charts, reports and analysis: a *Reports* page with the expiry of the next 13 weeks, the issuances by source,
+Charts, reports and analysis: a *Reports* page with the expiry of the current week and the next 12 weeks, the issuances by source,
 the certificates per CA, the alert history and the agent fleet, two of the charts on the dashboard, and an
 *Analysis* page that applies ten fixed rules and says what each finding saw, why it matters and what to do.
 The charts are drawn by the server as SVG; no script runs in the browser. Both pages and two new REST

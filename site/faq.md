@@ -157,7 +157,7 @@ certificates and silent agents, by e-mail or webhook. Set that up on day one
 
 ### Does it have charts or reports?
 
-Yes, since v0.3.8. The *Reports* page charts the certificates that end in each of the next 13 weeks, the
+Yes, since v0.3.8. The *Reports* page charts the certificates that end in the current week and each of the next 12 weeks, the
 issuances of the last 12 weeks by source (ACME, agent, UI and API), the certificates per CA and status, the
 alerts of the last five weeks and the agent fleet, each with a table of the exact numbers; the dashboard
 shows two of them. The *Analysis* page applies ten fixed rules and lists what looks odd, such as a weak key,

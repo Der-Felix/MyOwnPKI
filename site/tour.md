@@ -82,7 +82,7 @@ table (*Expiry* and *Authorities*), each in a fold that can be closed.
 ![The Reports page: the expiry timeline and the certificates per CA and status, with the issuances, alerts and agents sections closed]({{ '/assets/screens/tour-reports.png' | relative_url }})
 
 Five sections, each a fold with a chart, a sentence that says what is counted and a table of the exact
-numbers: *Expiry* (certificates that end in each of the next 13 weeks, colored by the warning and critical
+numbers: *Expiry* (certificates that end in the current week and each of the next 12 weeks, colored by the warning and critical
 windows of the monitor), *Issuances* (the last 12 weeks by source: ACME, agent, UI and API), *Authorities*
 (certificates per CA by status), *Alerts* (opened per week, the last five weeks) and *Agents* (state,
 version and deployments, only with the agent listener on). The page says when it was computed; the

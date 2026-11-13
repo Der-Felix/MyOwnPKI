@@ -246,7 +246,7 @@ An output looks like this (the states depend on your installation):
 {"id":"renewal_loop","state":"ok"}
 ```
 
-The certificates that end per week in the next 13 weeks:
+The certificates that end per week in the current week and the next 12 weeks:
 
 ```bash
 curl -sS --cacert root.pem -H "Authorization: Bearer $MYOWNPKI_TOKEN" https://pki.homelab.lan:9443/api/v1/reports | jq -c '.expiry.weeks[] | {start, count, window}'
@@ -278,7 +278,7 @@ into the SVG.
 ## Reading the charts without seeing them
 
 - Each chart is a `<figure>` with a caption and a one-sentence summary, for example how many certificates end
-  in the next 13 weeks and how many of them in the warning or critical window.
+  in the current week and the next 12 weeks and how many of them in the warning or critical window.
 - The SVG has a title and a description for screen readers. The **exact numbers are a real table** under every
   chart, in a fold called *Numbers*, which a keyboard opens like any other fold.
 - Every series has a text label in the legend. The second and third series of a stacked chart also have a

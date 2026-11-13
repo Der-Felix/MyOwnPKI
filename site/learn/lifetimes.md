@@ -79,7 +79,7 @@ Certificates that are issued on the same day with the same lifetime also end on 
 renewals then fail for one reason, such as a DNS change or a broken deploy hook, you lose them together. Two
 habits help: let every client renew at about two thirds of the lifetime on its own schedule (see the table
 above), and add a random delay (*jitter*) to a job that many hosts start at the same moment. The
-[Reports]({{ '/reports/' | relative_url }}#expiry) page shows the next 13 weeks as columns, so a wave is
+[Reports]({{ '/reports/' | relative_url }}#expiry) page shows the current week and the next 12 weeks as columns, so a wave is
 visible, and the *Analysis* page names a week in which at least 10 certificates and at least 30 percent of
 the valid ones end ([expiry wave]({{ '/glossary/' | relative_url }}#expiry-wave)).
 

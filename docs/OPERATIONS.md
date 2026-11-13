@@ -2726,7 +2726,7 @@ then §13.10.
 ## 15. Reports and analysis
 
 Since v0.3.8 the web UI has two pages that answer "what is the state of the PKI, and why?": **Reports** (charts
-of the expiry of the next 13 weeks, the issuances, the certificates per CA, the alert history and the agent
+of the expiry of the current week and the next 12 weeks, the issuances, the certificates per CA, the alert history and the agent
 fleet) and **Analysis** (ten fixed rules that name what no alert covers). The dashboard shows two of the charts.
 Everything is computed on the server from data it already holds. Nothing is sent to an outside service, nothing
 new is stored (§15.5), and nothing needs to be configured.
