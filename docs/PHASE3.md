@@ -1937,3 +1937,40 @@ approval of ECharts is kept for a later step. What that step takes (so the choic
   or `javascript:` inside. The render tests use it on every page; the `.templ` scan allows `<svg` only in
   `components/chart.templ`, in the template form of the same shape.
 - The gallery has a "Charts" section with sample data (fixed dates), the empty state, and one chart in the dark preview.
+
+**Step 49 (pages).** What differs from the plan text, and why:
+
+- **Routes and names:** `GET /reports` (nav key `reports`, label "Reports") and `GET /analysis` (`analysis`, "Analysis"), both in
+  the navigation group Overview between Alerts and Endpoints and both `Primary`, so layout C and the top navigation of a
+  small screen show them like Alerts. The code is `internal/web/app_reports.go`, `app_analysis.go` and the page packages
+  `pages/reports` and `pages/analysis`. `AppDeps` has `Reports` and `Analysis` (interfaces `ReportSource` and
+  `AnalysisSource`, one `Get(ctx, who)` each); `Server` hands the monitor's services over as `reportSource()` and
+  `analysisSource()` (nil, not a typed nil, without monitoring: then the pages answer 404 "Monitoring is off." and the
+  navigation has no entry). The permission is the services' own tenant-wide `authz.ReadPKI` check: a role limited to one
+  CA gets the 403 page; the navigation entry is hidden by the same check as the Alerts entry.
+- **New component `components.Fold(id, title, open)`:** a native `<details class="fold">` whose `<summary>` holds the `<h2>`
+  (so each section has a heading for a screen reader, and the page has one `<h1>`). Classes `fold` and `fold-body` in
+  `components.css`, a "Folds" entry in the gallery, `TestFoldStylesAreCalm`. The state is not remembered (D12).
+- **Reports:** sections Expiry and Authorities open, Issuances, Alerts and Agents closed (the task for step 49 differs from D12's
+  "all open"). The Agents section is left out when `rep.Agents` is nil (agent listener off). A plain
+  sentence under each heading says what is counted and left out (revoked and agent identity certificates, the D6 source
+  classes, 30 days of alerts). "Computed at <time> UTC. The numbers are refreshed at most once a minute." is the page
+  description. A chart without data shows its empty-state sentence and, by the component's design (step 48), no numbers table.
+- **Analysis:** the order is the summary line, Findings (a table: Severity as the status dot plus text, Rule, Subject as a link
+  to the affected page when the finding has a path inside the UI, What was seen, Why it matters, What to do), Rules (rule,
+  state, count) and "How this works". The rules table links a rule that has findings to `?rule=<id>`; `?rule=` limits the
+  findings table and says so with a "Show all findings" link; an unknown id is a 400 page that does not echo it. A rule in
+  state `unknown` shows as `unknown: <reason>` in the neutral status and never as a finding; a rule with findings and a gap
+  says "findings; N not assessed: <reason>". The tables scroll sideways on a phone (not the adaptive layout: six wrapped
+  columns were unreadable at 375 px). A finding link that is not a path starting with one `/` is dropped, the row stays.
+- **Dashboard:** the two charts (expiry, authorities) sit below the "Expiring in the next 30 days" table, each in an open fold,
+  with an "All reports" link, only for a caller who passes `ReadPKI`. A failed build costs the charts (a warning line, the
+  cause in the server log), not the dashboard.
+- **Tests:** `app_reports_page_test.go` covers the roles (viewer, operator and admin 200, a CA-limited role 403 with no entry and
+  no dashboard charts, anonymous redirect to the sign-in page), the sealed server (both pages render with the sealed notice),
+  no monitoring, hostile CA, subject, reason and link text, empty states, the unknown rule, the filter, unique ids, one h1
+  and the h2 list per page. `reportPages` feeds the new pages into the HTML rules of `server_test.go` (no inline style or
+  script, every class defined, tokens only, SVG shape).
+- **Browser check** on the pages with canned data (light, dark, 375 px): no horizontal page scroll, legend and hatching
+  readable in both themes. `serve --dev` is the prototype and has no real pages (Reports and Analysis are real-UI entries, shown
+  disabled there), so the check used the real handler of the test instance.
