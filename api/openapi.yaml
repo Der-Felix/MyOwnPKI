@@ -1951,6 +1951,54 @@ paths:
         "422": { $ref: "#/components/responses/PolicyViolation" }
         "503": { $ref: "#/components/responses/Sealed" }
 
+  /certificates/preview:
+    post:
+      tags: [certificates]
+      operationId: previewCertificate
+      summary: Show what issuing this request would produce – nothing is signed or stored
+      description: |
+        Takes exactly the body of `POST /certificates` and answers with what the policy decides and
+        what the certificate would contain: the same checks, in the same order, run by the same code
+        as an issuance. It signs nothing, stores nothing, draws no serial number and no key, and
+        writes no audit entry (not even for a refusal); nothing is kept between a preview and the
+        issuance, and there is no preview ID.
+
+        - **A refusal is a 200.** `allowed` is false and `reasons` lists every reason, exactly the
+          ones `POST /certificates` returns as 422 for the same request. 422 itself is never
+          returned by this operation.
+        - **A forecast, not a promise.** The checks run again when the certificate is issued, and
+          the clock, the CA or the settings may have changed by then. `generated_at` is the moment
+          of the preview; `not_before` of a certificate issued a moment later is the issuance time
+          minus five minutes.
+        - **The CSR is never echoed.** The response holds only what the server derived from it
+          (names, subject, key algorithm), as JSON data; a CSR is untrusted input and any name in
+          it may contain markup – a client must escape it when it renders it.
+        - **A sealed server previews** and says `sealed: true`; issuing would fail with 503 until
+          an instance admin unseals it.
+        - The permission is the one for issuing on the CA: a caller who may not read the CA gets
+          404, one who may read it but not issue gets 403. Needs no step-up, so an API token works.
+        - Malformed bodies, a CSR over 64 KiB (400) and a body over the size limit (413) are
+          refused exactly as for issuance. `POST /csr/inspect` stays for parsing a CSR alone.
+      x-required-role: operator
+      requestBody:
+        description: "The same request as for issuing: CA, preset and names, plus either a CSR or the key algorithm for a server-generated key"
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueRequest" }
+      responses:
+        "200":
+          description: The plan – allowed or refused
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificatePreview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+
   /certificates/{certificateId}:
     parameters:
       - $ref: "#/components/parameters/CertificateId"
@@ -3931,6 +3979,182 @@ components:
           type: array
           items: { type: string }
           description: Extended key usages – only for customizable presets; validated like preset files
+
+    CertificatePreview:
+      description: |
+        What issuing a request would produce, decided by the same policy that issues. A forecast,
+        not a promise: the checks run again at issuance. For a refused request (`allowed` false)
+        the descriptive fields are filled as far as the checks got – `ca`, `preset`, `subject` and
+        `names` as soon as they are known – while `validity`, the usages, `extensions` and the URLs
+        are only given for an allowed plan. No serial number is part of a preview.
+      type: object
+      required: [generated_at, allowed, sealed, reasons, checks, stopped_at, ca, preset, subject, subject_dn, names,
+                 dropped_csr_names, key, validity, key_usage, ext_key_usage, ext_key_usage_critical, extensions,
+                 aia_url, cdp_url, chain, notes, warnings]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+          description: The server clock when the plan was made, UTC
+        allowed:
+          type: boolean
+          description: The policy would issue this request now. A sealed server does not change it; see `sealed`.
+        sealed:
+          type: boolean
+          description: The key ring is sealed, so issuing fails (503) until an instance admin unseals it
+        reasons:
+          type: array
+          description: |
+            Why the request is refused, in the order issuance gives them (the problems of `checks`,
+            concatenated); empty when `allowed`. They may contain requested names – escape them.
+          items: { type: string }
+        checks:
+          type: array
+          description: The checks that ran, in order
+          items: { $ref: "#/components/schemas/PolicyCheck" }
+        stopped_at:
+          type: [string, "null"]
+          description: |
+            The `name` of the gate that ended the plan early; null when every check ran. A gate
+            ends an issuance at its first problem, so a refusal at a gate can hide problems of the
+            checks after it until it is fixed – those checks are not in `checks`.
+        ca:
+          type: [object, "null"]
+          description: The CA that would sign; null while it is unknown (the CA check failed first)
+          required: [name, generation, max_validity_days]
+          properties:
+            name: { type: string }
+            generation: { type: integer, minimum: 1, description: "Its current generation (the CA key)" }
+            max_validity_days: { type: integer, minimum: 0, description: "The CA's limit for the lifetime of a certificate" }
+        preset:
+          type: [object, "null"]
+          description: The preset that applies; null when the request names none that exists
+          required: [name, description]
+          properties:
+            name: { type: string }
+            description: { type: string }
+        subject:
+          type: [object, "null"]
+          description: The subject as the certificate would carry it, defaults applied; null until the names are decided
+          required: [common_name, organization, organizational_unit, locality, state, country]
+          properties:
+            common_name: { type: string, description: "Requested or derived from a name; may be empty" }
+            organization: { type: string }
+            organizational_unit: { type: string }
+            locality: { type: string }
+            state: { type: string }
+            country: { type: string }
+        subject_dn: { type: string, description: "The subject DN as it would be stored (RFC 4514 style); empty while unknown" }
+        names:
+          type: array
+          description: The subject alternative names the certificate would carry
+          items:
+            type: object
+            required: [type, value]
+            properties:
+              type: { type: string, enum: [dns, ip, email, uri] }
+              value: { type: string, description: "Requested or CSR-derived text – escape it" }
+        dropped_csr_names:
+          type: array
+          description: Names from the CSR the preset doesn't take, as `type:value`
+          items: { type: string }
+        key:
+          type: [object, "null"]
+          description: The key of the certificate; null when it is not known yet
+          required: [algorithm, source]
+          properties:
+            algorithm: { $ref: "#/components/schemas/KeyAlgorithm" }
+            source:
+              type: string
+              enum: [csr, server]
+              description: "`csr` = the key comes with the CSR; `server` = the server would generate and store it"
+        validity:
+          type: [object, "null"]
+          description: The lifetime the certificate would get; null for a refused plan
+          required: [not_before, not_after, days]
+          properties:
+            not_before: { type: string, format: date-time }
+            not_after: { type: string, format: date-time }
+            days: { type: integer, minimum: 1 }
+        key_usage:
+          type: array
+          description: Key usage bits by name, e.g. digitalSignature; empty for a refused plan
+          items: { type: string }
+        ext_key_usage:
+          type: array
+          description: Extended key usages by name, or the dotted OID of an unnamed one; empty for a refused plan
+          items: { type: string }
+        ext_key_usage_critical:
+          type: boolean
+          description: The extended key usage extension is marked critical (only where the preset says so)
+        extensions:
+          type: array
+          description: The extensions the certificate would carry; empty for a refused plan
+          items: { $ref: "#/components/schemas/ExtensionInfo" }
+        aia_url:
+          type: [string, "null"]
+          description: The CA certificate URL baked into the certificate (authority information access); null for a refused plan
+        cdp_url:
+          type: [string, "null"]
+          description: The CRL URL baked into the certificate (CRL distribution point); null for a refused plan
+        chain:
+          type: array
+          description: The CA certificates from the issuing CA (first) up to the root (last); empty while the CA is unknown
+          items: { $ref: "#/components/schemas/ChainLink" }
+        notes:
+          type: array
+          description: Defaults that changed the request (validity shortened, base domain added)
+          items: { type: string }
+        warnings:
+          type: array
+          description: Compatibility problems that would not stop the issuance
+          items: { type: string }
+
+    PolicyCheck:
+      description: One step of the policy and what it found
+      type: object
+      required: [name, title, collected, passed, problems]
+      properties:
+        name:
+          type: string
+          enum: [acme-order, preset, ca, ca-validity, key, usages, names, name-constraints, eku-limit, validity, renewal]
+          description: |
+            Stable name of the check. The first six (`acme-order`, `preset`, `ca`, `ca-validity`,
+            `key`, `usages`) are gates, the others are collected.
+        title: { type: string, description: "A short human name for the check" }
+        collected:
+          type: boolean
+          description: |
+            Collected: the check gathers every problem it finds in one pass, so `problems` is
+            complete, and all collected checks run before the request is refused. A check that is
+            not collected is a gate: it ended the plan at its first problem, as it ends an
+            issuance, and the checks after it did not run (see `stopped_at`).
+        passed: { type: boolean, description: "No problem found" }
+        problems:
+          type: array
+          description: The reasons this check refuses the request; empty = passed. They may contain requested names – escape them.
+          items: { type: string }
+
+    ChainLink:
+      description: One CA certificate on the way from the issuing CA to the root
+      type: object
+      required: [ca, subject, sha256, not_after, root]
+      properties:
+        ca: { type: string, description: "CA name" }
+        subject: { type: string, description: "Subject DN of the CA certificate" }
+        sha256: { type: string, pattern: "^[0-9A-F]{64}$", description: "SHA-256 fingerprint of the DER certificate" }
+        not_after: { type: string, format: date-time }
+        root: { type: boolean, description: "This is the root of the chain" }
+
+    ExtensionInfo:
+      description: One extension of the certificate that would be issued
+      type: object
+      required: [oid, name, critical, detail]
+      properties:
+        oid: { type: string, description: "Dotted object identifier" }
+        name: { type: string, description: "Well-known name, or `other`" }
+        critical: { type: boolean }
+        detail: { type: string, description: "What the extension says, as text; may be empty" }
 
     IssuedCertificate:
       description: "A new certificate, with what the server changed or dropped"

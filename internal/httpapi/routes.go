@@ -64,6 +64,7 @@ func (a *API) table() []Route {
 
 		{OperationID: "listCertificates", Method: http.MethodGet, Path: "/certificates", access: signedIn, handle: a.listCertificates},
 		{OperationID: "issueCertificate", Method: http.MethodPost, Path: "/certificates", access: signedIn, body: true, handle: a.issueCertificate},
+		{OperationID: "previewCertificate", Method: http.MethodPost, Path: "/certificates/preview", access: signedIn, body: true, handle: a.previewCertificate},
 		{OperationID: "getCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}", access: signedIn, handle: a.getCertificate},
 		{OperationID: "downloadCertificate", Method: http.MethodGet, Path: "/certificates/{certificateId}/download/{format}", access: signedIn, handle: a.downloadCertificate},
 		{OperationID: "exportCertificateWithKey", Method: http.MethodPost, Path: "/certificates/{certificateId}/export", access: signedIn, body: true, handle: a.exportKey},
