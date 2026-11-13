@@ -190,7 +190,8 @@ deployment add` writes it. See [Adding a deployment]({{ '/hosts/' | relative_url
 
 The ACME challenge in which the client puts a TXT record at `_acme-challenge.<name>` (RFC 8555 §8.4). The server
 only reads it, through `acme.resolver`. It is the only challenge that proves a [wildcard](#wildcard-certificate).
-The agent does not support it yet. See
+The agent can do it since v0.3.7, through [RFC 2136](#rfc-2136) or Cloudflare; see
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}). For split DNS see
 [operations guide §10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network).
 
 Background: [ACME explained]({{ '/learn/acme/' | relative_url }}).
@@ -426,6 +427,12 @@ key for every later request. See
 
 Background: [Revocation]({{ '/learn/revocation/' | relative_url }}).
 
+### RFC 2136
+
+The standard for dynamic DNS updates: a client sends a signed message that adds or removes records in a zone.
+The agent uses it for [dns-01](#dns-01), signed with a [TSIG](#tsig) key, against BIND, Knot or PowerDNS. See
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
+
 ### Role
 
 What a user may do in a tenant, optionally limited to one CA. *Viewer* reads; *operator* also issues, renews,
@@ -529,6 +536,13 @@ your own root must be added to every client. See
 [Trusting your root on the clients]({{ '/reference/operations/' | relative_url }}#104-trusting-your-root-on-the-clients).
 
 Background: [How trust works]({{ '/learn/trust/' | relative_url }}).
+
+### TSIG
+
+A shared secret that signs DNS messages (RFC 8945), so a DNS server knows who sends an update and the sender
+knows the answer is genuine. The agent's [RFC 2136](#rfc-2136) provider needs a key name and a base64 secret
+in its root-only credentials file, and accepts `hmac-sha256`, `hmac-sha384` and `hmac-sha512`. See
+[dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}#rfc-2136-with-a-tsig-key-bind-knot-powerdns).
 
 ## V
 

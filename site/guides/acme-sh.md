@@ -120,8 +120,9 @@ Every message is explained in
 
 - Does the renewal job find the CA bundle? Run `acme.sh --cron` by hand once and read its output. If
   it cannot reach the server, give `--ca-bundle` again or put the root into the system store.
-- DNS validation for wildcard names works on the server (*dns-01*) but is not built into the agent yet.
-  acme.sh has its own DNS modes; see its documentation and
+- DNS validation for wildcard names (*dns-01*) works on the server. The MyOwnPKI **agent** can do it too since
+  v0.3.7 ([dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }})); acme.sh has its own DNS modes;
+  see its documentation and
   [§10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network).
 - Other clients: [certbot]({{ '/guides/certbot/' | relative_url }}), [lego]({{ '/guides/lego/' | relative_url }}).
 - Revoke or replace a certificate: [Renew and revoke]({{ '/guides/renew-and-revoke/' | relative_url }}).

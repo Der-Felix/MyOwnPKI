@@ -1682,6 +1682,19 @@ Where this plan differs from the task text and from PLAN §10.1 (read from the c
 7. **Cloudflare** (only with a zone there): a token with *Zone:Read* and *DNS:Edit* for that one zone, a deployment with `--dns-type cloudflare`, with `proxy:` if the host needs one. Afterwards the zone holds no `_acme-challenge` TXT.
 8. **A wrong name:** a deployment for a name that is not in the agent's names fails with `rejectedIdentifier`, and the agent page already says "not covered by Names it may order".
 
+**Status of the live test (step 43):** pending. The documentation says so in three places: the status note of
+`site/dns-01.md`, the operations guide §12.11 (*What is tested*) and the CHANGELOG `[0.3.7]` (*Known
+limitations*). Not tested against the real thing: the Cloudflare code against the real API (CI uses a stub), a
+BIND `update-policy` on the maintainer's server (the conformance test uses `allow-update`), the default
+`propagation: authoritative` against name servers on port 53 (CI uses `propagation: resolver`), the Salt
+formula's dns-01 deployments on live minions, and macOS. **Docs against code, step 43:** when the pages were
+written, a failed cleanup was only logged (`dnsGuard.warn`; `Warnings()` was read by tests only) although the
+plan said "a warning in the status". The working tree then gained `dnsGuard.Notice`, which puts
+`dns-01 cleanup failed: a TXT record may remain at _acme-challenge.<name>; ...` into the deployment's *Last
+error*, and the pages describe that; they must be read again if it changes. Step 43 also fixed the sentences
+"the agent does not do dns-01 yet" in `site/learn/acme.md`, `site/faq.md` and the guides for certbot, acme.sh,
+lego, Traefik and Caddy, split DNS and domains.
+
 ### 13.2 Decisions
 
 The maintainer was not available; each row takes the cautious option. Review them together with §13.7.

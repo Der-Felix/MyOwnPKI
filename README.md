@@ -23,7 +23,7 @@ agent; the rest of this list follows up to v1.0:
 - **ACME client** for public certificates from Let's Encrypt / ZeroSSL (http-01, dns-01)
 - **Optional agent** that deploys certificates to Linux, Windows and FreeBSD hosts, reloads
   services safely and monitors what is actually being served *(v0.3.0: Linux, nginx and files,
-  with rollback)*
+  with rollback; v0.3.7: dns-01 for wildcard certificates, through RFC 2136 or Cloudflare)*
 - **Multiple domains and tenants**, policies per domain, audit log
 - **Runs anywhere** as a single binary or container: Docker, Podman, LXC, Linux, macOS, Windows, FreeBSD
 

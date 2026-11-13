@@ -157,8 +157,9 @@ The complete table is
 
 ## Next steps
 
-- Wildcard names need dns-01. The server supports it, but the **agent** does not yet (planned for a
-  later release). With certbot you can use a DNS plug-in of certbot itself; see
+- Wildcard names need dns-01. The server supports it, and so does the **agent** since v0.3.7
+  ([dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }})). With certbot you can use a DNS
+  plug-in of certbot itself; see
   [§10.7]({{ '/reference/operations/' | relative_url }}#107-split-dns-and-the-network).
 - Use **one account per host**: hosts that share an account and the same names retire each other's
   certificates ([§10.6]({{ '/reference/operations/' | relative_url }}#106-connecting-clients)).
