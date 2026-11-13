@@ -135,3 +135,111 @@ func TestDeploymentAndSandboxCommands(t *testing.T) {
 		t.Errorf("agent.yaml changed: %v\n%s", err, data)
 	}
 }
+
+const dnsSentinel = "SENTINEL-cf-token-0123456789"
+
+// dnsAgentYAML is an agent.yaml with one Cloudflare provider; withDeployment
+// adds a wildcard deployment that uses it.
+func dnsAgentYAML(dir, credentials string, withDeployment bool) string {
+	out := "server: https://pki.homelab.lan:8444\nca_bundle: " + yamlPath(filepath.Join(dir, "root.pem")) +
+		"\nhostname: proxy1.homelab.lan\nstate_dir: " + yamlPath(filepath.Join(dir, "state")) +
+		"\nacme_directory: https://pki.homelab.lan/acme/directory\npaths: [" + yamlPath(filepath.Join(dir, "ssl")) + "]\n" +
+		"dns_providers:\n  homelab-dns:\n    type: cloudflare\n    credentials_file: " + yamlPath(credentials) + "\n"
+	if withDeployment {
+		out += "deployments:\n  - name: wild\n    profile: file\n    names: ['*.homelab.lan', homelab.lan]\n    challenge: dns-01\n    dns_provider: homelab-dns\n" +
+			"    files: {fullchain: " + yamlPath(filepath.Join(dir, "ssl", "fullchain.pem")) + ", key: " + yamlPath(filepath.Join(dir, "ssl", "key.pem")) + "}\n"
+	}
+	return out
+}
+
+// dnsCredentialsFile writes a credentials file that passes the checks of this
+// platform (directory 0700, file 0600) and returns its path.
+func dnsCredentialsFile(t *testing.T, dir, content string) string {
+	t.Helper()
+	cdir := filepath.Join(dir, "dns")
+	if err := os.Mkdir(cdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cdir, "homelab.yaml")
+	writeFile(t, path, content)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestConfigCheckShowsDNSProviders(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	creds := dnsCredentialsFile(t, dir, "api_token: "+dnsSentinel+"\n")
+	cfg := filepath.Join(dir, "agent.yaml")
+	writeFile(t, cfg, dnsAgentYAML(dir, creds, true))
+	var stdout, stderr bytes.Buffer
+	if code := run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s\n%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"  dns providers\n", "    homelab-dns  cloudflare  " + creds + ": ok\n", "Configuration is valid."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "SENTINEL") {
+		t.Fatalf("config check printed the content of the credentials file:\n%s%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestConfigCheckFailsForAnUnusableCredentialsFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agent.yaml")
+	missing := filepath.Join(dir, "dns", "absent.yaml")
+	writeFile(t, cfg, dnsAgentYAML(dir, missing, true))
+	var stdout, stderr bytes.Buffer
+	code := run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), missing+": missing: no such file") ||
+		!strings.Contains(stderr.String(), "1 DNS credentials file(s) used by a deployment cannot be used") || strings.Contains(stdout.String(), "Configuration is valid.") {
+		t.Fatalf("exit code %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+
+	// An invalid file is reported without its content.
+	bad := dnsCredentialsFile(t, t.TempDir(), "api_tokne: "+dnsSentinel+"\n")
+	writeFile(t, cfg, dnsAgentYAML(dir, bad, true))
+	stdout.Reset()
+	stderr.Reset()
+	code = run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), bad+": invalid: unknown key \"api_tokne\"") || strings.Contains(stdout.String()+stderr.String(), "SENTINEL") {
+		t.Fatalf("exit code %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestConfigCheckAnUnusedProviderIsOnlyAWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agent.yaml")
+	missing := filepath.Join(dir, "dns", "absent.yaml")
+	writeFile(t, cfg, dnsAgentYAML(dir, missing, false))
+	var stdout, stderr bytes.Buffer
+	if code := run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{missing + ": missing: no such file (no deployment uses it)", "warning       dns_providers.homelab-dns: no deployment uses it", "Configuration is valid."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestConfigCheckRefusesUnknownDNSKeys(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agent.yaml")
+	creds := dnsCredentialsFile(t, dir, "api_token: x\n")
+	writeFile(t, cfg, dnsAgentYAML(dir, creds, true)+"    api_token: "+dnsSentinel+"\n")
+	var stdout, stderr bytes.Buffer
+	_ = run(t.Context(), []string{"config", "check", "--config", cfg}, &stdout, &stderr)
+	// The wildcard deployment above is last in the file, so the stray key is
+	// read as a key of the deployment: refused by name.
+	if !strings.Contains(stderr.String(), "field api_token not found") {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+}

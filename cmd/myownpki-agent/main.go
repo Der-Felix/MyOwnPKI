@@ -268,8 +268,29 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) int {
 	} else {
 		_, _ = fmt.Fprint(stdout, sandbox)
 	}
+	// DNS providers: only the state of each credentials file, never its content.
+	unusable := 0
+	if statuses := cfg.DNSProviderStatuses(); len(statuses) > 0 {
+		_, _ = fmt.Fprintln(stdout, "  dns providers")
+		for _, s := range statuses {
+			line := fmt.Sprintf("    %s  %s  %s: %s", s.Name, s.Type, s.Path, s.State)
+			if s.Detail != "" {
+				line += ": " + s.Detail
+			}
+			if len(s.Users) == 0 {
+				line += " (no deployment uses it)"
+			} else if !s.OK() {
+				unusable++
+			}
+			_, _ = fmt.Fprintln(stdout, line)
+		}
+	}
 	for _, w := range cfg.Warnings() {
 		_, _ = fmt.Fprintln(stdout, "  warning      ", w)
+	}
+	if unusable > 0 {
+		_, _ = fmt.Fprintf(stderr, "\nThe configuration is valid, but %d DNS credentials file(s) used by a deployment cannot be used (see \"dns providers\" above).\n", unusable)
+		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, "\nConfiguration is valid.")
 	return 0
