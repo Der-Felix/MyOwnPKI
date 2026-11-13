@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,10 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/analysis"
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
+	"github.com/Der-Felix/MyOwnPKI/internal/report"
+	"github.com/Der-Felix/MyOwnPKI/internal/store"
 )
 
 // TestMonitorJob: a server that stays sealed opens a "sealed" alert after
@@ -152,5 +158,50 @@ func TestUILink(t *testing.T) {
 	cfg.Admin.TLSNames, cfg.Admin.Listen = "2001:db8::10", "[::]:8443"
 	if l := uiLink(cfg); l == nil || l("/") != "https://[2001:db8::10]:8443/" {
 		t.Errorf("link with an IPv6 address")
+	}
+}
+
+// TestReportsAndAnalysisAreWired (v0.3.8): the server hands the REST API and
+// the pages one report service and one analysis service per tenant. The
+// agent listener is off here, so the report has no fleet and the analysis
+// says so; a role limited to one CA is refused before anything is read.
+func TestReportsAndAnalysisAreWired(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t)
+	initialized(t, cfg)
+	clk := clock.NewFake(t0)
+	srv, err := Open(t.Context(), Options{Config: cfg, Log: slog.New(slog.DiscardHandler), Clock: clk, Hostname: "pki01", Version: "test", Release: "v0.3.8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Shutdown(t.Context()) }()
+	if srv.Reports() == nil || srv.Analysis() == nil {
+		t.Fatal("the services are not wired")
+	}
+	rep, err := srv.Reports().Get(t.Context(), console)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Agents != nil || len(rep.Expiry.Weeks) != report.ExpiryWeeks || !rep.GeneratedAt.Equal(t0) {
+		t.Errorf("report: agents %v, %d weeks, at %v", rep.Agents, len(rep.Expiry.Weeks), rep.GeneratedAt)
+	}
+	an, err := srv.Analysis().Get(t.Context(), console)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(an.Results) != 10 {
+		t.Fatalf("%d rules", len(an.Results))
+	}
+	for _, r := range an.Results {
+		if r.ID == analysis.RuleOutdatedAgent && (r.State != analysis.StateUnknown || r.UnknownReason == "") {
+			t.Errorf("outdated_agent without the agent listener: %+v", r)
+		}
+	}
+	scoped := keys.Who{Principal: &authz.Principal{Kind: authz.KindUser, Username: "x", Bindings: []authz.Binding{{Tenant: store.DefaultTenant, CA: "issuing", Role: authz.Viewer}}}}
+	if _, err := srv.Reports().Get(t.Context(), scoped); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("report for a role limited to one CA: %v", err)
+	}
+	if _, err := srv.Analysis().Get(t.Context(), scoped); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("analysis for a role limited to one CA: %v", err)
 	}
 }
