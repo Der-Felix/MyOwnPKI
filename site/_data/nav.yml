@@ -1,41 +1,122 @@
-# Navigation of the documentation site. Every url is the permalink of a page
-# (relative_url adds the base URL). scripts/ci/site-check.sh checks that each
-# one exists. A section shows its children while one of its pages is open.
-- title: Home
-  url: /
-- title: Installation
-  url: /install/
-- title: Upgrade
-  url: /upgrade/
-- title: Adding hosts
-  url: /hosts/
-  children:
-    - title: Rolling out with Salt
-      url: /hosts/salt/
-- title: Recipes
-  url: /recipes/
-- title: Monitoring
-  url: /monitoring/
-- title: TLS scan
-  url: /tls-scan/
-- title: Best practices
-  url: /best-practices/
-- title: Troubleshooting
-  url: /troubleshooting/
-- title: Reference
-  url: /reference/
-  children:
-    - title: Operations guide
-      url: /reference/operations/
-    - title: Configuration file
-      url: /reference/configuration/
-    - title: Command line
-      url: /reference/cli/
-    - title: REST API
-      url: /reference/api/
-    - title: Release notes
-      url: /reference/changelog/
-    - title: Security
-      url: /reference/security/
-    - title: Contributing
-      url: /reference/contributing/
+# Navigation of the documentation site, in groups. Every url is the permalink
+# of a page (relative_url adds the base URL). scripts/ci/site-check.sh checks
+# that each one exists. A group has a label and a list of items; an item shows
+# its children while one of its pages is open.
+- group: Start
+  items:
+    - title: Home
+      url: /
+    - title: Choose your setup
+      url: /choose/
+    - title: Installation
+      url: /install/
+    - title: Upgrade
+      url: /upgrade/
+- group: Learn
+  items:
+    - title: Learn
+      url: /learn/
+      children:
+        - title: What is a CA?
+          url: /learn/what-is-a-ca/
+        - title: Root and intermediate
+          url: /learn/root-and-intermediate/
+        - title: Reading a certificate
+          url: /learn/certificate-anatomy/
+        - title: How trust works
+          url: /learn/trust/
+        - title: Name constraints
+          url: /learn/name-constraints/
+        - title: Revocation
+          url: /learn/revocation/
+        - title: Lifetimes and renewal
+          url: /learn/lifetimes/
+        - title: ACME explained
+          url: /learn/acme/
+        - title: Keys and unsealing
+          url: /learn/keys-and-unseal/
+- group: Guides
+  items:
+    - title: All guides
+      url: /guides/
+      children:
+        - title: First certificate in the UI
+          url: /guides/first-certificate-ui/
+        - title: Certbot
+          url: /guides/certbot/
+        - title: acme.sh
+          url: /guides/acme-sh/
+        - title: lego
+          url: /guides/lego/
+        - title: Traefik and Caddy
+          url: /guides/traefik-caddy/
+        - title: Domains and EAB keys
+          url: /guides/domains-and-approvals/
+        - title: Split DNS and validation
+          url: /guides/split-dns/
+        - title: Renew and revoke
+          url: /guides/renew-and-revoke/
+        - title: Behind a reverse proxy
+          url: /guides/reverse-proxies/
+        - title: Trust the root
+          url: /guides/trust-the-root/
+        - title: CA lifecycle
+          url: /guides/ca-lifecycle/
+        - title: Offline root
+          url: /guides/offline-root/
+        - title: Import from pki.sh
+          url: /guides/import-from-pki-sh/
+        - title: Backup and restore
+          url: /guides/backup-and-restore/
+        - title: Users, roles, 2FA
+          url: /guides/users-roles-2fa/
+        - title: The audit log
+          url: /guides/audit-log/
+        - title: When things go wrong
+          url: /guides/when-things-go-wrong/
+- group: Operate
+  items:
+    - title: Monitoring
+      url: /monitoring/
+    - title: TLS scan
+      url: /tls-scan/
+    - title: Best practices
+      url: /best-practices/
+    - title: Troubleshooting
+      url: /troubleshooting/
+- group: Hosts
+  items:
+    - title: Adding hosts
+      url: /hosts/
+      children:
+        - title: Rolling out with Salt
+          url: /hosts/salt/
+    - title: Recipes
+      url: /recipes/
+- group: Help
+  items:
+    - title: FAQ
+      url: /faq/
+    - title: Glossary
+      url: /glossary/
+    - title: UI tour
+      url: /tour/
+- group: Reference
+  items:
+    - title: Overview
+      url: /reference/
+      children:
+        - title: Operations guide
+          url: /reference/operations/
+        - title: Configuration file
+          url: /reference/configuration/
+        - title: Command line
+          url: /reference/cli/
+        - title: REST API
+          url: /reference/api/
+        - title: Release notes
+          url: /reference/changelog/
+        - title: Security
+          url: /reference/security/
+        - title: Contributing
+          url: /reference/contributing/

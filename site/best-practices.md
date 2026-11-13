@@ -90,7 +90,7 @@ promptly after every restart and update, and let monitoring wake you if you forg
 
 ### Use a second factor and the smallest role
 
-Every user signs in with an authenticator or a passkey, and sensitive actions (revoking, key
+Every user signs in with a password and an authenticator app (TOTP), and sensitive actions (revoking, key
 downloads, CA operations, user management) ask again with a fresh code. Give people the role that fits:
 *viewer* for looking, *operator* for issuing and renewing, *admin* for the tenant, and the instance admin
 only to those who unseal. A role can be limited to one CA. How:

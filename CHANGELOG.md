@@ -7,6 +7,16 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restore instructions: run `restore` as root, then `chown`.** `myownpki restore` builds its work copy
+  next to the data directory (in `/var/lib`) and renames it onto the data directory, so the service user,
+  which cannot write to `/var/lib`, could not run it. The message of `install.sh` after a failed update
+  (`rolled back … but it is not healthy either`), the upgrade page (*Roll back*), the operations guide
+  §6 and the CLI page now say to stop the service, move the old data directory away, create an empty one,
+  run `restore` as root, `chown -R myownpki:myownpki /var/lib/myownpki` and start the service. The
+  program is unchanged.
+
 ## [0.3.6] - 2026-11-12
 
 Salt formula: `deploy/salt/myownpki/` installs the agent from a hash-checked package, enrolls it with an

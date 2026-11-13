@@ -56,6 +56,7 @@ The server logs JSON (set `log.format: text` to read it on a console). It never 
 | A user is locked out (too many wrong passwords) | The lockout | Wait 15 minutes, or an instance admin clicks *Unlock now*, or `myownpki user unlock NAME` |
 | A user lost the phone | The authenticator is gone | At the server: `myownpki user reset-2fa NAME` (needs the unseal passphrase or `--recovery-key`) |
 | Every user needs a new second factor after a restore | `auth.key` was not in the backup (it lives outside the data directory) | `myownpki user reset-2fa NAME --new-auth-key`, then `reset-2fa` for every other user |
+| `restore` fails with `permission denied` on `/var/lib/.myownpki-restore-…` | It ran as the service user, which cannot write to `/var/lib` | Run `restore` as root, then `chown -R myownpki:myownpki /var/lib/myownpki` before `systemctl start myownpki` ([operations guide §6]({{ '/reference/operations/' | relative_url }}#6-backup-and-restore)) |
 | The passphrase is lost | | `myownpki passphrase reset` with the **recovery key**. If both are lost, the CA keys cannot be recovered: create new CAs ([operations guide §8]({{ '/reference/operations/' | relative_url }}#8-when-something-is-lost-or-wrong)). |
 | `systemctl start myownpki` fails at once | The configuration is invalid | `sudo -u myownpki /usr/local/bin/myownpki config check --config /etc/myownpki/config.yaml` |
 | The server refuses to start: unknown `MYOWNPKI_…` variable | A typo or a variable of another version; unknown variables are errors | Remove or correct it; the message lists the known names |

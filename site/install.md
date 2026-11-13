@@ -238,7 +238,7 @@ before you create it.
 | Secret | What it protects | Where to keep it |
 |---|---|---|
 | Unseal passphrase (at least 16 characters) | All CA keys. You type it after every start of the server. | A password manager. Not on the server, not in a script, not in an environment variable, not next to the backups. |
-| Recovery key (9 groups of 6 characters, shown once) | The same as the passphrase: the second way in, if the passphrase is lost | On paper, in a safe or another place that is not your password manager and not the backup disk |
+| Recovery key (9 groups of 6 characters, shown once) | The same as the passphrase: the second way in, if the passphrase is lost. It sets a new passphrase (`passphrase reset`); the unseal screen takes only the passphrase | On paper, in a safe or another place that is not your password manager and not the backup disk |
 | Admin password and authenticator (TOTP) | Sign-in to the UI and API | The admin's password manager and phone |
 | Checkpoint key fingerprint (shown at the end of `init`) | Lets you prove later that the audit log is the one you had | Write it down; you need it for `backup verify` and `restore` |
 | Backups | Everything, but encrypted: they cannot sign without the passphrase | A third place: a backup disk or another machine |
