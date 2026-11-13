@@ -31,6 +31,8 @@ import (
 //     failed one may already have rewritten the bundle (update-ca-certificates
 //     writes ca-certificates.crt before its own hooks run), and the bundle must
 //     not keep a root that "trust status" calls absent, or the other way round
+//   - the hook runs with umask 022 whatever the umask of the caller: a root
+//     shell with umask 077 must not leave a bundle only root can read
 
 // trustFamily is one family of Linux distributions with its fixed targets.
 type trustFamily struct {
@@ -224,10 +226,15 @@ func (e trustEnv) target(f *trustFamily, forInstall bool) (*trustTarget, error) 
 
 // runHook runs one fixed argument vector under the trust timeout. The
 // environment is a fixed PATH: no proxy and no SSL_CERT_* variable reaches it.
+// The umask is 022 (withHookUmask), whatever the caller's is.
 func (e trustEnv) runHook(ctx context.Context, argv []string) error {
 	ctx, cancel := context.WithTimeout(ctx, trustHookTimeout)
 	defer cancel()
-	output, err := e.Runner.Run(ctx, argv, []string{"PATH=" + trustHookPATH, "LC_ALL=C"})
+	var output string
+	var err error
+	withHookUmask(func() {
+		output, err = e.Runner.Run(ctx, argv, []string{"PATH=" + trustHookPATH, "LC_ALL=C"})
+	})
 	output = sanitizeHookOutput([]byte(output)) // control characters out, the end kept, bounded
 	if err != nil {
 		return errors.New(hookErrorText(filepath.Base(argv[0]), err, output))
