@@ -278,6 +278,22 @@ func (s *Server) endpointAdmin() web.EndpointAdmin {
 	return s.monitor.endpoints
 }
 
+// reportSource and analysisSource are the services as the UI's interfaces -
+// nil (not a typed nil) without monitoring.
+func (s *Server) reportSource() web.ReportSource {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.reports
+}
+
+func (s *Server) analysisSource() web.AnalysisSource {
+	if s.monitor == nil {
+		return nil
+	}
+	return s.monitor.analysis
+}
+
 // Reports is the report service for the REST API and the pages; nil
 // without monitoring.
 func (s *Server) Reports() *report.Service {

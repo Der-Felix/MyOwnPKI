@@ -181,6 +181,9 @@ func renderedPages(t *testing.T) map[string]string {
 	for k, html := range realPages(t) {
 		out[k] = html
 	}
+	for k, html := range reportPages(t) {
+		out[k] = html
+	}
 	return out
 }
 

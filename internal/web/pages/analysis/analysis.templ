@@ -1,0 +1,59 @@
+package analysis
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Data is the content of the Analysis page. The tables are built by the
+// handler from the findings and the rules; every text in them (subjects come
+// from certificates, agents and domains) is written by templ's escaping.
+type Data struct {
+	Messages []view.Message
+	// Summary is the one line of counts: findings by severity and the rules
+	// that cannot be assessed.
+	Summary string
+	// Filter is the title of the rule the findings are limited to; empty
+	// when all findings are shown. ShowAll links back to every finding.
+	Filter, ShowAll string
+	// Truncated says some rule has more findings than it lists.
+	Truncated bool
+	Findings  admin.TableData
+	Rules     admin.TableData
+	// How is the "How this works" paragraph.
+	How []string
+}
+
+// Page renders the Analysis page: the summary line, the findings, the state
+// of every rule and a short explanation. An h2 heads each part.
+templ Page(p view.Page, d Data) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<p id="analysis-summary">{ d.Summary }</p>
+		<section class="section" aria-labelledby="h-findings">
+			<div class="section-head">
+				<h2 id="h-findings">Findings</h2>
+				if d.Filter != "" {
+					<span class="muted">Only the rule { d.Filter }.</span>
+					<a href={ templ.SafeURL(d.ShowAll) }>Show all findings</a>
+				}
+			</div>
+			if d.Truncated {
+				<p class="muted">A rule lists at most 200 findings; its count in the rules table is complete.</p>
+			}
+			@admin.Table(d.Findings)
+		</section>
+		<section class="section" aria-labelledby="h-rules">
+			<div class="section-head"><h2 id="h-rules">Rules</h2></div>
+			@admin.Table(d.Rules)
+		</section>
+		<section class="section" aria-labelledby="h-how">
+			<div class="section-head"><h2 id="h-how">How this works</h2></div>
+			for _, t := range d.How {
+				<p class="muted">{ t }</p>
+			}
+		</section>
+	}
+}

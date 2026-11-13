@@ -178,6 +178,9 @@ func TestReportsAndAnalysisAreWired(t *testing.T) {
 	if srv.Reports() == nil || srv.Analysis() == nil {
 		t.Fatal("the services are not wired")
 	}
+	if srv.reportSource() == nil || srv.analysisSource() == nil {
+		t.Fatal("the pages of the web UI do not get the services")
+	}
 	rep, err := srv.Reports().Get(t.Context(), console)
 	if err != nil {
 		t.Fatal(err)

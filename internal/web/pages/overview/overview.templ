@@ -19,6 +19,10 @@ type Data struct {
 	AlertsHref string
 	// Real UI: no recent activity yet (the audit log follows in step 18).
 	Real bool
+	// Expiry and Authorities are the two report charts of the real UI,
+	// shown below the expiring certificates; nil (no read access to the
+	// reports, monitoring off) hides them.
+	Expiry, Authorities *view.Chart
 }
 
 // Page renders the dashboard.
@@ -52,6 +56,21 @@ templ Page(p view.Page, d Data) {
 				@components.CertificateTable(d.Expiring, false, "")
 			}
 		</section>
+		if d.Expiry != nil || d.Authorities != nil {
+			<section class="section" aria-label="Charts">
+				if d.Expiry != nil {
+					@components.Fold("dash-expiry", "Expiry", true) {
+						@components.Chart(*d.Expiry)
+					}
+				}
+				if d.Authorities != nil {
+					@components.Fold("dash-authorities", "Authorities", true) {
+						@components.Chart(*d.Authorities)
+					}
+				}
+				<p class="table-foot"><a href="/reports">All reports</a></p>
+			</section>
+		}
 		if !d.Real {
 			<section class="section" aria-labelledby="h-activity">
 				<div class="section-head">
