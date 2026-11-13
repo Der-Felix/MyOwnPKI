@@ -2526,6 +2526,73 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
+  # ---------------------------------------------------------------- reports and analysis (v0.3.8)
+  /reports:
+    get:
+      tags: [monitoring]
+      operationId: getReports
+      summary: Read the five report datasets (expiry, issuances, authorities, alerts, agents)
+      description: |
+        The numbers behind the Reports page (docs/PHASE3.md §14.2), computed from what the server
+        holds; nothing is stored. All times are UTC; every week starts on a Monday 00:00 (ISO
+        week). The result is built at most once a minute per tenant and shared, so `generated_at`
+        can be up to a minute old.
+
+        The report names the CAs, agents and alerts of the whole tenant, so it needs the
+        tenant-wide read permission, like `GET /alerts`: a role limited to one CA gets 403, and so
+        does an API token whose roles are limited to one CA. Reading works while the server is
+        sealed.
+
+        Every string is raw text, never HTML; a CA name comes from an operator and must be
+        escaped by whoever renders it.
+      x-required-role: viewer
+      responses:
+        "200":
+          description: The report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /analysis:
+    get:
+      tags: [monitoring]
+      operationId: getAnalysis
+      summary: Read what the analysis rules found
+      description: |
+        Ten rules over a snapshot of the PKI (docs/PHASE3.md §14.2) that look for what no alarm
+        covers: a certificate nobody serves, two sources issuing for the same names, a renewal
+        loop, an expiry wave, a weak key or signature, a CA that ends before its certificates, an
+        outdated agent, an unused ACME account or domain. The analysis is advice, not an alarm:
+        nothing is stored, nothing can be dismissed and no finding becomes an alert or a message.
+
+        `rules` holds one entry per rule (all ten, or only the requested one) with its state:
+        `ok`, `findings`, or `unknown` when its input is missing (`unknown_reason` says why; with
+        findings it says how many things could not be assessed). A rule never claims more than
+        its input shows. `findings` holds at most 200 per rule, most severe first; `count` and
+        `summary` count every finding.
+
+        Same permission and cache as `GET /reports`: the tenant-wide read permission (403 for a
+        role limited to one CA), at most one run a minute per tenant, works while sealed. The
+        findings carry names from CSRs, ACME clients and agents as raw text, clipped to 120
+        characters, never HTML.
+      x-required-role: viewer
+      parameters:
+        - name: rule
+          description: "Only this rule, by its `id`; the summary then covers that rule only. An id that is not a rule is 400"
+          in: query
+          schema: { type: string, maxLength: 64, examples: ["weak_key"] }
+      responses:
+        "200":
+          description: The analysis
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Analysis" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
 components:
   securitySchemes:
     session:
@@ -4222,3 +4289,205 @@ components:
               ok: { type: boolean }
               error: { type: string, description: "Why it failed; never a secret, but may name hosts, file paths and recipient addresses" }
 
+    Report:
+      description: |
+        The five datasets of the Reports page (docs/PHASE3.md §14.2). Times are UTC. Names are
+        untrusted text (raw, never HTML).
+      type: object
+      required: [generated_at, expiry, issuances, authorities, alerts, agents]
+      additionalProperties: false
+      properties:
+        generated_at: { type: string, format: date-time, description: "When this report was built; it is reused for up to a minute" }
+        expiry:
+          description: "When the valid certificates end"
+          type: object
+          required: [weeks]
+          additionalProperties: false
+          properties:
+            weeks:
+              description: "13 entries: the current ISO week and 12 more. Counts certificates that are not revoked (imported and external ones included, agent identity certificates not); the current week counts only those that end after `generated_at`"
+              type: array
+              items: { $ref: "#/components/schemas/ReportWeek" }
+        issuances:
+          description: "Certificates issued per week by source (docs/PHASE3.md D6); imported and external certificates are not issuances"
+          type: object
+          required: [weeks]
+          additionalProperties: false
+          properties:
+            weeks:
+              description: "12 entries, the oldest first, the last is the current (partial) week"
+              type: array
+              items: { $ref: "#/components/schemas/ReportIssuanceWeek" }
+        authorities:
+          description: |
+            One entry per CA that has certificates or is active, sorted by name. The certificates
+            that have no CA (imported external ones) come last in an entry with an empty `id` and
+            an empty `name`. Agent identity certificates are not counted. `valid` includes
+            `expiring` (it ends within 30 days), as the Certificates page does with
+            `status=valid`: stack `valid - expiring`, `expiring`, `expired` and `revoked`.
+          type: array
+          items: { $ref: "#/components/schemas/ReportAuthority" }
+        alerts:
+          description: "The alert history the store keeps (30 days)"
+          type: object
+          required: [retention_days, weeks, open]
+          additionalProperties: false
+          properties:
+            retention_days: { type: integer, description: "How far back the store keeps alerts; the weeks cover that" }
+            weeks:
+              description: "5 entries, the oldest first, the last is the current week. Counts the alerts first seen in that week by their severity now"
+              type: array
+              items: { $ref: "#/components/schemas/ReportAlertWeek" }
+            open: { type: integer, description: "Alerts that hold right now" }
+        agents:
+          description: "The agent fleet; null while the agent listener is off"
+          oneOf:
+            - $ref: "#/components/schemas/ReportFleet"
+            - type: "null"
+
+    ReportWeek:
+      description: "One week of the expiry timeline"
+      type: object
+      required: [start, count, window]
+      additionalProperties: false
+      properties:
+        start: { type: string, format: date-time, description: "Monday 00:00 UTC, the first day of the expiry week" }
+        count: { type: integer, description: "Certificates that end in this week" }
+        window:
+          type: string
+          enum: [critical, warning, none]
+          description: "`critical` when the week starts inside the critical expiry window of the monitor (`monitor.expiry_days`), `warning` inside the warning window, else `none`"
+
+    ReportIssuanceWeek:
+      description: "One week of issuances by source"
+      type: object
+      required: [start, acme, agent, ui]
+      additionalProperties: false
+      properties:
+        start: { type: string, format: date-time, description: "Monday 00:00 UTC, the first day of the issuance week" }
+        acme: { type: integer, description: "Through an ACME order of an account that has no agent" }
+        agent: { type: integer, description: "Through an ACME order of an account that belongs to an agent" }
+        ui: { type: integer, description: "Without an order: the web UI and this API" }
+
+    ReportAuthority:
+      description: "A CA with its certificate counts, or the certificates that have no CA"
+      type: object
+      required: [id, name, valid, expiring, expired, revoked]
+      additionalProperties: false
+      properties:
+        id: { type: string, description: "Empty for the certificates that have no CA" }
+        name: { type: string, description: "Empty for the certificates that have no CA. Untrusted text" }
+        valid: { type: integer, description: "Includes `expiring`" }
+        expiring: { type: integer, description: "Valid and ending within 30 days" }
+        expired: { type: integer }
+        revoked: { type: integer }
+
+    ReportAlertWeek:
+      description: "Alerts first seen in one week"
+      type: object
+      required: [start, warning, critical]
+      additionalProperties: false
+      properties:
+        start: { type: string, format: date-time, description: "Monday 00:00 UTC, the week the alerts were first seen" }
+        warning: { type: integer }
+        critical: { type: integer }
+
+    ReportFleet:
+      description: |
+        The agent fleet. The state counts cover every agent; the version and deployment counts
+        cover the agents that are neither disabled nor revoked, as the monitor rules do.
+      type: object
+      required: [active, silent_warning, silent_critical, disabled, revoked, version, deployments]
+      additionalProperties: false
+      properties:
+        active: { type: integer, description: "Active agents that reported within the silence threshold, or have not reported yet (the monitor does not call them silent either)" }
+        silent_warning: { type: integer, description: "Active agents silent for the warning threshold" }
+        silent_critical: { type: integer, description: "Active agents silent for the critical threshold" }
+        disabled: { type: integer }
+        revoked: { type: integer }
+        version:
+          description: "The agent versions against the server version"
+          type: object
+          required: [current, older, unknown]
+          additionalProperties: false
+          properties:
+            current: { type: integer, description: "The server version or newer" }
+            older: { type: integer }
+            unknown: { type: integer, description: "The version of the agent or of the server is not a release number (a development build has no comparable version, so every agent is counted here)" }
+        deployments:
+          description: "Deployments that are not removed, by state"
+          type: object
+          required: [deployed, pending, failed, rolled_back]
+          additionalProperties: false
+          properties:
+            deployed: { type: integer }
+            pending: { type: integer }
+            failed: { type: integer }
+            rolled_back: { type: integer }
+
+    Analysis:
+      description: |
+        What the analysis rules found (docs/PHASE3.md §14.2). Advice, not an alarm. Every string
+        is raw text, never HTML; names from CSRs, ACME clients and agents are clipped to 120
+        characters.
+      type: object
+      required: [generated_at, summary, rules, findings]
+      additionalProperties: false
+      properties:
+        generated_at: { type: string, format: date-time, description: "When the analysis ran; it is reused for up to a minute" }
+        summary:
+          description: "Findings by severity (every finding, also those beyond the 200 listed per rule) and the number of rules that cannot be assessed"
+          type: object
+          required: [critical, warning, info, unknown]
+          additionalProperties: false
+          properties:
+            critical: { type: integer }
+            warning: { type: integer }
+            info: { type: integer }
+            unknown: { type: integer, description: "Rules in state `unknown`" }
+        rules:
+          description: "One entry per rule in a fixed order; a single entry with `?rule=`"
+          type: array
+          items: { $ref: "#/components/schemas/AnalysisRule" }
+        findings:
+          description: "Most severe first, then by rule and subject; at most 200 per rule"
+          type: array
+          items: { $ref: "#/components/schemas/Finding" }
+
+    AnalysisRule:
+      description: "The state of one rule"
+      type: object
+      required: [id, title, state, count, unknown_reason]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: "Stable; the value of `?rule=` and of `Finding.rule`"
+          enum: [orphaned_certificate, duplicate_certificates, renewal_loop, expiry_wave, weak_key, weak_signature, ca_cliff, outdated_agent, unused_acme_account, unused_domain]
+        title: { type: string, description: "Short English name for display" }
+        state:
+          type: string
+          enum: [ok, findings, unknown]
+          description: "`ok`: checked, nothing found. `findings`: at least one finding. `unknown`: the input is missing, see `unknown_reason`; the rule produced no finding"
+        count: { type: integer, description: "Every finding of the rule, also those beyond the 200 listed" }
+        unknown_reason:
+          type: string
+          description: "Why the rule is `unknown`, or what it could not assess although it has findings; empty otherwise"
+
+    Finding:
+      description: "One thing a rule saw. A finding never states more than the snapshot shows"
+      type: object
+      required: [key, rule, severity, subject, seen, why, recommendation, href]
+      additionalProperties: false
+      properties:
+        key: { type: string, description: "`rule:subject id`, stable between runs" }
+        rule: { type: string, description: "The `id` of the rule" }
+        severity:
+          type: string
+          enum: [info, warning, critical]
+          description: "`info` is never a call to act"
+        subject: { type: string, description: "What it is about, for display (a certificate, an agent, a week). Untrusted text, clipped" }
+        seen: { type: string, description: "What the snapshot shows. May contain clipped untrusted names" }
+        why: { type: string, description: "Why it matters" }
+        recommendation: { type: string, description: "What to do" }
+        href: { type: string, description: "Path of the object in the web UI; empty for none" }
