@@ -369,9 +369,12 @@ func (h *Handler) trustFile(w http.ResponseWriter, r *http.Request) {
 			h.profile(w, r, s)
 			return
 		}
-		download := name + "-trust-" + map[string]string{ScopeMachine: "computer", ScopeUser: "user"}[scope] + ".cmd"
+		// The name is built from the CA name and the normalized generation, never
+		// from the text of the request ("+2" and "0002" both parse to 2).
+		who := map[string]string{ScopeMachine: "computer", ScopeUser: "user"}[scope]
+		download := name + "-trust-" + who + ".cmd"
 		if !s.gen.Current {
-			download = name + "-" + genText + "-trust-" + map[string]string{ScopeMachine: "computer", ScopeUser: "user"}[scope] + ".cmd"
+			download = name + "-" + strconv.FormatInt(gen, 10) + "-trust-" + who + ".cmd"
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+download+`"`)

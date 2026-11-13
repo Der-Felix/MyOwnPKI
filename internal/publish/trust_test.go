@@ -286,6 +286,17 @@ func TestTrustDownloads(t *testing.T) {
 		if a := fetch(t, h, "/trust/root/1/"+scope+".cmd"); a.code != http.StatusOK || a.h.Get("Content-Disposition") != `attachment; filename="`+wantName+`"` {
 			t.Errorf("older helper: %d %v", a.code, a.h)
 		}
+		// The generation in the file name is the normalized number, not the text of
+		// the request: "+1" and many leading zeros parse to 1 and name the same file.
+		for _, spelled := range []string{"+1", "01", "0000000001", strings.Repeat("0", 30) + "1"} {
+			a := fetch(t, h, "/trust/root/"+spelled+"/"+scope+".cmd")
+			if a.code != http.StatusOK && a.code != http.StatusNotFound {
+				t.Errorf("%s: %d", spelled, a.code)
+			}
+			if cd := a.h.Get("Content-Disposition"); a.code == http.StatusOK && cd != `attachment; filename="`+wantName+`"` {
+				t.Errorf("generation spelled %q: Content-Disposition %q, want the name %q", spelled, cd, wantName)
+			}
+		}
 	}
 
 	off := false
