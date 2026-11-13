@@ -7,7 +7,7 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
-## [0.3.9]
+## [0.3.9] - 2026-11-13
 
 The trust portal. The page at `/` of the public listener now guesses the visitor's system from the browser, lets the
 visitor choose another one, and shows the steps and commands that install a root there; iPhone, iPad and Mac get a
