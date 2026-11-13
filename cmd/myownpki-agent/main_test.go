@@ -243,3 +243,99 @@ func TestConfigCheckRefusesUnknownDNSKeys(t *testing.T) {
 		t.Fatalf("stderr: %s", stderr.String())
 	}
 }
+
+func TestTrustCommandLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agent.yaml")
+	pin := strings.Repeat("ab", 32)
+	writeFile(t, cfg, "server: https://pki.homelab.lan:8444\nca_bundle: "+yamlPath(filepath.Join(dir, "root.pem"))+
+		"\nhostname: proxy1.homelab.lan\nstate_dir: "+yamlPath(filepath.Join(dir, "state"))+"\n")
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string
+		wantStdout string
+	}{
+		{name: "no subcommand", args: []string{"trust"}, wantCode: 2, wantStderr: "trust install"},
+		{name: "unknown subcommand", args: []string{"trust", "add"}, wantCode: 2, wantStderr: "trust remove"},
+		{name: "install needs the pin", args: []string{"trust", "install", "--config", cfg}, wantCode: 2, wantStderr: "--root-sha256 is required"},
+		{name: "install with a stray argument", args: []string{"trust", "install", "--root-sha256", pin, "--config", cfg, "extra"}, wantCode: 2},
+		{name: "unknown flag", args: []string{"trust", "install", "--force"}, wantCode: 2},
+		{name: "status has no --no-record", args: []string{"trust", "status", "--no-record"}, wantCode: 2},
+		{name: "remove has no --quiet", args: []string{"trust", "remove", "--quiet"}, wantCode: 2},
+		{name: "status without a pin", args: []string{"trust", "status", "--config", cfg}, wantCode: 1, wantStdout: "not configured"},
+		{name: "status quiet without a pin", args: []string{"trust", "status", "--quiet", "--config", cfg}, wantCode: 1},
+		{name: "status of a missing file", args: []string{"trust", "status", "--config", filepath.Join(dir, "nope.yaml")}, wantCode: 1, wantStderr: "nope.yaml"},
+		// install and remove need root and a Linux host: on this machine (a test
+		// run is not root) they refuse before anything is read or written.
+		{name: "install refuses a non-root caller", args: []string{"trust", "install", "--root-sha256", pin, "--config", cfg}, wantCode: 1, wantStderr: "must run as root"},
+		{name: "remove refuses a non-root caller", args: []string{"trust", "remove", "--config", cfg}, wantCode: 1, wantStderr: "must run as root"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if os.Geteuid() == 0 && strings.Contains(tt.name, "non-root") {
+				t.Skip("the test run is root; the refusal is for everybody else")
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(t.Context(), tt.args, &stdout, &stderr); code != tt.wantCode {
+				t.Errorf("exit code = %d, want %d (stderr: %s)", code, tt.wantCode, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) || !strings.Contains(stdout.String(), tt.wantStdout) {
+				t.Errorf("stdout %q, stderr %q: want %q and %q", stdout.String(), stderr.String(), tt.wantStdout, tt.wantStderr)
+			}
+		})
+	}
+	if _, err := os.Stat(cfg + ".bak"); err == nil {
+		t.Error("a refused command wrote agent.yaml.bak")
+	}
+}
+
+func TestSetupHasTheSystemTrustFlag(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	// No --server: setup refuses at once, but the flag must parse (usage error 2 would mean it does not).
+	if code := run(t.Context(), []string{"setup", "--system-trust"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "--server is required") {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+}
+
+func TestConfigCheckShowsTheSystemTrustBlock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(extra string) string {
+		path := filepath.Join(dir, "agent.yaml")
+		writeFile(t, path, "server: https://pki.homelab.lan:8444\nca_bundle: "+yamlPath(filepath.Join(dir, "root.pem"))+
+			"\nhostname: proxy1.homelab.lan\nstate_dir: "+yamlPath(filepath.Join(dir, "state"))+"\n"+extra)
+		return path
+	}
+	check := func(path string) (int, string, string) {
+		var stdout, stderr bytes.Buffer
+		code := run(t.Context(), []string{"config", "check", "--config", path}, &stdout, &stderr)
+		return code, stdout.String(), stderr.String()
+	}
+	if code, out, errOut := check(write("")); code != 0 || !strings.Contains(out, "  system trust  off\n") {
+		t.Fatalf("off: %d\n%s%s", code, out, errOut)
+	}
+	pin := strings.Repeat("cd", 32)
+	// The root is not there yet (a laptop, a host before setup): information, exit 0.
+	if code, out, errOut := check(write("system_trust:\n  root_sha256: \"" + pin + "\"\n")); code != 0 || !strings.Contains(out, "  system trust  ") || strings.Contains(out, "system trust  off") {
+		t.Fatalf("configured: %d\n%s%s", code, out, errOut)
+	}
+	// ca_bundle holds another root than the pin: exit 1.
+	root, _ := testRootPEM(t)
+	writeFile(t, filepath.Join(dir, "root.pem"), string(root))
+	code, out, errOut := check(write("system_trust:\n  root_sha256: \"" + pin + "\"\n"))
+	if code != 1 || !strings.Contains(out, "pin differs from ca_bundle") || !strings.Contains(errOut, "system_trust") {
+		t.Fatalf("pin mismatch: %d\n%s%s", code, out, errOut)
+	}
+	// A bad pin is a configuration error like any other.
+	if code, _, errOut := check(write("system_trust:\n  root_sha256: nothex\n")); code != 1 || !strings.Contains(errOut, "system_trust.root_sha256") {
+		t.Fatalf("bad pin: %d %s", code, errOut)
+	}
+	if code, _, errOut := check(write("system_trust:\n  root_sha256: \"" + pin + "\"\n  extra: 1\n")); code != 1 || !strings.Contains(errOut, "extra") {
+		t.Fatalf("unknown key: %d %s", code, errOut)
+	}
+}

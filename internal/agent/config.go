@@ -75,7 +75,17 @@ type Config struct {
 	Hooks        map[string][]string    `yaml:"hooks"`
 	Paths        []string               `yaml:"paths"`
 	Sandbox      Sandbox                `yaml:"sandbox"`
-	Deployments  []Deployment           `yaml:"deployments"`
+	// SystemTrust asks for the root in the system trust store of the host
+	// (docs/PHASE3.md §15). nil is off, and off is the default. The service never
+	// acts on it: "trust install" and "trust remove" do, run by root.
+	SystemTrust *SystemTrust `yaml:"system_trust"`
+	Deployments []Deployment `yaml:"deployments"`
+}
+
+// SystemTrust is the pin of the root that may enter the system trust store.
+type SystemTrust struct {
+	// RootSHA256 is the SHA-256 of the DER of the root, 64 hexadecimal digits.
+	RootSHA256 string `yaml:"root_sha256"`
 }
 
 // Sandbox is the part of the systemd sandbox that agent.yaml cannot derive
@@ -169,6 +179,7 @@ func ParseConfig(name string, data []byte) (*Config, error) {
 var (
 	nameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	hookRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	pinRE  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // Validate checks every rule of docs/PHASE3.md §1.3 and returns all
@@ -248,6 +259,13 @@ func (c *Config) Validate() error {
 		}
 	}
 	c.Sandbox.Write = sandbox
+	if c.SystemTrust != nil {
+		pin := strings.ToLower(c.SystemTrust.RootSHA256)
+		if !pinRE.MatchString(pin) {
+			add("system_trust.root_sha256: the SHA-256 of the root certificate, 64 hexadecimal digits without colons (the admin UI shows it)")
+		}
+		c.SystemTrust.RootSHA256 = pin
+	}
 	switch c.Enrollment.Challenge {
 	case ChallengeStandalone:
 	case ChallengeWebroot:
