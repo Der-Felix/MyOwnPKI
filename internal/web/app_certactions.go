@@ -16,6 +16,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/pkcs12"
+	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
@@ -30,6 +31,7 @@ func (c *rc) refused(err error, back string) {
 	var denied *ca.DeniedError
 	var ref *auth.RefusedError
 	var pol *auth.PolicyError
+	var conflict *settingsver.ConflictError
 	var msgs []view.Message
 	add := func(text string) { msgs = append(msgs, view.Message{Kind: view.MessageError, Text: text}) }
 	switch {
@@ -55,6 +57,8 @@ func (c *rc) refused(err error, back string) {
 		}
 	case errors.As(err, &pol):
 		add(pol.Error())
+	case errors.As(err, &conflict):
+		add(conflictText(conflict))
 	case errors.Is(err, authz.ErrDenied):
 		add("Your role doesn't allow this.")
 	case errors.Is(err, auth.ErrInvalidLogin):

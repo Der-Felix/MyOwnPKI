@@ -212,11 +212,13 @@ func (a *app) domainDetail(c *rc) {
 			c.fail(ferr)
 			return
 		}
+		fields = append(fields, baseVersionField(d.Version))
 		self := "/domains/" + d.ID
 		sections = append(sections, admin.Section{Forms: []admin.FormData{
 			c.form(admin.FormData{Title: "Change", Action: self, Submit: "Save", Fields: fields}),
 			c.form(admin.FormData{Title: "Delete", Action: self + "/delete", Submit: "Delete domain", Danger: true,
-				Intro: []string{"Certificates already issued stay valid. Open ACME orders for its names fail."}}),
+				Fields: []admin.Field{baseVersionField(d.Version)},
+				Intro:  []string{"Certificates already issued stay valid. Open ACME orders for its names fail."}}),
 		}})
 	}
 	render(c.w, c.r, a.log, http.StatusOK, admin.DetailPage(c.page(d.Name, "domains", domainCrumbs()...), admin.DetailData{Messages: c.messages(), Sections: sections}))
@@ -231,7 +233,13 @@ func orDash(s string) string {
 
 func (a *app) domainUpdate(c *rc) {
 	id := c.r.PathValue("id")
-	if _, err := a.d.Engine.UpdateDomain(c.r.Context(), id, domainSettingsFromForm(c), c.who()); err != nil {
+	settings := domainSettingsFromForm(c)
+	var err error
+	if settings.Options.ExpectedVersion, err = baseVersion(c); err != nil {
+		c.refused(err, "/domains/"+id)
+		return
+	}
+	if _, err = a.d.Engine.UpdateDomain(c.r.Context(), id, settings, c.who()); err != nil {
 		c.refused(err, "/domains/"+id)
 		return
 	}
@@ -240,7 +248,13 @@ func (a *app) domainUpdate(c *rc) {
 
 func (a *app) domainDelete(c *rc) {
 	id := c.r.PathValue("id")
-	if err := a.d.Engine.DeleteDomain(c.r.Context(), id, c.who()); err != nil {
+	var opts ca.ChangeOptions
+	var err error
+	if opts.ExpectedVersion, err = baseVersion(c); err != nil {
+		c.refused(err, "/domains/"+id)
+		return
+	}
+	if err = a.d.Engine.DeleteDomainWith(c.r.Context(), id, opts, c.who()); err != nil {
 		c.refused(err, "/domains/"+id)
 		return
 	}
