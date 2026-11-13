@@ -294,7 +294,10 @@ func (k tsigKey) mac(msg []byte, alg string) ([]byte, error) {
 	default:
 		return nil, dns.ErrKeyAlg
 	}
-	text := k.secret.reveal()
+	// A copy: the guard may wipe the secret while this runs in the goroutine of
+	// a CleanUp that timed out.
+	text := k.secret.snapshot()
+	defer clear(text)
 	raw := make([]byte, base64.StdEncoding.DecodedLen(len(text)))
 	defer clear(raw)
 	n, err := base64.StdEncoding.Decode(raw, text)

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 
 	"go.yaml.in/yaml/v3"
@@ -64,33 +65,64 @@ func (e *credentialsError) Error() string {
 
 // secret is a value that must never reach a log, an error, a report or a
 // `%v` of any struct. Every way Go has to print it yields [redacted]; the
-// bytes are reachable only through reveal.
+// bytes are reachable only through reveal and snapshot.
 //
-// The bytes are held by two closures, not by a field. fmt prints a struct in
+// The bytes are held by closures, not by a field. fmt prints a struct in
 // an unexported field by reflection, bypassing every method, and it prints
 // what a pointer to a struct or a slice points to for verbs like %s and %q;
 // a func value prints as an address only. So no spelling of a struct that
 // holds a secret shows a byte of it. A secret is not comparable (== does not
 // compile), which is intended.
+//
+// A guard may wipe the secret while a timed-out CleanUp is still running in
+// its own goroutine. The closures share a lock, and code that can run at that
+// time (the TSIG signature, the redaction) reads a snapshot, a copy made under
+// the lock, so that no read overlaps the overwriting.
 type secret struct {
 	read  func() []byte
+	snap  func() []byte
 	erase func()
 }
 
 func newSecret(b []byte) secret {
+	var mu sync.RWMutex
 	buf := bytes.Clone(b)
 	return secret{
-		read:  func() []byte { return buf },
-		erase: func() { clear(buf); buf = nil },
+		read: func() []byte {
+			mu.RLock()
+			defer mu.RUnlock()
+			return buf
+		},
+		snap: func() []byte {
+			mu.RLock()
+			defer mu.RUnlock()
+			return bytes.Clone(buf)
+		},
+		erase: func() {
+			mu.Lock()
+			defer mu.Unlock()
+			clear(buf)
+			buf = nil
+		},
 	}
 }
 
-// reveal is the only way to the value: call it where the provider needs it.
+// reveal returns the bytes themselves, which wipe overwrites. Use it only
+// where nothing can wipe the secret at the same time; otherwise use snapshot.
 func (s secret) reveal() []byte {
 	if s.read == nil {
 		return nil
 	}
 	return s.read()
+}
+
+// snapshot returns a copy of the value, safe against a concurrent wipe. The
+// caller clears it when it is done; after a wipe it is nil.
+func (s secret) snapshot() []byte {
+	if s.snap == nil {
+		return nil
+	}
+	return s.snap()
 }
 
 func (s secret) isSet() bool { return len(s.reveal()) > 0 }
@@ -154,8 +186,9 @@ func (c *dnsCredentials) redact(err error) error { return redact(err, c.secrets(
 func redactText(s string, secrets ...secret) string {
 	values := make([]string, 0, len(secrets))
 	for _, sec := range secrets {
-		if v := sec.reveal(); len(v) > 0 {
+		if v := sec.snapshot(); len(v) > 0 {
 			values = append(values, string(v))
+			clear(v)
 		}
 	}
 	slices.SortFunc(values, func(a, b string) int { return len(b) - len(a) })

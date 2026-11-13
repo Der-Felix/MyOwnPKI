@@ -173,3 +173,30 @@ func TestRFC2136SecretIsWipedWithTheCredentials(t *testing.T) {
 		}
 	}
 }
+
+// The guard wipes the secret when the issuance ends, while the goroutine of a
+// CleanUp that timed out may still be signing: signing works on a copy, and a
+// wiped key is an error, never a signature of garbage.
+func TestTSIGKeySigningWhileTheSecretIsWiped(t *testing.T) {
+	t.Parallel()
+	creds := tsigCreds(testTSIGSecret)
+	key := tsigKey{name: "acme-agent.", algorithm: dns.HmacSHA256, secret: creds.TSIGSecret}
+	if _, err := key.mac([]byte("message"), dns.HmacSHA256); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			if mac, err := key.mac([]byte("message"), dns.HmacSHA256); err != nil && !errors.Is(err, dns.ErrSecret) || err == nil && len(mac) != 32 {
+				t.Errorf("mac %x, %v", mac, err)
+				return
+			}
+		}
+	}()
+	creds.wipe()
+	<-done
+	if _, err := key.mac([]byte("message"), dns.HmacSHA256); !errors.Is(err, dns.ErrSecret) {
+		t.Fatalf("after the wipe: %v", err)
+	}
+}
