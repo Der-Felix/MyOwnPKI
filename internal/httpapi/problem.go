@@ -59,7 +59,7 @@ func (c *call) fail(err error) {
 	if errors.Is(err, errReply) {
 		return
 	}
-	if agentError(c, err) || endpointError(c, err) {
+	if agentError(c, err) || endpointError(c, err) || c.preconditionFailed(err) {
 		return
 	}
 	var authLocked *auth.LockedError
