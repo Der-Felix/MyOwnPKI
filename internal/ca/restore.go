@@ -122,6 +122,9 @@ type DomainVersionDetail struct {
 	Restore    RestoreCheck
 	// Current is the newest version number, the ETag.
 	Current int64
+	// Changed is the keys of the settings this version changed compared with the
+	// version before it; nil if that cannot be told.
+	Changed []string
 }
 
 // RestoreCheck is the answer of a dry run: whether the restore would be
@@ -150,7 +153,12 @@ func (e *Engine) GetDomainVersion(ctx context.Context, who keys.Who, id string, 
 	if err != nil {
 		return nil, err
 	}
-	return &DomainVersionDetail{Version: v, Snapshot: snap.(settingsver.DomainSnapshot), Comparison: cmp, Restore: check, Current: h.latest.Number}, nil
+	domain, err := settingsver.AsDomain(snap)
+	if err != nil {
+		return nil, err
+	}
+	return &DomainVersionDetail{Version: v, Snapshot: domain, Comparison: cmp, Restore: check, Current: h.latest.Number,
+		Changed: settingsver.PageChanges(ctx, h.b, []settingsver.Version{v})[0]}, nil
 }
 
 // DomainRestoreCheck asks whether RestoreDomain would accept a version now,
@@ -222,11 +230,10 @@ func (e *Engine) restoreDomain(ctx context.Context, id string, version int64, op
 	if err != nil {
 		return nil, err
 	}
-	decoded, err := v.Decoded()
+	snap, err := v.DecodedDomain()
 	if err != nil {
 		return nil, err
 	}
-	snap := decoded.(settingsver.DomainSnapshot)
 	// Early, so a stale caller hears 412 before a list of reasons; the writer
 	// checks again inside its transaction.
 	if err = settingsver.CheckExpected(ctx, b, settingsver.KindDomain, id, opts.ExpectedVersion); err != nil {
@@ -277,11 +284,11 @@ func (e *Engine) currentDomain(ctx context.Context, q *pkidb.Queries, b settings
 	if err != nil {
 		return nil, err
 	}
-	snap, err := latest.Decoded()
+	snap, err := latest.DecodedDomain()
 	if err != nil {
 		return nil, err
 	}
-	if e.authorize(who, authz.ReadPKI, e.caNameOf(ctx, q, snap.(settingsver.DomainSnapshot).CAID), e.now()) != nil {
+	if e.authorize(who, authz.ReadPKI, e.caNameOf(ctx, q, snap.CAID), e.now()) != nil {
 		return nil, ErrNotFound
 	}
 	return nil, nil
@@ -321,11 +328,10 @@ func (e *Engine) ListDeletedDomains(ctx context.Context, who keys.Who) ([]Delete
 		} else if !errors.Is(gerr, sql.ErrNoRows) {
 			return nil, gerr
 		}
-		decoded, derr := v.Decoded()
+		snap, derr := v.DecodedDomain()
 		if derr != nil {
 			continue // cannot be shown, and a restore would be refused anyway
 		}
-		snap := decoded.(settingsver.DomainSnapshot)
 		name := e.caNameOf(ctx, q, snap.CAID)
 		if e.authorize(who, authz.ReadPKI, name, e.now()) != nil {
 			continue

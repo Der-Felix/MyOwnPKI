@@ -55,6 +55,9 @@ type VersionDetail struct {
 	Restore    RestoreCheck
 	// Current is the newest version number, the ETag.
 	Current int64
+	// Changed is the keys of the settings this version changed compared with the
+	// version before it; nil if that cannot be told.
+	Changed []string
 }
 
 func (s *Store) checkAudit(tenant string, who keys.Who) error {
@@ -119,7 +122,12 @@ func (s *Store) VersionDetail(ctx context.Context, tenant string, who keys.Who, 
 	if err != nil {
 		return nil, err
 	}
-	return &VersionDetail{Version: v, Snapshot: snap.(settingsver.TenantSnapshot), Comparison: cmp, Restore: check, Current: current}, nil
+	tenantSnap, err := settingsver.AsTenant(snap)
+	if err != nil {
+		return nil, err
+	}
+	return &VersionDetail{Version: v, Snapshot: tenantSnap, Comparison: cmp, Restore: check, Current: current,
+		Changed: settingsver.PageChanges(ctx, b, []settingsver.Version{v})[0]}, nil
 }
 
 // RestoreCheck asks whether Restore would accept a version now, from the same
@@ -135,14 +143,13 @@ func (s *Store) RestoreCheck(ctx context.Context, tenant string, who keys.Who, v
 	if err != nil {
 		return RestoreCheck{}, err
 	}
-	decoded, err := v.Decoded()
+	snap, err := v.DecodedTenant()
 	switch {
 	case errors.Is(err, settingsver.ErrUnknownSchema), errors.Is(err, settingsver.ErrCorrupt):
 		return RestoreCheck{Problems: []string{"this version cannot be read by this release: " + err.Error()}}, nil
 	case err != nil:
 		return RestoreCheck{}, err
 	}
-	snap := decoded.(settingsver.TenantSnapshot)
 	live, err := s.read(ctx, tenant)
 	if err != nil {
 		return RestoreCheck{}, err
@@ -194,11 +201,10 @@ func (s *Store) restore(ctx context.Context, tenant string, version int64, opts 
 	if err != nil {
 		return 0, err
 	}
-	decoded, err := v.Decoded()
+	snap, err := v.DecodedTenant()
 	if err != nil {
 		return 0, err
 	}
-	snap := decoded.(settingsver.TenantSnapshot)
 	live, err := s.read(ctx, tenant)
 	if err != nil {
 		return 0, err

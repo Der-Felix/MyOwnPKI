@@ -134,3 +134,39 @@ func Keys(changes []FieldChange) []string {
 	}
 	return out
 }
+
+// AsDomain is a snapshot as a DomainSnapshot; any other type is a damaged row.
+func AsDomain(s Snapshot) (DomainSnapshot, error) {
+	d, ok := s.(DomainSnapshot)
+	if !ok {
+		return DomainSnapshot{}, fmt.Errorf("%w: not a domain snapshot", ErrCorrupt)
+	}
+	return d, nil
+}
+
+// AsTenant is a snapshot as a TenantSnapshot; any other type is a damaged row.
+func AsTenant(s Snapshot) (TenantSnapshot, error) {
+	t, ok := s.(TenantSnapshot)
+	if !ok {
+		return TenantSnapshot{}, fmt.Errorf("%w: not a tenant snapshot", ErrCorrupt)
+	}
+	return t, nil
+}
+
+// DecodedDomain is Decoded for a version of a domain.
+func (v Version) DecodedDomain() (DomainSnapshot, error) {
+	s, err := v.Decoded()
+	if err != nil {
+		return DomainSnapshot{}, err
+	}
+	return AsDomain(s)
+}
+
+// DecodedTenant is Decoded for a version of the tenant settings.
+func (v Version) DecodedTenant() (TenantSnapshot, error) {
+	s, err := v.Decoded()
+	if err != nil {
+		return TenantSnapshot{}, err
+	}
+	return AsTenant(s)
+}
