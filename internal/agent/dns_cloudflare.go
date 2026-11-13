@@ -31,7 +31,11 @@ import (
 //     error text (lego's errors embed it); only the API's error codes and
 //     short messages do;
 //   - the delete: lego logs a failed DELETE and returns nil; the transport
-//     notes it, so the guard can record the leftover record.
+//     notes it, so the guard can record the leftover record;
+//   - a create that may have worked: when the answer to the POST is lost or
+//     is not the API's (a proxy's HTML page), Cloudflare may have created the
+//     record, lego holds no ID for it, and CleanUp reports it as one that may
+//     remain.
 
 const (
 	cloudflareHTTPTimeout = 30 * time.Second
@@ -46,6 +50,7 @@ type cloudflareProvider struct {
 
 	mu        sync.Mutex
 	presented map[string]bool // token of every successful Present
+	unsure    map[string]bool // token of every Present that failed after its create request may have worked
 }
 
 var (
@@ -103,7 +108,7 @@ func newCloudflareProvider(cfg DNSProvider, creds *dnsCredentials, proxy string,
 		base.CloseIdleConnections()
 		return nil, creds.redact(err)
 	}
-	return &cloudflareProvider{inner: inner, creds: creds, tr: tr, presented: map[string]bool{}}, nil
+	return &cloudflareProvider{inner: inner, creds: creds, tr: tr, presented: map[string]bool{}, unsure: map[string]bool{}}, nil
 }
 
 func (p *cloudflareProvider) dnsCreds() *dnsCredentials { return p.creds }
@@ -116,7 +121,13 @@ func (p *cloudflareProvider) Timeout() (time.Duration, time.Duration) { return p
 
 // Present creates a new TXT record; lego remembers its ID for CleanUp.
 func (p *cloudflareProvider) Present(domain, token, keyAuth string) error {
+	_ = p.tr.takeCreate()
 	if err := p.inner.Present(domain, token, keyAuth); err != nil {
+		if p.tr.takeCreate() == createUnsure {
+			p.mu.Lock()
+			p.unsure[token] = true
+			p.mu.Unlock()
+		}
 		return p.creds.redact(err)
 	}
 	p.mu.Lock()
@@ -130,11 +141,18 @@ func (p *cloudflareProvider) Present(domain, token, keyAuth string) error {
 func (p *cloudflareProvider) CleanUp(domain, token, keyAuth string) error {
 	p.mu.Lock()
 	ok := p.presented[token]
+	unsure := p.unsure[token]
 	delete(p.presented, token)
+	delete(p.unsure, token)
 	p.mu.Unlock()
 	if !ok {
-		// Present did not finish, so lego holds no record ID; whatever the
-		// failed call left behind cannot be found by ID.
+		// Present did not finish, so lego holds no record ID and the record, if
+		// the API created it, cannot be found by ID. When the create request
+		// was refused there is nothing to report; when its answer is missing,
+		// the guard must tell the operator that a record may remain.
+		if unsure {
+			return errors.New("cloudflare: the request that creates the TXT record got no clear answer, so a TXT record may remain at _acme-challenge." + baseName(domain))
+		}
 		return nil
 	}
 	_ = p.tr.takeDeleteFailure()
@@ -152,6 +170,32 @@ type cloudflareTransport struct {
 	mu            sync.Mutex
 	ctx           context.Context //nolint:containedctx // set per phase by the guard, see dnsContextBinder
 	deleteFailure error
+	create        createState
+}
+
+// createState is what the transport saw of the request that creates a record
+// (the only POST lego sends).
+type createState int
+
+const (
+	createNone    createState = iota // no create request was sent
+	createRefused                    // the API answered with a client error: nothing was created
+	createUnsure                     // anything else: the record may exist
+)
+
+// takeCreate returns what the last create request came to and forgets it.
+func (t *cloudflareTransport) takeCreate() createState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s := t.create
+	t.create = createNone
+	return s
+}
+
+func (t *cloudflareTransport) noteCreate(s createState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.create = s
 }
 
 func (t *cloudflareTransport) setContext(ctx context.Context) {
@@ -186,14 +230,30 @@ func (t *cloudflareTransport) RoundTrip(r *http.Request) (*http.Response, error)
 		if r.Method == http.MethodDelete {
 			t.noteDeleteFailure(fmt.Errorf("cloudflare: deleting the TXT record failed: %w", err))
 		}
+		if r.Method == http.MethodPost {
+			t.noteCreate(createUnsure) // the request may have arrived
+		}
 		return nil, err
 	}
+	status := resp.StatusCode
 	out, err := sanitizeCloudflare(resp)
 	if err != nil {
 		if r.Method == http.MethodDelete {
 			t.noteDeleteFailure(fmt.Errorf("cloudflare: deleting the TXT record failed: %w", err))
 		}
+		if r.Method == http.MethodPost {
+			// A client error whose body is not the API's JSON (a proxy's page)
+			// proves nothing about the record either.
+			t.noteCreate(createUnsure)
+		}
 		return nil, err
+	}
+	if r.Method == http.MethodPost {
+		if status >= 400 && status < 500 {
+			t.noteCreate(createRefused)
+		} else {
+			t.noteCreate(createUnsure)
+		}
 	}
 	// A record that is already gone is what a delete wants.
 	if r.Method == http.MethodDelete && out.StatusCode/100 != 2 && out.StatusCode != http.StatusNotFound {

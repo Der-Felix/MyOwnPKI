@@ -280,3 +280,65 @@ func TestCloudflareHTTPClientSettings(t *testing.T) {
 		t.Fatalf("proxy error: %v", err)
 	}
 }
+
+// The answer to the create request is lost (a proxy), but Cloudflare made the
+// record: lego holds no ID, the agent cannot delete it, and the operator must
+// be told that a record may remain.
+func TestCloudflareLostCreateAnswerIsReportedAsALeftoverRecord(t *testing.T) {
+	h := newCFHarness(t, dnsserver.CloudflareOptions{Token: testCFToken})
+	h.stub.LoseCreateAnswers("<html><body>Bad gateway</body></html>")
+	log, logs := captureLog()
+	g := h.guard(t.Context(), h.cf(cfCreds(testCFToken, "")), Deployment{Name: "web", Names: []string{"homelab.lan"}})
+	g.log = log
+	err := h.round(t.Context(), g, []acme.Authorization{h.authz("homelab.lan", false)}, func(acme.Authorization) error { return nil })
+	if err == nil {
+		t.Fatal("the lost answer was not an error")
+	}
+	if left := h.store.ChallengeRecords(); len(left) != 1 {
+		t.Fatalf("the stub should hold the record the agent could not delete: %+v", left)
+	}
+	w := g.Warnings()
+	if len(w) != 1 || !strings.Contains(w[0], "a TXT record may remain at _acme-challenge.homelab.lan") {
+		t.Fatalf("warnings %q", w)
+	}
+	if n := g.Notice(); !strings.Contains(n, "_acme-challenge.homelab.lan") {
+		t.Fatalf("notice %q", n)
+	}
+	if !strings.Contains(logs.String(), "cleanup failed") {
+		t.Fatalf("no log line: %s", logs)
+	}
+	for _, text := range []string{strings.Join(w, "\n"), logs.String(), g.Notice()} {
+		if strings.Contains(text, testCFToken) || strings.Contains(text, "Bad gateway") {
+			t.Fatalf("a token or a body in %q", text)
+		}
+	}
+}
+
+// A create that the API refused wrote nothing: no leftover, no warning.
+func TestCloudflareRefusedCreateIsNoLeftoverRecord(t *testing.T) {
+	const zoneToken = "zone-only-token-sentinel"
+	h := newCFHarness(t, dnsserver.CloudflareOptions{Token: testCFToken, ZoneToken: zoneToken})
+	// The zone lookup works with the zone token; the create is refused (403)
+	// because the DNS token is wrong.
+	g := h.guard(t.Context(), h.cf(cfCreds("not-the-dns-token", zoneToken)), Deployment{Name: "web", Names: []string{"homelab.lan"}})
+	err := h.round(t.Context(), g, []acme.Authorization{h.authz("homelab.lan", false)}, func(acme.Authorization) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "10000") {
+		t.Fatalf("round: %v", err)
+	}
+	if w := g.Warnings(); len(w) != 0 || g.Notice() != "" {
+		t.Fatalf("warnings %q, notice %q", w, g.Notice())
+	}
+	h.wantNoChallengeRecords()
+}
+
+// Present did not reach the create request (the zone lookup failed): nothing to report.
+func TestCloudflareFailedZoneLookupIsNoLeftoverRecord(t *testing.T) {
+	h := newCFHarness(t, dnsserver.CloudflareOptions{Token: testCFToken})
+	g := h.guard(t.Context(), h.cf(cfCreds("wrong-token", "")), Deployment{Name: "web", Names: []string{"homelab.lan"}})
+	if err := h.round(t.Context(), g, []acme.Authorization{h.authz("homelab.lan", false)}, func(acme.Authorization) error { return nil }); err == nil {
+		t.Fatal("a wrong token worked")
+	}
+	if w := g.Warnings(); len(w) != 0 {
+		t.Fatalf("warnings %q", w)
+	}
+}

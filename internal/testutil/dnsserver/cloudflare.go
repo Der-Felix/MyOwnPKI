@@ -49,6 +49,7 @@ type CloudflareStub struct {
 	failDelete  int
 	errorText   string
 	notJSONBody string
+	lostCreate  string
 }
 
 // StartCloudflare starts the stub until the test ends.
@@ -91,6 +92,15 @@ func (c *CloudflareStub) NotJSON(body string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.notJSONBody = body
+}
+
+// LoseCreateAnswers makes the stub create a record as usual but answer the
+// request with body (HTTP 502, not JSON), as a proxy that loses the real
+// answer would: the record exists, and the client never learns its ID.
+func (c *CloudflareStub) LoseCreateAnswers(body string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lostCreate = body
 }
 
 func (c *CloudflareStub) answer(w http.ResponseWriter, status int, body any) {
@@ -163,7 +173,13 @@ func (c *CloudflareStub) serve(w http.ResponseWriter, r *http.Request) {
 		c.next++
 		id := fmt.Sprintf("rec%04d", c.next)
 		c.records[id] = Record{name, value}
+		lost := c.lostCreate
 		c.mu.Unlock()
+		if lost != "" {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = fmt.Fprint(w, lost)
+			return
+		}
 		c.answer(w, http.StatusOK, map[string]any{"success": true, "errors": []any{}, "result": map[string]any{"id": id, "type": "TXT", "name": strings.TrimSuffix(name, "."), "content": rec.Content, "ttl": rec.TTL}})
 	case r.Method == http.MethodDelete && len(parts) == 4 && parts[0] == "zones" && parts[2] == "dns_records":
 		if bearer != c.opts.Token {
