@@ -285,6 +285,15 @@ func (in *instance) seedCertificates(ctx context.Context, q *pkidb.Queries, now 
 		return err
 	}
 
+	// A deleted domain, so that /domains/deleted lists one.
+	old, err := e.CreateDomain(ctx, ca.DomainRequest{Name: "legacy.example", DomainSettings: ca.DomainSettings{CA: &issuing, Wildcards: &wild}, Who: console})
+	if err != nil {
+		return err
+	}
+	if err = e.DeleteDomain(ctx, old.ID, console); err != nil {
+		return err
+	}
+
 	// A certificate of another CA with a short RSA key, as an import from an
 	// old tool would leave it: self-signed, RSA 1024.
 	weak, err := weakCertificate()

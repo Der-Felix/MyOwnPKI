@@ -256,17 +256,22 @@ func TestInventoryInstanceShowsData(t *testing.T) {
 		return resp.StatusCode, string(body)
 	}
 	for path, want := range map[string]string{
-		"/reports":                       "Expiry",
-		"/analysis":                      "Renewal loop",
-		"/alerts":                        "Agent silent",
-		"/endpoints":                     "ci-runner.homelab.example",
-		"/agents":                        "proxy-02.homelab.example",
-		"/agents/enrollments":            "printer.homelab.example",
-		"/agents/" + in.agentID:          "proxy-01.homelab.example",
-		"/domains/" + in.domainID:        "corp.example",
-		"/acme/accounts/" + in.accountID: "mailto:admin@homelab.example",
-		"/admin/users/" + in.userID:      "alex",
-		"/hosts/add/" + in.enrollHost:    "printer.homelab.example",
+		"/reports":                               "Expiry",
+		"/analysis":                              "Renewal loop",
+		"/alerts":                                "Agent silent",
+		"/endpoints":                             "ci-runner.homelab.example",
+		"/agents":                                "proxy-02.homelab.example",
+		"/agents/enrollments":                    "printer.homelab.example",
+		"/agents/" + in.agentID:                  "proxy-01.homelab.example",
+		"/domains/" + in.domainID:                "corp.example",
+		"/domains/" + in.domainID + "/history":   "corp.example",
+		"/domains/" + in.domainID + "/history/1": "corp.example",
+		"/domains/deleted":                       "legacy.example",
+		"/admin/settings/history":                "Tenant settings",
+		"/admin/settings/history/1":              "Tenant settings",
+		"/acme/accounts/" + in.accountID:         "mailto:admin@homelab.example",
+		"/admin/users/" + in.userID:              "alex",
+		"/hosts/add/" + in.enrollHost:            "printer.homelab.example",
 	} {
 		status, body := get(path)
 		if status != http.StatusOK || !strings.Contains(body, want) {
