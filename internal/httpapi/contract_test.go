@@ -471,6 +471,15 @@ func TestContract(t *testing.T) {
 		{op: "issueCertificate", as: viewer, body: issue("b.homelab.lan"), want: 403, kind: "forbidden", note: "low-role"},
 		{op: "issueCertificate", as: rootview, body: issue("b.homelab.lan"), want: 404, note: "no-read"},
 		{op: "issueCertificate", as: anon, body: issue("b.homelab.lan"), want: 401, note: "no-session"},
+		{op: "previewCertificate", as: op, body: issue("a.homelab.lan"), want: 200},
+		{op: "previewCertificate", as: op, body: map[string]any{"ca_id": issuing, "preset": "server", "csr_pem": csrPEM}, want: 200},
+		{op: "previewCertificate", as: op, body: issue("a.example.org.invalid..name"), want: 200}, // a refusal is an answer
+		{op: "previewCertificate", as: op, body: map[string]any{"ca_id": issuing, "preset": "server"}, want: 400, kind: "bad-request"},
+		{op: "previewCertificate", as: op, body: map[string]any{"ca_id": issuing, "preset": "server", "csr_pem": strings.Repeat("A", 70000)}, want: 400, kind: "bad-request"},
+		{op: "previewCertificate", as: op, body: "ca_id=x", want: 415, kind: "unsupported-media-type"},
+		{op: "previewCertificate", as: viewer, body: issue("b.homelab.lan"), want: 403, kind: "forbidden", note: "low-role"},
+		{op: "previewCertificate", as: rootview, body: issue("b.homelab.lan"), want: 404, kind: "not-found"},
+		{op: "previewCertificate", as: anon, body: issue("b.homelab.lan"), want: 401, note: "no-session"},
 		{op: "getCertificate", as: viewer, path: "/certificates/" + keyedID, want: 200},
 		{op: "getCertificate", as: rootview, path: "/certificates/" + keyedID, want: 404, note: "no-read"},
 		{op: "getCertificate", as: viewer, path: "/certificates/crt_nothere", want: 404},
@@ -885,6 +894,76 @@ func TestContract(t *testing.T) {
 	} {
 		run(cc)
 	}
+
+	// History and restore (PHASE3 section 16, step 63). keepID has versions 1
+	// (create) and 2 (update); dropID is deleted (versions 1 and 2).
+	keepPath, dropPath := "/domains/"+keepID, "/domains/"+dropID
+	for _, cc := range []contractCase{
+		{op: "listDomainVersions", as: anon, path: keepPath + "/versions", want: 401, note: "no-session"},
+		{op: "listDomainVersions", as: viewer, path: keepPath + "/versions", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "listDomainVersions", as: rootview, path: keepPath + "/versions", want: 404, note: "no-read"},
+		{op: "listDomainVersions", as: admin, path: keepPath + "/versions", want: 200},
+		{op: "listDomainVersions", as: admin, path: dropPath + "/versions?limit=1", want: 200},
+		{op: "listDomainVersions", as: admin, path: keepPath + "/versions?limit=0", want: 400, kind: "bad-request"},
+		{op: "listDomainVersions", as: admin, path: "/domains/dom_doesnotexist0000000000/versions", want: 404},
+		{op: "getDomainVersion", as: anon, path: keepPath + "/versions/1", want: 401, note: "no-session"},
+		{op: "getDomainVersion", as: viewer, path: keepPath + "/versions/1", want: 403, kind: "forbidden", note: "low-role"},
+		{op: "getDomainVersion", as: rootview, path: keepPath + "/versions/1", want: 404, note: "no-read"},
+		{op: "getDomainVersion", as: admin, path: keepPath + "/versions/1", want: 200},
+		{op: "getDomainVersion", as: admin, path: keepPath + "/versions/2?against=current", want: 200},
+		{op: "getDomainVersion", as: admin, path: dropPath + "/versions/1?against=current", want: 200},
+		{op: "getDomainVersion", as: admin, path: keepPath + "/versions/9", want: 404},
+		{op: "getDomainVersion", as: admin, path: keepPath + "/versions/x", want: 404},
+		{op: "getDomainVersion", as: admin, path: keepPath + "/versions/1?against=later", want: 400, kind: "bad-request"},
+		{op: "listDeletedDomains", as: anon, want: 401, note: "no-session"},
+		{op: "listDeletedDomains", as: viewer, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "listDeletedDomains", as: admin, want: 200},
+		// The restore needs If-Match: without it 428, with a stale one 412, and
+		// the state that is already current is a 409.
+		{op: "restoreDomainVersion", as: admin, path: keepPath + "/versions/1/restore", body: map[string]any{}, want: 428, kind: "precondition-required"},
+		{op: "restoreDomainVersion", as: admin, path: keepPath + "/versions/1/restore", body: map[string]any{}, header: []string{"If-Match", `"1"`}, want: 412, kind: "precondition-failed"},
+		{op: "restoreDomainVersion", as: admin, path: keepPath + "/versions/2/restore", body: map[string]any{}, header: []string{"If-Match", `"2"`}, want: 409, kind: "conflict"},
+		{op: "restoreDomainVersion", as: admin, path: keepPath + "/versions/9/restore", body: map[string]any{}, header: []string{"If-Match", `"2"`}, want: 404},
+		{op: "restoreDomainVersion", as: admin, path: keepPath + "/versions/1/restore", body: map[string]any{"reason": "contract"}, header: []string{"If-Match", `"2"`}, want: 200},
+		{op: "restoreDomainVersion", as: admin, path: dropPath + "/versions/1/restore", body: map[string]any{}, header: []string{"If-Match", `"2"`}, want: 200},
+	} {
+		run(cc)
+	}
+
+	// The tenant settings: two versions by a change, then a restore of the first.
+	if r := admin.do(t, http.MethodGet, "/settings", nil); r.Code != http.StatusOK {
+		t.Fatalf("settings: %d", r.Code)
+	}
+	changed := admin.do(t, http.MethodPut, "/settings", map[string]any{"allow_server_keygen": true, "subject_defaults": map[string]string{
+		"organization": "Contract Restore", "organizational_unit": "", "locality": "", "state": "", "country": ""}})
+	s.check(t, s.routeOf(t, v.api, "updateSettings"), changed)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("change settings: %d %s", changed.Code, changed.Body.String())
+	}
+	newest := strings.Trim(changed.Header().Get("ETag"), `"`)
+	newestN, _ := strconv.Atoi(newest)
+	prevPath := "/settings/versions/" + strconv.Itoa(newestN-1)
+	for _, cc := range []contractCase{
+		{op: "listSettingsVersions", as: anon, want: 401, note: "no-session"},
+		{op: "listSettingsVersions", as: viewer, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "listSettingsVersions", as: admin, want: 200},
+		{op: "listSettingsVersions", as: admin, path: "/settings/versions?before=2&limit=1", want: 200},
+		{op: "listSettingsVersions", as: admin, path: "/settings/versions?before=0", want: 400, kind: "bad-request"},
+		{op: "getSettingsVersion", as: anon, path: prevPath, want: 401, note: "no-session"},
+		{op: "getSettingsVersion", as: viewer, path: prevPath, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "getSettingsVersion", as: admin, path: prevPath, want: 200},
+		{op: "getSettingsVersion", as: admin, path: prevPath + "?against=current", want: 200},
+		{op: "getSettingsVersion", as: admin, path: "/settings/versions/9999", want: 404, note: "no-read"},
+		{op: "restoreSettingsVersion", as: anon, path: prevPath + "/restore", body: map[string]any{}, want: 401, note: "no-session"},
+		{op: "restoreSettingsVersion", as: viewer, path: prevPath + "/restore", body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "restoreSettingsVersion", as: admin, path: prevPath + "/restore", body: map[string]any{}, want: 428, kind: "precondition-required"},
+		{op: "restoreSettingsVersion", as: admin, path: prevPath + "/restore", body: map[string]any{}, header: []string{"If-Match", `"1"`}, want: 412, kind: "precondition-failed"},
+		{op: "restoreSettingsVersion", as: admin, path: "/settings/versions/9999/restore", body: map[string]any{}, header: []string{"If-Match", `"` + newest + `"`}, want: 404, note: "no-read"},
+		{op: "restoreSettingsVersion", as: admin, path: prevPath + "/restore", body: map[string]any{"reason": "contract"}, header: []string{"If-Match", `"` + newest + `"`}, want: 200},
+		{op: "restoreSettingsVersion", as: admin, path: prevPath + "/restore", body: map[string]any{}, header: []string{"If-Match", `"` + strconv.Itoa(newestN+1) + `"`}, want: 409, kind: "conflict"},
+	} {
+		run(cc)
+	}
 	v.clk.Advance(authz.StepUpWindow + time.Second)
 	for _, cc := range []contractCase{
 		{op: "createDomain", as: anon, body: domainBody, want: 401, note: "no-session"},
@@ -898,6 +977,10 @@ func TestContract(t *testing.T) {
 		{op: "deleteDomain", as: viewer, path: "/domains/" + keepID, want: 403, kind: "forbidden", note: "low-role"},
 		{op: "deleteDomain", as: rootview, path: "/domains/" + keepID, want: 404, note: "no-read"},
 		{op: "deleteDomain", as: admin, path: "/domains/" + keepID, want: 403, kind: "step-up-required", note: "step-up"},
+		{op: "restoreDomainVersion", as: anon, path: "/domains/" + keepID + "/versions/1/restore", body: map[string]any{}, want: 401, note: "no-session"},
+		{op: "restoreDomainVersion", as: viewer, path: "/domains/" + keepID + "/versions/1/restore", body: map[string]any{}, want: 403, kind: "forbidden", note: "low-role"},
+		{op: "restoreDomainVersion", as: rootview, path: "/domains/" + keepID + "/versions/1/restore", body: map[string]any{}, want: 404, note: "no-read"},
+		{op: "restoreDomainVersion", as: admin, path: "/domains/" + keepID + "/versions/1/restore", body: map[string]any{}, want: 403, kind: "step-up-required", note: "step-up"},
 	} {
 		run(cc)
 	}

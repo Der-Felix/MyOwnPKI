@@ -88,14 +88,19 @@ type leaf struct {
 
 // buildTemplate assembles the certificate. The extensions come only from the
 // preset and the CA – never from the CSR (pki-rules.md §6).
-func buildTemplate(is *issuer, l leaf, rnd io.Reader) (*x509.Certificate, error) {
-	serial, err := newSerial(rnd)
-	if err != nil {
-		return nil, err
-	}
-	ski, err := subjectKeyID(l.pub)
-	if err != nil {
-		return nil, fmt.Errorf("subject key identifier: %w", err)
+//
+// The serial is not part of it: commit draws it right before signing, so that
+// building a template reads no randomness (the preview builds one too). l.pub
+// may be nil while the server has not generated the key yet (the preview of a
+// server-side key); the template then has no subject key identifier, which
+// the signed certificate derives from the new key (RFC 7093).
+func buildTemplate(is *issuer, l leaf) (*x509.Certificate, error) {
+	var ski []byte
+	if l.pub != nil {
+		var err error
+		if ski, err = subjectKeyID(l.pub); err != nil {
+			return nil, fmt.Errorf("subject key identifier: %w", err)
+		}
 	}
 	sigAlg, err := signatureAlgorithm(is.certs[0].PublicKey)
 	if err != nil {
@@ -103,7 +108,6 @@ func buildTemplate(is *issuer, l leaf, rnd io.Reader) (*x509.Certificate, error)
 	}
 	gen := is.gen.Generation
 	tmpl := &x509.Certificate{
-		SerialNumber:          serial,
 		Subject:               l.subject,
 		NotBefore:             l.v.notBefore,
 		NotAfter:              l.v.notAfter,

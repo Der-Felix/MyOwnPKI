@@ -396,6 +396,8 @@ type settingsJSON struct {
 	StepUpMinutes    *int                   `json:"step_up_minutes,omitempty"`
 	AgentPredecessor *predecessorPolicyJSON `json:"agent_predecessor,omitempty"`
 	OtherPredecessor *predecessorPolicyJSON `json:"other_predecessor,omitempty"`
+	// Reason is optional in a PUT: free text for the version history (never in the audit log).
+	Reason string `json:"reason,omitempty"`
 }
 
 type acmeLimitsJSON struct {
@@ -426,6 +428,7 @@ func (a *API) getSettings(c *call) error {
 	if err != nil {
 		return err
 	}
+	c.setETag(s.Version)
 	return c.reply(http.StatusOK, toSettingsJSON(s))
 }
 
@@ -449,7 +452,12 @@ func (a *API) putSettings(c *call) error {
 		p := req.OtherPredecessor.value()
 		v.OtherPredecessor = &p
 	}
-	err := a.d.Settings.Set(c.ctx(), a.d.Tenant, v, c.who())
+	opts := tenant.ChangeOptions{Reason: req.Reason}
+	var err error
+	if opts.ExpectedVersion, err = c.ifMatch(); err != nil {
+		return err
+	}
+	_, err = a.d.Settings.SetWith(c.ctx(), a.d.Tenant, v, opts, c.who())
 	if errors.Is(err, tenant.ErrInvalid) {
 		return c.problem(http.StatusUnprocessableEntity, "policy-violation", err.Error(), nil)
 	}

@@ -68,6 +68,10 @@ func (a *app) actionSummary(c *rc, entry *pendingAction) string {
 		} else {
 			summary = verb
 		}
+	case "POST /domains/{id}/history/{version}/restore":
+		summary = a.domainRestoreSummary(c, entry)
+	case "POST /admin/settings/history/{version}/restore":
+		summary = "Restore the tenant settings from version " + entry.path["version"]
 	case "POST /agents/enrollments/approve", "POST /agents/enrollments/deny":
 		verb := "Approve enrollment"
 		if strings.HasSuffix(entry.action, "/deny") {
@@ -269,4 +273,20 @@ func safeActionSummary(summary string) string {
 		summary = string(runes[:600]) + "…"
 	}
 	return summary
+}
+
+// domainRestoreSummary names the domain a restore brings back or changes; a
+// deleted domain is found in the list of deleted ones.
+func (a *app) domainRestoreSummary(c *rc, entry *pendingAction) string {
+	name := "domain"
+	if domain, err := a.d.Engine.GetDomain(c.r.Context(), c.who(), entry.path["id"]); err == nil {
+		name = "domain " + domain.Name + " on CA " + domain.CA
+	} else if list, lerr := a.d.Engine.ListDeletedDomains(c.r.Context(), c.who()); lerr == nil {
+		for _, dd := range list {
+			if dd.ID == entry.path["id"] {
+				name = "deleted domain " + dd.Name
+			}
+		}
+	}
+	return "Restore " + name + " from version " + entry.path["version"]
 }

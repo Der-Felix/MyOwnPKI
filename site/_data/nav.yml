@@ -42,6 +42,8 @@
       children:
         - title: First certificate in the UI
           url: /guides/first-certificate-ui/
+        - title: Preview a certificate
+          url: /guides/preview-a-certificate/
         - title: Certbot
           url: /guides/certbot/
         - title: acme.sh
@@ -70,6 +72,8 @@
           url: /guides/backup-and-restore/
         - title: Users, roles, 2FA
           url: /guides/users-roles-2fa/
+        - title: History and restore
+          url: /guides/settings-history/
         - title: The audit log
           url: /guides/audit-log/
         - title: When things go wrong

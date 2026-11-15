@@ -3,6 +3,7 @@ package ca
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -35,6 +36,7 @@ func (e *Engine) acmeRequest(ctx context.Context, req Request) (Request, error) 
 	var first *Domain
 	var firstName string
 	var reasons []string
+	var domains []string
 	days := 0
 	for _, id := range idents {
 		d, err := e.DomainFor(ctx, id.typ, id.value)
@@ -54,6 +56,9 @@ func (e *Engine) acmeRequest(ctx context.Context, req Request) (Request, error) 
 			reasons = append(reasons, fmt.Sprintf("%q belongs to domain %s (preset %s), %q to domain %s (preset %s) – the names of one order need one preset",
 				short(firstName), first.Name, first.Preset, short(id.value), d.Name, d.Preset))
 		}
+		if !slices.Contains(domains, d.Name) {
+			domains = append(domains, d.Name)
+		}
 		if v := d.EffectiveValidityDays(); days == 0 || v < days {
 			days = v
 		}
@@ -70,6 +75,7 @@ func (e *Engine) acmeRequest(ctx context.Context, req Request) (Request, error) 
 		days = int(ca.MaxValidityDays)
 	}
 	req.CA, req.Preset, req.ValidityDays = first.CA, first.Preset, days
+	req.acmeDomains = domains
 	req.IgnoreCSRNames = true
 	for _, n := range req.DNSNames {
 		if strings.HasPrefix(n, "*.") {

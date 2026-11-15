@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, the Salt formula, dns-01 in the agent, notifications, the TLS scan, containers and config check messages."
+description: "Symptom, likely cause, fix: install.sh and updates, sealed server and sign-in, ACME and http-01, agents and enrollment, Add host, enrollment passes and deployment add, the Salt formula, dns-01 in the agent, notifications, the TLS scan, preview and settings history, containers and config check messages."
 permalink: /troubleshooting/
 ---
 
@@ -285,6 +285,22 @@ openssl s_client -connect proxy.homelab.lan:443 -servername proxy.homelab.lan </
 | *Expired*, no newer certificate was issued | The host serves a certificate of this PKI that has ended, and nothing newer exists for the name | Issue a new certificate and deploy it |
 | `404` or *gone already* for *Scan now* or *Remove* of an endpoint that exists | The endpoint ID in the request is not well-formed (1 to 64 letters, digits, `_` or `-`). A caller without the role gets 403 first | Use the page's buttons or the `id` from `GET /api/v1/endpoints` |
 | The state stays *Pending* | The first scans failed fewer than `scan_unreachable_after` times, or scanning is off | Read *Last error* |
+
+## Preview and settings history
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| The review step says "The preview could not be computed. The checks run when you issue." | The engine could not make a plan (an invalid earlier step or an internal error) | Go *Back* and check the steps; issuing stays possible and decides again. The server log has the details |
+| The review says *Refused, stopped here* on a check | A gate ended the plan at its first problem, so the checks after it did not run | Fix it and preview again; more reasons can appear ([Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}#the-checks-table-collected-and-stopped-here)) |
+| `POST /certificates/preview` answers `200` with `allowed: false` | That is how a refusal is answered; issuing the same request would be `422` | Read `reasons` |
+| A page says *Changed meanwhile* (409), or the API answers `412` `precondition-failed` | Somebody saved a newer version of the domain or the settings after you read it. Nothing was saved | Look at the *History*, read the object again, repeat your change. The `412` names `current_version` and `changed_at` (and `changed_by` for a caller with the tenant-wide audit right) |
+| `428` `precondition-required` on a restore | A restore needs `If-Match` | Send the `ETag` of the newest version |
+| "This version can't be restored now:" with reasons, or `422` on a restore | The old state would be refused as a normal change now (a retired CA, a missing preset, a name that is taken, constraints) | The reasons name the cause; the dry run on the version page shows them before you try |
+| "The current state already equals this version." (`409`) | There is nothing to restore | Choose another version |
+| No *History* tab, or `403` on `…/versions` | Reading the history needs the admin role on the whole tenant | Ask for it; an admin of one CA does not qualify |
+| A restore answers `403` `step-up-required` or `forbidden` | A domain restore needs a fresh second factor, and so does a settings restore that changes the enrollment mode; a token can never do it | Confirm the second factor in the UI |
+
+More in [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 
 ## Containers
 

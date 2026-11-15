@@ -6,6 +6,7 @@ sources:
   - docs/OPERATIONS.md
   - internal/web/app_issue.go
   - internal/web/pages/certificates/issue.templ
+  - internal/web/pages/certificates/plan.templ
   - internal/web/pages/certificates/detail.templ
   - internal/web/app_pki.go
   - internal/web/app_certactions.go
@@ -24,8 +25,8 @@ ACME client ([Certbot]({{ '/guides/certbot/' | relative_url }})) or the agent
 
 ## Before you start
 
-- The server is **unsealed**. While it is sealed the wizard opens, but *Issue certificate* on the Review step is
-  disabled and that step says so.
+- The server is **unsealed**. While it is sealed the wizard opens and the Review step shows the policy result,
+  but *Issue certificate* is disabled and that step says so.
 - You have a role that may issue at an **online** CA: *operator* or *admin* on that CA or on the whole
   tenant. If there is none, the page says "There is no CA where your role may issue certificates."
 - At least one online intermediate exists ([Installation]({{ '/install/' | relative_url }}#the-first-ca-and-the-first-certificate)).
@@ -63,9 +64,16 @@ ACME client ([Certbot]({{ '/guides/certbot/' | relative_url }})) or the agent
    issued, not what the request asks for**, and the extensions always come from the preset. The
    common name may have at most 64 characters. Clients match host names against the *subject
    alternative names*, not the common name.
-6. **Review** and press *Issue certificate*. You land on the certificate page with the serial number.
-   If the policy refuses, the wizard stays on the review step and lists every reason (for example a
-   name outside the CA's name constraints, or a validity beyond the CA's maximum).
+6. **Review.** Since v0.3.10 this step shows what the policy would do **before anything is signed**: the
+   verdict (*Allowed* or *Refused*) with every reason, a table of the policy checks, the subject, the
+   names, the key, the validity dates, the key usage and the extensions, the issuing CA with its chain
+   and the CA certificate and CRL URLs that would go into the certificate. Nothing is stored by looking
+   at it. Read it, and if it says *Allowed* press *Issue certificate*; you land on the certificate page
+   with the serial number. If the verdict is *Refused* (for example a name outside the CA's name
+   constraints, or a validity beyond the CA's maximum), the button is disabled: use *Back* to change
+   what the reasons name. The review is a forecast, not a promise: the checks run again when you
+   issue, and a refusal at that point leaves you on the review step with the reasons. What each part
+   means: [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}).
 
 ## Download what you need
 
@@ -121,7 +129,7 @@ openssl pkey -in www.homelab.lan.key -pubout | openssl sha256
 |---|---|---|
 | No CA in the list, or the page says no CA allows your role | Your role is *viewer*, or only offline CAs exist | Ask an admin for the *operator* role on the issuing CA; create an online intermediate |
 | "The server is sealed – nothing was issued." | The server restarted | An instance admin unseals it ([Installation]({{ '/install/' | relative_url }}#initialize-and-start)) |
-| "Nothing was issued – the policy refused the request" with reasons | Name constraints, validity or preset rules of the CA | Change the names or the validity; the reasons say which |
+| The review says *Refused*, or "Nothing was issued – the policy refused the request", with reasons | Name constraints, validity or preset rules of the CA | Change the names or the validity; the reasons say which. A gate marked *Refused, stopped here* may hide more reasons until you fix it |
 | The request is rejected on the Key step | Pasted text must be one PEM request with a valid signature; an uploaded file may be PEM or DER and at most 64 KiB | Check with `openssl req -in www.homelab.lan.csr -noout -verify` |
 | *Generate the key on the server* is greyed out | The tenant switch is off | Use a request, or ask an admin |
 | `openssl verify` says "unable to get local issuer certificate" | The root or an intermediate is missing | Pass the right root with `-CAfile` and the chain with `-untrusted` |
@@ -132,5 +140,7 @@ More in [Troubleshooting]({{ '/troubleshooting/' | relative_url }}).
 
 - Make the host renew by itself: [Certbot]({{ '/guides/certbot/' | relative_url }}), or the agent
   ([Adding hosts]({{ '/hosts/' | relative_url }})).
+- Check a request against the policy without issuing, also from a script:
+  [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}).
 - Replace or withdraw the certificate later: [Renew and revoke]({{ '/guides/renew-and-revoke/' | relative_url }}).
 - Put the certificate into a service: [Recipes]({{ '/recipes/' | relative_url }}).

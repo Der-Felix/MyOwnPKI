@@ -95,6 +95,23 @@ type Session struct {
 	StepupMinutes int64
 }
 
+type SettingsVersion struct {
+	ID             int64
+	Kind           string
+	ObjectID       string
+	Version        int64
+	Change         string
+	Schema         int64
+	SnapshotJson   string
+	SnapshotSha256 string
+	ActorType      string
+	ActorID        string
+	ActorName      string
+	Reason         string
+	RestoredFrom   sql.NullInt64
+	CreatedAt      string
+}
+
 type Tenant struct {
 	ID                     string
 	Name                   string

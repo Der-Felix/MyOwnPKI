@@ -38,13 +38,18 @@ approval" is a reason to be here. Everything below needs the role *admin* with a
    | Approval | Who may order, see the next section |
    | Preset and validity | The profile of the certificates; empty validity means 90 days, never beyond the CA's maximum |
    | Addresses http-01 may reach | *internal networks too (homelab)*, or *public addresses only* ([Split DNS]({{ '/guides/split-dns/' | relative_url }})) |
-   | IP ranges | Which IP addresses may appear in certificates, for example `192.0.2.0/24` (http-01 only) |
+   | IP ranges | Which IP addresses may appear in certificates, for example `192.0.2.0/24` (http-01 only); at most 256 ranges per domain |
 
 3. Press *Create domain*. The domain page lets you change every setting later (*Save*) or delete the domain
    (*Delete domain*): certificates already issued stay valid, open ACME orders for its names fail.
 
 The REST API has `POST /api/v1/domains`; like the UI it needs the second factor, so an API token cannot
 create a domain.
+
+Since v0.3.10 every change of a domain is kept as a version. The change and delete forms have an optional
+*Reason*, and a save is refused with *Changed meanwhile* if somebody saved the domain after you opened it.
+A tenant-wide admin sees a *History* tab on the domain page and a link *Deleted domains* under the list, and can
+restore an old version, or a deleted domain, as a new version: [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 
 ## Who may order: the approval level
 

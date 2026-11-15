@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/ids"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -30,6 +32,8 @@ const (
 	ActionDomainCreate = "domain.create"
 	ActionDomainUpdate = "domain.update"
 	ActionDomainDelete = "domain.delete"
+	// ActionDomainRestore is a restore of a stored version (PHASE3 section 16, step 63).
+	ActionDomainRestore = "domain.restore"
 )
 
 // Approval levels (PLAN §6.3).
@@ -50,6 +54,12 @@ const (
 // DefaultACMEValidityDays: ACME issuances default to 90 days, capped by the
 // CA's maximum (owner decision 6, 2026-10-13).
 const DefaultACMEValidityDays = 90
+
+// MaxDomainIPRanges caps the IP ranges of a domain. A snapshot of a domain
+// (name, settings, at most this many ranges of 43 characters) stays far below
+// settingsver.MaxSnapshotBytes, so no domain can become too large to change
+// or delete.
+const MaxDomainIPRanges = 256
 
 // Approvals, Challenges and AddressPolicies list the valid values.
 var (
@@ -74,6 +84,10 @@ type Domain struct {
 	IPRanges          []netip.Prefix
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// Version is the newest version number of the domain, the number of its
+	// ETag. CreateDomain, UpdateDomain and GetDomain set it; the list and
+	// DomainFor leave it 0 (they do not read the history).
+	Version int64
 }
 
 // EffectiveValidityDays is the validity of an ACME certificate under d.
@@ -100,6 +114,8 @@ type DomainSettings struct {
 	ValidityDays      *int // 0 = default
 	AddressPolicy     *string
 	IPRanges          []string
+	// Options: the optional concurrency check and reason of the change.
+	Options ChangeOptions
 }
 
 // DomainRequest creates a domain.
@@ -231,6 +247,9 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 	if d.Wildcards && !d.AllowsChallenge(ChallengeDNS01) {
 		problems = append(problems, "wildcards are proven by dns-01 only (RFC 8555 §7.1.3) – allow dns-01")
 	}
+	if len(d.IPRanges) > MaxDomainIPRanges {
+		problems = append(problems, fmt.Sprintf("a domain has at most %d IP ranges (this one has %d) – use wider CIDR ranges", MaxDomainIPRanges, len(d.IPRanges)))
+	}
 	if len(d.IPRanges) > 0 && !d.AllowsChallenge(ChallengeHTTP01) {
 		problems = append(problems, "IP identifiers are proven by http-01 only – allow http-01")
 	}
@@ -293,13 +312,15 @@ func (e *Engine) CreateDomain(ctx context.Context, req DomainRequest) (*Domain, 
 }
 
 func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.Time) (*Domain, error) {
-	if err := e.authorize(req.Who, authz.ManageCA, "", now); err != nil {
+	rs := req.Options.restore
+	if err := e.authorizeChange(req.Options, req.Who, authz.ManageCA, "", now); err != nil {
 		return nil, err
 	}
 	q := pkidb.New(e.PKI)
 	d := domainDefaults()
 	d.Name = strings.TrimSpace(req.Name)
 	problems := req.apply(&d)
+	problems = append(problems, reasonProblems(req.Options)...)
 	more, _, err := e.checkDomain(ctx, q, &d)
 	if err != nil {
 		return nil, err
@@ -313,24 +334,63 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 	if len(problems) > 0 {
 		return nil, &DeniedError{Reasons: problems}
 	}
-	id, err := ids.New("dom", now, e.rand())
-	if err != nil {
+	if rs != nil && rs.dry {
+		return &d, nil
+	}
+	// A restore of a deleted domain creates it again under its old ID.
+	id := ""
+	if rs != nil {
+		id = rs.id
+	} else if id, err = ids.New("dom", now, e.rand()); err != nil {
 		return nil, err
 	}
 	d.ID, d.CreatedAt, d.UpdatedAt = id, now, now
 	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		if cerr := settingsver.CheckExpected(ctx, settingsver.PKIBackend(q), settingsver.KindDomain, d.ID, req.Options.ExpectedVersion); cerr != nil {
+			return cerr
+		}
 		if ierr := q.InsertDomain(ctx, domainRow(&d)); ierr != nil {
+			if isDomainUnique(ierr) {
+				// Another request created the same name (or ID) after the check above.
+				return &DeniedError{Reasons: []string{fmt.Sprintf("domain %q exists already", short(d.Name))}}
+			}
 			return ierr
 		}
+		details := domainDetails(&d)
+		details["ip_ranges"] = auditText("ip_ranges", details["ip_ranges"])
+		entry := settingsver.Entry{
+			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeCreate, After: domainSnapshot(&d),
+			Actor: versionActor(req.Who), Reason: req.Options.Reason, ExpectedVersion: req.Options.ExpectedVersion, Now: now,
+		}
+		action := ActionDomainCreate
+		if rs != nil {
+			entry.Change, entry.RestoredFrom, action = settingsver.ChangeRestore, rs.from, ActionDomainRestore
+			details["restored_from"] = rs.from
+			details["changed_keys"] = strings.Join(settingsver.Keys(settingsver.Diff(nil, entry.After)), ",")
+		}
+		res, rerr := recordDomain(ctx, q, entry, details)
+		if rerr != nil {
+			return rerr
+		}
+		d.Version = res.Version.Number
 		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: req.Who.Actor, Action: ActionDomainCreate, Target: audit.Target{Type: "domain", ID: d.ID},
-			Result: audit.ResultSuccess, SourceIP: req.Who.SourceIP, Details: domainDetails(&d),
+			Time: now, Actor: req.Who.Actor, Action: action, Target: audit.Target{Type: "domain", ID: d.ID},
+			Result: audit.ResultSuccess, SourceIP: req.Who.SourceIP, Details: details,
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &d, nil
+}
+
+// reasonProblems is the problem list for a reason that is too long or holds a
+// control character (a policy violation: 422 in the API, a message in the UI).
+func reasonProblems(o ChangeOptions) []string {
+	if settingsver.CheckReason(o.Reason) != nil {
+		return []string{fmt.Sprintf("reason: at most %d characters, no control or invisible formatting characters", settingsver.MaxReason)}
+	}
+	return nil
 }
 
 // UpdateDomain changes a domain; the name never changes.
@@ -346,11 +406,13 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 	if err != nil {
 		return nil, err
 	}
-	if aerr := e.authorize(who, authz.ManageCA, d.CA, now); aerr != nil {
+	rs := s.Options.restore
+	if aerr := e.authorizeChange(s.Options, who, authz.ManageCA, d.CA, now); aerr != nil {
 		return nil, aerr
 	}
 	before := domainDetails(d)
 	problems := s.apply(d)
+	problems = append(problems, reasonProblems(s.Options)...)
 	more, _, err := e.checkDomain(ctx, q, d)
 	if err != nil {
 		return nil, err
@@ -360,12 +422,28 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 	}
 	if s.CA != nil && *s.CA != before["ca"] {
 		// Moving to another CA needs the right on that CA as well.
-		if aerr := e.authorize(who, authz.ManageCA, d.CA, now); aerr != nil {
+		if aerr := e.authorizeChange(s.Options, who, authz.ManageCA, d.CA, now); aerr != nil {
 			return nil, aerr
 		}
 	}
+	if rs != nil && rs.dry {
+		return d, nil
+	}
 	d.UpdatedAt = now
 	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		if cerr := settingsver.CheckExpected(ctx, settingsver.PKIBackend(q), settingsver.KindDomain, d.ID, s.Options.ExpectedVersion); cerr != nil {
+			return cerr
+		}
+		// The state this write replaces, read inside the transaction: the
+		// baseline of a domain without history, and the proof that it still
+		// exists (it may have been deleted since it was loaded).
+		current, berr := domainBefore(ctx, q, d.ID)
+		if berr != nil {
+			return berr
+		}
+		if rs != nil && settingsver.Same(domainSnapshot(current), domainSnapshot(d)) {
+			return settingsver.ErrIdentical
+		}
 		row := domainRow(d)
 		if uerr := q.UpdateDomain(ctx, pkidb.UpdateDomainParams{
 			CaID: row.CaID, IncludeSubdomains: row.IncludeSubdomains, Wildcards: row.Wildcards, ChallengeTypes: row.ChallengeTypes,
@@ -378,11 +456,27 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 		after := domainDetails(d)
 		for k, v := range after {
 			if fmt.Sprint(before[k]) != fmt.Sprint(v) {
-				details[k] = fmt.Sprintf("%v -> %v", before[k], v)
+				details[k] = fmt.Sprintf("%v -> %v", auditText(k, before[k]), auditText(k, v))
 			}
 		}
+		entry := settingsver.Entry{
+			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeUpdate,
+			Before: boundedSnapshot(current, details), After: domainSnapshot(d), Actor: versionActor(who),
+			Reason: s.Options.Reason, ExpectedVersion: s.Options.ExpectedVersion, Now: now,
+		}
+		action := ActionDomainUpdate
+		if rs != nil {
+			entry.Change, entry.RestoredFrom, action = settingsver.ChangeRestore, rs.from, ActionDomainRestore
+			details["restored_from"] = rs.from
+			details["changed_keys"] = strings.Join(settingsver.Keys(settingsver.Diff(entry.Before, entry.After)), ",")
+		}
+		res, rerr := recordDomain(ctx, q, entry, details)
+		if rerr != nil {
+			return rerr
+		}
+		d.Version = res.Version.Number
 		return audit.Enqueue(ctx, tx, now, audit.Entry{
-			Time: now, Actor: who.Actor, Action: ActionDomainUpdate, Target: audit.Target{Type: "domain", ID: d.ID},
+			Time: now, Actor: who.Actor, Action: action, Target: audit.Target{Type: "domain", ID: d.ID},
 			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
 		})
 	})
@@ -395,12 +489,18 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 // DeleteDomain removes a domain. Certificates already issued stay; open ACME
 // orders for its names fail at finalize, which checks the domain again.
 func (e *Engine) DeleteDomain(ctx context.Context, id string, who keys.Who) error {
+	return e.DeleteDomainWith(ctx, id, ChangeOptions{}, who)
+}
+
+// DeleteDomainWith is DeleteDomain with the optional concurrency check and
+// reason. The deleted state is kept as the last version of the domain.
+func (e *Engine) DeleteDomainWith(ctx context.Context, id string, opts ChangeOptions, who keys.Who) error {
 	now := e.now()
-	_, err := e.deleteDomain(ctx, id, who, now)
+	_, err := e.deleteDomain(ctx, id, opts, who, now)
 	return e.finishDomain(ctx, now, ActionDomainDelete, who, id, "", err)
 }
 
-func (e *Engine) deleteDomain(ctx context.Context, id string, who keys.Who, now time.Time) (*Domain, error) {
+func (e *Engine) deleteDomain(ctx context.Context, id string, opts ChangeOptions, who keys.Who, now time.Time) (*Domain, error) {
 	q := pkidb.New(e.PKI)
 	d, err := e.loadDomain(ctx, q, who, id)
 	if err != nil {
@@ -409,13 +509,32 @@ func (e *Engine) deleteDomain(ctx context.Context, id string, who keys.Who, now 
 	if aerr := e.authorize(who, authz.ManageCA, d.CA, now); aerr != nil {
 		return nil, aerr
 	}
+	if problems := reasonProblems(opts); len(problems) > 0 {
+		return nil, &DeniedError{Reasons: problems}
+	}
 	err = e.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
+		if cerr := settingsver.CheckExpected(ctx, settingsver.PKIBackend(q), settingsver.KindDomain, d.ID, opts.ExpectedVersion); cerr != nil {
+			return cerr
+		}
+		// The deleted state, read inside the transaction.
+		current, berr := domainBefore(ctx, q, d.ID)
+		if berr != nil {
+			return berr
+		}
 		if derr := q.DeleteDomain(ctx, d.ID); derr != nil {
 			return derr
 		}
+		details := map[string]any{"name": d.Name, "ca": d.CA}
+		snap := boundedSnapshot(current, details)
+		if _, rerr := recordDomain(ctx, q, settingsver.Entry{
+			Kind: settingsver.KindDomain, ObjectID: d.ID, Change: settingsver.ChangeDelete, Before: snap, After: snap,
+			Actor: versionActor(who), Reason: opts.Reason, ExpectedVersion: opts.ExpectedVersion, Now: now,
+		}, details); rerr != nil {
+			return rerr
+		}
 		return audit.Enqueue(ctx, tx, now, audit.Entry{
 			Time: now, Actor: who.Actor, Action: ActionDomainDelete, Target: audit.Target{Type: "domain", ID: d.ID},
-			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: map[string]any{"name": d.Name, "ca": d.CA},
+			Result: audit.ResultSuccess, SourceIP: who.SourceIP, Details: details,
 		})
 	})
 	return d, err
@@ -423,6 +542,12 @@ func (e *Engine) deleteDomain(ctx context.Context, id string, who keys.Who, now 
 
 // finishDomain audits a refused domain change.
 func (e *Engine) finishDomain(ctx context.Context, now time.Time, action string, who keys.Who, id, name string, err error) error {
+	return e.finishDomainWith(ctx, now, action, who, id, name, nil, err)
+}
+
+// finishDomainWith is finishDomain with more audit details (a restore names
+// the version it wanted to copy, as the tenant side does).
+func (e *Engine) finishDomainWith(ctx context.Context, now time.Time, action string, who keys.Who, id, name string, extra map[string]any, err error) error {
 	if err == nil || errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -430,7 +555,9 @@ func (e *Engine) finishDomain(ctx context.Context, now time.Time, action string,
 	if target == "" {
 		target = short(name)
 	}
-	if aerr := e.refuse(ctx, now, action, who, audit.Target{Type: "domain", ID: target}, map[string]any{"name": short(name)}, err); aerr != nil {
+	details := map[string]any{"name": short(name)}
+	maps.Copy(details, extra)
+	if aerr := e.refuse(ctx, now, action, who, audit.Target{Type: "domain", ID: target}, details, err); aerr != nil {
 		return errors.Join(err, fmt.Errorf("audit: %w", aerr))
 	}
 	return err
@@ -464,7 +591,20 @@ func (e *Engine) ListDomains(ctx context.Context, who keys.Who) ([]Domain, error
 // GetDomain returns one domain; ErrNotFound when it doesn't exist or the
 // caller may not read its CA (decision 64).
 func (e *Engine) GetDomain(ctx context.Context, who keys.Who, id string) (*Domain, error) {
-	return e.loadDomain(ctx, pkidb.New(e.PKI), who, id)
+	q := pkidb.New(e.PKI)
+	// The version is read before the domain: a change between the two reads
+	// leaves the number older than the body, so an If-Match built from it
+	// fails instead of overwriting that change.
+	version, err := settingsver.Current(ctx, settingsver.PKIBackend(q), settingsver.KindDomain, id)
+	if err != nil {
+		return nil, err
+	}
+	d, err := e.loadDomain(ctx, q, who, id)
+	if err != nil {
+		return nil, err
+	}
+	d.Version = version
+	return d, nil
 }
 
 func (e *Engine) loadDomain(ctx context.Context, q *pkidb.Queries, who keys.Who, id string) (*Domain, error) {
@@ -617,3 +757,20 @@ func domainDetails(d *Domain) map[string]any {
 
 // oidServerAuth is the TLS server authentication EKU (RFC 5280 §4.2.1.12).
 var oidServerAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+
+// auditText is the value of an audit detail. The list of IP ranges can be
+// long (up to MaxDomainIPRanges of 43 characters, more than the 8 KiB an audit
+// entry may carry in all), so it shows the first ranges and counts the rest;
+// the full list is in the version of the domain.
+func auditText(key string, v any) any {
+	if key != "ip_ranges" {
+		return v
+	}
+	const shown = 16
+	list, _ := v.(string)
+	parts := strings.Split(list, ",")
+	if len(parts) <= shown {
+		return v
+	}
+	return strings.Join(parts[:shown], ",") + fmt.Sprintf(",… and %d more", len(parts)-shown)
+}

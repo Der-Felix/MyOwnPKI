@@ -129,6 +129,9 @@ type API struct {
 	cop      *http.CrossOriginProtection
 	routes   []Route
 	notFound http.Handler
+	// onRequest, set only by tests, sees the engine request that issueCertificate
+	// and previewCertificate build (see TestPreviewBuildsTheIssueRequest).
+	onRequest func(operation string, r ca.Request)
 }
 
 // New returns the API handler; mount it at BasePath + "/".

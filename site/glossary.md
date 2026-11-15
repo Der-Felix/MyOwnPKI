@@ -110,6 +110,13 @@ certificate a CA issues (the [CRL](#crl) and [AIA](#aia-authority-information-ac
 changed for a CA afterwards, so choose a stable DNS name. See
 [What runs where]({{ '/install/' | relative_url }}#what-runs-where).
 
+### Baseline
+
+The first [version](#version) of a domain or of the tenant settings that was not made by a change: the state *before*
+the first change after the upgrade to v0.3.10, written by "system, before history". It lets the very first mistake be
+undone. An object that was never changed has no versions at all. See
+[History and restore of settings]({{ '/guides/settings-history/' | relative_url }}#the-baseline).
+
 ### Basic constraints
 
 A certificate extension (RFC 5280 §4.2.1.9) that says whether the certificate belongs to a CA (`CA:TRUE`) and,
@@ -249,6 +256,14 @@ A [join token](#join-token) for a bounded number of hosts (2 to 25), for names t
 7 days, so that automation can enroll hosts without a person opening the UI for each. An admin creates it with a
 fresh second factor; an API token never can. See
 [the enrollment pass]({{ '/hosts/' | relative_url }}#the-enrollment-pass-for-roll-outs).
+
+### ETag and If-Match
+
+HTTP's way to say "this is the version I saw" (RFC 9110). For domains and the tenant settings the `ETag` is the number of
+the newest [version](#version), quoted (`"7"`; `"0"` = no history yet). A request with `If-Match: "7"` changes the object
+only if it is still at version 7; otherwise nothing is written and the answer is `412`. A [restore](#restore) needs the
+header (`428` without it). The web forms do the same with a hidden field. See
+[History and restore of settings]({{ '/guides/settings-history/' | relative_url }}#steps-through-the-rest-api).
 
 ### Expiry wave
 
@@ -428,6 +443,14 @@ A built-in profile for a kind of certificate: key usage, extended key usage, req
 There are twelve, for example `server`, `client`, `smime` and `wildcard`. The extensions of a certificate always
 come from the preset, never from the [CSR](#csr).
 
+### Preview
+
+The answer to "what would the policy do with this request?" before anything is signed: the verdict, every reason, the
+checks, the names, the key, the validity, the extensions, the issuing CA, its chain and the URLs. It is the first half of
+issuing (the engine calls it the *plan*) run on its own, so it writes nothing, draws no key or serial and creates no audit
+entry. It is a forecast: issuing checks again. See
+[Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}).
+
 ### Public listener
 
 The plain-HTTP listener without a login that serves the CRLs, the CA certificates and the trust portal. It speaks
@@ -453,6 +476,13 @@ A client that keeps getting new certificates for the same names, often because a
 again. The `renewal_loop` rule of the *Analysis* page fires at 3 certificates for the same names within 24 hours
 (critical at 6), or 8 within 7 days. ACME servers rate-limit this. See
 [Reports and analysis]({{ '/reports/' | relative_url }}#the-ten-rules).
+
+### Restore
+
+Making a domain or the tenant settings look like an old [version](#version) again. A restore runs the ordinary change, so
+every check of a normal change applies, and it is stored as a **new** version that records which one it copied; no version
+is ever edited. It needs the permission and the second factor of the same change. Not to be confused with restoring a
+[backup](#backup). See [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 
 ### Revocation
 
@@ -607,6 +637,13 @@ the presets have their own defaults, and each CA has a maximum validity that cap
 practical when renewal is automatic.
 
 Background: [Lifetimes and renewal]({{ '/learn/lifetimes/' | relative_url }}).
+
+### Version
+
+One stored state of a domain or of the tenant settings: the full state after a change, who made it, when, why (an optional
+reason) and a SHA-256 of the state that the audit entry repeats. Versions are numbered per object, only ever added, and
+kept for good. Presets, CA limits and secrets have none. See
+[History and restore of settings]({{ '/guides/settings-history/' | relative_url }}#what-is-versioned-and-what-is-not).
 
 ## W
 

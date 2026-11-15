@@ -64,6 +64,9 @@ var inventoryPages = []inventoryPage{
 	{"domains", "/domains", "/domains", light},
 	{"domain-new", "/domains/new", "/domains/new", light},
 	{"domain-detail", "/domains/{id}", "/domains/{domain}", light},
+	{"domain-history", "/domains/{id}/history", "/domains/{domain}/history", light},
+	{"domain-version", "/domains/{id}/history/{version}", "/domains/{domain}/history/1", light},
+	{"domains-deleted", "/domains/deleted", "/domains/deleted", light},
 	{"presets", "/presets", "/presets", light},
 	{"preset-detail", "/presets/{name}", "/presets/server", light},
 
@@ -87,6 +90,8 @@ var inventoryPages = []inventoryPage{
 	{"user-new", "/admin/users/new", "/admin/users/new", light},
 	{"user-detail", "/admin/users/{id}", "/admin/users/{user}", light},
 	{"settings", "/admin/settings", "/admin/settings", light},
+	{"settings-history", "/admin/settings/history", "/admin/settings/history", light},
+	{"settings-version", "/admin/settings/history/{version}", "/admin/settings/history/1", light},
 	{"audit-log", "/admin/audit", "/admin/audit", light},
 	{"audit-log-instance", "/admin/audit", "/admin/audit?scope=instance", light},
 	{"import", "/admin/import", "/admin/import", light},

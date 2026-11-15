@@ -391,30 +391,34 @@ type issueRequest struct {
 	ExtKeyUsage []string `json:"ext_key_usage"`
 }
 
-// issueCertificate: who may not read the CA gets 404, who may read but not
-// issue 403 – the engine checks the permission and the whole policy.
-func (a *API) issueCertificate(c *call) error {
+// certificateRequest reads the body of POST /certificates and of POST
+// /certificates/preview – the very same request – validates it, resolves the
+// CA (who may not read it gets 404) and builds the engine request, tenant
+// subject defaults included. Issuing and previewing both build their request
+// here and nowhere else, so a preview can't describe something other than what
+// an issuance of the same body would do. Everything in the body is untrusted.
+func (a *API) certificateRequest(c *call) (ca.Request, error) {
 	var req issueRequest
 	if err := c.decode(&req); err != nil {
-		return err
+		return ca.Request{}, err
 	}
 	switch {
 	case !idPattern.MatchString(req.CAID):
-		return badRequest("/ca_id", "required: the ID of the issuing CA")
+		return ca.Request{}, badRequest("/ca_id", "required: the ID of the issuing CA")
 	case !presetPattern.MatchString(req.Preset):
-		return badRequest("/preset", "required: a preset name")
+		return ca.Request{}, badRequest("/preset", "required: a preset name")
 	case (req.CSRPEM == nil) == (req.Key == nil):
-		return badRequest("/csr_pem", "give exactly one of csr_pem (preferred) or key")
+		return ca.Request{}, badRequest("/csr_pem", "give exactly one of csr_pem (preferred) or key")
 	case req.CSRPEM != nil && len(*req.CSRPEM) > 65536:
-		return badRequest("/csr_pem", "at most 64 KiB")
+		return ca.Request{}, badRequest("/csr_pem", "at most 64 KiB")
 	case req.ValidityDays != nil && *req.ValidityDays < 1:
-		return badRequest("/validity_days", "at least 1")
+		return ca.Request{}, badRequest("/validity_days", "at least 1")
 	case req.Key != nil && req.Key.Algorithm == "":
-		return badRequest("/key/algorithm", "required")
+		return ca.Request{}, badRequest("/key/algorithm", "required")
 	}
 	name, err := a.d.Engine.CAName(c.ctx(), c.who(), req.CAID)
 	if err != nil {
-		return err
+		return ca.Request{}, err
 	}
 	r := ca.Request{CA: name, Preset: req.Preset, CustomKeyUsage: req.KeyUsage, CustomExtKeyUsage: req.ExtKeyUsage, Who: c.who()}
 	if req.CSRPEM != nil {
@@ -436,9 +440,22 @@ func (a *API) issueCertificate(c *call) error {
 	if a.d.Settings != nil {
 		d, derr := a.d.Settings.Defaults(c.ctx(), a.d.Tenant)
 		if derr != nil {
-			return derr
+			return ca.Request{}, derr
 		}
 		r.SubjectDefaults = ca.Subject{Organization: d.Organization, OrganizationalUnit: d.OrganizationalUnit, Locality: d.Locality, Province: d.State, Country: d.Country}
+	}
+	return r, nil
+}
+
+// issueCertificate: who may not read the CA gets 404, who may read but not
+// issue 403 – the engine checks the permission and the whole policy.
+func (a *API) issueCertificate(c *call) error {
+	r, err := a.certificateRequest(c)
+	if err != nil {
+		return err
+	}
+	if a.onRequest != nil {
+		a.onRequest("issueCertificate", r)
 	}
 	issued, err := a.d.Engine.Issue(c.ctx(), r)
 	if err != nil {

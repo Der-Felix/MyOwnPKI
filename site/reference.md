@@ -10,7 +10,7 @@ is built again.
 
 | Page | What it is | Source in the repository |
 |---|---|---|
-| [Operations guide]({{ '/reference/operations/' | relative_url }}) | The operator's book: what runs where, install, `init`, running, backup and restore, passphrase and recovery key, when something is lost, upgrading, the ACME server, the trust page, the agent, monitoring, the TLS scan, reports and analysis | `docs/OPERATIONS.md` |
+| [Operations guide]({{ '/reference/operations/' | relative_url }}) | The operator's book: what runs where, install, `init`, running, backup and restore, passphrase and recovery key, when something is lost, upgrading, the ACME server, the trust page, the agent, monitoring, the TLS scan, reports and analysis, certificate preview and settings history | `docs/OPERATIONS.md` |
 | [Configuration file]({{ '/reference/configuration/' | relative_url }}) | Every key of `config.yaml` with its default and a comment | `deploy/config.example.yaml` |
 | [Command line]({{ '/reference/cli/' | relative_url }}) | The commands of `myownpki` and `myownpki-agent` | `cmd/` |
 | [REST API]({{ '/reference/api/' | relative_url }}) | How to call the API, how to make a token, what a token cannot do | `api/openapi.yaml` |
@@ -35,6 +35,7 @@ is built again.
 13. [Monitoring and notifications]({{ '/reference/operations/' | relative_url }}#13-monitoring-and-notifications)
 14. [TLS scan]({{ '/reference/operations/' | relative_url }}#14-tls-scan)
 15. [Reports and analysis]({{ '/reference/operations/' | relative_url }}#15-reports-and-analysis): charts, the ten analysis rules, who sees them, the API
+16. [Certificate preview and settings history]({{ '/reference/operations/' | relative_url }}#16-certificate-preview-and-settings-history): the preview, what is versioned, restore, `If-Match`, permissions, the problem types
 
 ## More in the repository
 

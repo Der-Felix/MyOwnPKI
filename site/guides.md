@@ -15,6 +15,7 @@ complete details. If you want to know why something works the way it does, the
 | I want to | Guide |
 |---|---|
 | Issue my first certificate in the web UI | [Issue a first certificate in the web UI]({{ '/guides/first-certificate-ui/' | relative_url }}) |
+| See what a request would produce, and whether the policy would refuse it, before anything is signed | [Preview a certificate before you issue it]({{ '/guides/preview-a-certificate/' | relative_url }}) |
 | Let certbot get and renew certificates | [Certbot with MyOwnPKI]({{ '/guides/certbot/' | relative_url }}) |
 | Use acme.sh | [acme.sh with MyOwnPKI]({{ '/guides/acme-sh/' | relative_url }}) |
 | Use lego | [lego with MyOwnPKI]({{ '/guides/lego/' | relative_url }}) |
@@ -39,6 +40,7 @@ complete details. If you want to know why something works the way it does, the
 |---|---|
 | Back up, and prove that a restore works | [Backup and restore]({{ '/guides/backup-and-restore/' | relative_url }}) |
 | Add people, set roles and a second factor, create API tokens | [Users, roles, second factor and API tokens]({{ '/guides/users-roles-2fa/' | relative_url }}) |
+| See who changed a domain or a setting, compare versions and restore an old one | [History and restore of settings]({{ '/guides/settings-history/' | relative_url }}) |
 | See who did what, and check that the log was not changed | [The audit log]({{ '/guides/audit-log/' | relative_url }}) |
 | Know what to do when the server is sealed, a secret is lost or a CA is compromised | [When things go wrong]({{ '/guides/when-things-go-wrong/' | relative_url }}) |
 

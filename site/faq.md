@@ -255,6 +255,15 @@ Yes. The certificate may carry IP addresses as subject alternative names, and an
 IP ranges that may appear in certificates (http-01 only). Some ranges are never validated, such as
 loopback and link-local addresses ([§14.8]({{ '/reference/operations/' | relative_url }}#148-which-addresses-are-never-scanned)).
 
+### Can I see what a certificate would look like before I issue it?
+
+Yes, since v0.3.10. The *Review* step of the issue wizard shows the verdict of the policy with every reason, the
+checks, the names, the key, the validity, the extensions, the issuing CA with its chain and the URLs that would be
+written into the certificate, and a refused request cannot be submitted from there. Scripts can ask
+`POST /api/v1/certificates/preview`; a refusal is a `200` with `allowed: false`. Nothing is signed or stored, and
+the checks run again when you issue, so it is a forecast, not a promise. The ACME protocol has no preview.
+See [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}).
+
 ### Who makes the private key?
 
 By default the host makes it and sends only a certificate request, so the key never leaves the host. The
@@ -426,6 +435,15 @@ show that the log is the one you had and not a replacement. Single entries canno
 which matters if the log holds personal data such as user names and addresses.
 See [Verify the audit log now and then]({{ '/best-practices/' | relative_url }}#verify-the-audit-log-now-and-then).
 Guide: [The audit log]({{ '/guides/audit-log/' | relative_url }}).
+
+### Can I undo a change to a domain or a setting?
+
+Yes, for domains and the tenant settings, since v0.3.10. Every change is kept as a version with who made it, when and an
+optional reason. A tenant-wide admin opens the *History* tab, compares a version with the current state and restores it;
+the restore is a **new** version, so nothing is edited or lost, and it needs the same permission and second factor as the
+change it undoes. Presets, CA limits, per-account and per-agent settings and everything secret are not versioned.
+Undoing an issued certificate is revoking it. See
+[History and restore of settings]({{ '/guides/settings-history/' | relative_url }}).
 
 ### I lost my phone. How do I sign in again?
 
