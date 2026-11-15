@@ -216,7 +216,7 @@ The repository has the same file with comments: `deploy/salt/myownpki/pillar.exa
 | `package.source` | no | Default `salt://myownpki/files/{name}`. `{name}` is the package file name. An `https://` URL is allowed because the hash is checked |
 | `package.format` | no | `auto` (default: `deb` for the Debian family, `rpm` for Red Hat and SUSE), `deb` or `rpm` |
 | `webroot` | no | An existing directory for the enrollment check (http-01). Unset: standalone on port 80 |
-| `low_ports` | no | `true` passes `--low-ports` to `setup`, needed when nginx listens on port 443. Set it on every host that already has `20-low-ports.conf`: `setup` takes this one setting only from the flag, so an enrolled host loses the drop-in at the next package update if the key is missing |
+| `low_ports` | no | `true` passes `--low-ports` to `setup`, which installs `20-low-ports.conf` when it is missing (needed when nginx listens on port 443 or the agent binds port 80). A host that already has the file keeps it without this key: since agent 0.3.5 `setup` leaves the file as found and removes it only for `sandbox.low_ports: false` in `agent.yaml`. Set the key on those hosts anyway if you want the pillar to state what the host needs |
 | `system_trust` | no | `true` adds the root to the system trust store of the host after `setup` (agent 0.3.9 or later, Debian and Red Hat families, [below](#the-root-in-the-system-trust-store)). Default `false`: no state, and the formula never removes it. Must be a boolean |
 | `enrollment_pass` | no | The pass, as a string. Used only while the host has no agent certificate. Unset: pattern A |
 | `config_source` | no | A `salt://` source for a complete `agent.yaml`. Not together with `deployments` or `absent` |

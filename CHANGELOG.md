@@ -7,6 +7,14 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation on `low_ports`:** the Salt page, the upgrade page and the formula README said that an enrolled host
+  loses `20-low-ports.conf` at the next package update when `low_ports: true` is missing from its pillar. That is not so
+  since agent 0.3.5: `setup` leaves the file as found and removes it only for `sandbox.low_ports: false`. A live update
+  from 0.3.5 to 0.3.10 of a host without the key kept the file. The key still installs the file where it is missing and
+  lets the pillar state what a host needs.
+
 ## [0.3.10] - 2026-11-15
 
 Preview and versioned settings. The review step of the issue wizard and a new REST operation show what the policy would
