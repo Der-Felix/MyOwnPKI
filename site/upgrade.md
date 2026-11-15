@@ -185,7 +185,7 @@ salt -t 300 'minion-01.homelab.lan' state.apply myownpki
 
 On an enrolled host the formula checks the new package against the hash, installs it and runs `setup`
 again (the state `myownpki-agent-setup-update`), which is the step above: it refreshes the unit and the
-drop-ins, keeps `agent.yaml` and restarts the agent. A host that already has the drop-in `20-low-ports.conf` needs `low_ports: true` in its pillar. Then apply to the rest. Update the server before you
+drop-ins, keeps `agent.yaml` and restarts the agent. A host that already has the drop-in `20-low-ports.conf` keeps it (since agent 0.3.5 `setup` leaves the file as found); put `low_ports: true` in its pillar if you want Salt to state that the host needs it. Then apply to the rest. Update the server before you
 change the pillar. The details, and what the formula does not test, are on
 [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}#update-the-agents). Without the formula, the
 same commands go into your own configuration management.

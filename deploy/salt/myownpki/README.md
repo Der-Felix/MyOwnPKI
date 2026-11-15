@@ -271,7 +271,9 @@ states exist and which do not, checks that the pass appears nowhere in the outpu
 Tested live by the maintainer: a real `state.apply` on five enrolled Debian amd64 hosts upgraded the
 agent from 0.3.2 to 0.3.5 (package staged and checked, installed from the local file, `setup` run once
 by `myownpki-agent-setup-update`, `agent.yaml`, certificate serial and deployments unchanged), and a
-second apply changed nothing. Four of the hosts had `20-low-ports.conf` and needed `low_ports: true`.
+second apply changed nothing. Four of the hosts had `20-low-ports.conf` and carry `low_ports: true` in their pillar. A later
+update from 0.3.5 to 0.3.10 of one more host with the file and without the key kept the file: `setup` leaves it as found and
+removes it only for `sandbox.low_ports: false`.
 
 Not tested live: the enrollment of a new host with an enrollment pass (`--token-file`, the removal of the
 pass file, a host that waits for approval), `rpm` hosts, `arm64`, `config_source`, the gitfs install and
