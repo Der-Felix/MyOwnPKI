@@ -256,10 +256,10 @@ func (s *Server) build(key *auth.Key) error {
 	s.auth.Wake = s.wakeUp
 	origin := s.opt.Config.Auth.PasskeyOrigin
 	if rpID, perr := config.PasskeyRPID(origin); perr != nil {
-		return perr
+		return fmt.Errorf("auth.passkey_origin: %w", perr)
 	} else if rpID != "" {
 		if s.auth.Passkeys, perr = auth.NewPasskeys(rpID, origin); perr != nil {
-			return perr
+			return fmt.Errorf("auth.passkey_origin: %w", perr)
 		}
 	}
 	s.ring.OnUnseal = func(ctx context.Context) {
