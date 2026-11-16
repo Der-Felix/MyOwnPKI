@@ -1546,7 +1546,9 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.10...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.12...HEAD
+[0.3.12]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.11...v0.3.12
+[0.3.11]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.7...v0.3.8
