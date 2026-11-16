@@ -470,16 +470,23 @@ func (s *editSession) completeSpec(spec *DeploymentSpec) (Deployment, error) {
 	case d.Profile == "" && d.Dir == "" && hasFiles:
 		d.Profile = ProfileFile
 	case d.Profile == "":
-		return d, errors.New("pick a profile: --recipe, --profile, --dir (nginx profile) or --certificate/--fullchain/--key (file profile)")
+		return d, errors.New("pick a profile: --recipe, --profile, --dir (nginx profile) or --certificate/--fullchain/--key/--combined (file profile)")
 	}
 	switch d.Profile {
 	case ProfileNginx:
 		if d.Dir == "" || hasFiles {
-			return d, errors.New("profile nginx needs --dir and takes no --certificate, --chain, --fullchain or --key")
+			return d, errors.New("profile nginx needs --dir and takes no --certificate, --chain, --fullchain, --key or --combined")
 		}
 	case ProfileFile:
-		if d.Dir != "" || d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "" {
-			return d, errors.New("profile file needs --key and --fullchain or --certificate, and takes no --dir")
+		switch {
+		case d.Dir != "":
+			return d, errors.New("profile file takes no --dir")
+		case d.Files.Combined != "":
+			if d.Files.Certificate != "" || d.Files.Chain != "" || d.Files.Fullchain != "" || d.Files.Key != "" {
+				return d, errors.New("--combined holds the chain and the key in one file: use it alone, without --certificate, --chain, --fullchain or --key")
+			}
+		case d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "":
+			return d, errors.New("profile file needs --key and --fullchain or --certificate (or --combined alone), and takes no --dir")
 		}
 	default:
 		return d, errors.New("--profile: nginx or file")
@@ -549,10 +556,9 @@ func (s *editSession) neededDirs(d Deployment) ([]neededDir, error) {
 	if d.Profile == ProfileNginx {
 		wants = append(wants, want{"--dir", d.Dir, filepath.Dir(d.Dir)})
 	} else {
-		for _, f := range []struct{ flag, value string }{{"--certificate", d.Files.Certificate}, {"--chain", d.Files.Chain},
-			{"--fullchain", d.Files.Fullchain}, {"--key", d.Files.Key}} {
-			if f.value != "" {
-				wants = append(wants, want{f.flag, f.value, filepath.Dir(f.value)})
+		for _, f := range d.Files.fields() {
+			if f.Path != "" {
+				wants = append(wants, want{"--" + f.Name, f.Path, filepath.Dir(f.Path)})
 			}
 		}
 	}
@@ -703,8 +709,10 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 		if len(cmd) == 0 {
 			continue
 		}
-		switch filepath.Base(cmd[0]) {
-		case "nginx", "apachectl", "apache2ctl", "haproxy":
+		if apacheConfigCheck(cmd) && len(cfg.Sandbox.Write) == 0 {
+			_, _ = fmt.Fprintf(s.opts.Stderr, "hint: hook %q runs %s as a configuration check; Apache opens its error log even then, and without a writable log directory the check fails with AH00091 (cannot open the error log); if it does, add the directory with --sandbox-write (Debian and Ubuntu: /var/log/apache2, Red Hat family: /var/log/httpd).\n", name, filepath.Base(cmd[0]))
+		}
+		if opensSocketsAndLogs(cmd) {
 			if len(cfg.Sandbox.Write) == 0 {
 				_, _ = fmt.Fprintf(s.opts.Stderr, "hint: hook %q runs %s, which writes its log files; if it fails with \"Read-only file system\" add its log directory with --sandbox-write (for nginx: /var/log/nginx).\n", name, filepath.Base(cmd[0]))
 			}
@@ -713,6 +721,29 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 			}
 		}
 	}
+}
+
+// opensSocketsAndLogs says whether a hook command is one that is known to open
+// listen sockets and log files when it runs, which the sandbox may stop:
+// nginx (even "nginx -t" does), and the Apache and HAProxy programs in a form
+// that starts the server. Their check-only forms (apache2ctl configtest,
+// apachectl -t, haproxy -c) parse the configuration and, as far as the
+// documentation says, bind nothing, so the sockets and logs hint is not printed
+// for them (apacheConfigCheck has the log directory hint of the Apache forms).
+func opensSocketsAndLogs(cmd []string) bool {
+	if len(cmd) == 0 {
+		return false
+	}
+	args := cmd[1:]
+	switch filepath.Base(cmd[0]) {
+	case "nginx":
+		return true
+	case "apachectl", "apache2ctl":
+		return !slices.Contains(args, "configtest") && !slices.Contains(args, "-t")
+	case "haproxy":
+		return !slices.Contains(args, "-c")
+	}
+	return false
 }
 
 // resolveHooks decides which of the wanted hooks are new. A hook name that
@@ -836,12 +867,7 @@ func footprint(d Deployment) []string {
 	if d.Profile == ProfileNginx {
 		return append(out, d.Dir)
 	}
-	for _, p := range []string{d.Files.Certificate, d.Files.Chain, d.Files.Fullchain, d.Files.Key} {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	return append(out, d.Files.Targets()...)
 }
 
 // prunablePaths are the paths entries that only the removed deployment used.
@@ -934,13 +960,7 @@ func ListDeployments(w io.Writer, configPath string) error {
 	for _, d := range cfg.Deployments {
 		targets := d.Dir
 		if d.Profile == ProfileFile {
-			var parts []string
-			for _, p := range []string{d.Files.Certificate, d.Files.Chain, d.Files.Fullchain, d.Files.Key} {
-				if p != "" {
-					parts = append(parts, p)
-				}
-			}
-			targets = strings.Join(parts, ",")
+			targets = strings.Join(d.Files.Targets(), ",")
 		}
 		var hooks []string
 		if d.TestHook != "" {
@@ -1011,4 +1031,20 @@ func SyncSandbox(ctx context.Context, opts SyncOptions) error {
 		return nil
 	}
 	return s.apply(ctx, changeSet{config: data, plan: plan})
+}
+
+// apacheConfigCheck says whether a hook command is the configuration check of
+// Apache through its control script (apachectl -t, apache2ctl configtest).
+// opensSocketsAndLogs leaves it out because it binds no socket, but Apache
+// opens its error log even for a check, and a check run as a user that cannot
+// write the log directory fails with AH00091.
+func apacheConfigCheck(cmd []string) bool {
+	if len(cmd) == 0 {
+		return false
+	}
+	switch filepath.Base(cmd[0]) {
+	case "apachectl", "apache2ctl":
+		return slices.Contains(cmd[1:], "configtest") || slices.Contains(cmd[1:], "-t")
+	}
+	return false
 }

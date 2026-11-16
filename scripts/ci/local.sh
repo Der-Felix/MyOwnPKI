@@ -33,6 +33,9 @@ steps=(
   'agent-e2e|real server agent ACME nginx rollback|linux_docker|bash scripts/ci/agent-e2e-nginx.sh'
   'agent-e2e|systemd verify and security|linux_systemd_disposable|bash scripts/ci/agent-e2e-systemd.sh'
   'agent-e2e|nginx port 443 systemd controls|linux_systemd_docker_disposable|bash scripts/ci/agent-e2e-nginx-systemd.sh'
+  'agent-e2e-services|download pinned Go modules|go|bash scripts/ci/agent-e2e-download.sh'
+  'agent-e2e-services|apache2 recipe with the real Apache|linux_apache|bash scripts/ci/agent-e2e-apache.sh'
+  'agent-e2e-services|haproxy recipe with the real HAProxy|linux_haproxy|bash scripts/ci/agent-e2e-haproxy.sh'
   'install|GoReleaser snapshot|linux_goreleaser|bash scripts/ci/install-snapshot.sh'
   'install|agent package formats and architectures|linux_docker_dpkg|bash scripts/ci/agent-package-inspect.sh'
   'install|agent packages in pinned distributions|linux_docker_openssl|bash scripts/ci/agent-package-distros.sh'
@@ -41,6 +44,7 @@ steps=(
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
+  'image|demo from the snapshot image|linux_docker_demo|bash scripts/ci/demo-check.sh'
   'salt|self-test without Salt|bash|bash scripts/ci/salt-test.sh --self-test'
   'salt|render and apply test=True|salt|bash scripts/ci/salt-test.sh'
   # Documentation site: the same steps as the build job of .github/workflows/pages.yml
@@ -131,9 +135,30 @@ requirement() {
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
     vacuum) has_commands go task vacuum || echo 'needs Go + Task + vacuum' ;;
     linux) [ "$os" = linux ] || echo 'needs Linux' ;;
+    linux_apache)
+      # The tests start their own Apache; the package only has to be installed
+      # (sudo apt-get install apache2). The job on GitHub installs it itself.
+      if [ "$os" != linux ] || ! has_commands go || [ ! -x /usr/sbin/apache2 ] || [ ! -x /usr/sbin/apache2ctl ] || [ ! -f /usr/lib/apache2/modules/mod_ssl.so ]; then
+        echo "needs Linux + Go + the Debian or Ubuntu package apache2 (the test runs its own instance, the installed service stays untouched)"
+      fi
+      ;;
+    linux_haproxy)
+      if [ "$os" != linux ] || ! has_commands go || [ ! -x /usr/sbin/haproxy ]; then
+        echo "needs Linux + Go + the Debian or Ubuntu package haproxy (the test runs its own instance, the installed service stays untouched)"
+      fi
+      ;;
     linux_docker)
       if [ "$os" != linux ] || ! has_commands go task docker; then
         echo 'needs Linux + docker'
+      fi
+      ;;
+    linux_docker_demo)
+      # The demo runs on the image the snapshot step above leaves in the local
+      # image store (or on MYOWNPKI_IMAGE).
+      if [ "$os" != linux ] || ! has_commands docker curl openssl; then
+        echo 'needs Linux + docker + curl + openssl'
+      elif [ -z "${MYOWNPKI_IMAGE:-}" ] && ! docker image ls ghcr.io/der-felix/myownpki --format '{{.Tag}}' 2>/dev/null | grep -q .; then
+        echo 'needs the snapshot image of the previous step (ghcr.io/der-felix/myownpki) or MYOWNPKI_IMAGE'
       fi
       ;;
     linux_docker_dpkg)

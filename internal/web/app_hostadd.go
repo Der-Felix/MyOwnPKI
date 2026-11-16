@@ -421,7 +421,10 @@ func (a *app) deploymentExplanation(p hostPlan) []string {
 	if r.Profile == "nginx" {
 		parts = append(parts, "files fullchain.pem and privkey.pem in "+strings.ReplaceAll(r.Dir, "{name}", p.Service.ID))
 	} else {
-		parts = append(parts, "files "+strings.Join(nonEmpty(r.Fullchain, r.Certificate, r.Chain, r.Key), ", "))
+		parts = append(parts, "files "+strings.Join(recipeFiles(r, p.Service.ID), ", "))
+		if r.Combined != "" {
+			parts[len(parts)-1] += " (the certificate chain and the private key in one file, mode " + r.KeyMode + ")"
+		}
 	}
 	for _, h := range r.Hooks {
 		parts = append(parts, "hook "+h.Name+": "+strings.Join(h.Command, " "))
@@ -440,16 +443,6 @@ func (a *app) deploymentExplanation(p hostPlan) []string {
 		out = append(out, "Example recipe: test it on a non-production host first.")
 	}
 	return append(out, r.Notes...)
-}
-
-func nonEmpty(values ...string) []string {
-	var out []string
-	for _, v := range values {
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
 }
 
 // ---------------------------------------------------------------- step 3

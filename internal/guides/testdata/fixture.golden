@@ -1,0 +1,20 @@
+slug=fixture title="Fixture guide" summary="Every construct of the subset once." audience="Tests" order=7 site="/guides/certbot/" sources=["internal/guides/guides.go" "docs/PHASE3.md"]
+heading level=2 id=first-section "First section"
+paragraph "A paragraph with " bold("bold") ", " italic("italic") ", " code("code with {ca_name}") " and a " link("link to the CA list" -> 2 /authorities) ". The second line continues the paragraph; a < b & c stays text."
+heading level=3 id=a-subsection "A subsection"
+list ordered=true
+  item "Step one with a " link("guide link" -> 3 /guides/other#second-section) "."
+  item "Step two continues on an indented line."
+list ordered=false
+  item "Bullet with " link("the site" -> 4 https://der-felix.github.io/MyOwnPKI/guides/certbot/) " and " link("the repository" -> 4 https://github.com/Der-Felix/MyOwnPKI) "."
+  item "Bullet with an " link("anchor" -> 1 first-section) " and a " link("query" -> 2 /certificates?status=expiring) "."
+note warning=false "A note over two lines, with " code("code") "."
+note warning=true "A warning."
+code lang=bash "curl --silent {acme_directory}\nsudo systemctl status myownpki   # <b>not html</b> & more"
+table
+  head "Name"
+  head "Meaning"
+  row | code("a|b") | "A pipe inside code does not split the cell"
+  row | bold("bold") | link("Certificates" -> 2 /certificates)
+heading level=2 id=second-section "Second section"
+paragraph "Last paragraph."

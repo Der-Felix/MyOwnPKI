@@ -18,6 +18,10 @@ import (
 	"time"
 )
 
+// rigCombined is a profile name only for newDeployRig: the file profile with
+// files.combined instead of the four files.
+const rigCombined = "combined"
+
 type deployRig struct {
 	a                      *Agent
 	old, next              map[string]*Material
@@ -45,9 +49,14 @@ func newDeployRig(t *testing.T, profiles ...string) *deployRig {
 	for i, profile := range profiles {
 		name := fmt.Sprintf("service%d", i)
 		d := Deployment{Name: name, Profile: profile, Names: []string{name + ".homelab.lan"}, TestHook: "test", ReloadHook: "reload"}
-		if profile == ProfileNginx {
+		switch profile {
+		case ProfileNginx:
 			d.Dir = filepath.Join(root, name)
-		} else {
+		case rigCombined:
+			// the file profile with the one-file target
+			d.Profile = ProfileFile
+			d.Files = Files{Combined: filepath.Join(root, name+".pem")}
+		default:
 			d.Files = Files{Certificate: filepath.Join(root, name+".crt"), Chain: filepath.Join(root, name+".chain"), Fullchain: filepath.Join(root, name+".fullchain"), Key: filepath.Join(root, name+".key")}
 		}
 		r.old[name], r.next[name] = testMaterial(t, d.Names[0], int64(i+1)), testMaterial(t, d.Names[0], int64(i+100))
@@ -86,11 +95,7 @@ func newDeployRig(t *testing.T, profiles ...string) *deployRig {
 func (r *deployRig) loadFiles() error {
 	for _, d := range r.a.cfg.Deployments {
 		files := deploymentPaths(d)
-		cert := files.Fullchain
-		if cert == "" {
-			cert = files.Certificate
-		}
-		pair, err := tls.LoadX509KeyPair(cert, files.Key)
+		pair, err := tls.LoadX509KeyPair(files.CertPath(), files.KeyPath())
 		if err != nil {
 			return errors.New("test service could not load the files")
 		}

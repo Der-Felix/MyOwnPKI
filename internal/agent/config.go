@@ -131,11 +131,15 @@ type Deployment struct {
 }
 
 // Files are the targets of the file profile.
+//
+// Combined is the single-file form (HAProxy): the certificate chain and the
+// private key in one PEM file. It excludes the other four.
 type Files struct {
 	Certificate string `yaml:"certificate"`
 	Chain       string `yaml:"chain"`
 	Fullchain   string `yaml:"fullchain"`
 	Key         string `yaml:"key"`
+	Combined    string `yaml:"combined"`
 }
 
 // LoadConfig reads and validates agent.yaml.
@@ -334,12 +338,17 @@ func (c *Config) Validate() error {
 		case ProfileNginx:
 			under(where+": dir", d.Dir)
 		case ProfileFile:
-			if d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "" {
-				add("%s: files: key and certificate or fullchain at least", where)
+			switch {
+			case d.Files.Combined != "":
+				if d.Files.Certificate != "" || d.Files.Chain != "" || d.Files.Fullchain != "" || d.Files.Key != "" {
+					add("%s: files.combined: not together with certificate, chain, fullchain or key (it holds all of them in one file)", where)
+				}
+			case d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "":
+				add("%s: files: key and certificate or fullchain at least, or combined alone", where)
 			}
-			for field, p := range map[string]string{"certificate": d.Files.Certificate, "chain": d.Files.Chain, "fullchain": d.Files.Fullchain, "key": d.Files.Key} {
-				if p != "" {
-					under(where+": files."+field, p)
+			for _, field := range d.Files.fields() {
+				if field.Path != "" {
+					under(where+": files."+field.Name, field.Path)
 				}
 			}
 		default:
@@ -369,10 +378,7 @@ func (c *Config) Validate() error {
 			add("%s: check_name: every name is a wildcard, so the TLS check needs a concrete name, e.g. www.homelab.lan", where)
 		}
 		f := deploymentPaths(d)
-		for _, target := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
-			if target == "" {
-				continue
-			}
+		for _, target := range f.Targets() {
 			key := filepath.Clean(target)
 			if Under([]string{c.StateDir}, key) || key == filepath.Clean(c.CABundle) {
 				add("%s: target overlaps state_dir or ca_bundle", where)

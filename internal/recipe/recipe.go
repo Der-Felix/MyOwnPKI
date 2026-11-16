@@ -27,14 +27,19 @@ type Recipe struct {
 	Name    string
 	Summary string
 
-	// Profile is "nginx" (Dir) or "file" (Certificate, Chain, Fullchain, Key).
+	// Profile is "nginx" (Dir) or "file" (Certificate, Chain, Fullchain, Key,
+	// or Combined alone).
 	Profile string
-	// Dir may contain {name}, the name of the deployment.
+	// Dir, and every file path of the file profile, may contain {name}: the
+	// name of the deployment (a validated name of letters, digits and "-").
 	Dir         string
 	Certificate string
 	Chain       string
 	Fullchain   string
 	Key         string
+	// Combined is the single-file form (HAProxy): the certificate chain and the
+	// private key in one PEM file. It excludes the four fields above.
+	Combined string
 
 	Owner   string
 	Group   string
@@ -74,6 +79,87 @@ var recipes = []Recipe{
 		Check:        "127.0.0.1:443",
 		SandboxWrite: []string{"/var/log/nginx"},
 		LowPorts:     true,
+	},
+	{
+		Name:    "apache2",
+		Summary: "Apache on Debian and Ubuntu: fullchain.pem and privkey.pem in a directory of their own",
+		Profile: "nginx",
+		Dir:     "/etc/ssl/myownpki/{name}",
+		Owner:   "root",
+		KeyMode: "0600",
+		Hooks: []Hook{
+			{Name: "apache2-test", Command: []string{"/usr/sbin/apache2ctl", "configtest"}},
+			{Name: "apache2-reload", Command: []string{"/usr/bin/systemctl", "reload", "apache2"}},
+		},
+		TestHook:     "apache2-test",
+		ReloadHook:   "apache2-reload",
+		Check:        "127.0.0.1:443",
+		SandboxWrite: []string{"/var/log/apache2"},
+		Example:      true,
+		Notes: []string{
+			"vhost: SSLCertificateFile /etc/ssl/myownpki/<name>/fullchain.pem and SSLCertificateKeyFile /etc/ssl/myownpki/<name>/privkey.pem (the chain belongs in the first file since Apache 2.4.8); enable mod_ssl with a2enmod ssl",
+			"the recipe never edits the Apache configuration; the vhost lines are yours",
+			"apache2ctl configtest checks that the files exist and the directives parse; configtest does not detect a key that does not match the certificate (observed in CI with Apache 2.4.58 on Ubuntu 24.04), so the agent's check of the pair before it writes is the guard against a wrong key, and a file damaged afterwards reaches the reload",
+			"a failed reload can stop Apache: in CI a graceful reload with a damaged key ended the Apache process, and the rollback restored the previous files (result rolled_back) without bringing Apache back; after a rolled_back result look at systemctl status apache2",
+			"apache2ctl configtest creates /run/apache2, /run/apache2/socks and /run/lock/apache2 when they are missing; the agent's unit runs with ProtectSystem=strict and the recipe makes only /var/log/apache2 writable, so the test hook fails when Apache has not been started since the boot (and a systemctl reload would fail as well); after one normal start of Apache the directories exist and nothing is written",
+			"all deployments of this recipe share one test hook and one reload hook, so they are one reload and one rollback group",
+			"the local check connects to 127.0.0.1:443 with the certificate's first name as SNI; when Apache listens elsewhere, set --check HOST:PORT (or delete the check line in agent.yaml)",
+			"a group such as ssl-cert is needed only when something other than the root-run Apache master reads the key",
+		},
+	},
+	{
+		Name:    "httpd",
+		Summary: "Apache httpd on the Red Hat family: fullchain.pem and privkey.pem in a directory of their own",
+		Profile: "nginx",
+		Dir:     "/etc/ssl/myownpki/{name}",
+		Owner:   "root",
+		KeyMode: "0600",
+		Hooks: []Hook{
+			{Name: "httpd-test", Command: []string{"/usr/sbin/httpd", "-t"}},
+			{Name: "httpd-reload", Command: []string{"/usr/bin/systemctl", "reload", "httpd"}},
+		},
+		TestHook:     "httpd-test",
+		ReloadHook:   "httpd-reload",
+		Check:        "127.0.0.1:443",
+		SandboxWrite: []string{"/var/log/httpd"},
+		Example:      true,
+		Notes: []string{
+			"vhost: SSLCertificateFile /etc/ssl/myownpki/<name>/fullchain.pem and SSLCertificateKeyFile /etc/ssl/myownpki/<name>/privkey.pem (the chain belongs in the first file since Apache 2.4.8); install mod_ssl (dnf install mod_ssl)",
+			"the recipe never edits the httpd configuration; the vhost lines are yours",
+			"httpd -t is the same test as apache2ctl configtest: it checks that the files exist and the directives parse; configtest does not detect a key that does not match the certificate (observed in CI with the apache2 package, Apache 2.4.58 on Ubuntu 24.04; httpd on the Red Hat family was not run), so the agent's check of the pair before it writes is the guard against a wrong key, and a file damaged afterwards reaches the reload",
+			"a failed reload can stop Apache: in CI a graceful reload of the apache2 package with a damaged key ended the Apache process, and the rollback restored the previous files (result rolled_back) without bringing Apache back; after a rolled_back result look at systemctl status httpd",
+			"SELinux: look at the label of /etc/ssl/myownpki (ls -Z) and run restorecon -R /etc/ssl/myownpki if httpd cannot read the files",
+			"all deployments of this recipe share one test hook and one reload hook, so they are one reload and one rollback group",
+			"the local check connects to 127.0.0.1:443 with the certificate's first name as SNI; when httpd listens elsewhere, set --check HOST:PORT (or delete the check line in agent.yaml)",
+			"a group such as ssl-cert is needed only when something other than the root-run httpd master reads the key",
+		},
+	},
+	{
+		Name:     "haproxy",
+		Summary:  "HAProxy: one PEM per certificate with the chain and the key in it",
+		Profile:  "file",
+		Combined: "/etc/ssl/myownpki/haproxy/{name}.pem",
+		Owner:    "root",
+		Group:    "root",
+		KeyMode:  "0600",
+		Hooks: []Hook{
+			{Name: "haproxy-test", Command: []string{"/usr/sbin/haproxy", "-c", "-f", "/etc/haproxy/haproxy.cfg"}},
+			{Name: "haproxy-reload", Command: []string{"/usr/bin/systemctl", "reload", "haproxy"}},
+		},
+		TestHook:   "haproxy-test",
+		ReloadHook: "haproxy-reload",
+		Check:      "127.0.0.1:443",
+		Example:    true,
+		Notes: []string{
+			"haproxy.cfg: bind :443 ssl crt /etc/ssl/myownpki/haproxy/<name>.pem for one certificate, or crt /etc/ssl/myownpki/haproxy/ for every file in the directory; a crt-list is your own file",
+			"each deployment writes one file per deployment name (the certificate chain, then the private key, mode 0600); the recipe never edits haproxy.cfg",
+			"the test hook checks /etc/haproxy/haproxy.cfg only; when the service uses more (-f /etc/haproxy/conf.d) give the test hook your own command line with --hook and --test-hook",
+			"haproxy -c refuses a certificate and key that do not match (observed in CI with HAProxy 2.8.30 on Ubuntu 24.04: \"inconsistencies between private key and certificate\"), so the test hook stops a damaged file before the reload",
+			"the directory form of crt skips the agent's temporary .myownpki-* file (observed in CI: haproxy -c passed with a truncated one in the directory and HAProxy did not serve the complete one)",
+			"the order of the certificate and the key in the file does not matter (observed in CI: HAProxy accepted and served a file with the key before the certificate; the agent writes the certificate chain first)",
+			"the local check connects to 127.0.0.1:443 with the certificate's first name as SNI; with accept-proxy or a bind to another address set --check HOST:PORT (or delete the check line in agent.yaml)",
+			"a check hook binds no port and the sandbox gets no write directory and no low-ports entry; if the agent log shows \"Read-only file system\" or \"Permission denied\" from a hook, add --sandbox-write or --low-ports",
+		},
 	},
 	{
 		Name:       "postfix",

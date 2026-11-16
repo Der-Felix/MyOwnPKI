@@ -95,10 +95,8 @@ func (a *Agent) deploymentWriteFailures(deployments []Deployment) map[string]err
 			directories = []string{d.Dir}
 		} else {
 			files := deploymentPaths(d)
-			for _, path := range []string{files.Certificate, files.Chain, files.Fullchain, files.Key} {
-				if path != "" {
-					directories = append(directories, filepath.Dir(path))
-				}
+			for _, path := range files.Targets() {
+				directories = append(directories, filepath.Dir(path))
 			}
 		}
 		for _, directory := range directories {

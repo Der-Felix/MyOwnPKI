@@ -7,7 +7,7 @@ permalink: /hosts/
 A host gets its certificate in one of two ways. Either it runs an **ACME client** that talks to the
 ACME server of MyOwnPKI, or it runs the **agent**, which uses ACME inside and adds deployment,
 reload, rollback and reporting. This page covers both and then the agent in detail. Ready-made
-settings for nginx, Postfix, Dovecot and Proxmox VE are on [Recipes]({{ '/recipes/' | relative_url }}).
+settings for nginx, Apache, HAProxy, Postfix, Dovecot and Proxmox VE are on [Recipes]({{ '/recipes/' | relative_url }}).
 Rolling the agent out to many machines is done with the Salt formula (since v0.3.6); it has its own page:
 [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}).
 
@@ -62,11 +62,11 @@ The default way, from a new host name to a deployed certificate. In the UI choos
 (or the button on the agent list) and go through four steps:
 
 1. **Your answers.** The **exact host name** (an FQDN that resolves to the host and is covered by a
-   domain), the **service** (nginx, Postfix, Dovecot, Proxmox VE, or *certificate files only*), how the
+   domain), the **service** (nginx, Apache on Debian and Ubuntu, Apache httpd on the Red Hat family, HAProxy, Postfix, Dovecot, Proxmox VE, or *certificate files only*), how the
    host answers the enrollment check, **standalone** (the agent listens on port 80 for a moment) or
    **webroot** (a web server already answers port 80 and the agent writes a file into a directory it
    serves), up to four more certificate names (optional), and the package: `deb`, `rpm`, tarball with
-   the architecture, or *already installed*. The Postfix, Dovecot and Proxmox VE choices are marked
+   the architecture, or *already installed*. Every choice except nginx is marked
    *example recipe*: see [Recipes]({{ '/recipes/' | relative_url }}).
 2. **Admission.** The page checks every name against your domains (a name no domain covers, or a
    domain without http-01, is refused), names the tenant's enrollment mode, and lists the ways to get
@@ -279,9 +279,9 @@ sudo systemctl restart myownpki-agent
 
 | Flag | Meaning |
 |---|---|
-| `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Defaults for the service, see [Recipes]({{ '/recipes/' | relative_url }}). Every other flag overrides them. |
+| `--recipe nginx`, `apache2`, `httpd`, `haproxy`, `postfix`, `dovecot` or `proxmox` | Defaults for the service, see [Recipes]({{ '/recipes/' | relative_url }}). Every other flag overrides them. |
 | `--name FQDN` (repeat) | Certificate names. Default: the host name of `agent.yaml`. |
-| `--profile nginx` or `file`, `--dir DIR`, `--certificate`, `--chain`, `--fullchain`, `--key FILE` | Where the files go: `--dir` for the nginx profile, the file flags for the file profile |
+| `--profile nginx` or `file`, `--dir DIR`, `--certificate`, `--chain`, `--fullchain`, `--key FILE`, `--combined FILE` | Where the files go: `--dir` for the nginx profile, the file flags for the file profile. `--combined` is one file with the certificate chain and the private key (HAProxy) and is used alone; an agent older than 0.3.11 refuses it, so update agents first. |
 | `--challenge webroot`, `standalone` or `dns-01`, `--webroot DIR` | Default: what the enrollment uses. **A wildcard name (`--name '*.homelab.lan'`) needs `dns-01`**, which needs no port 80 and no `--webroot`; see below. |
 | `--owner`, `--group`, `--key-mode` | Local ownership and mode of the key (no rights for others) |
 | `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | Hooks: no shell, the first element is an absolute path. An identical command line is reused, so deployments of one service share one reload and one rollback group. |
@@ -392,7 +392,7 @@ nginx server block.
 | `deployments[].names` | 1 to 100 DNS names for the certificate. Each must be covered by the agent's *Names it may order* on the server. A name that starts with `*.` (a wildcard, at least two labels after it) is allowed only with `challenge: dns-01`. |
 | `deployments[].challenge`, `webroot` | `standalone` or `webroot` for the ACME http-01 of this certificate; the webroot lies below `paths`. `dns-01` (since v0.3.7) proves the names through a DNS TXT record: no port 80, no `webroot`, and it needs `dns_provider`. |
 | `deployments[].dns_provider` | With `dns-01`: the name of an entry in `dns_providers` |
-| `deployments[].files` | For `file`: `key` and `certificate` or `fullchain`, optionally `chain` |
+| `deployments[].files` | For `file`: `key` and `certificate` or `fullchain`, optionally `chain`; or `combined` alone (the certificate chain and the key in one file, since 0.3.11) |
 | `deployments[].owner`, `group`, `key_mode` | Local ownership and an octal mode without rights for others (for example `"0600"` or `"0640"`) |
 | `deployments[].test_hook`, `reload_hook` | Names from `hooks`: run before the reload (for example `nginx -t`) and the reload itself |
 | `deployments[].check` | `host:port` of the local TLS endpoint. After the reload the agent connects with SNI and compares the served certificate with the deployed one. |

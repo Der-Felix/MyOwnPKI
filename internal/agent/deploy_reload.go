@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -112,15 +111,11 @@ func (a *Agent) writtenLeafFingerprint(d Deployment, want string) (string, error
 		return "", nil
 	}
 	files := deploymentPaths(d)
-	certPath := files.Fullchain
-	if certPath == "" {
-		certPath = files.Certificate
-	}
-	data, _, err := a.readTarget(certPath)
+	data, _, err := a.readTarget(files.CertPath())
 	if err != nil {
 		return "", fmt.Errorf("read back certificate for deployment %q: %w", d.Name, err)
 	}
-	block, _ := pem.Decode(data)
+	block := firstPEMBlock(data)
 	if block == nil || block.Type != "CERTIFICATE" {
 		return "", errors.New("read back certificate: leaf is not PEM CERTIFICATE")
 	}

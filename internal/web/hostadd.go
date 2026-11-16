@@ -50,6 +50,9 @@ type hostService struct {
 
 var hostServices = []hostService{
 	{"nginx", "nginx", "nginx"},
+	{"apache2", "Apache (Debian, Ubuntu; example recipe)", "apache2"},
+	{"httpd", "Apache httpd (Red Hat family; example recipe)", "httpd"},
+	{"haproxy", "HAProxy (example recipe)", "haproxy"},
 	{"postfix", "Postfix (example recipe)", "postfix"},
 	{"dovecot", "Dovecot (example recipe)", "dovecot"},
 	{"proxmox", "Proxmox VE (example recipe)", "proxmox"},
@@ -237,12 +240,23 @@ func certParents(p hostPlan) []string {
 		add(path.Dir(strings.ReplaceAll(r.Dir, "{name}", p.Service.ID)))
 		return dirs
 	}
-	for _, f := range []string{r.Certificate, r.Chain, r.Fullchain, r.Key} {
-		if f != "" {
-			add(path.Dir(f))
-		}
+	for _, f := range recipeFiles(r, p.Service.ID) {
+		add(path.Dir(f))
 	}
 	return dirs
+}
+
+// recipeFiles are the files a file-profile recipe writes for the deployment
+// called name: the recipe's paths with {name} replaced, in the order the
+// page lists them. Both the commands and the explanation call it.
+func recipeFiles(r recipe.Recipe, name string) []string {
+	var out []string
+	for _, f := range []string{r.Fullchain, r.Certificate, r.Chain, r.Key, r.Combined} {
+		if f != "" {
+			out = append(out, strings.ReplaceAll(f, "{name}", name))
+		}
+	}
+	return out
 }
 
 // deploymentAddCommand is the block that adds the deployment on the host. The

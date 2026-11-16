@@ -163,5 +163,6 @@ func finishInit(ctx context.Context, opt setup.Options, ui setup.UI, stdout, std
 		out("\n*** %s ***\nSecrets: %s\nFor production set up a new instance with `%s init`.\n", setup.DemoWarning, res.DemoSecretsFile, binary)
 	case setup.Interactive:
 	}
+	out("\nNext: sign in and open Help, First steps.\n")
 	return exitOK
 }

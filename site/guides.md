@@ -51,4 +51,5 @@ complete details. If you want to know why something works the way it does, the
 | Find a quick answer | [FAQ]({{ '/faq/' | relative_url }}) |
 | Look up a term | [Glossary]({{ '/glossary/' | relative_url }}) |
 | See what the screens look like | [A tour of the web UI]({{ '/tour/' | relative_url }}) |
+| Find out what the Help group of the UI shows, and how a guide is written | [Guides in the UI]({{ '/guides/guides-in-the-ui/' | relative_url }}) |
 | Fix an error message | [Troubleshooting]({{ '/troubleshooting/' | relative_url }}) |

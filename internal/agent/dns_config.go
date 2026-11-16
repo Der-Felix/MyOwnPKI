@@ -181,7 +181,7 @@ func (c *Config) credentialsPathProblem(p string) string {
 		return fmt.Sprintf("%q is under one of paths; the agent writes there, a secret file must not", p)
 	}
 	for _, d := range c.Deployments {
-		targets := []string{d.Files.Certificate, d.Files.Chain, d.Files.Fullchain, d.Files.Key}
+		targets := d.Files.Targets()
 		if d.Profile == ProfileNginx {
 			targets = []string{d.Dir}
 		}
