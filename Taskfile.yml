@@ -189,6 +189,11 @@ tasks:
     cmds:
       - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/upgrade/fetch.sh --all
 
+  upgrade:
+    desc: "Upgrade test (Linux amd64): old release binaries make an installation, the binary of this tree updates it in place (UPGRADE_ONLY=0.3.12 for one start version; lego from task acme:lego for the ACME step; options: task upgrade -- --dry-run)"
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash test/upgrade/run.sh {{.CLI_ARGS}}
+
   upgrade:test:
     desc: Upgrade test – the previous release (UPGRADE_FROM) makes an instance and a backup; this build restores, migrates and issues by ACME
     cmds:
