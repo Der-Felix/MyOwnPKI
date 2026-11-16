@@ -15,6 +15,15 @@
 - HTTP API errors use RFC 9457 `application/problem+json`; ACME errors use the ACME problem types
   (`urn:ietf:params:acme:error:*`). Map domain errors in one place per surface.
 - Never put secrets, key material or full CSRs in error strings.
+- Message form: starts in lower case unless the first word is an acronym or a proper name (`URI is longer than …`,
+  `ARI returned …`), no trailing punctuation, no newline.
+- `%w` whenever an error is returned that has a cause; `errors.New` for a constant text (a `fmt.Errorf` without a verb
+  is a lint finding, `perfsprint`).
+- Wrap once, at the boundary that adds context (the function that knows the name, the path or the step), not again on
+  every level on the way up.
+- Texts that reach a client or the UI (`deny`, `problemErr`, `badRequest`, ACME and API problem details) are sentences
+  with ` – ` between the clauses, written for the person who reads them. They are part of the API, tests and docs pin
+  them, and they are changed only when they are wrong, never for style.
 
 ## Logging
 
