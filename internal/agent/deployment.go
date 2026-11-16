@@ -709,8 +709,7 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 		if len(cmd) == 0 {
 			continue
 		}
-		switch filepath.Base(cmd[0]) {
-		case "nginx", "apachectl", "apache2ctl", "haproxy":
+		if opensSocketsAndLogs(cmd) {
 			if len(cfg.Sandbox.Write) == 0 {
 				_, _ = fmt.Fprintf(s.opts.Stderr, "hint: hook %q runs %s, which writes its log files; if it fails with \"Read-only file system\" add its log directory with --sandbox-write (for nginx: /var/log/nginx).\n", name, filepath.Base(cmd[0]))
 			}
@@ -719,6 +718,28 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 			}
 		}
 	}
+}
+
+// opensSocketsAndLogs says whether a hook command is one that is known to open
+// listen sockets and log files when it runs, which the sandbox may stop:
+// nginx (even "nginx -t" does), and the Apache and HAProxy programs in a form
+// that starts the server. Their check-only forms (apache2ctl configtest,
+// apachectl -t, haproxy -c) parse the configuration and, as far as the
+// documentation says, bind nothing, so no hint is printed for them.
+func opensSocketsAndLogs(cmd []string) bool {
+	if len(cmd) == 0 {
+		return false
+	}
+	args := cmd[1:]
+	switch filepath.Base(cmd[0]) {
+	case "nginx":
+		return true
+	case "apachectl", "apache2ctl":
+		return !slices.Contains(args, "configtest") && !slices.Contains(args, "-t")
+	case "haproxy":
+		return !slices.Contains(args, "-c")
+	}
+	return false
 }
 
 // resolveHooks decides which of the wanted hooks are new. A hook name that
