@@ -18,7 +18,7 @@ services:
   # stays marked as a demo for good. A second run fails with "initialized
   # already", so it is not part of `up`: ./demo.sh up runs it once.
   init:
-    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.12}
     profiles: [init]
     command: ["init", "--demo", "--with-ca", "--ca-base-url", "http://myownpki:8080"]
     restart: "no"
@@ -33,7 +33,7 @@ services:
       - no-new-privileges:true
 
   myownpki:
-    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.12}
     restart: "no"
     volumes:
       - demo-data:/var/lib/myownpki
@@ -110,7 +110,7 @@ services:
     build:
       context: ./web
       args:
-        MYOWNPKI_IMAGE: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+        MYOWNPKI_IMAGE: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.12}
     image: myownpki-demo-web:local
     restart: "no"
     volumes:

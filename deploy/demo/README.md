@@ -15,7 +15,7 @@ certificate is deployed by `myownpki-agent`.
 - Ports: `127.0.0.1:9443` on this host. Nothing else is published, and nothing listens on a
   network address of the host.
 
-The image tag in `docker-compose.yml` (`ghcr.io/der-felix/myownpki:0.3.11`) exists after the
+The image tag in `docker-compose.yml` (`ghcr.io/der-felix/myownpki:0.3.12`) exists after the
 release is published. Before that, or for a snapshot or local build, name your image:
 
 ```bash

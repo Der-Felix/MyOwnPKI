@@ -6,7 +6,7 @@
 # the checksums.txt that comes with it. The server image is the variable
 # MYOWNPKI_IMAGE of the compose file (a snapshot in CI, the release tag
 # otherwise).
-ARG MYOWNPKI_IMAGE=ghcr.io/der-felix/myownpki:0.3.11
+ARG MYOWNPKI_IMAGE=ghcr.io/der-felix/myownpki:0.3.12
 FROM ${MYOWNPKI_IMAGE} AS server
 
 # nginx 1.31.7 on Debian 13, index uploaded 2026-10-21 (two-week rule), BSD-2-Clause.
