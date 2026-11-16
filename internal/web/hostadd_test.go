@@ -145,7 +145,7 @@ func TestParseHostPlan(t *testing.T) {
 		"wildcard name":      {"names": "*.homelab.lan"},
 		"bad name":           {"names": "ok.homelab.lan\n$(reboot).homelab.lan"},
 		"five extra names":   {"names": "a.homelab.lan b.homelab.lan c.homelab.lan d.homelab.lan e.homelab.lan"},
-		"unknown service":    {"service": "apache"},
+		"unknown service":    {"service": "lighttpd"},
 		"service injection":  {"service": "nginx --hook x='/bin/sh'"},
 		"unknown challenge":  {"challenge": "dns-01"},
 		"webroot standalone": {"challenge": "standalone"},
@@ -564,7 +564,7 @@ func TestDeploymentAddCommandQuotesWhateverItIsGiven(t *testing.T) {
 func TestCertParentsAreTheRecipeDirectories(t *testing.T) {
 	t.Parallel()
 	for id, want := range map[string][]string{
-		"nginx": {"/etc/ssl/myownpki"}, "postfix": {"/etc/ssl/myownpki/postfix"}, "dovecot": {"/etc/ssl/myownpki/dovecot"},
+		"nginx": {"/etc/ssl/myownpki"}, "apache2": {"/etc/ssl/myownpki"}, "httpd": {"/etc/ssl/myownpki"}, "postfix": {"/etc/ssl/myownpki/postfix"}, "dovecot": {"/etc/ssl/myownpki/dovecot"},
 		"proxmox": {"/etc/ssl/myownpki/pve"}, "files": {"/etc/ssl/myownpki"},
 	} {
 		svc, _ := hostServiceByID(id)

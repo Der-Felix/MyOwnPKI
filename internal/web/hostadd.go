@@ -50,6 +50,8 @@ type hostService struct {
 
 var hostServices = []hostService{
 	{"nginx", "nginx", "nginx"},
+	{"apache2", "Apache (Debian, Ubuntu; example recipe)", "apache2"},
+	{"httpd", "Apache httpd (Red Hat family; example recipe)", "httpd"},
 	{"postfix", "Postfix (example recipe)", "postfix"},
 	{"dovecot", "Dovecot (example recipe)", "dovecot"},
 	{"proxmox", "Proxmox VE (example recipe)", "proxmox"},
