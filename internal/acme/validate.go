@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -110,9 +111,39 @@ func (v *validator) start(j job) {
 		defer func() { <-v.sem }()
 		ctx, cancel := context.WithTimeout(v.ctx, 3*validateTimeout)
 		defer cancel()
-		err := v.validate(ctx, j)
+		err := v.guarded(ctx, j)
 		v.finish(j, err)
 	}()
+}
+
+// guarded is validate that cannot take the process down: a panic ends only
+// this check (decision 10 of docs/PHASE3.md section 18). The validator runs
+// in its own goroutine on names an ACME client chose and on what the target
+// answers, and a panic in any goroutine ends the whole CA.
+func (v *validator) guarded(ctx context.Context, j job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = v.recovered(r)
+		}
+	}()
+	return v.validate(ctx, j)
+}
+
+// panicError is a recovered panic of the validator: its type, never its
+// text (the text can hold what the target or the client sent). The client
+// sees serverInternal, the audit entry names the type, and the log has the
+// stack.
+type panicError struct{ typ string }
+
+func (e *panicError) Error() string { return "validator panic (" + e.typ + ")" }
+
+// recovered logs the stack of a recovered panic at error level and returns
+// the error that fails the challenge. Call it from the deferred function that
+// recovered, so the stack still shows the panic.
+func (v *validator) recovered(r any) *panicError {
+	typ := fmt.Sprintf("%T", r)
+	v.log.Error("acme validation panicked", slog.String("panic_type", typ), slog.String("stack", string(debug.Stack())))
+	return &panicError{typ: typ}
 }
 
 // validationError is a failed check with its ACME problem type.
@@ -161,7 +192,14 @@ func (v *validator) validate(ctx context.Context, j job) error {
 // resolves once, checks every address against the domain's policy and
 // connects to an allowed one.
 func (v *validator) policyDial(policy string) func(ctx context.Context, network, addr string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (conn net.Conn, err error) {
+		// net/http calls the dialer in a goroutine of its own, outside the
+		// recover of guarded.
+		defer func() {
+			if r := recover(); r != nil {
+				conn, err = nil, v.recovered(r)
+			}
+		}()
 		g := netguard.Dialer{
 			Policy: policy, Dial: v.dial, LookupIP: v.lookupIP, Log: v.log, LogName: "acme validation",
 			CheckPort: func(port uint16) error {
@@ -171,7 +209,7 @@ func (v *validator) policyDial(policy string) func(ctx context.Context, network,
 				return nil
 			},
 		}
-		conn, err := g.DialContext(ctx, network, addr)
+		conn, err = g.DialContext(ctx, network, addr)
 		var ge *netguard.Error
 		if errors.As(err, &ge) {
 			return nil, &validationError{typ: ge.Kind, detail: ge.Detail}
@@ -232,6 +270,10 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 	req.Header.Set("User-Agent", "MyOwnPKI-ACME-validator")
 	resp, err := client.Do(req)
 	if err != nil {
+		var pe *panicError
+		if errors.As(err, &pe) {
+			return pe
+		}
 		var ve *validationError
 		if errors.As(err, &ve) {
 			return ve
@@ -335,6 +377,10 @@ func (v *validator) finish(j job, verr error) {
 		perr = sql.NullString{String: string(b), Valid: true}
 		status, authzStatus, expires, result = "invalid", "invalid", j.authz.ExpiresAt, audit.ResultFailure
 		details["error"] = ve.typ + ": " + clip(ve.detail)
+		var pe *panicError
+		if errors.As(verr, &pe) {
+			details["panic"] = pe.typ // the type only, no text
+		}
 		s.limits.allow("failed:"+j.authz.IdentifierValue, s.limitsNow(ctx).FailedPerName, time.Hour)
 	}
 	validated := sql.NullString{}
