@@ -20,7 +20,8 @@
 # Options:
 #   --dry-run            print what would run for each version, touch nothing
 #   --self-test          test the harness itself (parsers, config files, profiles, TOTP); no server
-#   --print-matrix SET   print the versions of SET (pr or all), one line, for a CI matrix
+#   --print-matrix SET [--json]
+#                        print the versions of SET (pr or all), one line (or a JSON array), for a CI matrix
 #   --list               the versions of releases.txt
 #   --offline            no downloads (same as UPGRADE_OFFLINE=1); a missing file is a SKIP line
 #   --keep               keep the work directory of a passing run
@@ -32,9 +33,11 @@
 #                        meaningful and say so). Nothing is downloaded.
 #
 # Environment: UPGRADE_WORK (default .tools/upgrade/work), UPGRADE_CACHE, UPGRADE_OFFLINE,
-# UPGRADE_ONLY, LEGO_BIN (default .tools/lego; task acme:lego builds it), UPGRADE_HOST_IP (an address
+# UPGRADE_ONLY, LEGO_BIN (default .tools/lego; task upgrade:lego builds it), UPGRADE_HOST_IP (an address
 # of this host that is not loopback, for http-01), UPGRADE_AGENT_WAIT (seconds to wait for the old
-# agent's next report, default 420), UPGRADE_SKIP_ACME=1, UPGRADE_SKIP_AGENT=1.
+# agent's next report, default 480) and UPGRADE_AGENT_GRACE (more seconds when the agent is slow but no
+# report failed, default 150; see assert_a7), UPGRADE_PORT80=1 (the caller made sure that port 80 may be
+# bound), UPGRADE_SKIP_ACME=1, UPGRADE_SKIP_AGENT=1.
 #
 # Exit status: 0 every check passed or was skipped with a reason, 1 a check failed,
 # 2 usage. Every SKIP is printed in the table at the end: a skip is not a pass.
@@ -210,7 +213,7 @@ child_main() {
     if [ -n "${UPGRADE_SKIP_ACME:-}" ]; then
       ACME_SKIP="UPGRADE_SKIP_ACME is set"
     elif [ -z "$LEGO_BIN" ] || [ ! -x "$LEGO_BIN" ]; then
-      ACME_SKIP="needs lego (LEGO_BIN, or .tools/lego from task acme:lego)"
+      ACME_SKIP="needs lego (LEGO_BIN, or .tools/lego from task upgrade:lego)"
     elif [ -z "$HOSTIP" ]; then
       ACME_SKIP="needs an address of this host that is not loopback for http-01 (UPGRADE_HOST_IP)"
     elif ! can_bind_port80; then
@@ -431,6 +434,8 @@ self_test() {
   # The matrix.
   self_check "the pull-request matrix has the oldest, 0.3.5 and the newest" test "$(matrix_versions pr)" = "$(release_versions | head -n 1) 0.3.5 $(release_versions | tail -n 1)"
 
+  self_check "the JSON matrix of the pull-request subset is an array of strings" test "$(bash "$SELF" --print-matrix pr --json)" = "[\"$(matrix_versions pr | sed 's/ /\",\"/g')\"]"
+
   # TOTP (RFC 6238 appendix B, SHA-1, 6 digits: the 8-digit values 94287082 and 07081804 end in these).
   self_check "TOTP of RFC 6238 at T=59" test "$(totp GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ 1)" = 287082
   self_check "TOTP of RFC 6238 at T=1111111109" test "$(totp GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ 37037036)" = 081804
@@ -572,7 +577,18 @@ while [ "$#" -gt 0 ]; do
     --dry-run) DRY_RUN=1 ;;
     --self-test) SELF_TEST=1 ;;
     --child) CHILD=${2:?--child needs a version}; shift ;;
-    --print-matrix) matrix_versions "${2:?--print-matrix needs pr or all}" || { echo 'upgrade: the set is pr or all' >&2; exit 2; }; exit 0 ;;
+    --print-matrix)
+      set_name=${2:?--print-matrix needs pr or all}
+      list=$(matrix_versions "$set_name") || { echo 'upgrade: the set is pr or all' >&2; exit 2; }
+      if [ "${3:-}" = --json ]; then
+        printf '["%s"]
+' "${list// /\",\"}"
+      else
+        printf '%s
+' "$list"
+      fi
+      exit 0
+      ;;
     --list) release_versions; exit 0 ;;
     --offline) export UPGRADE_OFFLINE=1 ;;
     --keep) export UPGRADE_KEEP=1 ;;

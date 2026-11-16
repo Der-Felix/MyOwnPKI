@@ -3,6 +3,7 @@
 #
 #   fetch.sh [--offline] [--cache DIR] VERSION [KIND...]   fetch and verify; print the path of each file
 #   fetch.sh [--offline] [--cache DIR] --all               every version and kind of releases.txt
+#                                                          (only the versions of UPGRADE_ONLY, when it is set)
 #   fetch.sh --list                                        the pinned list
 #   fetch.sh --self-test                                   try it against a local directory
 #
@@ -81,8 +82,12 @@ kinds_of() {
 }
 
 cmd_all() {
-  local version kind rc=0
+  local version kind rc=0 only=${UPGRADE_ONLY:-}
   for version in $(release_versions); do
+    # UPGRADE_ONLY (as for test/upgrade/run.sh) narrows the versions: one matrix job fetches only its own.
+    if [ -n "$only" ]; then
+      case ",${only// /,}," in *",$version,"*) ;; *) continue ;; esac
+    fi
     for kind in $(kinds_of "$version"); do
       fetch_one "$version" "$kind" >/dev/null || rc=$?
       [ "$rc" -ne 1 ] || exit 1
@@ -120,6 +125,7 @@ cmd_self_test() {
   out=$(bash "$me" 9.9.9) || die "self-test: a pinned file was not fetched"
   [ "$out" = "$work/cache/9.9.9/myownpki_9.9.9_linux_amd64.tar.gz" ] || die "self-test: unexpected path $out"
   bash "$me" --all >/dev/null || die "self-test: --all failed"
+  UPGRADE_ONLY=7.7.7 bash "$me" --all >/dev/null || die "self-test: --all with an UPGRADE_ONLY that names no listed version failed"
 
   # Second run offline: the cache answers without the network.
   UPGRADE_BASE_URL=file:///nonexistent bash "$me" --offline --all >/dev/null || die "self-test: the cache did not answer offline"

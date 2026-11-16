@@ -250,31 +250,68 @@ agents_refresh() {
   agents_json
 }
 
+# agent_seen_after BASE: success when the agent's last report is newer than BASE;
+# AGENT_SEEN and AGENT_VERSION_NOW hold what the list said.
+agent_seen_after() {
+  agents_refresh || true
+  AGENT_SEEN=$(agent_field last_seen_at)
+  AGENT_VERSION_NOW=$(agent_field version)
+  [[ -n "$AGENT_SEEN" && "$AGENT_SEEN" > "$1" ]]
+}
+
+# agent_wait SECONDS: poll every 10 seconds; stops early when the agent process ends.
+agent_wait() {
+  local i
+  for ((i = 0; i < $1; i += 10)); do
+    agent_seen_after "$A7_BASE" && return 0
+    kill -0 "$AGENT_PID" 2>/dev/null || return 2
+    sleep 10
+  done
+  return 1
+}
+
+# The wait is the one slow part of the test: the agent reports every 270 to 330
+# seconds, and the update can fall right after a report. A slow report must not
+# make a run flaky, a broken agent must still fail it:
+#   1. UPGRADE_AGENT_WAIT seconds (default 480: one full cycle plus the restart);
+#   2. when nothing came, the log of the agent decides: "agent report failed" lines
+#      mean the new server refuses the old agent - FAIL at once, with the lines;
+#   3. no failed report: the agent is only slow - UPGRADE_AGENT_GRACE more seconds
+#      (default 150), then FAIL. A report of the agent counts however late it is.
 assert_a7() {
   if [ "$(assertion_applies A7)" != yes ]; then skip A7 "$(assertion_applies A7)"; return 0; fi
   if [ -n "$AGENT_SKIP" ]; then skip A7 "$AGENT_SKIP"; return 0; fi
-  local wait=${UPGRADE_AGENT_WAIT:-420} i seen version=
+  local wait=${UPGRADE_AGENT_WAIT:-480} grace=${UPGRADE_AGENT_GRACE:-150} rc=0
   sign_in
   kill -0 "$AGENT_PID" 2>/dev/null || { fail A7 "the old agent process is gone"; return 0; }
   note "waiting up to ${wait}s for the next report of the old agent (it reports every 4.5 to 5.5 minutes)"
-  for ((i = 0; i < wait; i += 10)); do
-    agents_refresh || true
-    seen=$(agent_field last_seen_at)
-    version=$(agent_field version)
-    if [[ -n "$seen" && "$seen" > "$A7_BASE" ]]; then
-      if [ "$version" != "$F_AGENT_VERSION" ]; then
-        fail A7 "the agent's version changed from $F_AGENT_VERSION to $version"
-      else
-        pass A7 "the old agent ($version) kept reporting: last_seen $A7_BASE -> $seen"
-      fi
+  agent_wait "$wait" || rc=$?
+  if [ "$rc" = 1 ]; then
+    if grep -q 'agent report failed' "$T/agent/run.log"; then
+      fail A7 "the old agent's reports to the new server fail"
+      grep 'agent report failed' "$T/agent/run.log" | tail -n 3 | cut -c1-300 | sed 's/^/        | /'
       return 0
     fi
-    kill -0 "$AGENT_PID" 2>/dev/null || { fail A7 "the old agent process stopped"; return 0; }
-    sleep 10
-  done
-  fail A7 "the old agent did not report to the new server within ${wait}s (last seen $seen)"
-  tail -n 8 "$T/agent/run.log" | sed 's/^/        | /'
+    note "no report yet and none failed: the agent is slow, waiting up to ${grace}s more"
+    rc=0
+    agent_wait "$grace" || rc=$?
+  fi
+  case $rc in
+    0)
+      if [ "$AGENT_VERSION_NOW" != "$F_AGENT_VERSION" ]; then
+        fail A7 "the agent's version changed from $F_AGENT_VERSION to $AGENT_VERSION_NOW"
+      else
+        pass A7 "the old agent ($AGENT_VERSION_NOW) kept reporting: last_seen $A7_BASE -> $AGENT_SEEN"
+      fi
+      ;;
+    2) fail A7 "the old agent process stopped" ;;
+    *)
+      fail A7 "the old agent did not report to the new server within $((wait + grace))s (last seen ${AGENT_SEEN:-never})"
+      tail -n 8 "$T/agent/run.log" | cut -c1-300 | sed 's/^/        | /'
+      ;;
+  esac
 }
+
 
 # --- A8: the pre-update backup with the new binary ----------------------------------------------------
 
