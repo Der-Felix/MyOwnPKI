@@ -5,15 +5,19 @@ package demo
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
+	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
 
 type composeFile struct {
@@ -260,5 +264,94 @@ func TestDemoConfig(t *testing.T) {
 	}
 	if strings.Contains(read(t, "config.yaml"), "passphrase") {
 		t.Error("config.yaml names a passphrase")
+	}
+}
+
+// TestScriptReadsTheSecretsFileOfInit runs read_secrets and totp of demo.sh on
+// the file a real `init --demo` wrote: the TOTP secret is printed there in
+// groups of four, and the script must make the same code of it as the server
+// does. A damaged secret must stop the script without printing it.
+func TestScriptReadsTheSecretsFileOfInit(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not installed")
+	}
+	if _, err = exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl is not installed")
+	}
+	if runtime.GOOS == "windows" && os.Getenv("MYOWNPKI_TEST_DEMO_SCRIPT") != "1" {
+		t.Skip("on Windows only with Git Bash first in the PATH: set MYOWNPKI_TEST_DEMO_SCRIPT=1")
+	}
+	inst := testinstance.New(t, testinstance.Options{})
+	file := filepath.Join(inst.Config.DataDir, "init-demo-secrets.txt")
+	text := strings.ReplaceAll(read(t, filepath.ToSlash(file)), "\r\n", "\n")
+	var shown string
+	for line := range strings.SplitSeq(text, "\n") {
+		if v, ok := strings.CutPrefix(line, "secret:"); ok {
+			shown = strings.TrimSpace(v)
+		}
+	}
+	if !strings.Contains(shown, " ") {
+		t.Fatalf("the test expects the secret in groups, as init writes it (%d characters)", len(shown))
+	}
+	script, err := filepath.Abs("demo.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1_700_000_010, 0)
+	want := testinstance.TOTP(shown, at)
+	normal := strings.ReplaceAll(shown, " ", "")
+
+	run := func(t *testing.T, secretsFile string) (string, string, error) {
+		t.Helper()
+		const program = `source "$1"; read_secrets "$2"; printf '%s %s\n' "$totp_secret" "$(totp "$totp_secret" "$3")"`
+		cmd := exec.CommandContext(t.Context(), bash, "-c", program, "bash", filepath.ToSlash(script), filepath.ToSlash(secretsFile), "56666667") // #nosec G204 -- fixed program, test files
+		cmd.Env = append(os.Environ(), "GITHUB_ACTIONS=false")                                                                                    // no ::add-mask:: lines in the output
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		return stdout.String(), stderr.String(), err
+	}
+	// 1700000010 / 30 = 56666667.
+	good := map[string]string{
+		"as init wrote it": text,
+		"lower case":       strings.Replace(text, "secret:       "+shown, "secret: "+strings.ToLower(normal), 1),
+		"padded":           strings.Replace(text, "secret:       "+shown, "secret: "+normal+"====", 1),
+		"crlf":             strings.ReplaceAll(text, "\n", "\r\n"),
+		"link only":        strings.Replace(text, "secret:       "+shown, "", 1),
+	}
+	for name, content := range good {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "secrets.txt")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, err := run(t, path)
+			if err != nil {
+				t.Fatalf("%v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+			if got := strings.TrimSpace(stdout); got != normal+" "+want {
+				t.Errorf("the script read a different secret or computed a different code (code want %s, output has %d characters)", want, len(got))
+			}
+		})
+	}
+	for name, bad := range map[string]string{
+		"not base32": "NOT-A-BASE32-SECRET-1",
+		"too short":  "GEZD GNBV",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "secrets.txt")
+			damaged := strings.Replace(text, "secret:       "+shown, "secret:       "+bad, 1)
+			if err := os.WriteFile(path, []byte(damaged), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, err := run(t, path)
+			if err == nil || !strings.Contains(stderr, "is not base32") {
+				t.Fatalf("want the script to stop with 'is not base32': %v\nstderr: %s", err, stderr)
+			}
+			if strings.Contains(stdout+stderr, bad) || strings.Contains(stdout+stderr, normal) {
+				t.Error("the script printed a secret")
+			}
+		})
 	}
 }

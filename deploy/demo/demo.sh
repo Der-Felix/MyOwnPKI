@@ -83,13 +83,26 @@ mask() {
   return 0
 }
 
-# load_secrets copies the demo secrets file out of the data volume into the
-# private temporary directory, reads the values, masks them and deletes the copy.
-load_secrets() {
-  local file=$tmp/secrets.txt line value
-  [ -z "$pass" ] || return 0
-  dc cp myownpki:/var/lib/myownpki/init-demo-secrets.txt "$file" >/dev/null 2>&1 ||
-    die "cannot read the demo secrets file from the data volume - is the demo up? (./demo.sh up)"
+# b32_clean TEXT: the TOTP secret as an authenticator app wants it. The file
+# prints it in groups of four ("GEZD GNBV ..."), a person may paste it in lower
+# case, with "=" padding, or as the otpauth link: strip a link down to its
+# secret parameter, drop white space, "-" and "=", upper-case it.
+b32_clean() {
+  local s=$1
+  case $s in
+    *secret=*)
+      s=${s#*secret=}
+      s=${s%%&*}
+      ;;
+  esac
+  printf '%s' "$s" | tr -d '[:space:]=-' | tr '[:lower:]' '[:upper:]'
+}
+
+# read_secrets FILE: the values of the demo secrets file (the format of
+# internal/setup and internal/auth: "key: value" lines, "secret:" padded and in
+# groups of four), masked and checked; nothing is printed.
+read_secrets() {
+  local file=$1 line value
   # Every value of the file is a secret (passphrase, password, recovery key
   # and codes, TOTP secret and link): mask all of them before any is used.
   while IFS= read -r line; do
@@ -97,20 +110,39 @@ load_secrets() {
     value=$(printf '%s' "${line#*:}" | sed 's/^[[:space:]]*//')
     [ -z "$value" ] || mask "$value"
   done <"$file"
-  pass=$(sed -n '/^unseal passphrase: /{s///;p;q;}' "$file")
-  admin_user=$(sed -n '/^admin user: /{s///;p;q;}' "$file")
-  admin_password=$(sed -n '/^admin password: /{s///;p;q;}' "$file")
-  totp_secret=$(sed -n '/^secret: */{s///;p;q;}' "$file")
-  rm -f "$file"
+  pass=$(sed -n '/^unseal passphrase: /{s///;p;q;}' "$file" | tr -d '\r')
+  admin_user=$(sed -n '/^admin user: /{s///;p;q;}' "$file" | tr -d '\r')
+  admin_password=$(sed -n '/^admin password: /{s///;p;q;}' "$file" | tr -d '\r')
+  totp_secret=$(sed -n '/^secret:[[:space:]]*/{s///;p;q;}' "$file")
+  if [ -z "$totp_secret" ]; then
+    totp_secret=$(sed -n 's/^otpauth link:.*[?&]secret=\([^&[:space:]]*\).*/\1/p' "$file" | head -n 1)
+  fi
+  totp_secret=$(b32_clean "$totp_secret")
   [ -n "$pass" ] || die "the demo secrets file has no unseal passphrase"
   [ -n "$admin_user" ] || die "the demo secrets file has no admin user"
   [ -n "$admin_password" ] || die "the demo secrets file has no admin password"
   [ -n "$totp_secret" ] || die "the demo secrets file has no TOTP secret"
-  b32_hex "$totp_secret" >/dev/null || die "the TOTP secret in the demo secrets file is not base32"
+  # The secret as the code generator uses it (no spaces) is a second string
+  # for the mask. An authenticator secret has at least 16 characters (80 bits).
+  mask "$totp_secret"
+  if [ "${#totp_secret}" -lt 16 ] || ! b32_hex "$totp_secret" >/dev/null; then
+    die "the TOTP secret in the demo secrets file is not base32 (or shorter than 16 characters)"
+  fi
   # The values go into JSON bodies as they are.
   case "$pass$admin_user$admin_password" in
-    *'"'* | *\\*) die "an unexpected character in the demo secrets file" ;;
+    *'"'* | *\*) die "an unexpected character in the demo secrets file" ;;
   esac
+}
+
+# load_secrets copies the demo secrets file out of the data volume into the
+# private temporary directory, reads the values, masks them and deletes the copy.
+load_secrets() {
+  local file=$tmp/secrets.txt
+  [ -z "$pass" ] || return 0
+  dc cp myownpki:/var/lib/myownpki/init-demo-secrets.txt "$file" >/dev/null 2>&1 ||
+    die "cannot read the demo secrets file from the data volume - is the demo up? (./demo.sh up)"
+  read_secrets "$file"
+  rm -f "$file"
   note "the demo secrets file was read (nothing of it is printed)"
 }
 
@@ -346,8 +378,18 @@ cmd_verify() {
   openssl x509 -in "$tmp/leaf.pem" -noout -subject -issuer -serial -dates
   say "The audit log has the issuance"
   sign_in
-  api GET '/audit?action=certificate.issue&result=success&limit=20' || die "cannot read the audit log: $(problem)"
-  grep -q '"action":"certificate.issue"' "$tmp/api.json" || die "no certificate.issue entry in the audit log"
+  # The entry reaches the audit log through an outbox (written with the
+  # issuance, delivered by a worker a moment later): look a few times.
+  local attempt found=0
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    api GET '/audit?action=certificate.issue&result=success&limit=20' || die "cannot read the audit log: $(problem)"
+    if grep -q '"action":"certificate.issue"' "$tmp/api.json"; then
+      found=1
+      break
+    fi
+    sleep 1
+  done
+  [ "$found" -eq 1 ] || die "no certificate.issue entry in the audit log (after $attempt tries)"
   note "found: certificate.issue (success)"
 }
 
