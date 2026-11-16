@@ -219,6 +219,8 @@ jobs:
           vacuum: "true"
       - run: bash scripts/ci/lint-meta-actionlint.sh
       - run: bash scripts/ci/lint-meta-registry.sh --self-test
+      - name: Coverage summary matches its golden files
+        run: bash scripts/ci/cover-summary.sh --self-test
       - run: task lint:api
 
   shellcheck:

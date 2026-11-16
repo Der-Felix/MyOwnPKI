@@ -28,6 +28,11 @@ vars:
   # The release the upgrade test starts from (task upgrade:test).
   UPGRADE_FROM: 0.1.0
 
+  # Windows: the POSIX tools of Git for Windows (bash, grep, awk, tee) for the tasks that run a script from
+  # scripts/ci. A PowerShell PATH often lacks them or finds the WSL stub of bash.exe first; Git Bash has them already.
+  # Prepended to PATH by those tasks; empty on Linux, macOS and FreeBSD.
+  POSIX_TOOLS_PATH: '{{if eq OS "windows"}}C:\Program Files\Git\usr\bin;{{end}}'
+
   BIN_DIR: bin
   # Release targets (PLAN §3, go-conventions.md "Build and CI").
   PLATFORMS: linux/amd64 linux/arm64 darwin/arm64 windows/amd64 freebsd/amd64
@@ -128,6 +133,40 @@ tasks:
     desc: Short fuzz runs of the parsers that read untrusted input (ACME JWS) – 30 seconds each
     cmds:
       - CGO_ENABLED=0 go test ./internal/acme/jose/ -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+
+  cover:
+    desc: 'Coverage table per package, integration tests credited to the code they exercise (COVER_PKGS=./internal/ids/... for a few packages, COVER_SKIP=<regexp> to leave packages out; needs minutes)'
+    cmds:
+      - |
+        export PATH="{{.POSIX_TOOLS_PATH}}$PATH"
+        set -o pipefail
+        pkgs=$(go list {{.COVER_PKGS | default "./..."}})
+        skip={{.COVER_SKIP | default "" | shellQuote}}
+        if [ -n "$skip" ]; then
+          pkgs=$(printf '%s\n' "$pkgs" | { grep -v -E -e "$skip" || true; })
+        fi
+        if [ -z "$pkgs" ]; then
+          echo "cover: no package left (COVER_PKGS={{.COVER_PKGS | default "./..."}} COVER_SKIP=$skip)"; exit 1
+        fi
+        echo "cover: $(printf '%s\n' "$pkgs" | wc -l | tr -d ' ') packages; the table follows when the last one has finished"
+        rc=0
+        # shellcheck disable=SC2086 # the package list is meant to be split
+        CGO_ENABLED=0 go test -json -count=1 -timeout 30m -coverpkg=./cmd/...,./internal/... -coverprofile=coverage.out $pkgs \
+          | tee coverage.json | bash scripts/ci/cover-summary.sh progress || rc=$?
+        echo
+        bash scripts/ci/cover-summary.sh summary
+        exit $rc
+
+  cover:func:
+    desc: 'After task cover: the functions with the most uncovered statements (COVER_TOP=40)'
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/ci/cover-summary.sh func {{.COVER_TOP | default "40"}}
+
+  cover:html:
+    desc: 'After task cover: the merged profile as an HTML page in the browser (go tool cover -html)'
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/ci/cover-summary.sh merge > coverage.merged.out
+      - go tool cover -html=coverage.merged.out
 
   acme:lego:
     desc: End-to-end check with the real ACME client lego (test tool, never in go.mod) – builds lego into .tools/ and runs the walking skeleton

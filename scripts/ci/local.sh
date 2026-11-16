@@ -21,6 +21,7 @@ steps=(
   'vuln|govulncheck|go_task|task vuln'
   'lint-meta|actionlint|go_task|bash scripts/ci/lint-meta-actionlint.sh'
   'lint-meta|registry coverage|bash|bash scripts/ci/lint-meta-registry.sh --self-test'
+  'lint-meta|coverage summary golden files|bash|bash scripts/ci/cover-summary.sh --self-test'
   'lint-meta|vacuum OpenAPI|vacuum|task lint:api'
   'shellcheck|ShellCheck sources|shellcheck|bash scripts/ci/shellcheck-sources.sh'
   'shellcheck|legacy smoke test|linux|bash scripts/ci/shellcheck-smoke.sh'
