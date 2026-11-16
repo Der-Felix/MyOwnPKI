@@ -10,10 +10,8 @@
 # Blank lines and lines starting with # are ignored. Invariants of every target:
 # docs/PHASE3.md section 18.2. Order: FuzzParse first, then by package.
 #
-# Not listed on purpose (docs/PHASE3.md section 18.2): FuzzACMEPayload (tier 2,
-# listed only if the spike of step 88 reaches 200 executions a second) and the
-# operator-file targets FuzzConfigLoad, FuzzAgentConfig, FuzzDNSCredentials
-# (not in this release).
+# Not listed on purpose (docs/PHASE3.md section 18.2): the operator-file targets FuzzConfigLoad,
+# FuzzAgentConfig and FuzzDNSCredentials (tier 2, not in this release).
 
 # ACME request envelope (step 80)
 ./internal/acme/jose FuzzParse
@@ -52,3 +50,11 @@
 # The public trust page (step 87)
 ./internal/trustkit FuzzDetect
 ./internal/trustkit FuzzGuide
+
+# The guide engine (the markdown of the public trust page and the setup guides)
+./internal/guides FuzzParse
+
+# The ACME handlers with a real database (step 88, tier 2). The spike measured about 300 executions
+# a second with two workers (200 is the gate of step 88); each worker owns a SQLite server, so
+# -parallel 2 bounds the memory and the number of databases.
+./internal/acme FuzzACMEPayload -parallel 2
