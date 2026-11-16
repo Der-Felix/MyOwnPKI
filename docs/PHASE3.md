@@ -2816,6 +2816,39 @@ rest is grouped in §18.4.
 | 99 | 0.3.12 | **One mechanical commit: `modernize`.** `golangci-lint run --fix --enable-only modernize` (173 findings, 69 outside tests), reviewed as a diff that must be reproducible by the same command, **only after PR #49 and every other open branch are merged** (it touches many files and would conflict with them). Skipped findings stay with a `nolint` and a reason | `golangci-lint run`; `task check`; `git diff --stat` shows only the files the tool changed; the command run again produces no diff |
 | 100 | 0.3.12 | **Docs and release.** CONTRIBUTING (the tasks `cover`, `fuzz`, `deadcode`, what a seed is, how to run one target for an hour), `SECURITY.md` ("Supported versions" says there is no release: say that the latest release and `main` get fixes), `site/security.md` (what is fuzzed and what is not), `docs/RELEASING.md` (a fuzz run of one hour per target before a tag is an optional checkbox), `.claude/skills/myownpki/references/go-conventions.md` (the Testing section: fuzz and cover), PLAN §10.1 row ✅ after the tag and the "Before Beta" line, CHANGELOG `[0.3.12]` (undated; **Changed:** CI runs more fuzz targets; **Fixed:** one line per finding after the fix is released, in plain words; **Added:** `task cover`, `task fuzz`, `task deadcode`; no Upgrading section needed: no migration, no setting). Version bump as in step 65 (`DEFAULT_VERSION` in `deploy/install.sh` and `deploy/install-agent.sh`, `test/install/agent_functions_test.sh`, `api/openapi.yaml`, `deploy/docker-compose.yml`, README, `docs/OPERATIONS.md`, `docs/RELEASING.md`, the status line of `CLAUDE.md`); CHANGELOG dated by the maintainer | `scripts/ci/site-check.sh`; every documented command run once; `task ci:local` with every SKIP line reported; `docs/RELEASING.md` |
 
+**Built: the fuzz list, steps 90 and 95 (differences from the plan).**
+
+- *Fuzz list.* `scripts/ci/fuzz-targets.txt` lists 24 targets and `fuzz.sh --check` passes. `FuzzACMEPayload` is in
+  (tier 2, step 88's gate is met: the spike measured about 300 executions a second with two workers, 200 was the
+  bar) with `-parallel 2`, because each worker builds its own server and SQLite database. `internal/guides`
+  `FuzzParse` (the guide engine of step 71) exists in the tree too and is listed; the table in 18.2 does not
+  name it, so the CI count in 18.3 is 24 targets, not 22 (about 4 minutes of fuzzing at 10 s a target).
+- *Step 90.* `validator.start` runs `validate` through `guarded`, which recovers: the challenge becomes `invalid`
+  with `serverInternal`, the audit entry (`acme.challenge.validate`, result `failure`) carries `"panic": "<type>"`
+  and never the panic's text, and the log has one error record with the stack. **The recover also had to go into
+  `policyDial`:** `net/http` calls the dialer (and, through it, the `lookupIP` of `SetNetwork`) in a goroutine of
+  its own, so a panic there is outside `guarded` and ended the process (checked by removing it). Tests
+  (`validate_panic_test.go`): a string, an error and a struct as panic value and a nil dereference, at the
+  lookup edge, the dial edge and the TXT lookup; the answer, the audit entry and the log never hold the text;
+  the server answers the next order; and more panicking checks than `parallelChecks` in a row do not block the
+  next one (the slot is released).
+- *Step 95.* New files `account_test.go`, `account_orders_test.go`, `order_branches_test.go`,
+  `server_branches_test.go`, `expire_test.go`: `newAccount` (two dozen contact, payload and EAB cases, an existing key,
+  EAB failures, sealed), account update and clear, deactivation, 17 `keyChange` refusals, `accountOrders`,
+  the `challenge`, `authz` and `finalize` states (wrong state, expired, processing, valid, CSR errors that end
+  the order and request errors that do not), `joseFail` for every class, `fail`, the request rules of `read`,
+  the nonce store, `certIdentifiers` and an account that revokes a certificate with several names, `ExpireStale`,
+  the dns-01 failures. Coverage of `internal/acme` (`go test -coverprofile`, this machine, Windows):
+  **76.7 % before step 95 (after step 90), 82.3 % after.** What stays low is the admin side
+  (`Pending`, `Accounts`, `Names`, `Orders`: used by `internal/server`, which measures them) and the agent binding.
+- *Found by a test:* `accountOrders` read the 1000 newest orders of **all** accounts and then kept the caller's; an
+  account whose orders were older than the newest 1000 of the others got an incomplete or empty list. Fixed with
+  a query by account (`ListACMEOrdersOfAccount`, index `acme_orders_account`) in its own commit. Severity low:
+  a correct, authenticated, own-data read; clients (certbot, lego) do not depend on this list.
+- *Notes for the maintainer, not changed:* a request that fails the contact check still counts against the
+  10-accounts-per-address limit (the limit is checked first); the 409 of a `keyChange` to the account's own key says
+  "belongs to another account already".
+
 ### 18.2 Fuzz targets and invariants
 
 Every target follows the same rules, so a reviewer can check them in one pass:
