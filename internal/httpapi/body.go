@@ -64,6 +64,11 @@ func (c *call) decode(v any) error {
 		}
 		return badRequest("", "%v", err)
 	}
+	// "null" decodes into a struct without an error and without a field, so
+	// the one thing left to check is that the value is an object.
+	if !bytes.HasPrefix(bytes.TrimLeft(data, " \t\r\n"), []byte("{")) {
+		return badRequest("", "the body must be a JSON object")
+	}
 	if dec.More() {
 		return badRequest("", "data after the JSON object")
 	}
