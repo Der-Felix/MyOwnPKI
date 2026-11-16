@@ -338,8 +338,8 @@ func TestAuthenticateToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := v.s.RemoveRole(t.Context(), mustUserID(t, v, "alice"), d, "ca-a", console); err != nil {
-			t.Fatal(err)
+		if rerr := v.s.RemoveRole(t.Context(), mustUserID(t, v, "alice"), d, "ca-a", console); rerr != nil {
+			t.Fatal(rerr)
 		}
 		sess, err := v.s.AuthenticateToken(t.Context(), secret)
 		if err != nil {
@@ -349,8 +349,8 @@ func TestAuthenticateToken(t *testing.T) {
 			t.Errorf("bindings %+v, want only the operator role", got)
 		}
 		// Lowered from operator to viewer: the token keeps nothing above viewer.
-		if err := v.s.SetRole(t.Context(), mustUserID(t, v, "alice"), authz.Binding{Tenant: d, Role: authz.Viewer}, console); err != nil {
-			t.Fatal(err)
+		if rerr := v.s.SetRole(t.Context(), mustUserID(t, v, "alice"), authz.Binding{Tenant: d, Role: authz.Viewer}, console); rerr != nil {
+			t.Fatal(rerr)
 		}
 		sess, err = v.s.AuthenticateToken(t.Context(), secret)
 		if err != nil {

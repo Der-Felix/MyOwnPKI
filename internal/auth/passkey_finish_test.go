@@ -148,19 +148,23 @@ func TestPasskeyAnswerRefusals(t *testing.T) {
 	}
 	tests := []refusal{
 		{"answer from another origin", "passkey not accepted", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.authn.Origin = evil
 			return finishErr(t, p, token, p.answer(t, p.authn, token))
 		}},
 		{"answer without user verification", "passkey not accepted", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.authn.UserVerified = false
 			return finishErr(t, p, token, p.answer(t, p.authn, token))
 		}},
 		{"answer to an earlier challenge", "passkey not accepted", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			old := p.answer(t, p.authn, token)
 			p.begin(t, token) // a new challenge replaces the open one
 			return finishErr(t, p, token, old)
 		}},
 		{"a passkey the server did not offer", "passkey not accepted", func(t *testing.T, p *passkeyEnv, k ceremonyKind, _ string) error {
+			t.Helper()
 			bobsToken := k.open(t, p, "bob")
 			bobBefore := p.stepUpAt(t, bobsToken)
 			options := p.begin(t, bobsToken)
@@ -173,6 +177,7 @@ func TestPasskeyAnswerRefusals(t *testing.T) {
 			return err
 		}},
 		{"a passkey removed after the challenge", "passkey not accepted", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			answer := p.answer(t, p.authn, token)
 			if _, err := p.sys.ExecContext(t.Context(), `DELETE FROM webauthn_credentials WHERE user_id = ?`, mustUserID(t, p.env, "alice")); err != nil {
 				t.Fatal(err)
@@ -180,18 +185,22 @@ func TestPasskeyAnswerRefusals(t *testing.T) {
 			return finishErr(t, p, token, answer)
 		}},
 		{"garbage", "unreadable passkey answer", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.begin(t, token)
 			return finishErr(t, p, token, []byte("not json"))
 		}},
 		{"empty answer", "unreadable passkey answer", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.begin(t, token)
 			return finishErr(t, p, token, nil)
 		}},
 		{"answer of the wrong shape", "unreadable passkey answer", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.begin(t, token)
 			return finishErr(t, p, token, []byte(`{"id":"x","rawId":"x","type":"public-key","response":{}}`))
 		}},
 		{"oversized answer", "passkey answer too large", func(t *testing.T, p *passkeyEnv, _ ceremonyKind, token string) error {
+			t.Helper()
 			p.begin(t, token)
 			return finishErr(t, p, token, []byte(strings.Repeat("a", maxPasskeyBody+1)))
 		}},
