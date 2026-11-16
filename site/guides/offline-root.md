@@ -114,12 +114,16 @@ The form takes the PEM text, so paste the contents of `publish/root.crl.pem` (`p
 DER copy). With plain OpenSSL, `openssl ca -gencrl` needs the root's `index.txt` and `crlnumber`; the
 *Offline signing* page shows the commands. The server accepts only a CRL with a higher CRL number than
 the newest one it has, signed by the root, without a delta or an unknown critical extension.
-The server plans with 180 days for an imported root's CRL unless you set another value at the import,
-but `pki.sh` signs for `CRL_DAYS` of its `pki.conf` (30 by default), so set that to the lifetime you want.
+**Two different numbers.** The server and the offline tool do not share a setting. The server keeps a
+*CRL lifetime* for an imported root (180 days unless you set another value at the import) and signs nothing for it:
+it is a planning value, and the *Offline signing* page uses it as `-crldays` in the plain OpenSSL command it shows. The real lifetime is whatever you sign offline: `./pki.sh crl` signs for `CRL_DAYS` of its
+`pki.conf`, **30 days by default**. The server reads the dates from the CRL you upload, so its alert counts from
+those and not from the 180. With the default of `pki.sh`, plan to renew at least every 15 days; set `CRL_DAYS` in
+`pki.conf` before you sign if you want longer.
+
 Renew the CRL before **half** of its actual lifetime has passed: the `crl` alert warns at that point and
-turns critical once the CRL is past its next update, and
-then clients that check revocation reject every certificate below the root. Put the next date in a
-calendar.
+turns critical once the CRL is past its next update, and then clients that check revocation reject every
+certificate below the root. Put the next date in a calendar.
 
 ## Planning the root's life
 
