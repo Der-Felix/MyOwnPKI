@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The release image as release.yml builds it, without pushing or signing:
 # a GoReleaser snapshot with dockers_v2, then the image is checked for the
-# agent packages the server serves. CI snapshots elsewhere skip the image, so
+# agent packages the server serves and for what the distroless base carries (user,
+# CA certificates, data directory). CI snapshots elsewhere skip the image, so
 # without this job an image problem shows only after the release tag.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -29,6 +30,10 @@ goreleaser release --snapshot --clean --skip=sign,sbom
 # the release pushes them as one multi-platform tag. Check each.
 work=$RUNNER_TEMP/image-check
 rm -rf "$work"
+case "$(uname -m)" in
+aarch64 | arm64) native=arm64 ;;
+*) native=amd64 ;;
+esac
 for platform in amd64 arm64; do
   image=$(docker image ls ghcr.io/der-felix/myownpki --format '{{.Repository}}:{{.Tag}}' | grep -- "-$platform\$" | head -n 1) ||
     fail "the snapshot built no linux/$platform image ghcr.io/der-felix/myownpki"
@@ -38,10 +43,35 @@ for platform in amd64 arm64; do
   grep -q '"MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist"' <<<"$env" ||
     fail "$image does not point agent.package_dir at /opt/myownpki/agent-dist: $env"
 
+  # The base is distroless static (Debian 13) with no shell, so look at what the
+  # image really carries: the user, and the files from its layers.
+  user=$(docker image inspect --format '{{.Config.User}}' "$image")
+  case "$user" in
+  65532 | 65532:65532) ;;
+  *) fail "$image runs as user '$user', want 65532" ;;
+  esac
+  # Only the runner's own architecture can be executed (no emulation here).
+  if [ "$platform" = "$native" ]; then
+    out=$(docker run --rm "$image" --version) || fail "$image: --version failed"
+    case "$out" in
+    myownpki\ *) echo "$image runs: $out" ;;
+    *) fail "$image: unexpected --version output: $out" ;;
+    esac
+  fi
+
   dir=$work/$platform
   mkdir -p "$dir"
   cid=$(docker create --platform "linux/$platform" "$image")
   docker cp "$cid:/opt/myownpki/agent-dist" "$dir/agent-dist"
+  # What the binary needs from the base: CA certificates for outbound TLS and the
+  # data directory (a copy of the base's nonroot home) owned by 65532.
+  docker export "$cid" | tar --numeric-owner -tvf - >"$dir/files.txt"
+  grep -Eq ' etc/ssl/certs/ca-certificates\.crt$' "$dir/files.txt" ||
+    fail "$image has no etc/ssl/certs/ca-certificates.crt"
+  for owned in home/nonroot var/lib/myownpki; do
+    grep -Eq "^d[rwx-]{9} 65532/65532 .* ${owned}/\$" "$dir/files.txt" ||
+      fail "$image: $owned is missing or not a directory owned by 65532"
+  done
   docker rm "$cid" >/dev/null
 
   cmp dist/checksums.txt "$dir/agent-dist/checksums.txt" || fail "checksums.txt in $image differs from dist/"
