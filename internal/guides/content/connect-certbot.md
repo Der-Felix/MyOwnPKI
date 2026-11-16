@@ -89,6 +89,11 @@ you choose otherwise, so use it for the first run, in place of the plain command
 sudo certbot certonly --server {acme_directory} --eab-kid KEY_ID --eab-hmac-key MAC_KEY --standalone -d nas.homelab.lan
 ```
 
+> **Warning:** The MAC key is a secret, and on a command line it is visible to every user of the host in the process
+> list while certbot runs, it is saved in the shell history, and `sudo` writes the whole command into its log. Run
+> `unset HISTFILE` in the shell first and close that shell afterwards, so the line is not saved, and treat the key as
+> spent after the first run: it binds one account. An unused key cannot be withdrawn, it only expires, so choose few days.
+
 ## Check it worked
 
 ```bash
