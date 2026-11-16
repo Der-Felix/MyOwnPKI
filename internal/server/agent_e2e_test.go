@@ -105,7 +105,7 @@ func TestAgentEndToEnd(t *testing.T) {
 		return time.Now().UTC()
 	})
 	second := a.Identity().Leaf
-	if second.SerialNumber.Cmp(first.SerialNumber) == 0 || string(second.RawSubjectPublicKeyInfo) == string(first.RawSubjectPublicKeyInfo) {
+	if second.SerialNumber.Cmp(first.SerialNumber) == 0 || bytes.Equal(second.RawSubjectPublicKeyInfo, first.RawSubjectPublicKeyInfo) {
 		t.Fatal("not renewed with a new key")
 	}
 	if c, err := e.srv.Agents().Identify(ctx, second, ""); err != nil || c.Agent.ID != id {
@@ -121,7 +121,7 @@ func TestAgentEndToEnd(t *testing.T) {
 		return time.Now().UTC()
 	})
 	third := a.Identity().Leaf
-	if third.SerialNumber.Cmp(second.SerialNumber) == 0 || string(third.RawSubjectPublicKeyInfo) != string(second.RawSubjectPublicKeyInfo) {
+	if third.SerialNumber.Cmp(second.SerialNumber) == 0 || !bytes.Equal(third.RawSubjectPublicKeyInfo, second.RawSubjectPublicKeyInfo) {
 		t.Fatal("not enrolled again with the last key")
 	}
 	if c, err := e.srv.Agents().Identify(ctx, third, ""); err != nil || c.Agent.ID != id {
@@ -186,7 +186,7 @@ func readDemoAccess(t *testing.T, dataDir string) demoAccess {
 }
 
 func servedSerial(ctx context.Context, client *http.Client, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", err
 	}

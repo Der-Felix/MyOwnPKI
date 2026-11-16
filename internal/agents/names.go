@@ -32,7 +32,7 @@ func CheckPattern(s string) (string, error) {
 }
 
 func checkDNSName(h string) error {
-	if len(h) == 0 || len(h) > 253 {
+	if h == "" || len(h) > 253 {
 		return errors.New("1 to 253 characters")
 	}
 	labels := strings.Split(h, ".")
@@ -40,7 +40,7 @@ func checkDNSName(h string) error {
 		return errors.New("want a fully qualified name such as proxy1.homelab.lan")
 	}
 	for _, l := range labels {
-		if len(l) == 0 || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
 			return errors.New("every label 1 to 63 characters, not starting or ending with '-'")
 		}
 		for _, r := range l {

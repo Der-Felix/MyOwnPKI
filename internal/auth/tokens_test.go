@@ -30,7 +30,8 @@ func tokenEnv(t *testing.T) (*env, string) {
 		t.Fatal(err)
 	}
 	v.remember(t, enr)
-	return v, v.login(t, "alice")
+	session := v.login(t, "alice")
+	return v, session
 }
 
 func tokenCount(t *testing.T, v *env, token string) int {

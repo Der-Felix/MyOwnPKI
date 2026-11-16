@@ -139,7 +139,7 @@ type Head struct {
 
 func (h Head) String() string { return strconv.FormatInt(h.Seq, 10) + ":" + h.Hash }
 
-var headPattern = regexp.MustCompile(`^([0-9]+):([0-9a-f]{12,64})$`)
+var headPattern = regexp.MustCompile(`^(\d+):([0-9a-f]{12,64})$`)
 
 // ParseHead reads "seq:hash"; a hash prefix of at least 12 hex digits is
 // enough, so a head can be noted down by hand.

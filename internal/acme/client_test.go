@@ -196,7 +196,7 @@ func (c *client) getNonce() string {
 		c.nonce = ""
 		return n
 	}
-	req, _ := http.NewRequestWithContext(c.t.Context(), http.MethodHead, c.local(testBase+"/new-nonce"), nil)
+	req, _ := http.NewRequestWithContext(c.t.Context(), http.MethodHead, c.local(testBase+"/new-nonce"), http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.t.Fatal(err)

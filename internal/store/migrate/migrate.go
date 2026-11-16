@@ -45,7 +45,7 @@ type Migration struct {
 	Checksum string // hex SHA-256 of the file with LF line endings
 }
 
-var fileName = regexp.MustCompile(`^([0-9]{4})_([a-z0-9_]+)\.sql$`)
+var fileName = regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.sql$`)
 
 // Load reads all *.sql files of fsys (its root directory), checks names and
 // numbering and returns them in order. Other files are ignored.

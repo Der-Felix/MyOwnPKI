@@ -18,8 +18,8 @@ import (
 // IDs and reasons are free text: they are data here and in every client.
 
 var (
-	versionPathPattern = regexp.MustCompile(`^[0-9]{1,15}$`)
-	againstPattern     = regexp.MustCompile(`^(previous|current|[0-9]{1,15})$`)
+	versionPathPattern = regexp.MustCompile(`^\d{1,15}$`)
+	againstPattern     = regexp.MustCompile(`^(previous|current|\d{1,15})$`)
 )
 
 type versionJSON struct {

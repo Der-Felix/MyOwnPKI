@@ -80,7 +80,7 @@ func (k *Key) newDevice(rnd io.Reader, u systemdb.User, now time.Time) (string, 
 // the key of its counter; "" = no valid cookie of this user.
 func (k *Key) checkDevice(value string, u systemdb.User, now time.Time) string {
 	parts := strings.Split(value, ".")
-	if len(parts) != 5 || parts[0] != devicePrefix || parts[1] != u.ID || len(parts[2]) == 0 || len(parts[2]) > 64 {
+	if len(parts) != 5 || parts[0] != devicePrefix || parts[1] != u.ID || parts[2] == "" || len(parts[2]) > 64 {
 		return ""
 	}
 	expires, err := strconv.ParseInt(parts[3], 10, 64)

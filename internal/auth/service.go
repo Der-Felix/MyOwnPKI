@@ -255,15 +255,18 @@ func (s *Service) pending(ctx context.Context, q *systemdb.Queries, token string
 	}
 	device := s.trustedDevice(c, u, now)
 	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		return row, u, "", refused
 	}
 	if wait := lockedFor(u, now); wait > 0 && device == "" {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		return row, u, "", refused
 	}
 	if u.DisabledAt.Valid {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
+		return row, u, "", refused
 	}
 	return row, u, device, nil
 }
@@ -369,10 +372,12 @@ func (s *Service) signedInFrom(ctx context.Context, token string, c Client, acti
 	}
 	device := s.trustedDevice(c, u, now)
 	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
-		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		return nil, u, "", refused
 	}
 	if wait := lockedFor(u, now); wait > 0 && device == "" {
-		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		return nil, u, "", refused
 	}
 	return sess, u, device, nil
 }

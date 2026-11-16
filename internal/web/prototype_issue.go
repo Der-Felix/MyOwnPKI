@@ -260,7 +260,7 @@ func parseCSR(text string) (*x509.CertificateRequest, error) {
 		return nil, csrError("Paste a PEM certificate request (-----BEGIN CERTIFICATE REQUEST-----).")
 	case block.Type != "CERTIFICATE REQUEST" && block.Type != "NEW CERTIFICATE REQUEST":
 		return nil, csrError("This is a " + block.Type + ", not a certificate request.")
-	case len(strings.TrimSpace(string(rest))) > 0:
+	case strings.TrimSpace(string(rest)) != "":
 		return nil, csrError("Paste exactly one certificate request.")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)

@@ -223,7 +223,7 @@ func checkEndpoint(s string, nameAllowed bool) error {
 func checkZone(z string) error { return checkLabels(z) }
 
 func checkLabels(h string) error {
-	if len(h) == 0 || len(h) > 253 {
+	if h == "" || len(h) > 253 {
 		return errors.New("1 to 253 characters")
 	}
 	for _, l := range strings.Split(h, ".") {

@@ -23,7 +23,7 @@ import (
 // gzip, turns a strong ETag weak, and the client sends it back as it got it).
 // A weak tag counts as the strong one. A list, "*" and anything else are
 // refused as a bad request instead of being guessed at.
-var etagPattern = regexp.MustCompile(`^(?:W/)?"([0-9]{1,15})"$`)
+var etagPattern = regexp.MustCompile(`^(?:W/)?"(\d{1,15})"$`)
 
 // ifMatch returns the version the caller expects, nil when the header is
 // absent (the released behavior: the last writer wins).

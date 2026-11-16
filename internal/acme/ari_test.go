@@ -22,7 +22,7 @@ import (
 // ari fetches renewalInfo (GET, unsigned).
 func (v *env) ari(t *testing.T, id string) (int, http.Header, map[string]map[string]string) {
 	t.Helper()
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, v.ts.URL+"/acme/renewal-info/"+id, nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, v.ts.URL+"/acme/renewal-info/"+id, http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

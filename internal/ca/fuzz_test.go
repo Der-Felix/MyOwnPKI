@@ -469,7 +469,7 @@ func ldhLabel(l string) bool {
 // dnsProblem returns what is wrong with name as an accepted, canonical DNS SAN, or "".
 func dnsProblem(name string, wildcard bool) string {
 	switch {
-	case len(name) == 0 || len(name) > 253:
+	case name == "" || len(name) > 253:
 		return fmt.Sprintf("length %d", len(name))
 	case strings.HasSuffix(name, "."):
 		return "trailing dot"

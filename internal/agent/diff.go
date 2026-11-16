@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -11,7 +12,7 @@ import (
 // changed middle too large for the table is shown as one removed and one
 // added block. A missing old file diffs against /dev/null.
 func unifiedDiff(name string, old []byte, oldExists bool, updated []byte) string {
-	if oldExists && string(old) == string(updated) {
+	if oldExists && bytes.Equal(old, updated) {
 		return ""
 	}
 	a, b := splitLines(string(old)), splitLines(string(updated))

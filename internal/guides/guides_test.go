@@ -338,9 +338,9 @@ func TestEmbeddedGuides(t *testing.T) {
 		name string
 		re   *regexp.Regexp
 	}{
-		{"an IPv4 address", regexp.MustCompile(`\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b`)},
+		{"an IPv4 address", regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)},
 		{"a fingerprint or hash", regexp.MustCompile(`(?i)\b[0-9a-f]{2}(:[0-9a-f]{2}){15,}\b|\b[0-9a-f]{40,}\b`)},
-		{"PEM material", regexp.MustCompile(`-----BEGIN`)},
+		{"PEM material", regexp.MustCompile(`-----BEGIN`)}, //nolint:gocritic // the literal marker reads better than -{5}BEGIN
 		{"a token", regexp.MustCompile(`\b(mjt|mop|mpa|mea)_[A-Za-z0-9]+`)},
 		{"a credential", regexp.MustCompile(`(?i)\b(password|passphrase|secret|token|key)s?\s*[:=]\s*[^\s<{]`)},
 	}

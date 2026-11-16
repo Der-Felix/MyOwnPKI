@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -126,7 +127,7 @@ func FuzzCSRKey(f *testing.F) {
 			t.Fatalf("result %q is not canonical base64url", got)
 		}
 		sum := sha256.Sum256(csr.RawSubjectPublicKeyInfo)
-		if string(raw) != string(sum[:]) {
+		if !bytes.Equal(raw, sum[:]) {
 			t.Fatalf("result is not the SHA-256 of the public key")
 		}
 		// The key that was hashed is the key of the request.
@@ -246,7 +247,7 @@ func reportLimitsHold(in ReportInput) bool {
 		return len(s) <= limit && utf8.ValidString(s) && !strings.Contains(s, "\x00")
 	}
 	isHex := func(s string, exactly int) bool {
-		if len(s) > 64 || len(s)%2 == 1 || (exactly > 0 && len(s) != 0 && len(s) != exactly) {
+		if len(s) > 64 || len(s)%2 == 1 || (exactly > 0 && s != "" && len(s) != exactly) {
 			return false
 		}
 		for _, c := range []byte(s) {
@@ -309,7 +310,7 @@ func reportLimitsHold(in ReportInput) bool {
 // deploymentNameOK: 1 to 64 characters, lower case letters, digits and
 // hyphens, no hyphen at either end.
 func deploymentNameOK(s string) bool {
-	if len(s) == 0 || len(s) > 64 {
+	if s == "" || len(s) > 64 {
 		return false
 	}
 	for i := range len(s) {
@@ -327,7 +328,7 @@ func deploymentNameOK(s string) bool {
 // characters without a hyphen at either end, at most 253 characters in all,
 // and not an IP address (the last label is not all digits).
 func hostOK(s string) bool {
-	if len(s) == 0 || len(s) > 253 {
+	if s == "" || len(s) > 253 {
 		return false
 	}
 	labels := strings.Split(s, ".")
@@ -335,7 +336,7 @@ func hostOK(s string) bool {
 		return false
 	}
 	for _, l := range labels {
-		if len(l) == 0 || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
 			return false
 		}
 		for i := range len(l) {

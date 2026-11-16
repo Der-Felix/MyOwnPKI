@@ -1,6 +1,7 @@
 package settingsver
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -626,7 +627,7 @@ func TestCanonicalIsStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	db, sb, _ := Canonical(b)
-	if string(da) != string(db) || sa != sb {
+	if !bytes.Equal(da, db) || sa != sb {
 		t.Errorf("nil and empty lists differ:\n%s\n%s", da, db)
 	}
 	want := `{"name":"homelab.example","ca_id":"ca_1","include_subdomains":true,"wildcards":false,"challenge_types":["http-01","dns-01"],"approval":"account","preset":"server","validity_days":0,"address_policy":"internal","ip_ranges":[]}`

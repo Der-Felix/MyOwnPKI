@@ -13,12 +13,12 @@ import (
 var codeLanguages = map[string]bool{"bash": true, "powershell": true, "yaml": true, "json": true, "ini": true, "text": true}
 
 var (
-	orderedMarker = regexp.MustCompile(`^[0-9]{1,3}\. `)
+	orderedMarker = regexp.MustCompile(`^\d{1,3}\. `)
 	headingID     = regexp.MustCompile(`^[a-z0-9-]{1,60}$`)
 	sitePath      = regexp.MustCompile(`^/[a-z0-9/_-]*$`)
 	sourcePath    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	separatorCell = regexp.MustCompile(`^:?-{3,}:?$`)
-	entityLike    = regexp.MustCompile(`^&(#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
+	entityLike    = regexp.MustCompile(`^&(#\d+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 	linkChars     = regexp.MustCompile(`^[A-Za-z0-9._~/:#?=&-]+$`)
 	uiPath        = regexp.MustCompile(`^/[A-Za-z0-9._~/-]*(\?[A-Za-z0-9._~=&-]*)?(#[a-z0-9-]+)?$`)
 )

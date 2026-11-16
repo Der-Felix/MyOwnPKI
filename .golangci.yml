@@ -73,6 +73,18 @@ linters:
     errcheck:
       check-type-assertions: true
 
+    gocritic:
+      # On top of the default checks. sloppyReassign and redundantSprint are left out:
+      # `if err = f(); err != nil` is the project's way to keep govet shadow quiet, and
+      # the three tests that print a redacting type through fmt do so on purpose.
+      enabled-checks:
+        - stringXbytes      # bytes.Equal instead of string(a) == string(b): no copies of key material
+        - builtinShadow     # a variable called len or new hides the builtin
+        - regexpSimplify    # the \d class instead of [0-9] and the like
+        - emptyStringTest   # s == "" instead of len(s) == 0
+        - httpNoBody        # http.NoBody instead of a nil request body
+        - evalOrder         # a return with a call that changes what another operand reads
+
     govet:
       enable-all: true
       disable:

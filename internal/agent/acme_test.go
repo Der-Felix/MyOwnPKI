@@ -103,7 +103,7 @@ func TestACMETransportPreservesTimeoutAndPassCancellation(t *testing.T) {
 	defer cancelParent()
 	requestContext, cancelRequest := context.WithTimeout(t.Context(), time.Hour)
 	defer cancelRequest()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, "https://pki.homelab.lan/acme/directory", nil)
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, "https://pki.homelab.lan/acme/directory", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

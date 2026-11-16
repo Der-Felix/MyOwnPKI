@@ -263,7 +263,7 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 		},
 	}
 	url := "http://" + host + "/.well-known/acme-challenge/" + token
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return vfail("malformed", "the challenge URL can't be built")
 	}

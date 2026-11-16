@@ -386,7 +386,7 @@ func (c *apiClient) raw(t *testing.T, path string) []byte {
 
 func httpGet(t *testing.T, u string) []byte {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, u, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

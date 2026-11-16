@@ -146,7 +146,7 @@ func TestGuidePlaceholdersNeverComeFromTheRequest(t *testing.T) {
 		}
 	}
 	// A Host header changes nothing.
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://attacker.example/guides/zeta", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://attacker.example/guides/zeta", http.NoBody)
 	req.Host = "attacker.example"
 	if page := b.send(t, req).html(); strings.Contains(page, "attacker.example") {
 		t.Error("the Host header reached the page")

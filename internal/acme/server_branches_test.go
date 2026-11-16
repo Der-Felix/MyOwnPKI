@@ -200,7 +200,7 @@ func TestNewNonceAndLimits(t *testing.T) {
 	seen := map[string]bool{}
 	for method, code := range map[string]int{http.MethodGet: http.StatusNoContent, http.MethodHead: http.StatusOK} {
 		for range 2 {
-			req, _ := http.NewRequestWithContext(t.Context(), method, v.ts.URL+"/acme/new-nonce", nil)
+			req, _ := http.NewRequestWithContext(t.Context(), method, v.ts.URL+"/acme/new-nonce", http.NoBody)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)

@@ -90,7 +90,7 @@ func refCheckDNS(name string) string {
 	}
 	for _, l := range labels {
 		switch {
-		case len(l) == 0 || len(l) > 63:
+		case l == "" || len(l) > 63:
 			return "label length"
 		case !refLabel.MatchString(l):
 			return "label characters"

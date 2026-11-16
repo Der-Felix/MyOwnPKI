@@ -374,7 +374,7 @@ func (r *run) askTwice(prompt, again string, check func([]byte) error) ([]byte, 
 			clear(a)
 			return nil, err
 		}
-		same := string(a) == string(b)
+		same := bytes.Equal(a, b)
 		clear(b)
 		if same {
 			return a, nil

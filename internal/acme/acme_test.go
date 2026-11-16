@@ -20,7 +20,7 @@ import (
 func TestDirectoryNonceAndProxy(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t, ca.ApprovalOpen)
-	dreq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, v.ts.URL+"/acme/directory", nil)
+	dreq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, v.ts.URL+"/acme/directory", http.NoBody)
 	resp, err := http.DefaultClient.Do(dreq)
 	if err != nil {
 		t.Fatal(err)

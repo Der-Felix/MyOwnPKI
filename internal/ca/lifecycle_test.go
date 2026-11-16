@@ -516,7 +516,7 @@ func TestOnlineRenewal(t *testing.T) {
 		t.Fatalf("renew intermediate: %+v %v", i2, err)
 	}
 	c1, c2 := certOf(t, i1), certOf(t, i2)
-	if string(c1.RawSubject) != string(c2.RawSubject) || publicKeyEqual(c1.PublicKey, c2.PublicKey) || c2.MaxPathLen != 0 || !c2.MaxPathLenZero {
+	if !bytes.Equal(c1.RawSubject, c2.RawSubject) || publicKeyEqual(c1.PublicKey, c2.PublicKey) || c2.MaxPathLen != 0 || !c2.MaxPathLenZero {
 		t.Error("a renewal keeps the exact subject and the profile, with a new key")
 	}
 	cur := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"b.homelab.lan"}})

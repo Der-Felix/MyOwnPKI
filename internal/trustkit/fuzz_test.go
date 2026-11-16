@@ -378,7 +378,7 @@ func onlyOf(s, set string) bool {
 // nameOK: 1 to 63 bytes of a-z, 0-9, '.', '_' and '-', the first a letter or
 // a digit.
 func nameOK(s string) bool {
-	if len(s) == 0 || len(s) > 63 {
+	if s == "" || len(s) > 63 {
 		return false
 	}
 	for i := range len(s) {

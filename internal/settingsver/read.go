@@ -1,6 +1,7 @@
 package settingsver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,7 +33,7 @@ func Same(a, b Snapshot) bool {
 	}
 	da, _, ea := Canonical(a)
 	db, _, eb := Canonical(b)
-	return ea == nil && eb == nil && string(da) == string(db)
+	return ea == nil && eb == nil && bytes.Equal(da, db)
 }
 
 // Comparison is the diff between a compared state and a version.

@@ -27,7 +27,7 @@ import (
 // scheduledLayout is the name of a scheduled backup: UTC, to the second.
 const scheduledLayout = "20060102T150405Z"
 
-var scheduledPattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z$`)
+var scheduledPattern = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
 // UnverifiedSuffix marks a scheduled backup whose check failed; Prune never
 // deletes it and it doesn't count as one of the kept backups.

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -364,8 +365,8 @@ func TestAuthKeyOutsideTheBackup(t *testing.T) {
 			t.Errorf("notes %q", rep.Notes)
 		}
 		got, rerr := os.ReadFile(filepath.Join(target.Layout.DataDir, "auth.key"))
-		if rerr != nil || string(got) != string(key) {
-			t.Errorf("restored key: %v, equal %v", rerr, string(got) == string(key))
+		if rerr != nil || !bytes.Equal(got, key) {
+			t.Errorf("restored key: %v, equal %v", rerr, bytes.Equal(got, key))
 		}
 	})
 }

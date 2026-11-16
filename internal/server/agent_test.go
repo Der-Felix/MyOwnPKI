@@ -343,7 +343,7 @@ func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
 	client := e.httpClient(nil, nil)
 	base := "https://" + e.srv.AgentAddr() + "/agent-packages/"
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		req, _ := http.NewRequestWithContext(t.Context(), method, base+"myownpki-agent_0.3.1_linux_amd64.deb", nil)
+		req, _ := http.NewRequestWithContext(t.Context(), method, base+"myownpki-agent_0.3.1_linux_amd64.deb", http.NoBody)
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -378,7 +378,7 @@ func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
 
 func get(t *testing.T, c *http.Client, url string) (*http.Response, error) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
