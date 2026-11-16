@@ -504,3 +504,45 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// commandPrograms are the programs a command line of a guide may start with
+// (docs/PHASE3.md step 74): the project's own programs and the standard tools
+// the guides use. "./pki.sh" is the offline root tool of legacy/.
+var commandPrograms = map[string]bool{
+	"myownpki": true, "myownpki-agent": true, "certbot": true, "sudo": true, "curl": true,
+	"openssl": true, "systemctl": true, "install": true, "docker": true, "./pki.sh": true,
+}
+
+// TestEmbeddedCommandsAreKnownPrograms: every command line in a bash block of
+// the embedded guides starts with a known program, and none pipes into a
+// shell. A guide only shows commands; the reader decides to run them.
+func TestEmbeddedCommandsAreKnownPrograms(t *testing.T) {
+	t.Parallel()
+	r, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeIntoShell := regexp.MustCompile(`\|\s*(sudo\s+)?(-\S+\s+)*(ba|z|da|k)?sh\b`)
+	for _, g := range r.List() {
+		for _, b := range g.Blocks {
+			if b.Kind != KindCode || b.Lang != "bash" {
+				continue
+			}
+			continued := false
+			for _, line := range strings.Split(b.Code, "\n") {
+				cmd := strings.TrimSpace(line)
+				wasContinued := continued
+				continued = strings.HasSuffix(cmd, "\\")
+				if cmd == "" || strings.HasPrefix(cmd, "#") || wasContinued {
+					continue
+				}
+				if program, _, _ := strings.Cut(cmd, " "); !commandPrograms[program] {
+					t.Errorf("%s: the command %q starts with %q, which is not a known program", g.Slug, cmd, program)
+				}
+				if pipeIntoShell.MatchString(cmd) {
+					t.Errorf("%s: the command %q pipes into a shell", g.Slug, cmd)
+				}
+			}
+		}
+	}
+}
