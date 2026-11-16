@@ -204,7 +204,9 @@ func TestIssueWithACSR(t *testing.T) {
 	}
 
 	// Upload as DER and as PEM: the same prefill.
-	for name, data := range map[string][]byte{"nas.der": csrDER, "nas.csr": []byte(csrPEM)} {
+	// A DER request whose subject holds the PEM header text is still DER.
+	_, markedDER := testCSRWith(t, "-----BEGIN CERTIFICATE REQUEST-----", []string{"nas.homelab.lan", "files.homelab.lan"}, []string{"10.0.0.5"})
+	for name, data := range map[string][]byte{"nas.der": csrDER, "nas.csr": []byte(csrPEM), "marked.der": markedDER} {
 		rr := b.postFile(t, "/certificates/new", step(2, "next", nil), "csrfile", name, data)
 		if rr.Code != http.StatusOK || !strings.Contains(rr.html(), "nas.homelab.lan\nfiles.homelab.lan</textarea>") {
 			t.Errorf("upload %s: %d", name, rr.Code)
