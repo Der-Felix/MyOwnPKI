@@ -122,7 +122,7 @@ func (s *Server) checkCSR(o *pkidb.AcmeOrder, der []byte, accountKey any) error 
 	}
 	got := map[string]bool{}
 	for _, d := range csr.DNSNames {
-		got["dns:"+strings.ToLower(d)] = true
+		got["dns:"+asciiLower(d)] = true
 	}
 	for _, ip := range csr.IPAddresses {
 		a, _ := netip.AddrFromSlice(ip)
@@ -132,7 +132,7 @@ func (s *Server) checkCSR(o *pkidb.AcmeOrder, der []byte, accountKey any) error 
 		return problemErr(http.StatusBadRequest, "badCSR", "the CSR names e-mail addresses or URIs – only the order's DNS names and IPs")
 	}
 	if cn := csr.Subject.CommonName; cn != "" {
-		key := "dns:" + strings.ToLower(cn)
+		key := "dns:" + asciiLower(cn)
 		if a, perr := netip.ParseAddr(cn); perr == nil {
 			key = "ip:" + a.Unmap().String()
 		}
@@ -342,4 +342,18 @@ func (s *Server) ExpireStale(ctx context.Context) error {
 	}
 	_, err := q.ExpireACMEAuthzs(ctx, pkidb.ExpireACMEAuthzsParams{UpdatedAt: now, ExpiresAt: now})
 	return err
+}
+
+// asciiLower lower-cases the letters A to Z and nothing else. A name from a
+// CSR is compared with the order's identifiers, which are ASCII; strings.ToLower
+// would also fold look-alikes onto ASCII letters (the Kelvin sign U+212A
+// becomes "k"), and the CSR's common name would pass as an identifier of the
+// order while the certificate then carries the look-alike.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
