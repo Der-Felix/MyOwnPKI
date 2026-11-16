@@ -1440,3 +1440,6 @@ func withMode(settings map[string]any, mode string) map[string]any {
 	out["agent_enrollment"] = mode
 	return out
 }
+
+// Routes lists the operations this build serves (contract tests).
+func (a *API) Routes() []Route { return a.routes }
