@@ -18,7 +18,8 @@ import (
 //
 // Prune deletes only what the timer made: a directory (never a symlink)
 // named exactly like ScheduledName, with a readable manifest.json, that
-// holds exactly the files its manifest lists, each with the listed size.
+// holds exactly the files its manifest lists (and manifest.sig when the
+// format has one), each with the listed size.
 // Anything else in DIR – the update backups of install.sh
 // (<time>-<version>), a backup that failed its check (<time>-unverified),
 // notes, other files – is left alone, and so is a timer backup that doesn't
@@ -121,6 +122,9 @@ func checkScheduled(dir string) string {
 		return err.Error()
 	}
 	want := map[string]int64{ManifestFile: -1}
+	if m.Format == Format {
+		want[SignatureFile] = -1 // a backup of format 2 is complete only with its signature
+	}
 	dirs := map[string]bool{}
 	for _, f := range m.Files {
 		rel := filepath.FromSlash(f.Path)

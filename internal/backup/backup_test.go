@@ -102,7 +102,7 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 		t.Errorf("pki.db in the backup: %v", serr)
 	}
 
-	rep, err := Verify(t.Context(), dir, "")
+	rep, err := Verify(t.Context(), dir, Check{})
 	if err != nil {
 		t.Fatalf("verify: %v %v", err, rep)
 	}
@@ -116,7 +116,7 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 
 	target := Options{Layout: store.Layout{DataDir: filepath.Join(t.TempDir(), "restored")}, Clock: v.Clock, Who: testinstance.Console}
 	target.AuthKeyFile = filepath.Join(target.Layout.DataDir, "auth.key")
-	rr, err := Restore(t.Context(), dir, "", target)
+	rr, err := Restore(t.Context(), dir, Check{}, target)
 	if err != nil {
 		t.Fatalf("restore: %v %+v", err, rr)
 	}
@@ -154,7 +154,7 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Only into an empty data directory.
-	if _, err := Restore(t.Context(), dir, "", o); err == nil || !strings.Contains(err.Error(), "not empty") {
+	if _, err := Restore(t.Context(), dir, Check{}, o); err == nil || !strings.Contains(err.Error(), "not empty") {
 		t.Errorf("restore over the running instance: %v", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestBackupDuringWrites(t *testing.T) {
 	}
 	target := Options{Layout: store.Layout{DataDir: filepath.Join(t.TempDir(), "restored")}, Clock: v.Clock, Who: testinstance.Console}
 	target.AuthKeyFile = filepath.Join(target.Layout.DataDir, "auth.key")
-	if rep, rerr := Restore(t.Context(), dir, "", target); rerr != nil {
+	if rep, rerr := Restore(t.Context(), dir, Check{}, target); rerr != nil {
 		t.Fatalf("restore: %v %+v", rerr, rep)
 	}
 	pkiPath, _ := target.Layout.TenantDB(store.DefaultTenant, store.KindPKI)
@@ -296,7 +296,7 @@ func TestTamperedBackupRefused(t *testing.T) {
 		if err := os.Remove(filepath.Join(dir, ManifestFile)); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeManifest(dir, m); err != nil {
+		if err := writeManifest(dir, m, forgerKey(t)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -363,7 +363,7 @@ func TestTamperedBackupRefused(t *testing.T) {
 			dir := copyBackup(t)
 			tc.change(t, dir)
 			target := Options{Layout: store.Layout{DataDir: filepath.Join(t.TempDir(), "restored")}, Clock: v.Clock, Who: testinstance.Console}
-			rep, err := Restore(t.Context(), dir, "", target)
+			rep, err := Restore(t.Context(), dir, Check{}, target)
 			msg := fmt.Sprint(err)
 			if rep != nil {
 				msg += " " + strings.Join(rep.Problems, " | ")
@@ -387,7 +387,7 @@ func TestTamperedBackupRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(dir, ManifestFile), data, 0o600)
-	if _, err := Verify(t.Context(), dir, ""); err == nil {
+	if _, err := Verify(t.Context(), dir, Check{}); err == nil {
 		t.Error("manifest with an unknown field accepted")
 	}
 }
