@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/recipe"
@@ -45,6 +46,36 @@ type serviceHarness struct {
 	marker string // one line per reload the agent issued
 }
 
+// isolateApache2ctl keeps apache2ctl away from /run/apache2, /run/lock/apache2
+// and /var/log/apache2, which the user of the test cannot create. Debian's
+// apache2ctl sources $APACHE_ENVVARS (default /etc/apache2/envvars), whose
+// plain "export APACHE_RUN_DIR=/var/run/apache2" lines overwrite any value in
+// the environment, and then creates the run, socks and lock directories when
+// they are missing, even for "-t". So the test points APACHE_ENVVARS at its own
+// file and creates the directories itself: apache2ctl finds them and creates
+// nothing (it would chown the socks and lock directories to APACHE_RUN_USER).
+func isolateApache2ctl(t *testing.T, prefix string) {
+	t.Helper()
+	run, lock, logs := filepath.Join(prefix, "run"), filepath.Join(prefix, "lock"), filepath.Join(prefix, "log")
+	for _, dir := range []string{filepath.Join(run, "socks"), lock, logs} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.ContainsAny(prefix, "'\n") {
+		t.Skipf("the temporary directory %q cannot be written into a shell file", prefix)
+	}
+	envvars := filepath.Join(prefix, "envvars")
+	content := fmt.Sprintf("export APACHE_RUN_DIR='%s'\nexport APACHE_LOCK_DIR='%s'\nexport APACHE_LOG_DIR='%s'\nexport APACHE_PID_FILE='%s'\n",
+		run, lock, logs, filepath.Join(run, "apache2.pid"))
+	if err := os.WriteFile(envvars, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The hooks inherit the environment of the test (runHook sets no Env).
+	t.Setenv("APACHE_ENVVARS", envvars)
+	t.Setenv("APACHE_CONFDIR", "")
+}
+
 func newApacheHarness(t *testing.T) *serviceHarness {
 	t.Helper()
 	rec := requireRealService(t, "apache", envE2EApache, "apache2", apacheBinary,
@@ -62,6 +93,7 @@ func newApacheHarness(t *testing.T) *serviceHarness {
 			t.Fatal(err)
 		}
 	}
+	isolateApache2ctl(t, prefix)
 	conf := filepath.Join(prefix, "apache2.conf")
 	configuration := fmt.Sprintf(`ServerRoot %[1]q
 ServerName localhost
