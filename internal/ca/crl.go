@@ -287,11 +287,6 @@ func revocationEntry(en crlEntry) (x509.RevocationListEntry, error) {
 	return entry, nil
 }
 
-// LegacyCRLURL and LegacyCertURL are the URLs legacy pki.sh wrote into its
-// certificates (AIA_BASE_URL/<name>.crl|.crt).
-func LegacyCRLURL(baseURL, name string) string  { return baseURL + "/" + name + ".crl" }
-func LegacyCertURL(baseURL, name string) string { return baseURL + "/" + name + ".crt" }
-
 // CRL states, worst last.
 const (
 	CRLOK       = "ok"
