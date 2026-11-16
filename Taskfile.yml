@@ -130,9 +130,9 @@ tasks:
       - CGO_ENABLED=0 go test ./...
 
   fuzz:
-    desc: Short fuzz runs of the parsers that read untrusted input (ACME JWS) – 30 seconds each
+    desc: 'Fuzz every target of scripts/ci/fuzz-targets.txt (FUZZTIME=10s each; FUZZ_ONLY=<target> for one; "task fuzz FUZZTIME=30m FUZZ_ONLY=FuzzParse")'
     cmds:
-      - CGO_ENABLED=0 go test ./internal/acme/jose/ -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; FUZZTIME={{.FUZZTIME | default "10s" | shellQuote}} FUZZ_ONLY={{.FUZZ_ONLY | default "" | shellQuote}} bash scripts/ci/fuzz.sh
 
   cover:
     desc: 'Coverage table per package, integration tests credited to the code they exercise (COVER_PKGS=./internal/ids/... for a few packages, COVER_SKIP=<regexp> to leave packages out; needs minutes)'

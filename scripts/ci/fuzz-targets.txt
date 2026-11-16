@@ -1,0 +1,54 @@
+# The fuzz targets of the repository: one line per target.
+#
+#   <package> <target> [extra go test flags]
+#
+# `task fuzz` (scripts/ci/fuzz.sh) runs each line as
+#   go test <package> -run '^$' -fuzz '^<target>$' -fuzztime $FUZZTIME [extra flags]
+# Go fuzzes one target per package per invocation, so every target has its line.
+# The script refuses to run when a `func Fuzz...` in a _test.go file is missing
+# here, or when a line names a target that does not exist (`fuzz.sh --check`).
+# Blank lines and lines starting with # are ignored. Invariants of every target:
+# docs/PHASE3.md section 18.2. Order: FuzzParse first, then by package.
+#
+# Not listed on purpose (docs/PHASE3.md section 18.2): FuzzACMEPayload (tier 2,
+# listed only if the spike of step 88 reaches 200 executions a second) and the
+# operator-file targets FuzzConfigLoad, FuzzAgentConfig, FuzzDNSCredentials
+# (not in this release).
+
+# ACME request envelope (step 80)
+./internal/acme/jose FuzzParse
+./internal/acme/jose FuzzParseInner
+./internal/acme/jose FuzzParseJWK
+./internal/acme/jose FuzzVerifyEAB
+
+# ACME payload helpers (step 81)
+./internal/acme FuzzNormalizeIdentifier
+./internal/acme FuzzParseARIID
+./internal/acme FuzzCheckCSR
+
+# CSR, uploaded certificate, names, CRL upload bytes (step 82)
+./internal/ca FuzzParseCSR
+./internal/ca FuzzParseCertificate
+./internal/ca FuzzNames
+./internal/ca FuzzCRLDER
+
+# Legacy archive and old files (step 83): -parallel 2 bounds the memory of the archive target
+./internal/ca/legacy FuzzFromArchive -parallel 2
+./internal/ca/legacy FuzzParseKV
+./internal/ca/legacy FuzzParseIndex
+./internal/ca/legacy FuzzParsePrivateKey
+
+# Agent protocol input (step 84)
+./internal/agents FuzzCSRKey
+./internal/agents FuzzValidReport
+./internal/agents FuzzHostnamePattern
+
+# REST bodies (step 85)
+./internal/httpapi FuzzDecodeBody
+
+# The wizard's CSR file (step 86)
+./internal/web FuzzUploadedCSR
+
+# The public trust page (step 87)
+./internal/trustkit FuzzDetect
+./internal/trustkit FuzzGuide
