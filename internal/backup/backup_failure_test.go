@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
 )
@@ -72,6 +73,21 @@ func backupCopy(t *testing.T, src string) string {
 	return dir
 }
 
+// forgerKey is a backup key that is not the instance's: what somebody who
+// rewrites a backup signs with. The tests of the later checks change a backup
+// and sign it again with such a key, so the signature is valid and the check
+// under test is the one that refuses.
+func forgerKey(t *testing.T) *backupkey.Key {
+	t.Helper()
+	k, err := backupkey.Generate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// editManifestOf changes the manifest of a backup and signs it again with a
+// key of the forger.
 func editManifestOf(t *testing.T, dir string, fn func(*Manifest)) {
 	t.Helper()
 	m, err := readManifest(dir)
@@ -82,7 +98,7 @@ func editManifestOf(t *testing.T, dir string, fn func(*Manifest)) {
 	if err := os.Remove(filepath.Join(dir, ManifestFile)); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeManifest(dir, m); err != nil {
+	if err := writeManifest(dir, m, forgerKey(t)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -337,7 +353,7 @@ func TestAuthKeyOutsideTheBackup(t *testing.T) {
 				t.Errorf("auth.key is in the backup directory: %v", serr)
 			}
 			target := targetOptions(t, v)
-			rep, err := Restore(t.Context(), dir, "", target)
+			rep, err := Restore(t.Context(), dir, Check{}, target)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,7 +373,7 @@ func TestAuthKeyOutsideTheBackup(t *testing.T) {
 		}
 		target := targetOptions(t, v)
 		target.AuthKeyFile = outside
-		rep, err := Restore(t.Context(), dir, "", target)
+		rep, err := Restore(t.Context(), dir, Check{}, target)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -468,7 +484,7 @@ func TestRestoreRefusals(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := tree(t, parent)
-		if _, err := Restore(t.Context(), good, "", target); err == nil || !strings.Contains(err.Error(), "not empty") {
+		if _, err := Restore(t.Context(), good, Check{}, target); err == nil || !strings.Contains(err.Error(), "not empty") {
 			t.Errorf("restore into a directory with a file: %v", err)
 		}
 		sameTree(t, before, tree(t, parent))
@@ -481,7 +497,7 @@ func TestRestoreRefusals(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := tree(t, parent)
-		if _, err := Restore(t.Context(), good, "", target); err == nil {
+		if _, err := Restore(t.Context(), good, Check{}, target); err == nil {
 			t.Error("restore over a file")
 		}
 		sameTree(t, before, tree(t, parent))
@@ -495,7 +511,7 @@ func TestRestoreRefusals(t *testing.T) {
 		}
 		deep := Options{Layout: store.Layout{DataDir: filepath.Join(parent, "a", "b", "data")}, Clock: v.Clock, Who: testinstance.Console}
 		for _, target := range []Options{empty, deep} {
-			if _, err := Restore(t.Context(), good, "", target); err != nil {
+			if _, err := Restore(t.Context(), good, Check{}, target); err != nil {
 				t.Fatalf("restore into %s: %v", target.Layout.DataDir, err)
 			}
 			if _, err := os.Stat(target.Layout.SystemDB()); err != nil {
@@ -523,7 +539,7 @@ func TestRestoreRefusals(t *testing.T) {
 		before := tree(t, dir)
 		parent := t.TempDir()
 		target := Options{Layout: store.Layout{DataDir: filepath.Join(parent, "data")}, Clock: v.Clock, Who: testinstance.Console}
-		rep, err := Restore(t.Context(), dir, "", target)
+		rep, err := Restore(t.Context(), dir, Check{}, target)
 		if !errors.Is(err, ErrRefused) || rep == nil || len(rep.Problems) == 0 {
 			t.Fatalf("restore of a tampered backup: %v %+v", err, rep)
 		}
@@ -531,7 +547,7 @@ func TestRestoreRefusals(t *testing.T) {
 			t.Errorf("below the parent: %v", dirNames(entries))
 		}
 		sameTree(t, before, tree(t, dir))
-		if _, verr := Verify(t.Context(), dir, ""); !errors.Is(verr, ErrRefused) {
+		if _, verr := Verify(t.Context(), dir, Check{}); !errors.Is(verr, ErrRefused) {
 			t.Errorf("verify: %v", verr)
 		}
 		sameTree(t, before, tree(t, dir))
@@ -539,10 +555,10 @@ func TestRestoreRefusals(t *testing.T) {
 	t.Run("a good backup is not changed by verify or restore", func(t *testing.T) {
 		t.Parallel()
 		dir := backupCopy(t, good)
-		if _, err := Verify(t.Context(), dir, ""); err != nil {
+		if _, err := Verify(t.Context(), dir, Check{}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Restore(t.Context(), dir, "", targetOptions(t, v)); err != nil {
+		if _, err := Restore(t.Context(), dir, Check{}, targetOptions(t, v)); err != nil {
 			t.Fatal(err)
 		}
 		sameTree(t, goodTree, tree(t, dir))
@@ -550,14 +566,14 @@ func TestRestoreRefusals(t *testing.T) {
 	t.Run("no backup at all", func(t *testing.T) {
 		t.Parallel()
 		for _, dir := range []string{filepath.Join(t.TempDir(), "nope"), t.TempDir()} {
-			if _, err := Verify(t.Context(), dir, ""); err == nil || !strings.Contains(err.Error(), "no manifest.json") {
+			if _, err := Verify(t.Context(), dir, Check{}); err == nil || !strings.Contains(err.Error(), "no manifest.json") {
 				t.Errorf("verify %s: %v", dir, err)
 			}
 		}
 	})
 	t.Run("a checkpoint key that is not the noted one", func(t *testing.T) {
 		t.Parallel()
-		rep, err := Verify(t.Context(), good, "SHA256:not-the-key-noted-at-init")
+		rep, err := Verify(t.Context(), good, Check{CheckpointKey: "SHA256:not-the-key-noted-at-init"})
 		if !errors.Is(err, ErrRefused) || rep == nil || !strings.Contains(strings.Join(rep.Problems, "|"), "audit log") {
 			t.Errorf("wrong pin: %v %+v", err, rep)
 		}
@@ -581,8 +597,8 @@ func TestModifiedBackupIsRefused(t *testing.T) {
 	}{
 		{"manifest of another format", func(t *testing.T, dir string) {
 			t.Helper()
-			editManifestOf(t, dir, func(m *Manifest) { m.Format = "myownpki-backup/2" })
-		}, `backup format "myownpki-backup/2"`},
+			editManifestOf(t, dir, func(m *Manifest) { m.Format = "myownpki-backup/3" })
+		}, `backup format "myownpki-backup/3"`},
 		{"manifest without a format", func(t *testing.T, dir string) {
 			t.Helper()
 			editManifestOf(t, dir, func(m *Manifest) { m.Format = "" })
@@ -707,7 +723,7 @@ func TestModifiedBackupIsRefused(t *testing.T) {
 			tc.change(t, dir)
 			before := tree(t, dir)
 			target := targetOptions(t, v)
-			rep, err := Restore(t.Context(), dir, "", target)
+			rep, err := Restore(t.Context(), dir, Check{}, target)
 			if err == nil {
 				t.Fatal("the modified backup was restored")
 			}
@@ -739,7 +755,7 @@ func TestRestoredAuditLogContinues(t *testing.T) {
 	}
 	target := targetOptions(t, v)
 	v.Clock.Advance(time.Hour)
-	if _, rerr := Restore(t.Context(), dir, "", target); rerr != nil {
+	if _, rerr := Restore(t.Context(), dir, Check{}, target); rerr != nil {
 		t.Fatal(rerr)
 	}
 	db, err := store.OpenAuditLog(t.Context(), store.AuditLog{Scope: store.InstanceScope, Path: target.Layout.InstanceAuditDB()})

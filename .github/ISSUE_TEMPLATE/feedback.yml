@@ -1,0 +1,38 @@
+name: Feedback from testing
+description: "How the beta felt: what was unclear, what was missing, what you would change. Also the result of the tester checklist."
+title: "feedback: "
+labels: ["feedback", "beta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The project is in a beta with a feature freeze: ideas are welcome, but they are not built before version 1.0 and get the label `post-1.0`. A defect is a bug report, not feedback.
+
+        **This is a public page.** Never post keys, the recovery key, the unseal passphrase, tokens, join tokens, backup files, TOTP seeds or credentials. A **security problem** goes to the [private advisory](https://github.com/Der-Felix/MyOwnPKI/security/advisories/new).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `myownpki --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: The items of the [tester checklist](https://der-felix.github.io/MyOwnPKI/beta/) you went through, and which worked.
+    validations:
+      required: true
+  - type: textarea
+    id: feedback
+    attributes:
+      label: What was unclear, missing or in the way
+    validations:
+      required: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you send
+      options:
+        - label: I did not paste any secret.
+          required: true

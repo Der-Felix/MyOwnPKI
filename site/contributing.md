@@ -22,9 +22,28 @@ rules are short. The authoritative text is
 - Builds are pure Go. New dependencies need approval first; only permissive licenses.
 - Commits follow Conventional Commits, for example `docs(site): explain the Salt rollout`. Each commit
   builds and passes `task check`.
+- **From v0.9.0 until v1.0.0 the features are frozen** (the beta, see below): only fixes, documentation, tests,
+  security hardening and dependency security updates are merged.
 - Three tasks measure the tests and the code and are not part of `task check`: `task cover` (a coverage table per
   package), `task fuzz` (the fuzz targets of `scripts/ci/fuzz-targets.txt`, run by CI on every code change) and
   `task deadcode` (functions nothing reaches). A new `func Fuzz...` needs a line in the list.
+
+## The feature freeze of the beta
+
+From the tag v0.9.0 until v1.0.0 the project is in a beta with a **feature freeze**. The beta consists
+of ordinary releases (v0.9.0, v0.9.1, …); what it needs from contributors is fixes, not features.
+
+| Allowed | Not allowed without an exception |
+|---|---|
+| Fixes (`fix:`) | Features, new pages, settings, configuration keys or CLI commands |
+| Documentation, tests and the CI for them | New REST paths or fields; schema changes other than a new migration that fixes a defect |
+| Security hardening that only narrows what is accepted | New dependencies, protocol changes, new agent profiles or recipes, any change to an ADR |
+| Dependency security updates | |
+
+An exception is the owner's decision, written on the issue or pull request and marked with the label
+`freeze-exception`. Ideas for later get the label `post-1.0`: they are welcome, and they are looked at
+after v1.0.0. The pull request template asks which of the allowed kinds your change is.
+If you want to test the beta rather than change it, the [beta page]({{ '/beta/' | relative_url }}) has a checklist.
 
 ## Fixing a page on this site
 

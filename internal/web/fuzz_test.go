@@ -28,10 +28,11 @@ const csrFileLimit = 64 * 1024
 // way a browser sends it and read by the production parseForm with the
 // production limit, then uploadedCSR is called unchanged.
 //
-// What uploadedCSR promises (and what it leaves to the next call): a DER file
-// is checked here and returned as one PEM block; a file that has a PEM
-// header is returned as it is and checked by parseCSR of the same wizard
-// step, so the target runs both and states the promise of the pair.
+// What uploadedCSR promises (and what it leaves to the next call): a file
+// that parses as one DER request is returned as one PEM block, whatever text
+// its bytes hold; any other file that has a PEM header is returned as it is
+// and checked by parseCSR of the same wizard step, so the target runs both
+// and states the promise of the pair.
 func FuzzUploadedCSR(f *testing.F) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -67,6 +68,8 @@ func FuzzUploadedCSR(f *testing.F) {
 	f.Add(append(append([]byte(nil), der...), 0))                                                                         // DER with a byte after it
 	f.Add(der[:len(der)/2])                                                                                               // cut DER
 	f.Add(makeDER("-----BEGIN not a pem", nil))                                                                           // a DER request whose text looks like a header
+	f.Add(makeDER(beginText, func(c *x509.CertificateRequest) { c.Subject.Organization = []string{beginText} }))          // a DER request whose subject holds the PEM header text
+	f.Add(append(makeDER(beginText, nil), 0))                                                                             // the same with a byte after it: not DER, has the header
 	f.Add(makeDER("<script>alert(1)</script>", nil))                                                                      // markup in the name
 	f.Add(makeDER("a", func(c *x509.CertificateRequest) { c.DNSNames = []string{strings.Repeat("a", 60_000) + ".lan"} })) // large, still under the limit
 	f.Add([]byte("-----BEGIN CERTIFICATE REQUEST-----"))
@@ -122,17 +125,20 @@ func FuzzUploadedCSR(f *testing.F) {
 			return
 		}
 
-		// Accepted. A file without a PEM header must have been a DER request.
-		if !bytes.Contains(data, []byte("-----BEGIN")) {
+		// Accepted. A file that parses as one DER request (nothing after it) came back as that request in
+		// one PEM block, whatever text its bytes hold; any other file that has a PEM header came back as it
+		// was; nothing else is accepted.
+		if _, derErr := x509.ParseCertificateRequest(data); derErr == nil {
 			b, rest := pem.Decode([]byte(text))
 			if b == nil || len(rest) != 0 || b.Type != "CERTIFICATE REQUEST" || len(b.Headers) != 0 || !bytes.Equal(b.Bytes, data) {
 				t.Fatalf("a DER file came back as %.80q", text)
 			}
-			if _, err := x509.ParseCertificateRequest(data); err != nil {
-				t.Fatalf("accepted DER that does not parse: %v", err)
+		} else if bytes.Contains(data, []byte("-----BEGIN")) {
+			if text != string(data) {
+				t.Fatal("a PEM file was changed")
 			}
-		} else if text != string(data) {
-			t.Fatal("a PEM file was changed")
+		} else {
+			t.Fatalf("accepted a file that is neither DER nor has a PEM header: %.80q", text)
 		}
 
 		// The pair: what the wizard's next call (parseCSR) takes from the

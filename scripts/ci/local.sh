@@ -23,6 +23,10 @@ steps=(
   'vuln|govulncheck|go_task|task vuln'
   'lint-meta|actionlint|go_task|bash scripts/ci/lint-meta-actionlint.sh'
   'lint-meta|registry coverage|bash|bash scripts/ci/lint-meta-registry.sh --self-test'
+  'lint-meta|fetch.sh self-test (release files)|bash_curl|bash scripts/upgrade/fetch.sh --self-test'
+  'lint-meta|pin-release.sh self-test|bash_curl|bash scripts/upgrade/pin-release.sh --self-test'
+  'lint-meta|pin-migrations.sh self-test|git|bash scripts/ci/pin-migrations.sh --self-test'
+  'lint-meta|upgrade harness self-test|bash_openssl|bash test/upgrade/run.sh --self-test'
   'lint-meta|coverage summary golden files|bash|bash scripts/ci/cover-summary.sh --self-test'
   'lint-meta|vacuum OpenAPI|vacuum|task lint:api'
   'shellcheck|ShellCheck sources|shellcheck|bash scripts/ci/shellcheck-sources.sh'
@@ -45,7 +49,13 @@ steps=(
   'install|agent package real setup and systemd|linux_systemd_openssl_disposable|bash scripts/ci/agent-package-systemd.sh'
   'install|install.sh functions|linux_goreleaser|bash scripts/ci/install-functions.sh'
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
+  'install|update over old releases as root|linux_systemd_goreleaser_disposable|bash scripts/ci/upgrade-systemd.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
+  'upgrade|build lego|linux_upgrade|task upgrade:lego'
+  'upgrade|fetch the release files of the pull-request versions|linux_upgrade|UPGRADE_ONLY="$(bash test/upgrade/run.sh --print-matrix pr)" task upgrade:fetch'
+  'upgrade|old releases, update in place (pull-request versions)|linux_upgrade|UPGRADE_ONLY="$(bash test/upgrade/run.sh --print-matrix pr)" task upgrade'
+  'upgrade-nightly|old releases, update in place (every version)|nightly_upgrade|task upgrade'
+  'upgrade-nightly|agent protocol against v0.3.0|nightly_upgrade|bash scripts/ci/check-agent-protocol.sh --nightly'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
   'image|demo from the snapshot image|linux_docker_demo|bash scripts/ci/demo-check.sh'
   'salt|self-test without Salt|bash|bash scripts/ci/salt-test.sh --self-test'
@@ -136,6 +146,17 @@ requirement() {
     salt) has_commands bash salt-call jq || echo 'needs bash + salt-call + jq' ;;
     git) has_commands bash git || echo 'needs bash + git' ;;
     bash_openssl) has_commands bash openssl sha256sum || echo 'needs bash + openssl + sha256sum' ;;
+    bash_curl) has_commands bash curl sha256sum || echo 'needs bash + curl + sha256sum' ;;
+    linux_upgrade)
+      # The release archives are Linux builds. Port 80 and a non-loopback address are checked
+      # by the harness itself, which prints a SKIP line for the ACME step when it has neither.
+      if [ "$os" != linux ] || ! has_commands go task curl openssl tar sha256sum; then
+        echo 'needs Linux amd64 (the release archives are Linux builds) + Go + Task + curl + openssl + tar'
+      elif [ "$(uname -m)" != x86_64 ]; then
+        echo 'needs Linux amd64 (the release archives are Linux builds)'
+      fi
+      ;;
+    nightly_upgrade) echo 'runs only in the nightly CI (schedule); locally: task upgrade (every version) or task upgrade UPGRADE_ONLY=0.3.12' ;;
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
     vacuum) has_commands go task vacuum || echo 'needs Go + Task + vacuum' ;;
     linux) [ "$os" = linux ] || echo 'needs Linux' ;;

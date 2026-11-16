@@ -7,7 +7,11 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: v0.3.** A working CA with web UI, REST API, legacy import and backup – it replaces the
+> **Status: public beta (v0.9.x).** The feature set is frozen; only fixes follow until v1.0. Try it, break it,
+> report it – and never post secrets. What to test and how to report: the
+> [beta page](https://der-felix.github.io/MyOwnPKI/beta/).
+
+> **What it is (since v0.3).** A working CA with web UI, REST API, legacy import and backup – it replaces the
 > `pki.sh` Bash suite – an **ACME server** for your own CA (behind a reverse proxy, or with its own
 > TLS since v0.2.2) and, new in v0.3.0, the **Linux agent** that gets and deploys certificates by
 > ACME, with "Renew now" in the web UI. Monitoring comes with v0.3.x. See
@@ -81,7 +85,7 @@ distributions; amd64 or arm64). Download the script with the checksum file, chec
 never pipe it into a shell:
 
 ```sh
-v=0.3.12
+v=0.9.0
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/install.sh"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -102,7 +106,7 @@ single `myownpki` binary, the operations guide, an example configuration, the sy
 `install.sh`.
 
 ```sh
-v=0.3.12
+v=0.9.0
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/myownpki_${v}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt"
 curl -fsSLO "https://github.com/Der-Felix/MyOwnPKI/releases/download/v$v/checksums.txt.sigstore.json"
@@ -143,8 +147,8 @@ sha256sum --check --ignore-missing checksums.txt
 The image:
 
 ```sh
-cosign verify ghcr.io/der-felix/myownpki:0.3.12 \
-  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.3.12" \
+cosign verify ghcr.io/der-felix/myownpki:0.9.0 \
+  --certificate-identity "https://github.com/Der-Felix/MyOwnPKI/.github/workflows/release.yml@refs/tags/v0.9.0" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

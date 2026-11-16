@@ -25,7 +25,7 @@ in [SECURITY.md](https://github.com/Der-Felix/MyOwnPKI/blob/main/SECURITY.md). S
 |---|---|
 | CA keys | Online CA keys lie encrypted in the database. A key-encryption key is derived from the unseal passphrase with Argon2id and exists only in memory. The server **starts sealed** and signs only after an instance admin unseals it. *Seal* removes all keys from memory at once. An unseal refuses weak key-derivation parameters. |
 | The root | Can be offline. A root signs only intermediate CAs and CRLs; the engine refuses to issue end-entity certificates with it. |
-| Backups | Contain the CA keys, encrypted. A backup alone cannot sign; a backup plus the passphrase or the recovery key can. |
+| Backups | Contain the CA keys, encrypted. A backup alone cannot sign; a backup plus the passphrase or the recovery key can. Every backup is signed with a backup key that is never part of it; with its fingerprint passed as `--backup-key`, `backup verify` and `restore` refuse a changed or unsigned backup. Backups from before 0.9.0 are not signed and are reported as unauthenticated. |
 | Certificate content | Extensions come from the preset and the policy, **never from the CSR**. CSRs, uploads and ACME payloads are treated as attacker input. Name constraints are enforced before signing, not only by clients. |
 | Input parsers | The code that reads data from outside is **fuzzed**: the ACME request and its key and account-binding parts, the CSR, certificate, CRL and name parsers, the REST body, the file upload of the issue wizard, the agent's CSR and report checks, the trust page's User-Agent and command generator, and the legacy archive reader. Every pull request runs each target for a few seconds and the nightly run for minutes; a crash input is kept in the repository as a regression test. A refusal never repeats more than a short piece of what the sender wrote. |
 | People | A second factor (an authenticator app with recovery codes) is mandatory. Passkeys work only through the REST API, not in the web UI. Sensitive actions ask for a fresh code (step-up): revoking, downloading keys, CA operations, user management, agent management, switching the agent enrollment mode. Wrong passwords lock the account for 15 minutes. |
@@ -47,6 +47,9 @@ the repository.
 - **The passphrase, the recovery key and a backup together.** Whoever holds a backup and one of the two
   can sign as your CAs. Keep them apart
   ([Installation]({{ '/install/' | relative_url }}#the-passphrase-and-the-recovery-key)).
+- **A backup together with the backup key file.** Whoever holds both can sign a changed backup. The key file stays in the
+  data directory; do not copy it next to the backups. Without the fingerprint you noted at `init`, a valid signature
+  only shows that some key signed the backup.
 - **A server that is unsealed and compromised.** While it is unsealed, the decrypted keys are in its memory.
   If you suspect someone on the server: seal it at once, take it off the network, run
   `audit verify`, and restore onto a clean machine

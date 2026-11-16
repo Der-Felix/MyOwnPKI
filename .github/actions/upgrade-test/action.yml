@@ -1,0 +1,64 @@
+# One start version of the upgrade test (docs/PHASE3.md section 19.5): the old release
+# binaries make an installation, the binary of this tree updates it in place. Used by the
+# jobs `upgrade` (pull requests and main) and `upgrade-nightly` of ci.yml. The caller has
+# checked out the repository.
+name: Upgrade test for one start version
+description: Build lego, fetch the release files of one version (pinned SHA-256), run test/upgrade/run.sh for it
+
+inputs:
+  version:
+    description: The start version, as in scripts/upgrade/releases.txt (for example 0.3.5)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup
+
+    # lego is a test tool: built from its pinned version (Taskfile.yml), never in go.mod.
+    - name: Build lego
+      shell: bash
+      run: task upgrade:lego
+
+    # Only this version's files; every one is compared with the SHA-256 of
+    # scripts/upgrade/releases.txt before it is used.
+    - name: Fetch the release files of the start version
+      shell: bash
+      env:
+        UPGRADE_ONLY: ${{ inputs.version }}
+      run: task upgrade:fetch
+
+    # http-01 needs port 80 for lego and an address of this host that the server may
+    # connect to (never loopback): the way the conformance job does it
+    # (test/conformance/run.sh).
+    - name: Port 80 and the address of this host
+      shell: bash
+      run: |
+        if [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" -gt 80 ]; then
+          sudo sysctl -q -w net.ipv4.ip_unprivileged_port_start=80
+        fi
+        host_ip=$(hostname -I | awk '{print $1}')
+        [ -n "$host_ip" ] || { echo "no address of this host found" >&2; exit 1; }
+        echo "UPGRADE_HOST_IP=$host_ip" >> "$GITHUB_ENV"
+        echo "UPGRADE_PORT80=1" >> "$GITHUB_ENV"
+
+    - name: Old release, update in place, checks A1 to A10
+      shell: bash
+      env:
+        UPGRADE_ONLY: ${{ inputs.version }}
+        UPGRADE_OFFLINE: "1"
+        UPGRADE_WORK: ${{ runner.temp }}/upgrade-work
+      run: task upgrade
+
+    # The work directory of a failed version is kept; its server and agent logs (no
+    # secrets in them, PLAN section 5) are the first thing to read.
+    - name: Server and agent logs of the failed run
+      if: failure()
+      shell: bash
+      run: |
+        for f in "$RUNNER_TEMP"/upgrade-work/*/logs/*.log "$RUNNER_TEMP"/upgrade-work/*/t/agent/run.log "$RUNNER_TEMP"/upgrade-work/*/t/lego-*.log; do
+          [ -f "$f" ] || continue
+          echo "::group::$f"
+          tail -n 60 "$f"
+          echo "::endgroup::"
+        done

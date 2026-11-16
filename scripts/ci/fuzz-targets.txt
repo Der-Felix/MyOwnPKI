@@ -47,6 +47,9 @@
 # The wizard's CSR file (step 86)
 ./internal/web FuzzUploadedCSR
 
+# The backup manifest and its signature (step 102)
+./internal/backup FuzzManifest
+
 # The public trust page (step 87)
 ./internal/trustkit FuzzDetect
 ./internal/trustkit FuzzGuide

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 )
@@ -25,6 +26,11 @@ type Report struct {
 	Certificates int
 	// Notes are for the operator (auth.key, migrations to apply).
 	Notes []string
+	// Authenticity says what the signature proves: nothing (format 1), that a
+	// key made it (signed), or that the expected key made it (pinned).
+	Authenticity Authenticity
+	// SigningKey is the fingerprint of the key that signed; "" = unsigned.
+	SigningKey string
 }
 
 // ErrRefused wraps the problems of a backup that may not be restored.
@@ -35,29 +41,55 @@ func (r *Report) problem(format string, a ...any) {
 }
 
 // Verify runs every check of a restore on a copy and writes nothing else.
-// pin is the checkpoint key fingerprint noted at init ("" = all checkpoints
-// must use the key the manifest names).
-func Verify(ctx context.Context, dir, pin string) (*Report, error) {
+func Verify(ctx context.Context, dir string, c Check) (*Report, error) {
+	c, err := normalizeCheck(c)
+	if err != nil {
+		return nil, err
+	}
 	tmp, err := os.MkdirTemp("", "myownpki-verify-")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
-	return check(ctx, dir, filepath.Join(tmp, "data"), pin)
+	return check(ctx, dir, filepath.Join(tmp, "data"), c)
+}
+
+// normalizeCheck checks the --backup-key text before anything is read and
+// returns c with the fingerprints as lower-case hex digits.
+func normalizeCheck(c Check) (Check, error) {
+	var err error
+	if c.BackupKey != "" {
+		if c.BackupKey, err = backupkey.NormalizePin(c.BackupKey); err != nil {
+			return c, fmt.Errorf("backup key: %w", err)
+		}
+	}
+	if c.HostKey != "" {
+		if c.HostKey, err = backupkey.NormalizePin(c.HostKey); err != nil {
+			return c, fmt.Errorf("host backup key: %w", err)
+		}
+	}
+	return c, nil
 }
 
 // check copies the backup to work (a new directory) and checks it there:
-// the backup itself is never opened as a database.
-func check(ctx context.Context, dir, work, pin string) (*Report, error) {
-	m, err := readManifest(dir)
+// the backup itself is never opened as a database. The signature is checked
+// first: nothing the manifest says is used before it is known who vouches
+// for it.
+func check(ctx context.Context, dir, work string, c Check) (*Report, error) {
+	pin := c.CheckpointKey
+	m, raw, err := loadManifest(dir)
 	if err != nil {
 		return nil, err
 	}
 	r := &Report{Manifest: m}
+	r.checkSignature(dir, raw, c.BackupKey, c.HostKey, c.AllowUnsigned)
+	if len(r.Problems) > 0 {
+		return r, fmt.Errorf("%w: %s", ErrRefused, strings.Join(r.Problems, "; "))
+	}
 	listed := map[string]File{}
 	for _, f := range m.Files {
 		clean := path.Clean(f.Path)
-		if clean != f.Path || strings.HasPrefix(clean, "../") || clean == ".." || path.IsAbs(clean) || strings.Contains(clean, `\`) || clean == ManifestFile {
+		if clean != f.Path || strings.HasPrefix(clean, "../") || clean == ".." || path.IsAbs(clean) || strings.Contains(clean, `\`) || clean == ManifestFile || clean == SignatureFile {
 			r.problem("the manifest names the file %q – not a path inside the backup", f.Path)
 			continue
 		}
@@ -76,7 +108,7 @@ func check(ctx context.Context, dir, work, pin string) (*Report, error) {
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
-		if rel != ManifestFile && listed[rel].Path == "" {
+		if rel != ManifestFile && (rel != SignatureFile || m.Format != Format) && listed[rel].Path == "" {
 			r.problem("%s is not in the manifest – the backup was changed", rel)
 		}
 		return nil
@@ -245,9 +277,13 @@ func (r *Report) checkHead(ctx context.Context, p, scope string, head audit.Head
 	}
 }
 
-// Restore checks the backup and moves it into the data directory of o,
-// which must be empty or missing. pin as for Verify.
-func Restore(ctx context.Context, dir, pin string, o Options) (*Report, error) {
+// Restore checks the backup as Verify does and moves it into the data
+// directory of o, which must be empty or missing.
+func Restore(ctx context.Context, dir string, c Check, o Options) (*Report, error) {
+	c, perr := normalizeCheck(c)
+	if perr != nil {
+		return nil, perr
+	}
 	data := o.Layout.DataDir
 	// A file is no empty directory (on Windows ReadDir says "not found" for
 	// it, and the restore would delete it).
@@ -270,10 +306,11 @@ func Restore(ctx context.Context, dir, pin string, o Options) (*Report, error) {
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	work := filepath.Join(tmp, "data")
-	r, err := check(ctx, dir, work, pin)
+	r, err := check(ctx, dir, work, c)
 	if err != nil {
 		return r, err
 	}
+	r.noteBackupKey(o.Layout.DataDir)
 	if r.Manifest.AuthKey {
 		keyRel := ""
 		for _, f := range r.Manifest.Files {
@@ -312,4 +349,18 @@ func Restore(ctx context.Context, dir, pin string, o Options) (*Report, error) {
 		return r, fmt.Errorf("move the restored files into %s: %w", data, err)
 	}
 	return r, nil
+}
+
+// noteBackupKey tells what a restore does not bring along: the backup key
+// stays with the host that made the backup, so the instance restored here
+// has none until its first backup makes a new one.
+func (r *Report) noteBackupKey(dataDir string) {
+	if exists(backupkey.Path(dataDir)) {
+		return
+	}
+	text := "the backup key (" + backupkey.FileName + ") is never part of a backup: the first backup made here creates a new one – note its fingerprint"
+	if r.SigningKey != "" {
+		text += "; this backup stays verifiable with --backup-key " + r.SigningKey
+	}
+	r.Notes = append(r.Notes, text)
 }

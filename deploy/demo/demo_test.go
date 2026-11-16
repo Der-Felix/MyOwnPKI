@@ -355,3 +355,29 @@ func TestScriptReadsTheSecretsFileOfInit(t *testing.T) {
 		})
 	}
 }
+
+// TestImageTagIsTheCurrentRelease: the demo names the release it was made for
+// (docs/PHASE3.md §19, step 119). A static compose file cannot read the
+// version at build time, so the tag is bumped by hand at every release
+// (docs/RELEASING.md "Before the tag"); this test fails when it is not.
+func TestImageTagIsTheCurrentRelease(t *testing.T) {
+	m := regexp.MustCompile(`(?m)^DEFAULT_VERSION=(\S+)$`).FindStringSubmatch(read(t, "../install.sh"))
+	if m == nil {
+		t.Fatal("deploy/install.sh: DEFAULT_VERSION not found")
+	}
+	want := m[1]
+
+	tag := regexp.MustCompile(`ghcr\.io/der-felix/myownpki:([0-9A-Za-z._-]+)`)
+	found := 0
+	for _, file := range []string{"docker-compose.yml", "web/Dockerfile", ".env.example", "README.md"} {
+		for _, hit := range tag.FindAllStringSubmatch(read(t, file), -1) {
+			found++
+			if hit[1] != want {
+				t.Errorf("%s: image tag %q, but deploy/install.sh has DEFAULT_VERSION=%s; bump the demo files (docs/RELEASING.md)", file, hit[1], want)
+			}
+		}
+	}
+	if found == 0 {
+		t.Error("no image tag found in the demo files")
+	}
+}

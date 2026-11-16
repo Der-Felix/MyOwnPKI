@@ -15,11 +15,11 @@ PowerShell 5.1: the commands write `"${VERSION}"` in double quotes, which both s
 Commands that differ between the shells are marked. Set the version once per shell window:
 
 ```bash
-VERSION=0.3.12
+VERSION=0.9.0
 ```
 
 ```powershell
-$VERSION = "0.3.12"
+$VERSION = "0.9.0"
 ```
 
 The sections "Check the draft" and "Remove a draft" are used twice – for the release candidate
@@ -85,6 +85,20 @@ $env:NO_PROXY = "github.com,api.github.com"
      parser, commit the file with the fix and start the check again.
    - `scripts/ci/fuzz-targets.txt` must list every `func Fuzz...` of the tree (CI job `fuzz` fails
      otherwise): `bash scripts/ci/fuzz.sh --check`.
+   - Released migrations are frozen: `internal/store/testdata/released-migrations.txt` pins the SHA-256
+     of every migration file a release shipped, and `TestReleasedMigrationsAreFrozen` fails when one
+     changes. Before the tag, check the pins against the tags that exist (they come from `git fetch
+     --tags`), and in the release commit pin the migrations that are new in this release:
+
+     ```bash
+     bash scripts/ci/pin-migrations.sh --check
+     ```
+
+     ```bash
+     bash scripts/ci/pin-migrations.sh --add-tree "v${VERSION}"
+     ```
+
+     A defect in a released migration is fixed by a new migration, never by an edit.
 2. `CHANGELOG.md`: the section `## [<version>] - <date>` must carry the day you push the tag –
    change it if not and commit (`docs: date of v<version>`). The release notes are taken from this
    section; the workflow stops if it is missing. What the workflow will take (Git Bash – the same
@@ -102,6 +116,11 @@ $env:NO_PROXY = "github.com,api.github.com"
    grep "^DEFAULT_VERSION=" deploy/install.sh deploy/install-agent.sh
    ```
 
+   The demo names the release too, and a static compose file cannot read it: bump the image tag
+   `ghcr.io/der-felix/myownpki:<version>` by hand in `deploy/demo/docker-compose.yml` (three
+   places), `deploy/demo/web/Dockerfile`, `deploy/demo/.env.example` and `deploy/demo/README.md`.
+   `go test ./deploy/demo` fails when one of them differs from `DEFAULT_VERSION`.
+
 4. Merge into main – through the pull request once its CI is green – and bring the local main up
    to date, so the tags below land on the merged commit:
 
@@ -114,6 +133,22 @@ $env:NO_PROXY = "github.com,api.github.com"
    ```
 
 5. Wait until CI on main is green (*Actions → CI*). Don't tag a red main.
+6. **The upgrade test is green for every start version, on the commit you tag.** The job `upgrade`
+   runs the full matrix (every version of `scripts/upgrade/releases.txt`: the old releases make an
+   installation, this tree updates it in place) on every push to main, and `upgrade-nightly` every
+   night. Open the run of the commit to be tagged: **one job per version, all green, none skipped**
+   (a pull request runs only three of them, so a green pull request is not enough). The job
+   `install` carries the same for the systemd installation (`install.sh` of 0.2.2 and of the
+   previous release, then this tree's). If a version cannot run on main, run it by hand on a Linux
+   machine with Go, Task, curl and OpenSSL (`task upgrade:lego` once, port 80 free) and put the
+   output into the release report:
+
+   ```bash
+   task upgrade UPGRADE_ONLY=0.3.12
+   ```
+
+   A SKIP line of the table (no lego, no port 80, no address) is not a success; fix the cause.
+   A failure is a blocker (docs/PHASE3.md §19.9): do not tag.
 
 ## Rehearsal: the release candidate
 
@@ -274,6 +309,40 @@ gh release view "v${VERSION}" --json isDraft,isPrerelease,url
 
 Both marks are false, and the URL is the release page. (In the browser instead: the draft → *Edit*
 → *Set as the latest release* ticked → *Publish release*.)
+
+## After the publish: the next start version
+
+The upgrade test starts from published releases, with the SHA-256 of their files pinned in the
+repository. Right after the release is published, on the branch of the next release:
+
+1. Pin the release for the upgrade test. `pin-release.sh` downloads `checksums.txt` and its
+   cosign bundle, verifies the signature against the workflow identity of that tag (cosign must be
+   installed; without it the script stops, and `--no-cosign` is a conscious step), and writes the
+   lines of `scripts/upgrade/releases.txt` for that version. Review them with `git diff`; the
+   hashes must equal the ones on the release page:
+
+   ```bash
+   bash scripts/upgrade/pin-release.sh "v${VERSION}" --write --packages
+   ```
+
+   `--packages` also pins the six agent packages of the release (55 MB): the update test of the systemd
+   installation (`install.sh` of the previous release, then this tree's) needs them, because that
+   `install.sh` refuses `--archive` without all six. Leave the flag out for a release that is
+   only a middle start version.
+
+   The newest line of the list is the *previous release* of the next version: the upgrade
+   test starts from it (the pull-request subset always has it), and `check-agent-protocol.sh`
+   compares the agent protocol with it. The older start versions stay; to add a middle version
+   (say 0.9.0 as a start for 1.0) is the same command.
+2. Pin the migration files of the release (they were pinned in the release commit with
+   `--add-tree`; this checks that the tag has the same files):
+
+   ```bash
+   bash scripts/ci/pin-migrations.sh --check
+   ```
+
+3. Commit both (`test(upgrade): pin v${VERSION}`) and let CI run the job `upgrade` once: the new
+   line must fetch and start.
 
 ## Remove a draft
 

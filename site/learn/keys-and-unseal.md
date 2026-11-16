@@ -66,7 +66,9 @@ Because of all this, plan for an unseal after every restart and every update, an
 `myownpki backup` copies every database consistently, also while the server runs: the instance database
 (users, sessions and the key ring with the wrapped master key), the tenant databases (CAs, certificates,
 encrypted keys) and the audit logs, plus `auth.key` when it lies in the data directory, and a
-`manifest.json` with a hash for each file. It does **not** copy `config.yaml`; keep that in your own backup.
+`manifest.json` with a hash for each file and a `manifest.sig`, the signature of the **backup key** over that manifest
+(0.9.0 and later; the key is a file in the data directory and is never part of a backup, so nobody who only has a backup
+can sign a changed one). It does **not** copy `config.yaml`; keep that in your own backup.
 
 The backup holds the keys, but encrypted. It cannot sign on its own. **Backup plus the passphrase or the
 recovery key can.** That is why the three belong in three different places.

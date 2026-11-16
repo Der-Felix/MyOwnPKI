@@ -22,7 +22,8 @@ keys, so it needs care in both directions: it must exist, and it must not lie ne
 |---|---|
 | Every database: users, the audit logs, CAs, certificates and the encrypted keys | `config.yaml`: copy `/etc/myownpki/config.yaml` yourself |
 | `auth.key`, only if it lives in the data directory | `auth.key` when `auth.key_file` points elsewhere; without it every user needs a second-factor reset after a restore |
-| A `manifest.json` with a SHA-256 per file and the head of every audit chain | The unseal passphrase and the recovery key, on purpose |
+| A `manifest.json` with a SHA-256 per file and the head of every audit chain, and a `manifest.sig`: its signature by the backup key | The unseal passphrase and the recovery key, on purpose |
+| | The backup key itself (`backup-signing.key` in the data directory), on purpose |
 
 The keys in a backup are encrypted. The backup alone cannot sign; the backup together with the passphrase or the recovery
 key can. That is why the three belong in different places.
@@ -48,11 +49,16 @@ Make a backup by hand before a larger change. The directory must not exist yet; 
 sudo -u myownpki /usr/local/bin/myownpki backup /var/backups/myownpki/before-change
 ```
 
-Check a backup without touching anything. Use the checkpoint key fingerprint that `init` showed you:
+Check a backup without touching anything. Use the checkpoint key and backup key fingerprints that `init` showed you:
 
 ```bash
-sudo -u myownpki /usr/local/bin/myownpki backup verify /var/backups/myownpki/before-change --checkpoint-key FINGERPRINT
+sudo -u myownpki /usr/local/bin/myownpki backup verify /var/backups/myownpki/before-change --backup-key BACKUP_KEY_FINGERPRINT --checkpoint-key FINGERPRINT
 ```
+
+Every backup is signed with the backup key. A signature says that the holder of one key made the backup, not whose key it
+is: somebody who can write to your backup share could change a database and sign the result with a key of his own. With
+`--backup-key` a backup signed by any other key, or not signed at all, is refused. Backups from before 0.9.0 have no signature;
+they still restore and are reported as unauthenticated, and need `--allow-unsigned` when `--backup-key` is given.
 
 ## Keep a copy off the machine
 
@@ -85,7 +91,7 @@ sudo install -d -m 0700 -o myownpki -g myownpki /var/lib/myownpki
 ```
 
 ```bash
-sudo /usr/local/bin/myownpki restore /path/to/backup --config /etc/myownpki/config.yaml --checkpoint-key FINGERPRINT
+sudo /usr/local/bin/myownpki restore /path/to/backup --config /etc/myownpki/config.yaml --backup-key BACKUP_KEY_FINGERPRINT --checkpoint-key FINGERPRINT
 ```
 
 The restored files belong to root until you hand them back, then start the server:
@@ -126,6 +132,7 @@ not in it.
 | Recovery key | On paper in a safe, not in the password manager and not with the backups |
 | Backups | Another machine or disk |
 | Checkpoint key fingerprint | Written down: `backup verify` and `restore` use it |
+| Backup key fingerprint | Written down: proves who made a backup (`--backup-key`). The key file stays in the data directory, not with the backups |
 
 A guide never shows any of these secrets; they appear once, where they are created. The longer page walks through a full
 restore drill and the failure cases.
