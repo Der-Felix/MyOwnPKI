@@ -60,6 +60,13 @@ myownpki:
       #   dns_nameserver: 192.0.2.53        # rfc2136 only
       #   dns_zone: homelab.lan             # rfc2136 only, optional
       #   dns_resolver: 192.0.2.53          # optional
+      # HAProxy (an example recipe, not yet run on a live host): one PEM file with the certificate
+      # chain and the key in it. The recipe sets "combined"; it needs agent 0.3.11 on the minion.
+      # lb:
+      #   recipe: haproxy
+      #   name: lb-01.homelab.lan
+      #   webroot: /var/www/html
+      #   create_dirs: true
     # ... and names of deployments to remove with "deployment remove":
     absent: []
     # ... or a complete agent.yaml, rendered by Salt (then neither deployments nor absent):

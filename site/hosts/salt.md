@@ -224,12 +224,15 @@ The repository has the same file with comments: `deploy/salt/myownpki/pillar.exa
 | `absent` | no | List of deployment names to remove with `deployment remove` |
 
 The options of a deployment are the flags of `myownpki-agent deployment add` with `-` written as `_`:
-`recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `owner`,
+`recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `combined`, `owner`,
 `group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `acme_directory` (strings), the seven options of [dns-01](#dns-01-deployments) (`check_name`, `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`, `dns_zone`, `dns_resolver`), `name`, `hook`,
 `sandbox_write` (a string or a list; the flag is repeated) and `low_ports`, `create_dirs`, `restart`
 (`true` or `false`). Leave `restart` unset: the formula restarts the agent itself with `try-restart`,
-and `restart: true` would start an agent that still waits for approval. The recipes are on
-[Recipes]({{ '/recipes/' | relative_url }}).
+and `restart: true` would start an agent that still waits for approval. The recipes (`nginx`, `apache2`, `httpd`, `haproxy`, `postfix`, `dovecot`, `proxmox`) are on
+[Recipes]({{ '/recipes/' | relative_url }}). `combined` is the flag `--combined`: one file with the certificate chain and the
+key, used alone, which the `haproxy` recipe sets. **An agent older than 0.3.11 refuses it, so update the agent on the minion
+first** ([Upgrade]({{ '/upgrade/' | relative_url }}#update-the-agents)); the same holds for a `config_source` file that has
+`files.combined`.
 
 **One owner of `agent.yaml`.** Either `deployments` (the formula calls `deployment add`) or `config_source`
 (Salt renders the whole file and runs `sandbox sync`). Both together are refused. The agent's state
