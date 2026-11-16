@@ -94,18 +94,24 @@ func TestEveryRecipeRendersAValidDeployment(t *testing.T) {
 	}
 }
 
-func TestRecipeNginxGolden(t *testing.T) {
-	f := freshFixture(t)
-	spec := DeploymentSpec{Name: "test", Names: []string{"proxy.homelab.lan"}, ACMEDirectory: recipeACME}
-	if err := applyRecipe(&spec, "nginx", f.root); err != nil {
-		t.Fatal(err)
-	}
-	if err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "recipe-nginx.out.yaml", f.normalize(f.read(f.config)))
-	if strings.Contains(f.stdout.String(), "example recipe") {
-		t.Error("nginx is not an example recipe")
+// The configuration a recipe writes, byte for byte. Only nginx is a recipe
+// that ran on a live host; the others say so in their dry run.
+func TestRecipeGolden(t *testing.T) {
+	for _, name := range []string{"nginx", "apache2", "httpd"} {
+		t.Run(name, func(t *testing.T) {
+			f := freshFixture(t)
+			spec := DeploymentSpec{Name: "test", Names: []string{"proxy.homelab.lan"}, ACMEDirectory: recipeACME}
+			if err := applyRecipe(&spec, name, f.root); err != nil {
+				t.Fatal(err)
+			}
+			if err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err != nil {
+				t.Fatal(err)
+			}
+			golden(t, "recipe-"+name+".out.yaml", f.normalize(f.read(f.config)))
+			if got := strings.Contains(f.stdout.String(), "example recipe"); got != (name != "nginx") {
+				t.Errorf("example wording present = %v:\n%s", got, f.stdout.String())
+			}
+		})
 	}
 }
 
@@ -168,8 +174,8 @@ func TestRecipeDeploymentsShareTheirHooks(t *testing.T) {
 
 func TestRecipeUnknownNameListsTheKnownOnes(t *testing.T) {
 	t.Parallel()
-	err := ApplyRecipe(&DeploymentSpec{Name: "x"}, "apache")
-	if err == nil || err.Error() != `unknown recipe "apache" – known: dovecot, nginx, postfix, proxmox` {
+	err := ApplyRecipe(&DeploymentSpec{Name: "x"}, "lighttpd")
+	if err == nil || err.Error() != `unknown recipe "lighttpd" – known: apache2, dovecot, httpd, nginx, postfix, proxmox` {
 		t.Errorf("error = %v", err)
 	}
 }
