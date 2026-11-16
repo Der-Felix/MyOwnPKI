@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"log/slog"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
@@ -47,7 +47,7 @@ func (s *Server) revokeCert(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	der, err := base64.RawURLEncoding.Strict().DecodeString(p.Certificate)
+	der, err := b64url.Decode(p.Certificate)
 	if err != nil || len(der) == 0 {
 		s.fail(w, r, problemErr(http.StatusBadRequest, "malformed", "\"certificate\" must be the certificate's DER in base64url without padding"))
 		return

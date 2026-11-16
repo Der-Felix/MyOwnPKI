@@ -6,7 +6,8 @@
 //   - Flattened JSON serialization only, with exactly the members
 //     "protected", "payload" and "signature" – no unprotected header, no
 //     "signatures" array, no duplicate member names anywhere.
-//   - Base64url without padding, strict (no stray bits).
+//   - Base64url without padding in its one canonical form (b64url.Decode): no
+//     stray bits, and no line break or any other character outside the alphabet.
 //   - Algorithms: ES256 (P-256), ES384 (P-384), RS256 (RSA ≥ 2048 bits),
 //     EdDSA (Ed25519). The algorithm follows from the key; the header must
 //     name exactly that one. "none", HS*, everything else: refused.
@@ -24,6 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 )
 
 // Errors a caller can map to ACME problem types.
@@ -44,12 +47,14 @@ func malformed(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrMalformed, fmt.Sprintf(format, args...))
 }
 
-// b64 is base64url without padding, strict: trailing bits must be zero, so
-// every value has exactly one encoding.
+// b64 writes base64url without padding (thumbprints, canonical JWKs).
 var b64 = base64.RawURLEncoding.Strict()
 
+// decodeB64 reads base64url without padding in its one canonical form, so
+// every value has exactly one spelling. The standard decoder is not enough:
+// it skips CR and LF even in strict mode.
 func decodeB64(what, s string) ([]byte, error) {
-	out, err := b64.DecodeString(s)
+	out, err := b64url.Decode(s)
 	if err != nil {
 		return nil, malformed("%s is not base64url without padding", what)
 	}

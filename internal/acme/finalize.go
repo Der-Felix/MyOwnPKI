@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
@@ -66,7 +66,7 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, perr)
 		return
 	}
-	der, err := base64.RawURLEncoding.Strict().DecodeString(in.CSR)
+	der, err := b64url.Decode(in.CSR)
 	if err != nil {
 		s.fail(w, r, problemErr(http.StatusBadRequest, "badCSR", "csr is not base64url DER"))
 		return

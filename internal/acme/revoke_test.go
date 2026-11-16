@@ -274,3 +274,27 @@ func TestRevokeWithEachKeyType(t *testing.T) {
 		t.Errorf("revoke a P-521 certificate by its account: %d %s", a.code, a.body)
 	}
 }
+
+// A certificate with a line break inside is refused (encoding/base64 would
+// skip it); nothing is revoked, and the clean request still works.
+func TestRevokeCertRefusesLineBreaks(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	owner := v.client(t)
+	owner.register()
+	der, _ := owner.issue("nas.homelab.lan")
+	url := testBase + "/revoke-cert"
+	text := b64(der)
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		a := owner.post(url, map[string]any{"certificate": text[:40] + brk + text[40:]})
+		if a.code != http.StatusBadRequest || a.problem() != "malformed" {
+			t.Errorf("%q inside the certificate: %d %s", brk, a.code, a.body)
+		}
+	}
+	if _, revoked := v.revocation(t, der); revoked {
+		t.Fatal("a refused request revoked the certificate")
+	}
+	if a := owner.post(url, revokePayload(der, -1)); a.code != http.StatusOK {
+		t.Fatalf("the clean request: %d %s", a.code, a.body)
+	}
+}

@@ -399,3 +399,30 @@ func TestAccountKeyChangeAndDeactivation(t *testing.T) {
 		t.Errorf("deactivated account orders: %d %s", a.code, a.body)
 	}
 }
+
+// A CSR with a line break inside is refused like any other text that is not
+// canonical base64url (encoding/base64 would skip it), and the order stays
+// ready for the clean request.
+func TestFinalizeRefusesLineBreaksInCSR(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	c := v.client(t)
+	c.register()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csr := csrFor(t, key, "nas.homelab.lan", []string{"nas.homelab.lan"}, nil)
+	order := c.order("nas.homelab.lan")
+	c.solve(order, "http-01")
+	finalizeURL, _ := order.json["finalize"].(string)
+	text := b64(csr)
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		if a := c.post(finalizeURL, map[string]string{"csr": text[:20] + brk + text[20:]}); a.code != http.StatusBadRequest || a.problem() != "badCSR" {
+			t.Errorf("%q inside the CSR: %d %s", brk, a.code, a.body)
+		}
+	}
+	if a := c.post(finalizeURL, map[string]string{"csr": text + "\n"}); a.code != http.StatusBadRequest || a.problem() != "badCSR" {
+		t.Errorf("a line feed behind the CSR: %d %s", a.code, a.body)
+	}
+	if fin := c.finalize(order, csr); fin.json["status"] != "valid" {
+		t.Fatalf("the clean CSR after the refusals: %d %s", fin.code, fin.body)
+	}
+}

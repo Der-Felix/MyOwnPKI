@@ -121,6 +121,15 @@ dependency**.
   `AQID.AQ` (found by the fuzz job). Each part of the identifier has to be canonical base64url now (only `A-Z a-z 0-9 - _`,
   no padding, no stray bits); anything else answers 400 `malformed`. Clients that write the identifier as RFC 9773 says are
   not affected.
+- **The same hole in four more places that read base64url from a sender.** A line break inside the text was skipped there
+  as well: the three members of an ACME request (`protected`, `payload`, `signature`), the members of a key (`x`, `y`, `n`,
+  `e`) and of an external account binding, the `csr` of a finalize request, the `certificate` of a revocation, and the
+  key thumbprint that an agent reserves for its ACME account. So a signed request could be sent in several spellings
+  (the signature covers the spelling, so only the holder of the key could do that), and an agent could store a thumbprint
+  with a trailing line feed that never matches its account and blocked the real one with a conflict. All of them read
+  canonical base64url now and answer 400 (`malformed`, `badCSR`, or `invalid` for the agent). Requests from certbot, lego,
+  acme.sh and the agent are not affected: none of them writes a line break. The cookie value of a trusted device was
+  looked at too and left as it is: a cookie cannot carry a line break.
 
 ### Security notes
 

@@ -413,3 +413,88 @@ func TestRefusalsDoNotEchoTheRequest(t *testing.T) {
 		}
 	}
 }
+
+// breakIn returns the JSON object with a line break in the middle of its
+// string member name.
+func breakIn(t *testing.T, raw []byte, name, brk string) []byte {
+	t.Helper()
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := m[name]
+	if !ok || len(v) < 2 {
+		t.Fatalf("no member %q in %s", name, raw)
+	}
+	m[name] = v[:len(v)/2] + brk + v[len(v)/2:]
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestLineBreaksInBase64: encoding/base64 skips CR and LF, also in strict
+// mode, so a JWS with a line break inside "protected", "payload" or
+// "signature" (or a JWK member) decoded like the clean one and had a second
+// spelling. Every base64url text is canonical or refused, EAB included.
+func TestLineBreaksInBase64(t *testing.T) {
+	t.Parallel()
+	s := newSigner(t, ES256)
+	body := s.body(t, s.header(), `{"termsOfServiceAgreed":true}`)
+	if _, err := Parse(body); err != nil {
+		t.Fatalf("the clean request: %v", err)
+	}
+
+	const url = "https://acme.example/new-account"
+	acctKey, err := ParseJWK([]byte(s.jwk))
+	if err != nil {
+		t.Fatal(err)
+	}
+	macKey := []byte("a mac key the admin created, 32b")
+	ph := b64.EncodeToString([]byte(`{"alg":"HS256","kid":"eab-1","url":"` + url + `"}`))
+	pl := b64.EncodeToString([]byte(s.jwk))
+	mac := hmac.New(sha256.New, macKey)
+	mac.Write([]byte(ph + "." + pl))
+	eab := []byte(`{"protected":"` + ph + `","payload":"` + pl + `","signature":"` + b64.EncodeToString(mac.Sum(nil)) + `"}`)
+	lookup := func(kid string) ([]byte, error) {
+		if kid != "eab-1" {
+			return nil, errors.New("unknown EAB key")
+		}
+		return macKey, nil
+	}
+	if _, err = VerifyEAB(eab, acctKey, url, lookup); err != nil {
+		t.Fatalf("the clean binding: %v", err)
+	}
+
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		for _, member := range []string{"protected", "payload", "signature"} {
+			name := member + " " + strings.NewReplacer("\r", "CR", "\n", "LF").Replace(brk)
+			t.Run("JWS "+name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := Parse(breakIn(t, body, member, brk)); !errors.Is(err, ErrMalformed) {
+					t.Fatalf("expected ErrMalformed, got %v", err)
+				}
+			})
+			t.Run("EAB "+name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := VerifyEAB(breakIn(t, eab, member, brk), acctKey, url, lookup); !errors.Is(err, ErrMalformed) {
+					t.Fatalf("expected ErrMalformed, got %v", err)
+				}
+			})
+		}
+		t.Run("JWK x "+strings.NewReplacer("\r", "CR", "\n", "LF").Replace(brk), func(t *testing.T) {
+			t.Parallel()
+			const marker = `"x":"`
+			i := strings.Index(s.jwk, marker)
+			if i < 0 {
+				t.Fatalf("no x in %s", s.jwk)
+			}
+			i += len(marker) + 5
+			jwk := s.jwk[:i] + strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(brk) + s.jwk[i:]
+			if _, err := ParseJWK([]byte(jwk)); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("expected ErrMalformed, got %v (%s)", err, jwk)
+			}
+		})
+	}
+}
