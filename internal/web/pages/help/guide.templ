@@ -1,0 +1,148 @@
+package help
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/guides"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// GuideData is one guide page: the guide with its placeholders already
+// replaced (guides.Guide.Resolve). Everything in it is text; templ escapes it.
+type GuideData struct {
+	Messages []view.Message
+	Guide    *guides.Guide
+}
+
+// Guide renders one guide: a short contents list, one section per level 2
+// heading, and the link to the longer version. The guide is complete without
+// that link.
+templ Guide(p view.Page, d GuideData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<div class="prose">
+			if toc := d.Guide.Headings(); len(toc) > 1 {
+				<nav class="section" aria-label="On this page">
+					<p class="muted">On this page</p>
+					<ul class="link-list">
+						for _, h := range toc {
+							<li><a href={ templ.SafeURL("#" + AnchorID(h.ID)) }>{ h.Text[0].Text }</a></li>
+						}
+					</ul>
+				</nav>
+			}
+			@Body(d.Guide.Blocks)
+			if d.Guide.SiteURL() != "" {
+				<section class="section" aria-labelledby="g-longer">
+					<div class="section-head"><h2 id="g-longer">Longer version</h2></div>
+					<p>
+						This guide is complete on its own. The documentation site has the longer page
+						with more detail:
+						<a href={ templ.URL(d.Guide.SiteURL()) } rel="noopener noreferrer">{ d.Guide.Title } on the documentation site</a>.
+					</p>
+				</section>
+			}
+		</div>
+	}
+}
+
+// AnchorID is the id attribute of a heading. The prefix keeps a guide's ids
+// apart from the ids of the page shell (main, …).
+func AnchorID(id string) string { return "g-" + id }
+
+// Body renders blocks: every level 2 heading opens a section. Used by the
+// guide page and by the gallery on /design.
+templ Body(blocks []guides.Block) {
+	for _, s := range sections(blocks) {
+		if s.Heading != nil {
+			<section class="section" aria-labelledby={ AnchorID(s.Heading.ID) }>
+				<div class="section-head"><h2 id={ AnchorID(s.Heading.ID) }>{ s.Heading.Text[0].Text }</h2></div>
+				for _, b := range s.Blocks {
+					@Block(b)
+				}
+			</section>
+		} else {
+			<section class="section">
+				for _, b := range s.Blocks {
+					@Block(b)
+				}
+			</section>
+		}
+	}
+}
+
+// Block renders one block below its level 2 heading.
+templ Block(b guides.Block) {
+	switch b.Kind {
+		case guides.KindHeading:
+			<h3 id={ AnchorID(b.ID) }>{ b.Text[0].Text }</h3>
+		case guides.KindParagraph:
+			<p>@Inlines(b.Text)</p>
+		case guides.KindList:
+			if b.Ordered {
+				<ol>
+					for _, item := range b.Items {
+						<li>@Inlines(item)</li>
+					}
+				</ol>
+			} else {
+				<ul>
+					for _, item := range b.Items {
+						<li>@Inlines(item)</li>
+					}
+				</ul>
+			}
+		case guides.KindCode:
+			<pre class="pem" tabindex="0" role="region" aria-label={ CodeLabel(b.Lang) }><code>{ b.Code }</code></pre>
+		case guides.KindTable:
+			<div class="table-wrap table-adaptive">
+				<table class="table">
+					<thead>
+						<tr>
+							for _, cell := range b.Header {
+								<th scope="col">@Inlines(cell)</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range b.Rows {
+							<tr>
+								for _, cell := range row {
+									<td>@Inlines(cell)</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		case guides.KindNote:
+			if b.Warning {
+				<div class="msg msg-warn" role="note"><span class="msg-label">Warning:</span>{ " " }@Inlines(b.Text)</div>
+			} else {
+				<div class="msg msg-info" role="note"><span class="msg-label">Note:</span>{ " " }@Inlines(b.Text)</div>
+			}
+	}
+}
+
+// Inlines renders the inline forms. Text is always escaped; a link goes
+// through templ.SafeURL (the parser has restricted it already).
+templ Inlines(list []guides.Inline) {
+	for _, in := range list {
+		switch in.Kind {
+			case guides.InlineBold:
+				<strong>{ in.Text }</strong>
+			case guides.InlineItalic:
+				<em>{ in.Text }</em>
+			case guides.InlineCode:
+				<code>{ in.Text }</code>
+			case guides.InlineLink:
+				if in.Target == guides.LinkSite {
+					<a href={ templ.URL(in.Href) } rel="noopener noreferrer">{ in.Text }</a>
+				} else {
+					<a href={ templ.URL(LinkHref(in)) }>{ in.Text }</a>
+				}
+			default:
+				{ in.Text }
+		}
+	}
+}

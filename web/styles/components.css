@@ -316,7 +316,8 @@
   white-space: nowrap;
 }
 
-.table tbody tr:hover td {
+.table tbody tr:hover td,
+.table tbody tr:hover th {
   background: var(--row-hover);
 }
 
@@ -725,7 +726,7 @@
   margin-top: var(--s-8);
 }
 
-.chart-numbers .table tbody th {
+.table tbody th {
   border-bottom-color: var(--border);
   color: var(--text);
   font-weight: var(--fw-regular);
@@ -863,4 +864,44 @@
   font-size: var(--fs-subtitle);
   line-height: var(--lh-subtitle);
   white-space: pre;
+}
+
+/* ---------- Guide text and plain link lists ----------
+   The Help guides (docs/PHASE3.md section 17): running text in a readable
+   line length, lists with the same rhythm as paragraphs, plain code blocks
+   and notes. No boxes, no icons. */
+.prose p,
+.prose ul,
+.prose ol,
+.prose .msg {
+  max-width: 80ch;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0 0 var(--s-8);
+  padding-left: var(--s-24);
+}
+
+.prose li {
+  margin-bottom: var(--s-4);
+}
+
+.prose h3 {
+  margin: var(--s-16) 0 var(--s-8);
+}
+
+.prose pre {
+  margin: 0 0 var(--s-16);
+}
+
+.prose .table-wrap {
+  margin-bottom: var(--s-16);
+}
+
+/* A list of links without bullets (contents, the links of a table row). */
+.link-list {
+  margin: 0 0 var(--s-8);
+  padding: 0;
+  list-style: none;
 }
