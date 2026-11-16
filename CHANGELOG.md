@@ -116,6 +116,11 @@ dependency**.
 - **An empty or zeroed database was accepted as a backup** (copied as migration 0, reported as success, noticed only by a later
   verify). `backup create` refuses it and names the file.
 - **The start of the server named no setting when `auth.passkey_origin` was the reason for the refusal.** It does now.
+- **An ARI certificate identifier could be written in more than one way.** The decoder of the Go standard library skips
+  carriage returns and line feeds, also in strict mode, so `GET /acme/renewal-info/AQ%0AID.AQ` named the same certificate as
+  `AQID.AQ` (found by the fuzz job). Each part of the identifier has to be canonical base64url now (only `A-Z a-z 0-9 - _`,
+  no padding, no stray bits); anything else answers 400 `malformed`. Clients that write the identifier as RFC 9773 says are
+  not affected.
 
 ### Security notes
 

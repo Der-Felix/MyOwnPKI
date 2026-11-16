@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
@@ -54,19 +55,21 @@ func ariID(cert *x509.Certificate) string {
 }
 
 // parseARIID reads a certificate identifier; the serial must be the
-// minimal DER encoding of a positive number.
+// minimal DER encoding of a positive number. Each part must be canonical
+// base64url (b64url.Decode): the standard decoder skips CR and LF, so an
+// identifier with a line break inside would name the same certificate as
+// the clean one.
 func parseARIID(id string) ([]byte, *big.Int, error) {
 	bad := problemErr(http.StatusBadRequest, "malformed", "the certificate identifier must be base64url(authority key ID) \".\" base64url(serial) (RFC 9773 §4.1)")
 	aki64, serial64, ok := strings.Cut(id, ".")
 	if !ok || strings.Contains(serial64, ".") || len(id) > 200 {
 		return nil, nil, bad
 	}
-	dec := base64.RawURLEncoding.Strict()
-	aki, err := dec.DecodeString(aki64)
+	aki, err := b64url.Decode(aki64)
 	if err != nil || len(aki) == 0 {
 		return nil, nil, bad
 	}
-	sb, err := dec.DecodeString(serial64)
+	sb, err := b64url.Decode(serial64)
 	if err != nil || len(sb) == 0 || len(sb) > 21 || sb[0]&0x80 != 0 || (len(sb) > 1 && sb[0] == 0 && sb[1]&0x80 == 0) {
 		return nil, nil, bad
 	}

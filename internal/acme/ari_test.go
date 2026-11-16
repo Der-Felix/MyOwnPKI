@@ -171,3 +171,47 @@ func mustKey(t *testing.T) *ecdsa.PrivateKey {
 	}
 	return k
 }
+
+// TestParseARIIDCanonicalText: each part of the identifier is canonical
+// base64url. The decoder of encoding/base64 skips CR and LF (also in strict
+// mode), so "AQ\nID.AQ" decoded like "AQID.AQ" and the fuzzer found that the
+// accepted text did not encode back to itself
+// (testdata/fuzz/FuzzParseARIID/ac08fde3b3e0c831).
+func TestParseARIIDCanonicalText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		id   string
+		ok   bool
+	}{
+		{"valid", "AQID.AQ", true},
+		{"valid with the url alphabet", "-_8.AP8", true},
+		{"CR in the key ID", "AQ\rID.AQ", false},
+		{"LF in the key ID", "AQ\nID.AQ", false},
+		{"CRLF in the key ID", "AQ\r\nID.AQ", false},
+		{"CR in the serial", "AQID.A\rQ", false},
+		{"LF in the serial", "AQID.A\nQ", false},
+		{"CRLF in the serial", "AQID.A\r\nQ", false},
+		{"LF at the end", "AQID.AQ\n", false},
+		{"CR at the start", "\rAQID.AQ", false},
+		{"CI input of the fuzzer", "000.A\r000", false},
+		{"space", "AQID.A Q", false},
+		{"percent escape left in", "AQID.A%0AQ", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			aki, serial, err := parseARIID(tc.id)
+			if tc.ok {
+				if err != nil || len(aki) == 0 || serial.Sign() <= 0 {
+					t.Fatalf("parseARIID(%q) = %x, %v, %v; expected it to be accepted", tc.id, aki, serial, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("parseARIID(%q) accepted it (key ID %x, serial %v)", tc.id, aki, serial)
+			}
+			refDetail(t, err, http.StatusBadRequest, "malformed")
+		})
+	}
+}
