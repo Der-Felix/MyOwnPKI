@@ -99,7 +99,8 @@ func (s *Scanner) Close() {
 	s.wg.Wait()
 }
 
-// Wait returns when no scan is running (for tests).
+// Wait returns when no scan is running. Only tests call it, those of this
+// package and of internal/server, so it cannot move into a _test.go file.
 func (s *Scanner) Wait() { s.init(); s.wg.Wait() }
 
 // Kick looks for due endpoints at once in the background – after a "scan

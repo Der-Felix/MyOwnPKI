@@ -91,6 +91,9 @@ func sameSet(a, b []string) bool {
 // DiffVersions compares two versions of one object; from = 0 means "nothing
 // before" (the first version shows every set field as added). Both numbers
 // must exist.
+//
+// Only tests call it today; it is kept because doc.go names it as part of the
+// history and restore API (the pages compare through Compare instead).
 func DiffVersions(ctx context.Context, b Backend, kind, objectID string, from, to int64) ([]FieldChange, error) {
 	if from < 0 || to < 1 {
 		return nil, fmt.Errorf("%w: versions %d and %d", ErrInvalid, from, to)

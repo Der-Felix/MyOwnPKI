@@ -134,6 +134,11 @@ tasks:
     cmds:
       - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; FUZZTIME={{.FUZZTIME | default "10s" | shellQuote}} FUZZ_ONLY={{.FUZZ_ONLY | default "" | shellQuote}} bash scripts/ci/fuzz.sh
 
+  deadcode:
+    desc: 'Functions that no binary and no test reaches; fails on one that is not in scripts/ci/deadcode-known.txt (go run through the module cache, go.mod unchanged; not part of check)'
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/ci/deadcode.sh
+
   cover:
     desc: 'Coverage table per package, integration tests credited to the code they exercise (COVER_PKGS=./internal/ids/... for a few packages, COVER_SKIP=<regexp> to leave packages out; needs minutes)'
     cmds:
