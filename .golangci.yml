@@ -51,6 +51,13 @@ linters:
     - errchkjson    # an ignored json.Marshal error leaves an empty body that a test can mistake for "absent"
     - wastedassign  # a value assigned and overwritten before it is read hides a branch that forgot to set it
     - recvcheck     # mixed value and pointer receivers; the few deliberate ones (redaction on a copy, wipe on the original) say so in a //nolint
+    - unparam       # a parameter nobody reads or a result nobody uses is a leftover of a change; "always receives" is not reported (see exclusions)
+    - intrange      # for i := range n, as the language has it since Go 1.22
+    - perfsprint    # fmt.Errorf without a verb is errors.New (go-conventions.md "Errors"); plus strconv for plain numbers
+    - mirror        # bytes/strings twins that allocate for nothing (strings.Contains(string(b), s))
+    - canonicalheader # header names are written in the form net/http sends them
+    - dogsled       # three or more blank identifiers in one assignment hide what a call returns
+    - fatcontext    # a context that grows inside a loop
 
     # --- Tests ---
     - usetesting
@@ -81,6 +88,10 @@ linters:
 
     misspell:
       locale: US             # ADR-17: English, US spelling
+
+    perfsprint:
+      strconcat: false       # "use + instead of Sprintf" is a style rewrite, not a fix
+      concat-loop: false     # a few short loops in tools and test servers; no hot path
 
     nolintlint:
       require-explanation: true
@@ -154,6 +165,10 @@ linters:
       # Table tests and fixtures repeat on purpose; a shared helper there would hide what each case does.
       - path: _test\.go
         linters: [dupl]
+      # "always receives" is a design remark (a parameter kept for the second caller),
+      # not a leftover; unused parameters and unused results are still reported.
+      - linters: [unparam]
+        text: always receives
 
 issues:
   # Report every finding. The defaults cap equal messages at 3 and a linter at 50,

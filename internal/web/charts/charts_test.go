@@ -26,7 +26,7 @@ func render(t *testing.T, c view.Chart) string {
 func TestExpiry(t *testing.T) {
 	t.Parallel()
 	var e report.Expiry
-	for i := 0; i < report.ExpiryWeeks; i++ {
+	for i := range report.ExpiryWeeks {
 		w := report.ExpiryWeek{Start: monday.AddDate(0, 0, 7*i), Count: i, Window: report.WindowNone}
 		switch {
 		case i == 0:
@@ -73,7 +73,7 @@ func TestExpiry(t *testing.T) {
 func TestIssuances(t *testing.T) {
 	t.Parallel()
 	var i report.Issuances
-	for n := 0; n < report.IssuanceWeeks; n++ {
+	for n := range report.IssuanceWeeks {
 		i.Weeks = append(i.Weeks, report.IssuanceWeek{Start: monday.AddDate(0, 0, 7*(n-11)), ACME: n, Agent: 1, UI: 2})
 	}
 	c := Issuances(i)
@@ -138,7 +138,7 @@ func TestAuthoritiesHostileNameIsEscaped(t *testing.T) {
 func TestAlerts(t *testing.T) {
 	t.Parallel()
 	a := report.Alerts{RetentionDays: 30, Open: 2}
-	for n := 0; n < report.AlertWeeks; n++ {
+	for n := range report.AlertWeeks {
 		a.Weeks = append(a.Weeks, report.AlertWeek{Start: monday.AddDate(0, 0, 7*(n-4)), Warning: n, Critical: 1})
 	}
 	c := Alerts(a)

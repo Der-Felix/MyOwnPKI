@@ -275,7 +275,7 @@ func pointerTokens(p string) (tokens []string, valid bool) {
 		return nil, false
 	}
 	for _, raw := range strings.Split(p[1:], "/") {
-		for i := 0; i < len(raw); i++ {
+		for i := range len(raw) {
 			if raw[i] == '~' && (i+1 == len(raw) || (raw[i+1] != '0' && raw[i+1] != '1')) {
 				return nil, false
 			}

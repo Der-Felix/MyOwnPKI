@@ -55,14 +55,13 @@ func stepUpCertificate(t *testing.T, v *uiEnv, commonName string) *ca.Issued {
 	return issued
 }
 
-func beginRevoke(t *testing.T, b *browser, id, csrf, reason string) page {
+func beginRevoke(t *testing.T, b *browser, id, csrf, reason string) {
 	t.Helper()
 	b.v.Clock.Advance(authz.StepUpWindow + time.Second)
 	r := b.post(t, "/certificates/"+id+"/revoke", url.Values{"csrf_token": {csrf}, "reason": {reason}, "confirm": {"yes"}})
 	if r.Code != http.StatusSeeOther || r.location() != "/step-up" {
 		t.Fatalf("begin revocation: %d %q %s", r.Code, r.location(), r.html())
 	}
-	return r
 }
 
 func certificateStatus(t *testing.T, v *uiEnv, id string) string {

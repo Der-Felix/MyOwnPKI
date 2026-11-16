@@ -36,7 +36,7 @@ func CSRF(next http.Handler, sessionToken func(*http.Request) (string, bool)) ht
 	check := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !safeMethod(r.Method) {
 			if want, ok := sessionToken(r); ok {
-				got := r.Header.Get(CSRFHeader)
+				got := r.Header.Get(CSRFHeader) //nolint:canonicalheader // the documented spelling (CSRFHeader); net/http reads either form
 				if got == "" {
 					got = r.PostFormValue(CSRFField)
 				}

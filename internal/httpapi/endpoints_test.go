@@ -306,7 +306,7 @@ func TestScanEndpointNow(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
 	v.endpointDomain(t, "homelab.lan", "192.0.2.0/24")
-	admin, _, operator, _, _, _ := alertClients(t, v)
+	admin, _, operator, _, _, _ := alertClients(t, v) //nolint:dogsled // alertClients signs in every role; this test needs some of them
 	id := endpointID(t, admin, "proxy.homelab.lan", 443)
 	other := endpointID(t, admin, "web.homelab.lan", 443)
 	// The endpoint was entered a while ago; its next scan is far away.
@@ -378,7 +378,7 @@ func TestDeleteEndpoint(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
 	v.endpointDomain(t, "homelab.lan", "192.0.2.0/24")
-	admin, _, _, _, _, _ := alertClients(t, v)
+	admin, _, _, _, _, _ := alertClients(t, v) //nolint:dogsled // alertClients signs in every role; this test needs some of them
 	id := endpointID(t, admin, "proxy.homelab.lan", 443)
 	if r := admin.do(t, http.MethodDelete, "/endpoints/"+id, nil); r.Code != http.StatusNoContent || r.Body.Len() != 0 {
 		t.Fatalf("delete: %d %s", r.Code, r.Body.String())
@@ -402,7 +402,7 @@ func TestEndpointServedCertificate(t *testing.T) {
 	v := newEnv(t)
 	v.unseal(t)
 	v.endpointDomain(t, "homelab.lan", "192.0.2.0/24")
-	admin, viewer, _, _, _, _ := alertClients(t, v)
+	admin, viewer, _, _, _, _ := alertClients(t, v) //nolint:dogsled // alertClients signs in every role; this test needs some of them
 
 	issued, err := v.engine.Issue(t.Context(), ca.Request{CA: "issuing", Preset: "server", DNSNames: []string{"proxy.homelab.lan"}, ValidityDays: 90, Who: testinstance.Console})
 	if err != nil {

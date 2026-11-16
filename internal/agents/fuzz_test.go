@@ -312,7 +312,7 @@ func deploymentNameOK(s string) bool {
 	if len(s) == 0 || len(s) > 64 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		alnum := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 		if !alnum && (c != '-' || i == 0 || i == len(s)-1) {
@@ -338,7 +338,7 @@ func hostOK(s string) bool {
 		if len(l) == 0 || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
 			return false
 		}
-		for i := 0; i < len(l); i++ {
+		for i := range len(l) {
 			c := l[i]
 			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 				return false

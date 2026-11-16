@@ -622,7 +622,7 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	pki := func(args ...string) string {
+	pki := func(args ...string) {
 		t.Helper()
 		// #nosec G204 -- test: runs the repository's own legacy script
 		cmd := exec.CommandContext(t.Context(), bash, append([]string{posixPath(script), "--dir", posixPath(filepath.Join(dir, "pki")), "-y", "--no-color"}, args...)...)
@@ -634,7 +634,6 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 		if cerr != nil {
 			t.Fatalf("pki %s: %v\n%s", strings.Join(args, " "), cerr, out)
 		}
-		return string(out)
 	}
 	pki("init", "--org", "Legacy Test", "--cn", "Legacy Offline Root", "--key", "rsa3072", "--no-pass")
 	rootPEM, err := os.ReadFile(filepath.Join(dir, "pki", "root", "certs", "ca.crt"))

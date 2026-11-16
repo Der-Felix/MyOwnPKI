@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -279,7 +280,7 @@ func (s *Service) FinishPasskeyRegistration(ctx context.Context, token, name str
 			return derr
 		}
 		return s.enqueue(ctx, tx, selfWho(u, ip), "user.passkey_add", u, map[string]any{
-			"passkey": id, "name": name, "aaguid": fmt.Sprintf("%x", cred.Authenticator.AAGUID), "sessions_ended": ended,
+			"passkey": id, "name": name, "aaguid": hex.EncodeToString(cred.Authenticator.AAGUID), "sessions_ended": ended,
 		})
 	})
 	if err != nil {
@@ -321,7 +322,7 @@ func (s *Service) BeginPasskeyLogin(ctx context.Context, token string, c Client)
 	q := systemdb.New(s.System)
 	kind := ceremonyLogin
 	var u systemdb.User
-	if _, _, _, err := s.pendingPeek(ctx, q, token, now); err == nil {
+	if err := s.pendingPeek(ctx, q, token, now); err == nil {
 		_, u, _, err = s.pending(ctx, q, token, c, now)
 		if err != nil {
 			return nil, err
@@ -352,9 +353,9 @@ func (s *Service) BeginPasskeyLogin(ctx context.Context, token string, c Client)
 }
 
 // pendingPeek tells whether token is a pending session, without side effects.
-func (s *Service) pendingPeek(ctx context.Context, q *systemdb.Queries, token string, now time.Time) (systemdb.Session, systemdb.User, string, error) {
-	row, err := s.loadSession(ctx, q, token, statePassword, now)
-	return row, systemdb.User{}, "", err
+func (s *Service) pendingPeek(ctx context.Context, q *systemdb.Queries, token string, now time.Time) error {
+	_, err := s.loadSession(ctx, q, token, statePassword, now)
+	return err
 }
 
 // FinishPasskeyLogin checks the assertion. For a pending session it
@@ -373,7 +374,7 @@ func (s *Service) FinishPasskeyLogin(ctx context.Context, token string, body []b
 	var u systemdb.User
 	var device string
 	var err error
-	if _, _, _, perr := s.pendingPeek(ctx, q, token, now); perr == nil {
+	if perr := s.pendingPeek(ctx, q, token, now); perr == nil {
 		if row, u, device, err = s.pending(ctx, q, token, c, now); err != nil {
 			return nil, err
 		}

@@ -298,7 +298,7 @@ func TestWebhook(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
-		bodies, sigs = append(bodies, body), append(sigs, r.Header.Get(SignatureHeader))
+		bodies, sigs = append(bodies, body), append(sigs, r.Header.Get(SignatureHeader)) //nolint:canonicalheader // the documented spelling; net/http sends the canonical form either way
 		mu.Unlock()
 		switch r.URL.Path {
 		case "/fail":

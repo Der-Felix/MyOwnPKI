@@ -1,6 +1,7 @@
 package ca
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -30,7 +31,7 @@ const (
 // labels behind it.
 func checkDNSName(s string, allowWildcard bool) (string, error) {
 	if s == "" {
-		return "", fmt.Errorf("empty DNS name")
+		return "", errors.New("empty DNS name")
 	}
 	if !isASCII(s) {
 		return "", fmt.Errorf("DNS name %q contains non-ASCII characters – write internationalized names in their xn-- (punycode) form", short(s))
@@ -72,9 +73,9 @@ var ldh = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 func checkLabel(label string) error {
 	switch {
 	case label == "":
-		return fmt.Errorf("empty label (two dots in a row?)")
+		return errors.New("empty label (two dots in a row?)")
 	case strings.Contains(label, "*"):
-		return fmt.Errorf("\"*\" is only allowed as the whole leftmost label")
+		return errors.New("\"*\" is only allowed as the whole leftmost label")
 	case len(label) > maxLabel:
 		return fmt.Errorf("label %q is longer than %d characters", short(label), maxLabel)
 	case !ldh.MatchString(label):
@@ -305,7 +306,7 @@ func checkSubject(s Subject) (Subject, []string) {
 // and tabs) and invisible formatting characters such as bidi overrides.
 func checkDNText(v string) error {
 	if !utf8.ValidString(v) {
-		return fmt.Errorf("invalid UTF-8")
+		return errors.New("invalid UTF-8")
 	}
 	for _, r := range v {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {

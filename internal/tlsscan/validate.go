@@ -3,6 +3,7 @@ package tlsscan
 import (
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -100,7 +101,7 @@ func checkHost(raw string) (string, netip.Addr, string) {
 func joinInts(v []int) string {
 	parts := make([]string, len(v))
 	for i, n := range v {
-		parts[i] = fmt.Sprint(n)
+		parts[i] = strconv.Itoa(n)
 	}
 	return strings.Join(parts, ", ")
 }

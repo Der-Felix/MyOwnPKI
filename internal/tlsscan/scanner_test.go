@@ -660,7 +660,7 @@ func TestDispatchOnlyHandsOver(t *testing.T) {
 		return nil, &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
 	}
 	var ids []string
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h := "h" + itoa(i) + ".homelab.lan"
 		f.answers[h] = []netip.Addr{netip.MustParseAddr("192.0.2.50")}
 		ids = append(ids, f.add(t, Request{Host: h, Port: 443}).ID)

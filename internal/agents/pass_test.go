@@ -599,7 +599,7 @@ func TestPassSecretIsNeverLoggedOrAudited(t *testing.T) {
 	e.enroll(t, "b.homelab.lan", secret, false, mustCSR(t)) // a failed check is logged
 	e.enroll(t, "c.homelab.lan", secret, true, mustCSR(t))  // no uses left
 	// Wrong-pattern and failing-create paths are audited too.
-	_, _, _ = e.s.CreateEnrollmentPass(ctx, testinstance.Console, "bad", []string{"*.nodomain.lan"}, 5, time.Hour)
+	_, _, _ = e.s.CreateEnrollmentPass(ctx, testinstance.Console, "bad", []string{"*.nodomain.lan"}, 5, time.Hour) //nolint:dogsled // only the refusal matters here: it is audited, the pass is not used
 	if err := e.s.RevokeJoinToken(ctx, testinstance.Console, jt.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("revoke a used-up pass: %v", err)
 	}

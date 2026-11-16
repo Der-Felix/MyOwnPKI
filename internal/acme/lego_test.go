@@ -149,7 +149,7 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 	opensslBin := testutil.OpenSSL(t)
 	inst, dir := g.inst, g.dir
 	legoDir := filepath.Join(dir, "lego")
-	run := func(args ...string) string { t.Helper(); return g.run(t, args...) }
+	run := func(args ...string) { t.Helper(); g.run(t, args...) }
 	proxy, ariCalls := g.proxy, &g.ariCalls
 	obtain := g.obtain(legoDir)
 	run(obtain...)

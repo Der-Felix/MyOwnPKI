@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -436,7 +437,7 @@ func TestGeneratedDeploymentLineIsWhatTheAgentReads(t *testing.T) {
 	for _, svc := range hostServices {
 		for _, challenge := range []string{"webroot", "standalone"} {
 			for _, extras := range [][]string{nil, {"www.homelab.lan", "mail.homelab.lan"}} {
-				t.Run(svc.ID+"/"+challenge+"/"+fmt.Sprint(len(extras)), func(t *testing.T) {
+				t.Run(svc.ID+"/"+challenge+"/"+strconv.Itoa(len(extras)), func(t *testing.T) {
 					p := hostPlanFor(t, svc.ID, challenge, extras...)
 					assertAgentAccepts(t, p, deploymentAddCommand(p, testACMEDirectory))
 				})

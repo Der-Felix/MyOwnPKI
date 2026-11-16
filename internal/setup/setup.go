@@ -12,6 +12,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -430,7 +431,7 @@ func (r *run) collectUser() error {
 			if err := auth.CheckPassword(r.username, string(p)); err != nil {
 				return err
 			}
-			if strings.EqualFold(string(p), string(r.passphrase)) {
+			if bytes.EqualFold(p, r.passphrase) {
 				return ErrSameSecret
 			}
 			return nil

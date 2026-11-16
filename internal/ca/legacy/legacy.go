@@ -108,7 +108,7 @@ type Key struct {
 // readable at all; what is wrong inside is in Problems and Warnings.
 func Read(fsys fs.FS, pw Passphrases) (*PKI, error) {
 	if _, err := fs.Stat(fsys, "root/certs/ca.crt"); err != nil {
-		return nil, fmt.Errorf("no pki.sh directory: root/certs/ca.crt not found (point to the directory that pki.sh --dir names, usually ./pki)")
+		return nil, errors.New("no pki.sh directory: root/certs/ca.crt not found (point to the directory that pki.sh --dir names, usually ./pki)")
 	}
 	p := &PKI{Issued: map[string]*IssuedFile{}, LeafKeys: map[string]*Key{}}
 	p.readConfig(fsys)

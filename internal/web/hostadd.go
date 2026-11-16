@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -157,19 +158,19 @@ func parseHostPlan(get func(string) string, artifacts bool) (hostPlan, error) {
 func checkHostPath(p string) error {
 	switch {
 	case p == "":
-		return fmt.Errorf("a directory is required")
+		return errors.New("a directory is required")
 	case len(p) > maxHostPath || !utf8.ValidString(p):
 		return fmt.Errorf("at most %d characters", maxHostPath)
 	case !strings.HasPrefix(p, "/"):
-		return fmt.Errorf("an absolute path, for example /var/www/acme")
+		return errors.New("an absolute path, for example /var/www/acme")
 	}
 	for _, r := range p {
 		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("./_-", r) {
-			return fmt.Errorf("only letters, digits and . _ - / are allowed")
+			return errors.New("only letters, digits and . _ - / are allowed")
 		}
 	}
 	if path.Clean(p) != p {
-		return fmt.Errorf("a clean path: no //, no . or .. segment, no trailing /")
+		return errors.New("a clean path: no //, no . or .. segment, no trailing /")
 	}
 	if agentpath.Broad(p) {
 		return fmt.Errorf("%s is a system directory the agent may not write; use a subdirectory such as /var/www/acme", p)

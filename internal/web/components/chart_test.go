@@ -52,7 +52,7 @@ func approx(a, b float64) bool { return math.Abs(a-b) < 0.011 }
 
 func weekCats(n int, values func(i int) []int64) []view.ChartCategory {
 	var cats []view.ChartCategory
-	for i := 0; i < n; i++ {
+	for i := range n {
 		cats = append(cats, view.ChartCategory{Label: "W" + strconv.Itoa(i+1), Name: "Week " + strconv.Itoa(i+1), Values: values(i)})
 	}
 	return cats
@@ -304,7 +304,7 @@ func TestChartIsDeterministic(t *testing.T) {
 		Categories: weekCats(12, func(i int) []int64 { return []int64{int64(i * 3), int64(12 - i)} }),
 	}
 	first := renderChart(t, c)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if renderChart(t, c) != first {
 			t.Fatal("the same input renders different bytes")
 		}

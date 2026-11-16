@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -110,8 +111,8 @@ func newEnrollment(issuer, userID, username string, secret []byte) *Enrollment {
 	v.Set("secret", enc)
 	v.Set("issuer", issuer)
 	v.Set("algorithm", "SHA1")
-	v.Set("digits", fmt.Sprint(totpDigits))
-	v.Set("period", fmt.Sprint(totpPeriod))
+	v.Set("digits", strconv.Itoa(totpDigits))
+	v.Set("period", strconv.Itoa(totpPeriod))
 	label := url.PathEscape(issuer) + ":" + url.PathEscape(username)
 	return &Enrollment{
 		UserID: userID, Username: username, Secret: strings.Join(groups, " "),

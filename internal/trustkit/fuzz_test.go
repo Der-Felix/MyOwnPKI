@@ -169,14 +169,14 @@ func FuzzGuide(f *testing.F) {
 		{"root", "https://pki.homelab.lan", -1, false},
 		{"root", "https://pki.homelab.lan", 1 << 62, false},
 	} {
-		for p := uint8(0); p < 10; p++ {
+		for p := range uint8(10) {
 			f.Add(s.name, s.base, s.gen, s.current, der, p)
 		}
 	}
 	// Every single metacharacter alone, in the path and in the name, so a
 	// check that is loosened for one of them fails on a seed.
 	for _, c := range "'\"`$;&|<>()[]{}*?!#%^=,+@\\ \t\n~:" {
-		for p := uint8(0); p < 10; p++ {
+		for p := range uint8(10) {
 			f.Add("a"+string(c)+"b", "https://pki.homelab.lan", int64(1), true, der, p)
 			f.Add("root", "https://pki.homelab.lan/a"+string(c)+"b", int64(1), true, der, p)
 			f.Add("root", "https://pki.homelab.lan"+string(c), int64(2), false, der, p)
@@ -367,7 +367,7 @@ func indexAll(s, sub string) []int {
 }
 
 func onlyOf(s, set string) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !strings.ContainsRune(set, rune(s[i])) {
 			return false
 		}
@@ -381,7 +381,7 @@ func nameOK(s string) bool {
 	if len(s) == 0 || len(s) > 63 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		letterOrDigit := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 		if !letterOrDigit && (i == 0 || (c != '.' && c != '_' && c != '-')) {

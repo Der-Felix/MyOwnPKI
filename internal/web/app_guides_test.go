@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -179,7 +180,7 @@ func TestGuidesAreForEverySignedInUser(t *testing.T) {
 	v.User(t, "scoped", false, authz.Binding{CA: "issuing", Role: authz.Operator})
 	v.User(t, "noroles", false)
 	for _, name := range []string{"viewer", "scoped", "noroles"} {
-		b := v.browser("192.0.2." + fmt.Sprint(10+len(name)))
+		b := v.browser("192.0.2." + strconv.Itoa(10+len(name)))
 		b.signIn(t, name, testinstance.Password)
 		for _, target := range []string{"/guides", "/guides/alpha"} {
 			if r := b.get(t, target); r.Code != http.StatusOK {

@@ -197,7 +197,7 @@ func addNotices(results []DeploymentResult, materials map[string]*Material) {
 }
 
 func (a *Agent) applyResultHistory(current, previous []DeploymentResult, requested map[string]int64) {
-	for i := 0; i < len(current); i++ {
+	for i := range current {
 		result := &current[i]
 		old := DeploymentResult{}
 		for _, r := range previous {

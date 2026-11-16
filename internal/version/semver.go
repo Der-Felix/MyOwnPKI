@@ -34,7 +34,7 @@ func Compare(left, right string) (int, error) {
 	case len(a.prerelease) != 0 && len(b.prerelease) == 0:
 		return -1, nil
 	}
-	for i := 0; i < min(len(a.prerelease), len(b.prerelease)); i++ {
+	for i := range min(len(a.prerelease), len(b.prerelease)) {
 		aID, bID := a.prerelease[i], b.prerelease[i]
 		aNum, bNum := numericIdentifier(aID), numericIdentifier(bID)
 		switch {

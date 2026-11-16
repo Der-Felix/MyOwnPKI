@@ -212,7 +212,7 @@ func lastAddr(p netip.Prefix) netip.Addr {
 
 // checkDomain checks a whole domain against the database: one problem per
 // mistake, all at once.
-func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) ([]string, *issuer, error) {
+func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) ([]string, error) {
 	var problems []string
 	name, err := checkDNSName(d.Name, false)
 	switch {
@@ -271,21 +271,21 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 	// The CA: an active intermediate with an online key whose constraints
 	// permit the domain.
 	if d.CA == "" {
-		return append(problems, "a domain needs the CA that signs for it"), nil, nil
+		return append(problems, "a domain needs the CA that signs for it"), nil
 	}
 	is, err := loadIssuer(ctx, q, d.CA)
 	var denied *DeniedError
 	if errors.As(err, &denied) {
-		return append(problems, denied.Reasons...), nil, nil
+		return append(problems, denied.Reasons...), nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if denied := checkEKULimit(is.constraints, []asn1.ObjectIdentifier{oidServerAuth}); len(denied) > 0 {
 		problems = append(problems, fmt.Sprintf("CA %q does not allow serverAuth required by preset %q", d.CA, d.Preset))
 	}
 	if is.ca.Kind == KindRoot {
-		return append(problems, "a root CA only signs intermediate CAs – choose an intermediate"), nil, nil
+		return append(problems, "a root CA only signs intermediate CAs – choose an intermediate"), nil
 	}
 	d.CAID = is.ca.ID
 	if d.ValidityDays > int(is.ca.MaxValidityDays) {
@@ -301,7 +301,7 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 	for _, r := range d.IPRanges {
 		problems = append(problems, checkConstraints(is.constraints, Names{IPs: []netip.Addr{r.Addr(), lastAddr(r)}}, "")...)
 	}
-	return problems, is, nil
+	return problems, nil
 }
 
 // CreateDomain stores a new domain.
@@ -321,7 +321,7 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 	d.Name = strings.TrimSpace(req.Name)
 	problems := req.apply(&d)
 	problems = append(problems, reasonProblems(req.Options)...)
-	more, _, err := e.checkDomain(ctx, q, &d)
+	more, err := e.checkDomain(ctx, q, &d)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +413,7 @@ func (e *Engine) updateDomain(ctx context.Context, id string, s DomainSettings, 
 	before := domainDetails(d)
 	problems := s.apply(d)
 	problems = append(problems, reasonProblems(s.Options)...)
-	more, _, err := e.checkDomain(ctx, q, d)
+	more, err := e.checkDomain(ctx, q, d)
 	if err != nil {
 		return nil, err
 	}

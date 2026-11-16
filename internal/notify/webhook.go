@@ -73,7 +73,7 @@ func (w *Webhook) Send(ctx context.Context, d Digest) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", w.UserAgent)
-	req.Header.Set(SignatureHeader, Sign([]byte(secret), body))
+	req.Header.Set(SignatureHeader, Sign([]byte(secret), body)) //nolint:canonicalheader // the documented spelling (SignatureHeader); net/http sends the canonical form either way
 	transport := &http.Transport{
 		TLSClientConfig:   &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 		Proxy:             http.ProxyFromEnvironment,

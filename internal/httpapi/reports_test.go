@@ -342,7 +342,7 @@ func (h hostileEngine) CAs(ctx context.Context, who keys.Who) ([]ca.CAInfo, erro
 func TestHostileNamesComeBackAsData(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
-	_, viewer, _, _, _, _ := alertClients(t, v)
+	_, viewer, _, _, _, _ := alertClients(t, v) //nolint:dogsled // alertClients signs in every role; this test needs some of them
 	evil := `<script>alert("x")</script>&'` + strings.Repeat("é", 4000)
 	eng := hostileEngine{Engine: v.engine, name: evil, now: v.clk.Now()}
 	v.api.d.Analysis = analysis.NewService(analysis.Deps{Tenant: store.DefaultTenant, Engine: eng, ServerVersion: "v0.3.8", Clock: v.clk})

@@ -180,7 +180,7 @@ func instructions(plan *caPlan, b *OfflineBundle) string {
 // signature, e.g. to download it again.
 func (e *Engine) OfflineBundleFor(ctx context.Context, name string) (*OfflineBundle, error) {
 	q := pkidb.New(e.PKI)
-	ca, pending, parent, err := loadPending(ctx, q, name, e.now())
+	ca, pending, parent, err := loadPending(ctx, q, name)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (e *Engine) OfflineBundleFor(ctx context.Context, name string) (*OfflineBun
 
 // loadPending reads a CA, its generation waiting for a signature and the
 // intended parent generation.
-func loadPending(ctx context.Context, q *pkidb.Queries, name string, now time.Time) (pkidb.Ca, pkidb.CaGeneration, *parentInfo, error) {
+func loadPending(ctx context.Context, q *pkidb.Queries, name string) (pkidb.Ca, pkidb.CaGeneration, *parentInfo, error) {
 	ca, err := q.GetCAByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ca, pkidb.CaGeneration{}, nil, deny("there is no CA named %q", short(name))
@@ -274,7 +274,7 @@ func (e *Engine) installCACertificate(ctx context.Context, name string, certPEM 
 		return nil, keys.ErrSealed
 	}
 	q := pkidb.New(e.PKI)
-	ca, pending, parent, err := loadPending(ctx, q, name, now)
+	ca, pending, parent, err := loadPending(ctx, q, name)
 	if err != nil {
 		return nil, err
 	}

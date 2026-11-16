@@ -260,7 +260,7 @@ func SafeHref(href string) string {
 	if !strings.HasPrefix(href, "/") || strings.HasPrefix(href, "//") || strings.ContainsRune(href, '\\') {
 		return ""
 	}
-	for i := 0; i < len(href); i++ {
+	for i := range len(href) {
 		if href[i] < 0x20 || href[i] == 0x7f {
 			return ""
 		}

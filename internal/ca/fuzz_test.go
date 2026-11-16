@@ -14,6 +14,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -153,7 +154,7 @@ func verifyCSRSignature(csr *x509.CertificateRequest) (checked bool, err error) 
 			return true, fmt.Errorf("Ed25519 signature, key is %T", csr.PublicKey)
 		}
 		if !ed25519.Verify(pub, csr.RawTBSCertificateRequest, csr.Signature) {
-			return true, fmt.Errorf("Ed25519 signature does not verify")
+			return true, errors.New("Ed25519 signature does not verify")
 		}
 		return true, nil
 	default:
@@ -175,7 +176,7 @@ func verifyCSRSignature(csr *x509.CertificateRequest) (checked bool, err error) 
 	case *ecdsa.PublicKey:
 		if scheme == "ecdsa" {
 			if !ecdsa.VerifyASN1(pub, digest, csr.Signature) {
-				return true, fmt.Errorf("ECDSA signature does not verify")
+				return true, errors.New("ECDSA signature does not verify")
 			}
 			return true, nil
 		}

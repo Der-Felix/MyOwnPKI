@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -395,7 +394,7 @@ func TestCSRF(t *testing.T) {
 			t.Errorf("%s: %d, want %d", name, got, c.want)
 		}
 	}
-	if !bytes.Contains([]byte(ErrCSRF.Error()), []byte("reload")) {
+	if !strings.Contains(ErrCSRF.Error(), "reload") {
 		t.Error("message")
 	}
 }

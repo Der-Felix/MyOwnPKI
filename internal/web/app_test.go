@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -185,7 +186,7 @@ func TestIssueWithACSR(t *testing.T) {
 		for k, vs := range base {
 			f[k] = vs
 		}
-		f.Set("from", fmt.Sprint(from))
+		f.Set("from", strconv.Itoa(from))
 		f.Set("go", goTo)
 		for k, vs := range extra {
 			f[k] = vs
@@ -442,7 +443,7 @@ func realPages(t *testing.T) map[string]string {
 		confirmPending(t, b, token, "demo")
 		csrPEM, _ := testCSRWith(t, "web.homelab.lan", []string{"web.homelab.lan"}, nil)
 		form := func(from int, extra url.Values) url.Values {
-			f := url.Values{"csrf_token": {token}, "from": {fmt.Sprint(from)}, "go": {"next"}, "preset": {"server"}, "ca": {v.CAIDs["issuing"]},
+			f := url.Values{"csrf_token": {token}, "from": {strconv.Itoa(from)}, "go": {"next"}, "preset": {"server"}, "ca": {v.CAIDs["issuing"]},
 				"keymode": {"csr"}, "alg": {"ecdsa-p256"}, "days": {"90"}, "csr": {csrPEM}, "cn": {"web.homelab.lan"}, "dns": {"web.homelab.lan"}}
 			for k, vs := range extra {
 				f[k] = vs

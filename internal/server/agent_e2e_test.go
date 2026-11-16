@@ -97,7 +97,7 @@ func TestAgentEndToEnd(t *testing.T) {
 	first := a.Identity().Leaf
 
 	// Renewal: the clock at 6 of 7 days; Run renews, then sleeps – the
-	// the first wait after rotation ends the test run.
+	// first wait after rotation ends the test run.
 	runOnce(t, a, func() time.Time {
 		if a.Identity().Leaf.SerialNumber.Cmp(first.SerialNumber) == 0 {
 			return first.NotBefore.Add(6 * 24 * time.Hour)

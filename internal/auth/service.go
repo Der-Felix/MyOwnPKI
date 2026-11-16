@@ -650,7 +650,7 @@ func (s *Service) storeRecoveryCodes(ctx context.Context, q *systemdb.Queries, u
 	for _, c := range codes {
 		canon, ok := normalizeRecoveryCode(c)
 		if !ok {
-			return fmt.Errorf("malformed recovery code")
+			return errors.New("malformed recovery code")
 		}
 		if err := q.InsertRecoveryCode(ctx, systemdb.InsertRecoveryCodeParams{UserID: userID, CodeHash: s.Key.recoveryHash(userID, canon), CreatedAt: formatTime(now)}); err != nil {
 			return err

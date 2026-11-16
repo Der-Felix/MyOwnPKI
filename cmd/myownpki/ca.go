@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -107,7 +108,7 @@ func runCAList(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 				note = "REVOKED – see ca show"
 			}
 			if g.Current {
-				gen, until = fmt.Sprint(g.Generation), dateOnly(g.NotAfter)
+				gen, until = strconv.FormatInt(g.Generation, 10), dateOnly(g.NotAfter)
 			}
 			if g.Pending {
 				gen += fmt.Sprintf(" (%d pending)", g.Generation)
@@ -141,7 +142,7 @@ func showCA(out io.Writer, c ca.CAInfo) {
 	p("Key mode", c.KeyMode)
 	p("Public base URL", c.BaseURL)
 	if c.PathLen != nil {
-		p("Path length", fmt.Sprint(*c.PathLen))
+		p("Path length", strconv.FormatInt(*c.PathLen, 10))
 	}
 	if len(c.NameConstraints) > 0 {
 		crit := "critical"

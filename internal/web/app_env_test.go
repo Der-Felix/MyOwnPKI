@@ -150,8 +150,8 @@ func (b *browser) postFile(t *testing.T, target string, form url.Values, field, 
 	return b.send(t, req)
 }
 
-// signIn signs name in fully through the pages and returns where it landed.
-func (b *browser) signIn(t *testing.T, name, password string) string {
+// signIn signs name in fully through the pages.
+func (b *browser) signIn(t *testing.T, name, password string) {
 	t.Helper()
 	b.v.Clock.Advance(30 * time.Second)
 	r := b.post(t, "/login", url.Values{"username": {name}, "password": {password}})
@@ -162,7 +162,6 @@ func (b *browser) signIn(t *testing.T, name, password string) string {
 	if r.Code != http.StatusSeeOther || b.cookies[auth.CookieName] == "" {
 		t.Fatalf("code %s: %d %q", name, r.Code, r.location())
 	}
-	return r.location()
 }
 
 var reMessage = regexp.MustCompile(`(?s)<div class="msg msg-[a-z]+"[^>]*>.*?</div>`)

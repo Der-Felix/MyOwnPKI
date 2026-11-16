@@ -109,7 +109,7 @@ func TestACMETransportPreservesTimeoutAndPassCancellation(t *testing.T) {
 	}
 	var captured context.Context
 	transport := contextTransport{ctx: parent, rt: testRoundTripper(func(r *http.Request) (*http.Response, error) {
-		captured = r.Context()
+		captured = r.Context() //nolint:fatcontext // false positive: captured only records the request's context for the assertions below
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("body"))}, nil
 	})}
 	response, err := transport.RoundTrip(request)
