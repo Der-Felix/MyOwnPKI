@@ -276,7 +276,7 @@ func (in *instance) seedCertificates(ctx context.Context, q *pkidb.Queries, now 
 
 	// An unused domain.
 	issuing, wild := "issuing", false
-	d, err := e.CreateDomain(ctx, ca.DomainRequest{Name: "corp.example", DomainSettings: ca.DomainSettings{CA: &issuing, Wildcards: &wild}, Who: console})
+	d, err := e.CreateDomain(ctx, ca.DomainRequest{Name: "corp.example", CA: &issuing, Wildcards: &wild, Who: console})
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (in *instance) seedCertificates(ctx context.Context, q *pkidb.Queries, now 
 	}
 
 	// A deleted domain, so that /domains/deleted lists one.
-	old, err := e.CreateDomain(ctx, ca.DomainRequest{Name: "legacy.example", DomainSettings: ca.DomainSettings{CA: &issuing, Wildcards: &wild}, Who: console})
+	old, err := e.CreateDomain(ctx, ca.DomainRequest{Name: "legacy.example", CA: &issuing, Wildcards: &wild, Who: console})
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func weakCertificate() ([]byte, error) {
 // older version.
 func (in *instance) seedAgents(ctx context.Context, clk clock.Clock, now time.Time) (*agents.Service, error) {
 	e := in.engine
-	if _, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.example"},
+	if _, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{Name: "agent-ca", BaseURL: "http://pki.homelab.example",
 		Parent: "root", Subject: ca.Subject{CommonName: "Homelab Agent CA", Organization: "Homelab"}, EKULimit: []string{"clientAuth"}, Who: console}); err != nil {
 		return nil, err
 	}

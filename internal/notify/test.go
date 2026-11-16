@@ -43,14 +43,12 @@ func SendAll(ctx context.Context, channels []Channel, d Digest) []Result {
 	out := make([]Result, len(channels))
 	var wg sync.WaitGroup
 	for i, c := range channels {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			out[i] = Result{Channel: c.Name(), OK: true}
 			if err := c.Send(ctx, d); err != nil {
 				out[i] = Result{Channel: c.Name(), Error: shorten(clean(err.Error()), 300)}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return out

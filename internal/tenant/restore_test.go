@@ -85,7 +85,7 @@ func change(t *testing.T, s *Store, who keys.Who, edit func(*Settings)) int64 {
 }
 
 func opts(expected int64, reason string) ChangeOptions {
-	return ChangeOptions{ExpectedVersion: ptr(expected), Reason: reason}
+	return ChangeOptions{ExpectedVersion: new(expected), Reason: reason}
 }
 
 func TestRestoreCreatesANewVersion(t *testing.T) {
@@ -101,8 +101,8 @@ func TestRestoreCreatesANewVersion(t *testing.T) {
 	change(t, s, who, func(x *Settings) {
 		x.Organization = "Other"
 		x.Country = "DE"
-		x.TrustPage = ptr(false)
-		x.StepUpMinutes = ptr(30)
+		x.TrustPage = new(false)
+		x.StepUpMinutes = new(30)
 		x.ACME = &ACMELimits{OrdersPerAccount: 7, FailedPerName: 5, AccountsPerIP: 10}
 	})
 	old := history(t, v.SystemDB.Write)
@@ -150,7 +150,11 @@ func TestRestoreCreatesANewVersion(t *testing.T) {
 	if d["version"] != float64(4) || d["restored_from"] != float64(2) || d["snapshot_sha256"] != last.SHA256 {
 		t.Errorf("audit details: %v", d)
 	}
-	if text, _ := json.Marshal(d); strings.Contains(string(text), "please") {
+	text, jerr := json.Marshal(d)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	if strings.Contains(string(text), "please") {
 		t.Errorf("the reason is in the audit log: %s", text)
 	}
 	if n := len(entriesOf(t, v.SystemDB.Write, ActionSettings)); n != 2 {
@@ -238,7 +242,7 @@ func TestRestorePermissions(t *testing.T) {
 		_, err := s.Restore(ctx, store.DefaultTenant, 1, opts(cur, ""), who)
 		if err == nil {
 			// The settings are version 1 again; make them differ for the next caller.
-			change(t, s, testinstance.Console, func(x *Settings) { x.Organization = fmt.Sprint("Again", cur) })
+			change(t, s, testinstance.Console, func(x *Settings) { x.Organization = fmt.Sprint("Again", cur) }) //nolint:contextcheck // change uses t.Context(), the same context as ctx here
 		}
 		return err
 	}
@@ -255,9 +259,9 @@ func TestRestorePermissions(t *testing.T) {
 
 	// A restore that changes the mode needs what changing it needs: a fresh second
 	// factor, never an API token.
-	change(t, s, testinstance.Console, func(x *Settings) { x.AgentEnrollment = ptr(EnrollManual) })
+	change(t, s, testinstance.Console, func(x *Settings) { x.AgentEnrollment = new(EnrollManual) })
 	modeVersion, _ := s.Version(ctx, store.DefaultTenant, testinstance.Console) // the state with mode manual
-	change(t, s, testinstance.Console, func(x *Settings) { x.AgentEnrollment = ptr(EnrollVerified) })
+	change(t, s, testinstance.Console, func(x *Settings) { x.AgentEnrollment = new(EnrollVerified) })
 	latest, _ := s.Version(ctx, store.DefaultTenant, testinstance.Console)
 	before := len(history(t, v.SystemDB.Write))
 	for name, tc := range map[string]struct {
@@ -457,11 +461,9 @@ func TestConcurrentRestoresHaveOneWinner(t *testing.T) {
 	errs := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, errs[i] = s.Restore(ctx, store.DefaultTenant, 1, opts(2, ""), testinstance.Console)
-		}()
+		})
 	}
 	wg.Wait()
 	var won, lost int

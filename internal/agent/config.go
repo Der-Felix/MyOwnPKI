@@ -423,7 +423,7 @@ func checkHost(h string) error {
 	if net.ParseIP(h) != nil {
 		return errors.New("IP identifiers are not supported by this agent release")
 	}
-	if len(h) == 0 || len(h) > 253 {
+	if h == "" || len(h) > 253 {
 		return errors.New("1 to 253 characters")
 	}
 	labels := strings.Split(h, ".")

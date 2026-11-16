@@ -48,7 +48,7 @@ type Scanner struct {
 	Rand func(n int64) int64
 
 	once       sync.Once
-	ctx        context.Context
+	ctx        context.Context //nolint:containedctx // the scanner's lifetime: Close cancels it, and every scan hangs on it
 	cancel     context.CancelFunc
 	dispatchMu sync.Mutex
 	mu         sync.Mutex
@@ -99,7 +99,8 @@ func (s *Scanner) Close() {
 	s.wg.Wait()
 }
 
-// Wait returns when no scan is running (for tests).
+// Wait returns when no scan is running. Only tests call it, those of this
+// package and of internal/server, so it cannot move into a _test.go file.
 func (s *Scanner) Wait() { s.init(); s.wg.Wait() }
 
 // Kick looks for due endpoints at once in the background – after a "scan
@@ -153,7 +154,7 @@ func (s *Scanner) Dispatch(ctx context.Context) error {
 		s.running[ep.ID] = true
 		s.wg.Add(1)
 		s.mu.Unlock()
-		go s.run(ep)
+		go s.run(ep) //nolint:contextcheck // a scan runs on the scanner's lifetime context (Close cancels it), not on the dispatch call's: Dispatch does not wait for it
 	}
 	return nil
 }
@@ -338,7 +339,7 @@ func (s *Scanner) probe(ctx context.Context, ep Endpoint) (Result, error) {
 	// with the deadline in sight still gets a result. Close still cancels it.
 	cctx, cancel := context.WithTimeout(s.ctx, ChainTimeout)
 	defer cancel()
-	res.Served.ChainState, err = s.chainState(cctx, leaf, inter)
+	res.Served.ChainState, err = s.chainState(cctx, leaf, inter) //nolint:contextcheck // cctx is built from the scanner's lifetime on purpose (see the comment above)
 	return res, err
 }
 
@@ -393,8 +394,7 @@ func verifyTime(leaf *x509.Certificate, now time.Time) time.Time {
 
 // classifyDial maps a failed connect to the fixed vocabulary.
 func classifyDial(err error) string {
-	var ge *netguard.Error
-	if errors.As(err, &ge) {
+	if ge, ok := errors.AsType[*netguard.Error](err); ok {
 		switch {
 		case ge.Kind == netguard.KindDNS:
 			return KindDNS

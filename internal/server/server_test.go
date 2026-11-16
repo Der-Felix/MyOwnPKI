@@ -284,7 +284,7 @@ func TestServerStartUnsealAndStop(t *testing.T) {
 	}}}
 	get := func(url string) (int, string, http.Header) {
 		t.Helper()
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
 		resp, derr := client.Do(req)
 		if derr != nil {
 			t.Fatal(derr)
@@ -424,7 +424,7 @@ func TestCRLsRightAfterInit(t *testing.T) {
 
 	for name, days := range map[string]int{"root": 30, "issuing": 7} {
 		url := srv.PublicAddr() + "/crl/" + name + "/1.crl"
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
 		resp, derr := http.DefaultClient.Do(req)
 		if derr != nil {
 			t.Fatal(derr)
@@ -583,7 +583,7 @@ func TestACMEListener(t *testing.T) {
 	}()
 	get := func(u string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, u, nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, u, http.NoBody)
 		resp, derr := http.DefaultClient.Do(req)
 		if derr != nil {
 			t.Fatal(derr)

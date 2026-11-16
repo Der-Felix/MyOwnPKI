@@ -230,9 +230,7 @@ func (s *contract) unknownFields(schema, inst any, path string) []string {
 			open = true
 		}
 		if p, ok := m["properties"].(map[string]any); ok {
-			for k, v := range p {
-				props[k] = v
-			}
+			maps.Copy(props, p)
 		}
 		for _, key := range []string{"allOf", "oneOf", "anyOf"} {
 			list, _ := m[key].([]any)
@@ -1026,7 +1024,7 @@ func TestContract(t *testing.T) {
 	// verified), two enrollments in the queue, and join tokens.
 	admin.stepUp(t, "demo")
 	agentCA, err := v.engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
 	})
 	if err != nil {
@@ -1310,7 +1308,7 @@ func signOffline(t *testing.T, bundle map[string]any, root *x509.Certificate, ke
 	}
 	days, _ := bundle["days"].(float64)
 	var aia, cdp string
-	for _, l := range strings.Split(extConfig, "\n") {
+	for l := range strings.SplitSeq(extConfig, "\n") {
 		if v, found := strings.CutPrefix(l, "authorityInfoAccess    = caIssuers;URI:"); found {
 			aia = v
 		}
@@ -1440,3 +1438,6 @@ func withMode(settings map[string]any, mode string) map[string]any {
 	out["agent_enrollment"] = mode
 	return out
 }
+
+// Routes lists the operations this build serves (contract tests).
+func (a *API) Routes() []Route { return a.routes }

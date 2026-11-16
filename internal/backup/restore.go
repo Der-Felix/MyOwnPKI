@@ -249,6 +249,11 @@ func (r *Report) checkHead(ctx context.Context, p, scope string, head audit.Head
 // which must be empty or missing. pin as for Verify.
 func Restore(ctx context.Context, dir, pin string, o Options) (*Report, error) {
 	data := o.Layout.DataDir
+	// A file is no empty directory (on Windows ReadDir says "not found" for
+	// it, and the restore would delete it).
+	if fi, err := os.Stat(data); err == nil && !fi.IsDir() {
+		return nil, fmt.Errorf("%s is a file, not a directory – restore only into an empty data directory", data)
+	}
 	if entries, err := os.ReadDir(data); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s is not empty – restore only into an empty data directory (stop the server, move the old one away)", data)
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {

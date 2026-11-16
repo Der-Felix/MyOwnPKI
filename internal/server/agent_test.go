@@ -64,12 +64,12 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 		t.Fatal(uerr)
 	}
 	if _, cerr := srv.engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
 	}); cerr != nil {
 		t.Fatal(cerr)
 	}
-	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: ptrTo("issuing")}, Who: console}); derr != nil {
+	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: console}); derr != nil {
 		t.Fatal(derr)
 	}
 	srv.renewTLS(ctx) // the listener certificates, as at an unseal
@@ -142,8 +142,6 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 	})
 	return e
 }
-
-func ptrTo[T any](v T) *T { return &v }
 
 // client is an agent's connection; cert nil = without a client certificate.
 // asked reports whether the server asked for a client certificate.
@@ -343,7 +341,7 @@ func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
 	client := e.httpClient(nil, nil)
 	base := "https://" + e.srv.AgentAddr() + "/agent-packages/"
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		req, _ := http.NewRequestWithContext(t.Context(), method, base+"myownpki-agent_0.3.1_linux_amd64.deb", nil)
+		req, _ := http.NewRequestWithContext(t.Context(), method, base+"myownpki-agent_0.3.1_linux_amd64.deb", http.NoBody)
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -378,7 +376,7 @@ func TestAgentArtifactDownloadsAreAnonymousOnlyForExactFiles(t *testing.T) {
 
 func get(t *testing.T, c *http.Client, url string) (*http.Response, error) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

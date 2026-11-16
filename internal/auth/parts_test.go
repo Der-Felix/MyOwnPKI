@@ -1,11 +1,11 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -367,12 +367,8 @@ func TestCSRF(t *testing.T) {
 	session := map[string]string{"Cookie": "s=1", "Sec-Fetch-Site": "same-origin"}
 	with := func(extra map[string]string) map[string]string {
 		m := map[string]string{}
-		for k, v := range session {
-			m[k] = v
-		}
-		for k, v := range extra {
-			m[k] = v
-		}
+		maps.Copy(m, session)
+		maps.Copy(m, extra)
 		return m
 	}
 	for name, c := range map[string]struct {
@@ -395,7 +391,7 @@ func TestCSRF(t *testing.T) {
 			t.Errorf("%s: %d, want %d", name, got, c.want)
 		}
 	}
-	if !bytes.Contains([]byte(ErrCSRF.Error()), []byte("reload")) {
+	if !strings.Contains(ErrCSRF.Error(), "reload") {
 		t.Error("message")
 	}
 }

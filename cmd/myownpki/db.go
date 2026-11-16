@@ -26,23 +26,31 @@ const (
 
 // runDB handles `myownpki db <status|migrate>`.
 func runDB(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	usage := func() {
-		_, _ = fmt.Fprintf(stderr, "Usage:\n  %s db status [--config FILE]\n  %s db migrate [--config FILE]\n", binary, binary)
-	}
+	return runSubcommand("db", fmt.Sprintf("Usage:\n  %s db status [--config FILE]\n  %s db migrate [--config FILE]\n", binary, binary), args, stderr,
+		map[string]func([]string) int{
+			"status":  func(a []string) int { return runDBStatus(ctx, a, os.Environ(), stdout, stderr) },
+			"migrate": func(a []string) int { return runDBMigrate(ctx, a, os.Environ(), stdout, stderr) },
+		})
+}
+
+// runSubcommand is the shape that `myownpki <group> <subcommand>` shares: no
+// argument prints the usage text and exits with exitUsage, -h and --help print
+// it and exit with exitOK, a name in subs runs with the arguments after it, and
+// anything else is an unknown subcommand.
+func runSubcommand(group, usageText string, args []string, stderr io.Writer, subs map[string]func(args []string) int) int {
+	usage := func() { _, _ = fmt.Fprint(stderr, usageText) }
 	if len(args) == 0 {
 		usage()
 		return exitUsage
 	}
-	switch args[0] {
-	case "status":
-		return runDBStatus(ctx, args[1:], os.Environ(), stdout, stderr)
-	case "migrate":
-		return runDBMigrate(ctx, args[1:], os.Environ(), stdout, stderr)
-	case "-h", "--help":
+	if run, ok := subs[args[0]]; ok {
+		return run(args[1:])
+	}
+	if args[0] == "-h" || args[0] == "--help" {
 		usage()
 		return exitOK
 	}
-	_, _ = fmt.Fprintf(stderr, "%s db: unknown subcommand %q\n", binary, args[0])
+	_, _ = fmt.Fprintf(stderr, "%s %s: unknown subcommand %q\n", binary, group, args[0])
 	usage()
 	return exitUsage
 }

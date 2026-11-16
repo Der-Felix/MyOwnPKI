@@ -38,8 +38,8 @@ func TestPrune(t *testing.T) {
 	t.Parallel()
 	_, o := newInstance(t)
 	parent := t.TempDir()
-	real := filepath.Join(t.TempDir(), "real")
-	if _, err := Create(t.Context(), real, o); err != nil {
+	source := filepath.Join(t.TempDir(), "real")
+	if _, err := Create(t.Context(), source, o); err != nil {
 		t.Fatal(err)
 	}
 	if got := ScheduledName(time.Date(2026, 10, 25, 3, 12, 9, 0, time.FixedZone("CEST", 2*3600))); got != "20261025T011209Z" {
@@ -47,13 +47,13 @@ func TestPrune(t *testing.T) {
 	}
 	scheduled := []string{"20261020T031200Z", "20261021T030500Z", "20261022T034400Z", "20261023T031900Z"}
 	for _, n := range scheduled {
-		copyTree(t, real, filepath.Join(parent, n))
+		copyTree(t, source, filepath.Join(parent, n))
 	}
 	// Never deleted: install.sh's update backup, a failed one, a foreign
 	// directory and file, and scheduled names that aren't complete backups.
-	copyTree(t, real, filepath.Join(parent, "20261019T101010Z-v0.2.1-rc.1"))
-	copyTree(t, real, filepath.Join(parent, "20261018T030000Z"+UnverifiedSuffix))
-	copyTree(t, real, filepath.Join(parent, "notes"))
+	copyTree(t, source, filepath.Join(parent, "20261019T101010Z-v0.2.1-rc.1"))
+	copyTree(t, source, filepath.Join(parent, "20261018T030000Z"+UnverifiedSuffix))
+	copyTree(t, source, filepath.Join(parent, "notes"))
 	if err := os.WriteFile(filepath.Join(parent, "README.txt"), []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -63,19 +63,19 @@ func TestPrune(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(parent, "20261016T000000Z"), 0o700); err != nil { // no manifest
 		t.Fatal(err)
 	}
-	copyTree(t, real, filepath.Join(parent, "20261015T000000Z")) // an extra file
+	copyTree(t, source, filepath.Join(parent, "20261015T000000Z")) // an extra file
 	if err := os.WriteFile(filepath.Join(parent, "20261015T000000Z", "private.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	copyTree(t, real, filepath.Join(parent, "20261014T000000Z")) // a damaged database
+	copyTree(t, source, filepath.Join(parent, "20261014T000000Z")) // a damaged database
 	if err := os.WriteFile(filepath.Join(parent, "20261014T000000Z", "system.db"), []byte("short"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	copyTree(t, real, filepath.Join(parent, "20261013T000000Z")) // a missing database
+	copyTree(t, source, filepath.Join(parent, "20261013T000000Z")) // a missing database
 	if err := os.Remove(filepath.Join(parent, "20261013T000000Z", "audit.db")); err != nil {
 		t.Fatal(err)
 	}
-	copyTree(t, real, filepath.Join(parent, "20261012T999999Z")) // not a time
+	copyTree(t, source, filepath.Join(parent, "20261012T999999Z")) // not a time
 	symlink := runtime.GOOS != "windows"
 	if symlink {
 		if err := os.Symlink(filepath.Join(parent, scheduled[0]), filepath.Join(parent, "20261011T000000Z")); err != nil {

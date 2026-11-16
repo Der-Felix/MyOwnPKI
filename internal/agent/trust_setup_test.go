@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -50,7 +51,7 @@ func TestSetupSystemTrust(t *testing.T) {
 				t.Fatal(err)
 			}
 			rootCopy, err := os.ReadFile(filepath.Join(fixture.dir, "etc", "root.pem"))
-			if err != nil || string(installed) != string(rootCopy) {
+			if err != nil || !bytes.Equal(installed, rootCopy) {
 				t.Fatalf("the installed root is not the verified ca_bundle (%v)", err)
 			}
 			cfg, err := LoadConfig(fixture.opts.ConfigPath)

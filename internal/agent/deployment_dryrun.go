@@ -31,6 +31,10 @@ type DryRunHost struct {
 // run that cannot write, and it maps absolute paths below host.Root (a ".."
 // stays visible, so the check that refuses it still sees it). It returns what
 // the command would print.
+//
+// No binary calls it. It is kept, and exported, for the tests of internal/web
+// (hostadd_test.go): they check that the command the "add host" page prints
+// passes this validation. The tests of this package use it too.
 func DryRunDeploymentAdd(ctx context.Context, cmd DeploymentAddCommand, host DryRunHost) (string, error) {
 	var out bytes.Buffer
 	stderr := host.Stderr
@@ -40,8 +44,8 @@ func DryRunDeploymentAdd(ctx context.Context, cmd DeploymentAddCommand, host Dry
 	spec := cmd.Spec
 	spec.under(host.Root)
 	err := AddDeployment(ctx, AddOptions{
-		EditOptions: EditOptions{ConfigPath: host.ConfigPath, UnitPath: host.UnitPath, DryRun: true, Restart: cmd.Restart,
-			Stdout: &out, Stderr: stderr, skipPreflight: true},
+		ConfigPath: host.ConfigPath, UnitPath: host.UnitPath, DryRun: true, Restart: cmd.Restart,
+		Stdout: &out, Stderr: stderr, skipPreflight: true,
 		Spec: spec, CreateDirs: cmd.CreateDirs,
 	})
 	if err != nil {

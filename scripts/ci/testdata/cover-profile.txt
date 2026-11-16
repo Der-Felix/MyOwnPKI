@@ -1,0 +1,17 @@
+mode: set
+example.test/mod/internal/a/a.go:10.20,12.3 2 1
+example.test/mod/internal/a/a.go:13.2,14.3 1 0
+example.test/mod/internal/a/a.go:14.5,15.3 1 0
+example.test/mod/internal/a/a.go:20.20,22.3 3 0
+example.test/mod/internal/b/b.go:5.10,9.2 4 3
+example.test/mod/internal/b/b_templ.go:1.1,2.2 5 0
+example.test/mod/internal/gen/x/x.pb.go:1.1,2.2 5 0
+example.test/mod/internal/store/pkidb/q.go:1.1,2.2 5 0
+example.test/mod/internal/tools/t/t.go:1.1,2.2 5 0
+example.test/mod/internal/testutil/u.go:1.1,2.2 5 0
+example.test/mod/internal/store/store.go:3.1,4.2 2 0
+example.test/mod/cmd/app/main.go:8.13,10.2 3 1
+example.test/mod/doc.go:3.1,4.2 1 1
+example.test/mod/internal/a/a.go:10.20,12.3 2 0
+example.test/mod/internal/a/a.go:13.2,14.3 1 1
+example.test/mod/internal/b/b.go:5.10,9.2 4 0

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -292,7 +293,7 @@ func TestSetupACMEDirectoryValidationAndExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(fixture.opts.ConfigPath)
-	if err != nil || string(after) != string(before) {
+	if err != nil || !bytes.Equal(after, before) {
 		t.Fatalf("an existing agent.yaml was changed: %v\n%s", err, after)
 	}
 	if !strings.Contains(fixture.stderr.String(), "acme_directory") {

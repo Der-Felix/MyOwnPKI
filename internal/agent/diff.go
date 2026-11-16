@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -11,7 +13,7 @@ import (
 // changed middle too large for the table is shown as one removed and one
 // added block. A missing old file diffs against /dev/null.
 func unifiedDiff(name string, old []byte, oldExists bool, updated []byte) string {
-	if oldExists && string(old) == string(updated) {
+	if oldExists && bytes.Equal(old, updated) {
 		return ""
 	}
 	a, b := splitLines(string(old)), splitLines(string(updated))
@@ -46,9 +48,9 @@ func unifiedDiff(name string, old []byte, oldExists bool, updated []byte) string
 		for i := range lcs {
 			lcs[i] = make([]int, len(midB)+1)
 		}
-		for i := len(midA) - 1; i >= 0; i-- {
+		for i, m := range slices.Backward(midA) {
 			for j := len(midB) - 1; j >= 0; j-- {
-				if midA[i] == midB[j] {
+				if m == midB[j] {
 					lcs[i][j] = lcs[i+1][j+1] + 1
 				} else {
 					lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])

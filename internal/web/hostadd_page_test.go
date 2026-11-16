@@ -2,6 +2,7 @@ package web
 
 import (
 	stdhtml "html"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,9 +25,7 @@ import (
 func hostForm(csrf string, change map[string]string) url.Values {
 	form := map[string]string{"hostname": "proxy1.homelab.lan", "service": "nginx", "challenge": "webroot", "webroot": "/var/www/acme", "names": "",
 		"format": "deb", "arch": "amd64"}
-	for k, v := range change {
-		form[k] = v
-	}
+	maps.Copy(form, change)
 	out := url.Values{"csrf_token": {csrf}}
 	for k, v := range form {
 		out.Set(k, v)
@@ -47,7 +46,7 @@ var reRefreshMeta = regexp.MustCompile(`<meta http-equiv="refresh" content="([^"
 func noScript(t *testing.T, name, html string) {
 	t.Helper()
 	for _, banned := range []string{"hx-", "<script", "style=", "onclick", "htmx"} {
-		if strings.Contains(html, banned) {
+		if strings.Contains(withoutCSRF(html), banned) {
 			t.Errorf("%s contains %q", name, banned)
 		}
 	}
@@ -254,7 +253,7 @@ func TestAddHostRefusesWhatCannotWork(t *testing.T) {
 	// A domain without http-01.
 	issuing := "issuing"
 	if _, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "dnsonly.lan",
-		DomainSettings: ca.DomainSettings{CA: &issuing, ChallengeTypes: []string{ca.ChallengeDNS01}}, Who: testinstance.Console}); err != nil {
+		CA: &issuing, ChallengeTypes: []string{ca.ChallengeDNS01}, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	r := b.post(t, hostAddPath, hostForm(csrf, map[string]string{"hostname": "a.dnsonly.lan"}))
@@ -696,5 +695,20 @@ func TestRefreshOnlyOnProgressPages(t *testing.T) {
 		if html := b.get(t, target).html(); reRefreshMeta.MatchString(html) || strings.Count(html, `href="/hosts/add"`) < 1 {
 			t.Errorf("%s: refresh %v / nav entry %d", target, reRefreshMeta.MatchString(html), strings.Count(html, `href="/hosts/add"`))
 		}
+	}
+}
+
+// The CSRF token is random text: a banned word inside it is no htmx attribute, and a real attribute stays visible.
+func TestWithoutCSRFHidesOnlyTheToken(t *testing.T) {
+	t.Parallel()
+	const field = `<input type="hidden" name="csrf_token" value="hx-0htmx-Zz_9">`
+	page := `<form>` + field + `</form>`
+	for _, banned := range []string{"hx-", "htmx"} {
+		if strings.Contains(withoutCSRF(page), banned) {
+			t.Errorf("the token is still in the page: %q", banned)
+		}
+	}
+	if got := withoutCSRF(page + `<a hx-get="/x">`); !strings.Contains(got, ` hx-get="/x"`) {
+		t.Errorf("an htmx attribute was removed: %s", got)
 	}
 }

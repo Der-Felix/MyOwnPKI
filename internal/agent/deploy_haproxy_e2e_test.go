@@ -73,13 +73,12 @@ func haproxyCheck(t *testing.T, conf string) (string, error) {
 
 // startHAProxy starts a master-worker HAProxy on addr with crt and waits until
 // it listens.
-func startHAProxy(t *testing.T, dir, name, addr, crt string) *realService {
+func startHAProxy(t *testing.T, dir, name, addr, crt string) {
 	t.Helper()
 	conf := filepath.Join(dir, name+".cfg")
 	writeHAProxyConfig(t, conf, addr, crt)
 	svc := startRealService(t, name, dir, []string{haproxyBinary, "-W", "-f", conf})
 	svc.waitListening(t, addr)
-	return svc
 }
 
 func newHAProxyHarness(t *testing.T) *serviceHarness {

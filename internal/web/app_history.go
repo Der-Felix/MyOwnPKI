@@ -452,7 +452,7 @@ func (a *app) domainsDeleted(c *rc) {
 
 // ---------------------------------------------------------------- tenant settings
 
-func (a *app) settingsTarget(c *rc) historyTarget {
+func (a *app) settingsTarget() historyTarget {
 	return historyTarget{title: "Tenant settings", section: "settings", crumbs: adminCrumbs(), base: "/admin/settings", exists: true,
 		labels:       fieldLabels(settingsver.TenantSnapshot{}),
 		secondFactor: "Changing the agent enrollment mode asks for a fresh second factor; every other restore needs none."}
@@ -468,7 +468,7 @@ func (a *app) settingsHistory(c *rc) {
 		c.historyFail(err, "/admin/settings")
 		return
 	}
-	a.historyPage(c, a.settingsTarget(c), versionList{versions: page.Versions, changed: page.Changed, current: page.Current, next: page.Next})
+	a.historyPage(c, a.settingsTarget(), versionList{versions: page.Versions, changed: page.Changed, current: page.Current, next: page.Next})
 }
 
 func (a *app) settingsVersion(c *rc) {
@@ -497,7 +497,7 @@ func (a *app) settingsVersion(c *rc) {
 		}
 		d.changes = now.Comparison.Changes
 	}
-	a.versionPage(c, a.settingsTarget(c), d, name)
+	a.versionPage(c, a.settingsTarget(), d, name)
 }
 
 func (a *app) settingsRestore(c *rc) {

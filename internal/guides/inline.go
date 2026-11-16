@@ -203,7 +203,7 @@ func (ip inlineParser) classify(dest string) (LinkTarget, string, error) {
 		if k := strings.IndexAny(path, "?#"); k >= 0 {
 			path = path[:k]
 		}
-		for _, seg := range strings.Split(path, "/") {
+		for seg := range strings.SplitSeq(path, "/") {
 			if seg == "." || seg == ".." {
 				return 0, "", ip.errf("a path link has no . or .. segment")
 			}

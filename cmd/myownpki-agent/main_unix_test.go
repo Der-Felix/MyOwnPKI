@@ -43,9 +43,9 @@ func TestConfigCheckNamesTheModeNotTheContent(t *testing.T) {
 func TestConfigCheckRefusesASymlinkedCredentialsFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	real := dnsCredentialsFile(t, dir, "api_token: "+dnsSentinel+"\n")
-	link := filepath.Join(filepath.Dir(real), "link.yaml")
-	if err := os.Symlink(real, link); err != nil {
+	target := dnsCredentialsFile(t, dir, "api_token: "+dnsSentinel+"\n")
+	link := filepath.Join(filepath.Dir(target), "link.yaml")
+	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	cfg := filepath.Join(dir, "agent.yaml")

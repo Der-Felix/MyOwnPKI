@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha1" // #nosec G505 -- TOTP test codes (RFC 6238)
 	"encoding/base32"
@@ -77,7 +78,7 @@ func say(v string) func(string) string { return func(string) string { return v }
 
 // group answers "Type group N" with that group of the printed recovery key.
 func group(out string) string {
-	key := regexp.MustCompile(`(?m)^    ([0-9A-Z]{6}(?:-[0-9A-Z]{6}){8})$`).FindStringSubmatch(out)
+	key := regexp.MustCompile(`(?m)^ {4}([0-9A-Z]{6}(?:-[0-9A-Z]{6}){8})$`).FindStringSubmatch(out)
 	n := regexp.MustCompile(`Type group (\d)`).FindAllStringSubmatch(out, -1)
 	if key == nil || n == nil {
 		return "?"
@@ -164,7 +165,7 @@ func TestInteractiveInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, ui.out.String())
 	}
-	if len(res.CheckpointFingerprint) == 0 || strings.Join(res.CAs, ",") != "root,issuing" || res.Resumed {
+	if res.CheckpointFingerprint == "" || strings.Join(res.CAs, ",") != "root,issuing" || res.Resumed {
 		t.Errorf("result %+v", res)
 	}
 
@@ -388,7 +389,7 @@ func TestResumeAfterEachStep(t *testing.T) {
 				t.Errorf("instance row: %v", err)
 			}
 			if keyBefore != nil {
-				if keyAfter, _ := os.ReadFile(opt.Config.AuthKeyFile()); string(keyAfter) != string(keyBefore) {
+				if keyAfter, _ := os.ReadFile(opt.Config.AuthKeyFile()); !bytes.Equal(keyAfter, keyBefore) {
 					t.Error("the auth key was replaced")
 				}
 			}

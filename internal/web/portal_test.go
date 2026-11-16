@@ -259,7 +259,7 @@ func TestSettingsPageNamesThePortal(t *testing.T) {
 	}
 	lower := strings.ToLower(page)
 	for _, bad := range []string{"https", "secure", "encrypted"} {
-		for _, line := range strings.Split(lower, "\n") {
+		for line := range strings.SplitSeq(lower, "\n") {
 			if strings.Contains(line, "trust portal") && strings.Contains(line, bad) {
 				t.Errorf("the setting says %q: %s", bad, line)
 			}

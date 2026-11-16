@@ -1,0 +1,9 @@
+package             stmts   covered  percent
+.                       1         1   100.0%
+cmd/app                 3         3   100.0%
+internal/a              7         3    42.9%
+internal/b              4         4   100.0%
+internal/store          2         0     0.0%
+total                  17        11    64.7%
+
+3 tests skipped in 2 packages (a skipped test covers nothing; a number from one machine is not the number of another)

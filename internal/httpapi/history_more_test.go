@@ -280,7 +280,11 @@ func TestSettingsHistoryAndRestore(t *testing.T) {
 		!strings.Contains(asStr(e[0]["changed_keys"]), "organization") {
 		t.Errorf("audit: %v", e)
 	}
-	if text, _ := json.Marshal(e); strings.Contains(string(text), "back to One") {
+	text, jerr := json.Marshal(e)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	if strings.Contains(string(text), "back to One") {
 		t.Errorf("the reason is in the audit log: %s", text)
 	}
 
@@ -433,11 +437,9 @@ func TestConcurrentRestoresHaveOneWinner(t *testing.T) {
 		codes := make([]int, clients)
 		var wg sync.WaitGroup
 		for i, c := range cs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				codes[i] = c.do(t, http.MethodPost, tc.path, map[string]any{}, ifMatch(2)...).Code
-			}()
+			})
 		}
 		wg.Wait()
 		ok, stale := 0, 0
@@ -510,7 +512,11 @@ func TestHistoryHoldsNoSecretsAndHostileTextStaysData(t *testing.T) {
 	// The audit log has neither the reason nor the raw text of it.
 	for _, action := range []string{"domain.update", "domain.restore", "tenant.settings"} {
 		for _, e := range h.auditRows(t, action) {
-			if text, _ := json.Marshal(e); strings.Contains(string(text), "alert(1)") || strings.Contains(string(text), "jndi") {
+			text, jerr := json.Marshal(e)
+			if jerr != nil {
+				t.Fatal(jerr)
+			}
+			if strings.Contains(string(text), "alert(1)") || strings.Contains(string(text), "jndi") {
 				t.Errorf("%s: the reason is in the audit log: %s", action, text)
 			}
 		}

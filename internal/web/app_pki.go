@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -324,17 +325,13 @@ func (a *app) certificateList(c *rc) {
 	}
 	if page.NextCursor != "" {
 		nq := url.Values{}
-		for k, v := range q {
-			nq[k] = v
-		}
+		maps.Copy(nq, q)
 		nq.Set("cursor", page.NextCursor)
 		d.NextHref = "/certificates?" + nq.Encode()
 	}
 	if cursor != "" {
 		fq := url.Values{}
-		for k, v := range q {
-			fq[k] = v
-		}
+		maps.Copy(fq, q)
 		fq.Del("cursor")
 		d.FirstHref = "/certificates?" + fq.Encode()
 	}

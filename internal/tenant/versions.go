@@ -1,12 +1,8 @@
 package tenant
 
 import (
-	"context"
-
-	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/settingsver"
-	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
 
 // ChangeOptions are the optional extras of a settings change (PHASE3
@@ -43,14 +39,4 @@ func snapshot(s *Settings) settingsver.TenantSnapshot {
 // request (the same person or token the audit entry names).
 func versionActor(who keys.Who) settingsver.Actor {
 	return settingsver.Actor{Type: string(who.Actor.Type), ID: who.Actor.ID, Name: who.Actor.Name}
-}
-
-// Version returns the newest version number of the tenant's settings, the
-// number of their ETag: 0 when they have not been changed since the version
-// history began. Reading needs the same right as Get.
-func (s *Store) Version(ctx context.Context, tenant string, who keys.Who) (int64, error) {
-	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: tenant}, s.Clock.Now()); err != nil && !anyRole(who.Principal, tenant) {
-		return 0, err
-	}
-	return settingsver.Current(ctx, settingsver.SystemBackend(systemdb.New(s.DB)), settingsver.KindTenant, tenant)
 }

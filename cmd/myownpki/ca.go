@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -20,25 +21,11 @@ import (
 // runCA handles `myownpki ca list|show` – read-only views of the CAs.
 // Creating and renewing CAs comes with the API and the UI (PHASE1 13/18/19).
 func runCA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	usage := func() {
-		_, _ = fmt.Fprintf(stderr, "Usage:\n  %s ca list [--config FILE]\n  %s ca show NAME [--config FILE]\n", binary, binary)
-	}
-	if len(args) == 0 {
-		usage()
-		return exitUsage
-	}
-	switch args[0] {
-	case "list":
-		return runCAList(ctx, args[1:], os.Environ(), stdout, stderr)
-	case "show":
-		return runCAShow(ctx, args[1:], os.Environ(), stdout, stderr)
-	case "-h", "--help":
-		usage()
-		return exitOK
-	}
-	_, _ = fmt.Fprintf(stderr, "%s ca: unknown subcommand %q\n", binary, args[0])
-	usage()
-	return exitUsage
+	return runSubcommand("ca", fmt.Sprintf("Usage:\n  %s ca list [--config FILE]\n  %s ca show NAME [--config FILE]\n", binary, binary), args, stderr,
+		map[string]func([]string) int{
+			"list": func(a []string) int { return runCAList(ctx, a, os.Environ(), stdout, stderr) },
+			"show": func(a []string) int { return runCAShow(ctx, a, os.Environ(), stdout, stderr) },
+		})
 }
 
 // loadCAs parses the flags, opens the tenant's pki.db read-only and reads
@@ -121,7 +108,7 @@ func runCAList(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 				note = "REVOKED – see ca show"
 			}
 			if g.Current {
-				gen, until = fmt.Sprint(g.Generation), dateOnly(g.NotAfter)
+				gen, until = strconv.FormatInt(g.Generation, 10), dateOnly(g.NotAfter)
 			}
 			if g.Pending {
 				gen += fmt.Sprintf(" (%d pending)", g.Generation)
@@ -155,7 +142,7 @@ func showCA(out io.Writer, c ca.CAInfo) {
 	p("Key mode", c.KeyMode)
 	p("Public base URL", c.BaseURL)
 	if c.PathLen != nil {
-		p("Path length", fmt.Sprint(*c.PathLen))
+		p("Path length", strconv.FormatInt(*c.PathLen, 10))
 	}
 	if len(c.NameConstraints) > 0 {
 		crit := "critical"

@@ -1,0 +1,7 @@
+example.test/mod/internal/a/a.go:10:	First	25.0%
+example.test/mod/internal/a/a.go:19:	Second	0.0%
+example.test/mod/internal/b/b.go:5:	Run	100.0%
+example.test/mod/internal/store/store.go:3:	Open	0.0%
+example.test/mod/cmd/app/main.go:7:	main	100.0%
+example.test/mod/doc.go:3:	Doc	100.0%
+total:	(statements)	54.0%

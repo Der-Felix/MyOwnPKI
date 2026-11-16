@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -335,4 +336,21 @@ func TestPublicServerShowsThePortal(t *testing.T) {
 	if host != "" && strings.Contains(strings.ToLower(html), strings.ToLower(host)) {
 		t.Error("the portal must not show the host name of the machine that shoots it")
 	}
+}
+
+// newInstance is the demo instance of the README screenshots.
+func newInstance(ctx context.Context, dir string) (*instance, error) {
+	return newInstanceWith(ctx, dir, false)
+}
+
+// inventoryRoutes is the set of routes the inventory covers.
+func inventoryRoutes() map[string]bool {
+	m := map[string]bool{}
+	for _, p := range inventoryPages {
+		m[p.route] = true
+	}
+	for r := range inventoryExcluded {
+		m[r] = true
+	}
+	return m
 }

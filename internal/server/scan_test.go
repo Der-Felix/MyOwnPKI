@@ -57,7 +57,7 @@ func scanServer(t *testing.T, edit func(*config.Config)) (*Server, *clock.Fake, 
 	}
 	t.Cleanup(func() { _ = srv.Shutdown(context.WithoutCancel(t.Context())) })
 	issuing := "issuing"
-	if _, err := srv.engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: console}); err != nil {
+	if _, err := srv.engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Who: console}); err != nil {
 		t.Fatal(err)
 	}
 	return srv, clk, passphrase

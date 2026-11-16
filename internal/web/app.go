@@ -398,7 +398,7 @@ func (a *app) session(h func(*rc), passive bool) http.HandlerFunc {
 				return
 			}
 			if !auth.SameCSRFToken(r.PostFormValue(auth.CSRFField), sess.CSRFToken) {
-				c.notice(http.StatusForbidden, "Refused", view.Message{Kind: view.MessageError, Text: auth.ErrCSRF.Error()})
+				c.notice(http.StatusForbidden, "Refused", view.Message{Kind: view.MessageError, Text: auth.ErrCSRF.Error()}) //nolint:contextcheck // false positive: notice reads the request it is bound to (c.r), the same one as r here
 				return
 			}
 		}
@@ -483,7 +483,7 @@ const flashCookie = "__Host-myownpki_flash"
 func (c *rc) setFlash(msgs ...view.Message) {
 	data, err := json.Marshal(msgs)
 	if err != nil || len(data) > 3000 {
-		data, _ = json.Marshal(msgs[:1])
+		data, _ = json.Marshal(msgs[:1]) //nolint:errchkjson // one message of four strings always encodes
 	}
 	http.SetCookie(c.w, &http.Cookie{
 		Name: flashCookie, Value: base64.RawURLEncoding.EncodeToString(data), Path: "/", MaxAge: 60,

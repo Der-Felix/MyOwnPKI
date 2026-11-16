@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -24,7 +23,7 @@ func (c *client) registerEAB(kid, hmacB64 string) *answer {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	h, _ := json.Marshal(map[string]string{"alg": "HS256", "kid": kid, "url": url})
+	h := mustJSON(c.t, map[string]string{"alg": "HS256", "kid": kid, "url": url})
 	ph, pl := b64(h), b64([]byte(c.jwk))
 	m := hmac.New(sha256.New, mac)
 	m.Write([]byte(ph + "." + pl))

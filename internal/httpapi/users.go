@@ -235,8 +235,7 @@ func (a *API) changeOwnPassword(c *call) error {
 	if errors.Is(err, auth.ErrInvalidLogin) {
 		return c.problem(http.StatusUnprocessableEntity, "wrong-secret", "wrong current password", nil)
 	}
-	var pw *auth.PolicyError
-	if errors.As(err, &pw) {
+	if pw, ok := errors.AsType[*auth.PolicyError](err); ok {
 		return c.problem(http.StatusUnprocessableEntity, "policy-violation", "the new password is refused", []fieldError{{Field: "/new_password", Message: pw.Error()}})
 	}
 	if err != nil {

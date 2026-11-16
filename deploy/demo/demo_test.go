@@ -189,7 +189,7 @@ func TestPinsAreListed(t *testing.T) {
 	if found != 2 {
 		t.Errorf("want two pinned third-party images (certbot, nginx), found %d digests", found)
 	}
-	for _, line := range strings.Split(dockerfile, "\n") {
+	for line := range strings.SplitSeq(dockerfile, "\n") {
 		if rest, ok := strings.CutPrefix(line, "FROM "); ok {
 			if !strings.HasPrefix(rest, "${MYOWNPKI_IMAGE} ") && !pinned.MatchString(strings.Fields(rest)[0]) {
 				t.Errorf("web/Dockerfile: FROM %q is not pinned", rest)

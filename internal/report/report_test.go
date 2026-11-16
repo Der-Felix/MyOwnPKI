@@ -766,3 +766,9 @@ func TestFleetSkipsADeletedAgent(t *testing.T) {
 		t.Errorf("the deleted agent was counted: %+v", f)
 	}
 }
+
+// WeekLabel is the ISO week of t as "2026-W47".
+func WeekLabel(t time.Time) string {
+	y, w := t.UTC().ISOWeek()
+	return fmt.Sprintf("%d-W%02d", y, w)
+}

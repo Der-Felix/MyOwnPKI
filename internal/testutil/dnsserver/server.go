@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -155,12 +156,6 @@ func listenBoth(f listeners, attempts int) (net.Listener, net.PacketConn, error)
 
 // Addr is host:port of the server (UDP and TCP).
 func (s *Server) Addr() string { return s.addr }
-
-// Host is the IP address of the server.
-func (s *Server) Host() string {
-	host, _, _ := net.SplitHostPort(s.addr)
-	return host
-}
 
 // Messages returns a copy of the log.
 func (s *Server) Messages() []Message {
@@ -411,11 +406,11 @@ func (s *Server) apply(rr dns.RR) {
 }
 
 func joinTXT(parts []string) string {
-	out := ""
+	var out strings.Builder
 	for _, p := range parts {
-		out += p
+		out.WriteString(p)
 	}
-	return out
+	return out.String()
 }
 
 // randomPort picks a number in [20000, 49152). crypto/rand keeps the project's

@@ -598,7 +598,7 @@ func TestPlanPermissionsAuditAndClock(t *testing.T) {
 func TestPlanEquivalenceACMEOrder(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
-	if _, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing"), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: ptr(30)}, Who: tester}); err != nil {
+	if _, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "homelab.lan", CA: new("issuing"), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: new(30), Who: tester}); err != nil {
 		t.Fatal(err)
 	}
 	ran := false

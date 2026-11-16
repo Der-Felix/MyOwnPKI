@@ -64,13 +64,13 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	f.mu.Lock()
 	f.dialed = append(f.dialed, addr)
-	real, ok := f.targets[addr]
+	target, ok := f.targets[addr]
 	f.mu.Unlock()
 	if !ok {
 		return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
 	}
 	var d net.Dialer
-	return d.DialContext(ctx, network, real)
+	return d.DialContext(ctx, network, target)
 }
 
 func (f *fixture) lookup(_ context.Context, host string) ([]netip.Addr, error) {
@@ -88,12 +88,12 @@ func (f *fixture) lookup(_ context.Context, host string) ([]netip.Addr, error) {
 	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 }
 
-// route makes host resolve to ip and ip:port reach the listener real.
-func (f *fixture) route(host, ip string, port int, real string) {
+// route makes host resolve to ip and ip:port reach the listener at the address listener.
+func (f *fixture) route(host, ip string, port int, listener string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.answers[host] = []netip.Addr{netip.MustParseAddr(ip)}
-	f.targets[net.JoinHostPort(ip, itoa(port))] = real
+	f.targets[net.JoinHostPort(ip, itoa(port))] = listener
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -172,9 +172,7 @@ func serveTLS(t *testing.T, cfg *tls.Config) *server {
 			if err != nil {
 				return
 			}
-			s.wg.Add(1)
-			go func() {
-				defer s.wg.Done()
+			s.wg.Go(func() {
 				defer func() { _ = conn.Close() }()
 				tc := tls.Server(conn, cfg)
 				if tc.HandshakeContext(t.Context()) != nil {
@@ -184,7 +182,7 @@ func serveTLS(t *testing.T, cfg *tls.Config) *server {
 				s.mu.Lock()
 				s.app += int(n)
 				s.mu.Unlock()
-			}()
+			})
 		}
 	}()
 	return s
@@ -660,7 +658,7 @@ func TestDispatchOnlyHandsOver(t *testing.T) {
 		return nil, &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
 	}
 	var ids []string
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h := "h" + itoa(i) + ".homelab.lan"
 		f.answers[h] = []netip.Addr{netip.MustParseAddr("192.0.2.50")}
 		ids = append(ids, f.add(t, Request{Host: h, Port: 443}).ID)

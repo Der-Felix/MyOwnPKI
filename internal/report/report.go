@@ -213,12 +213,6 @@ func WeekStart(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day()-back, 0, 0, 0, 0, time.UTC)
 }
 
-// WeekLabel is the ISO week of t as "2026-W47".
-func WeekLabel(t time.Time) string {
-	y, w := t.UTC().ISOWeek()
-	return fmt.Sprintf("%d-W%02d", y, w)
-}
-
 // Build reads the data and computes the five datasets at now. It does no
 // permission check: Service.Get does, and is the way in.
 func Build(ctx context.Context, d Deps, now time.Time) (*Report, error) {
@@ -415,6 +409,8 @@ func buildFleet(ctx context.Context, d *Deps, who keys.Who, now time.Time) (*Fle
 			f.Version.Current++
 		case versionOlder:
 			f.Version.Older++
+		case versionUnknown:
+			fallthrough
 		default:
 			f.Version.Unknown++
 		}

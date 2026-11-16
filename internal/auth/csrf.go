@@ -27,12 +27,16 @@ var ErrCSRF = errors.New("missing or wrong CSRF token – reload the page")
 // sessionToken returns the expected token of the request's session, or false
 // when the request has none. GET, HEAD and OPTIONS pass unchecked: they must
 // not change state.
+//
+// The web and API listeners wire both layers themselves (internal/web/server.go,
+// internal/httpapi/api.go); this is the packaged form that security.md
+// describes. Only parts_test.go calls it, so it is kept on purpose.
 func CSRF(next http.Handler, sessionToken func(*http.Request) (string, bool)) http.Handler {
 	cop := http.NewCrossOriginProtection()
 	check := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !safeMethod(r.Method) {
 			if want, ok := sessionToken(r); ok {
-				got := r.Header.Get(CSRFHeader)
+				got := r.Header.Get(CSRFHeader) //nolint:canonicalheader // the documented spelling (CSRFHeader); net/http reads either form
 				if got == "" {
 					got = r.PostFormValue(CSRFField)
 				}

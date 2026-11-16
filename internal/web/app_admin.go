@@ -481,7 +481,7 @@ func (a *app) runImport(c *rc) {
 		return
 	}
 	caPass := map[string]string{}
-	for _, line := range strings.Split(c.r.PostFormValue("ca_pass"), "\n") {
+	for line := range strings.SplitSeq(c.r.PostFormValue("ca_pass"), "\n") {
 		if k, v, ok := strings.Cut(strings.TrimRight(line, "\r"), "="); ok {
 			caPass[strings.TrimSpace(k)] = v
 		}

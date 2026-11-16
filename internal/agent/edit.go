@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -127,7 +128,7 @@ func (e *yamlEditor) flowList(quoted bool, values ...string) *yaml.Node {
 func plainKey(k string) *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k} }
 
 func boolNode(v bool) *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: fmt.Sprint(v)}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(v)}
 }
 
 // mapGet returns the value node of a mapping entry (nil: no such key).
@@ -452,7 +453,7 @@ func restoreBlankLines(orig, out []byte) []byte {
 		return out
 	}
 	var res []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if a, ok := anchorOf(line); ok && anchors[a] && len(res) > 0 && strings.TrimSpace(res[len(res)-1]) != "" {
 			res = append(res, "")
 		}

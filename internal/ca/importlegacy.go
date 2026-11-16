@@ -273,10 +273,7 @@ func (e *Engine) planLegacyCA(ctx context.Context, q *pkidb.Queries, p *legacyPl
 			c.row.ParentID = sql.NullString{String: root.row.ID, Valid: true}
 			c.gen.IssuerCaID = sql.NullString{String: root.row.ID, Valid: true}
 			c.gen.IssuerGeneration = sql.NullInt64{Int64: 1, Valid: true}
-			pathLen := 0
-			if cert.MaxPathLen > 0 {
-				pathLen = cert.MaxPathLen
-			}
+			pathLen := max(cert.MaxPathLen, 0)
 			c.row.PathLen = sql.NullInt64{Int64: int64(pathLen), Valid: true}
 		}
 		e.legacyConstraints(p, c, where)
@@ -365,7 +362,7 @@ func (e *Engine) legacyConstraints(p *legacyPlan, c *legacyCA, where string) {
 	}
 	c.row.NcCritical = boolInt(c.nc.critical)
 	eku, _ := certEKUs(cert)
-	limit, _ := json.Marshal(oidStrings(eku))
+	limit, _ := json.Marshal(oidStrings(eku)) //nolint:errchkjson // a []string always encodes
 	c.row.EkuLimit = string(limit)
 }
 

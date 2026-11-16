@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -98,12 +99,7 @@ type Settings struct {
 func (s Settings) Off() bool { return s.Interval <= 0 }
 
 func (s Settings) portAllowed(p int) bool {
-	for _, a := range s.Ports {
-		if a == p {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.Ports, p)
 }
 
 // Endpoint is one row of the endpoints table with its last scan.

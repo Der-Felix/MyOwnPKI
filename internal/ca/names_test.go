@@ -147,3 +147,38 @@ func TestComputeValidity(t *testing.T) {
 		t.Error("negative days accepted")
 	}
 }
+
+// Found by fuzzing: a refusal repeated a hostile name as far as it was long (253 bytes of a DNS name or an
+// e-mail address, 2 KiB of a URI, an IP zone of any length). short() is the limit of what a message may echo.
+func TestNameErrorsEchoAtMostWhatShortAllows(t *testing.T) {
+	t.Parallel()
+	a, z := strings.Repeat("a", 100), strings.Repeat("z", 300)
+	check := func(name, run string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if strings.Contains(err.Error(), run[:81]) {
+			t.Errorf("%s: the refusal repeats more than 80 bytes: %.200q", name, err.Error())
+		}
+	}
+	_, err := checkDNSName(a+"_.lan", false)
+	check("label with a bad character", a, err)
+	_, err = checkDNSName(a+".lan", false)
+	check("label over 63", a, err)
+	_, err = checkDNSName("*."+a+"_.lan", false)
+	check("wildcard without the preset", a, err)
+	_, err = checkDNSName(strings.Repeat("a.", 60)+strings.Repeat("1", 100), false)
+	check("digits only", strings.Repeat("a.", 60), err)
+	_, err = checkEmail(a + "@homelab.lan")
+	check("local part", a, err)
+	_, err = checkEmail("x@" + a + "_.lan")
+	check("domain", a, err)
+	_, err = checkEmail(a + ".." + a + "@x.lan")
+	check("local part with a dot", a, err)
+	_, err = checkURI("http://" + a + "@host/")
+	check("user info", a, err)
+	_, err = checkURI("/" + a + a)
+	check("not absolute", a, err)
+	_, err = checkIP("fe80::1%" + z)
+	check("zone", z, err)
+}

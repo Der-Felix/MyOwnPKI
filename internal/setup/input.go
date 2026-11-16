@@ -41,8 +41,8 @@ func (l *LineInput) ReadSecret(string) ([]byte, error) {
 		}
 		return nil, err
 	}
-	if bytes.HasSuffix(line, []byte("\n")) {
-		line = bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))
+	if before, ok := bytes.CutSuffix(line, []byte("\n")); ok {
+		line = bytes.TrimSuffix(before, []byte("\r"))
 	}
 	if len(line) == 0 {
 		return nil, errors.New("standard input ended early: init --stdin wants the unseal passphrase on the first line and the admin password on the second")

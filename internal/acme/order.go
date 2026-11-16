@@ -85,8 +85,7 @@ func (s *Server) planOrder(ctx context.Context, acct *pkidb.AcmeAccount, in []id
 	for _, raw := range in {
 		id, err := normalize(raw)
 		if err != nil {
-			var ae *acmeError
-			if errors.As(err, &ae) {
+			if ae, ok := errors.AsType[*acmeError](err); ok {
 				sub(raw, ae.typ, ae.detail)
 				continue
 			}
@@ -215,7 +214,7 @@ func (s *Server) newOrder(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	idsJSON, _ := json.Marshal(plan.idents)
+	idsJSON, _ := json.Marshal(plan.idents) //nolint:errchkjson // a list of two-string structs always encodes
 	err = s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
 		if replaces != "" {
 			// Again inside the transaction: two renewals at once get one order.
@@ -340,8 +339,7 @@ func (s *Server) loadOrder(ctx context.Context, id string) (*pkidb.AcmeOrder, er
 	}
 	var perr sql.NullString
 	if problem != "" {
-		b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:unauthorized", "detail": problem, "status": http.StatusForbidden})
-		perr = sql.NullString{String: string(b), Valid: true}
+		perr = problemJSON("unauthorized", problem, http.StatusForbidden)
 	}
 	if err := q.SetACMEOrderStatus(ctx, pkidb.SetACMEOrderStatusParams{Status: next, Error: perr, UpdatedAt: dbTime(now), ID: id}); err != nil {
 		return nil, err
@@ -537,7 +535,7 @@ func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
 				s.fail(w, r, kerr)
 				return
 			}
-			s.valid.start(job{challenge: c, authz: *a, thumbprint: acct, account: req.account.ID, ip: req.ip})
+			s.valid.start(job{challenge: c, authz: *a, thumbprint: acct, account: req.account.ID, ip: req.ip}) //nolint:contextcheck // the check outlives this request on purpose: it runs on the validator's lifetime, and finish writes its result detached from it
 		}
 	}
 	if c.Status == "processing" {

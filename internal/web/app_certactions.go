@@ -86,8 +86,7 @@ func (c *rc) refusedAt(err error, back, history string) {
 		errors.Is(err, auth.ErrNoTOTPChange), errors.Is(err, auth.ErrPasskeysOff), errors.Is(err, auth.ErrNoToken), errors.Is(err, auth.ErrNoPasskey):
 		add(err.Error())
 	default:
-		var locked *auth.LockedError
-		if errors.As(err, &locked) {
+		if locked, ok := errors.AsType[*auth.LockedError](err); ok {
 			add(locked.Error())
 			break
 		}

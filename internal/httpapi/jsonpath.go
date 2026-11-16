@@ -99,8 +99,7 @@ func jsonField(t reflect.Type, key string) (reflect.Type, bool) {
 	var fold reflect.Type
 	var walk func(t reflect.Type) (reflect.Type, bool)
 	walk = func(t reflect.Type) (reflect.Type, bool) {
-		for i := range t.NumField() {
-			f := t.Field(i)
+		for f := range t.Fields() {
 			tag := f.Tag.Get("json")
 			if tag == "-" {
 				continue

@@ -251,7 +251,7 @@ func TestIssuedTLSDenied(t *testing.T) {
 	ctx := t.Context()
 	e.inst.Unseal(t)
 	if _, err := e.inst.Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "lab", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "lab", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Lab CA"}, NameConstraints: ca.NameConstraints{PermittedDNS: []string{"dmz.homelab.lan"}},
 		Who: testinstance.Console,
 	}); err != nil {
@@ -393,8 +393,8 @@ func TestIssuedTLSValidity(t *testing.T) {
 	ctx := t.Context()
 	e.inst.Unseal(t)
 	for _, c := range []ca.IntermediateRequest{
-		{CASettings: ca.CASettings{Name: "short-max", BaseURL: "http://pki.homelab.lan", MaxValidityDays: 30}, Subject: ca.Subject{CommonName: "Short max"}},
-		{CASettings: ca.CASettings{Name: "ends-soon", BaseURL: "http://pki.homelab.lan"}, Subject: ca.Subject{CommonName: "Ends soon"}, ValidityDays: 20},
+		{Name: "short-max", BaseURL: "http://pki.homelab.lan", MaxValidityDays: 30, Subject: ca.Subject{CommonName: "Short max"}},
+		{Name: "ends-soon", BaseURL: "http://pki.homelab.lan", Subject: ca.Subject{CommonName: "Ends soon"}, ValidityDays: 20},
 	} {
 		c.Parent, c.Who = "root", testinstance.Console
 		if _, err := e.inst.Engine.CreateIntermediate(ctx, c); err != nil {
@@ -497,7 +497,7 @@ func TestIssuedListeners(t *testing.T) {
 		t.Fatal(uerr)
 	}
 	// The root from the public listener is the only trust anchor.
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.PublicAddr()+"/ca/root/1.crt", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.PublicAddr()+"/ca/root/1.crt", http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -511,7 +511,7 @@ func TestIssuedListeners(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "acme.homelab.lan", MinVersion: tls.VersionTLS12}}}
-	req, _ = http.NewRequestWithContext(t.Context(), http.MethodGet, "https://"+srv.ACMEAddr()+"/acme/directory", nil)
+	req, _ = http.NewRequestWithContext(t.Context(), http.MethodGet, "https://"+srv.ACMEAddr()+"/acme/directory", http.NoBody)
 	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("ACME over TLS with the root as trust anchor: %v", err)

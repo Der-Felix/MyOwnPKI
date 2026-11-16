@@ -38,7 +38,7 @@ const MaxFileSize = 64 << 10
 var ErrInvalid = errors.New("invalid configuration")
 
 // Config is the server configuration. Field order is the order of the example file.
-type Config struct {
+type Config struct { //nolint:recvcheck // ApplyEnv writes the struct, every other method only reads it
 	// DataDir holds system.db and the tenant directories. Absolute path.
 	DataDir string  `yaml:"data_dir"`
 	Log     Log     `yaml:"log"`

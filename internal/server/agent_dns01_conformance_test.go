@@ -72,7 +72,7 @@ func TestConformanceAgentDNS01(t *testing.T) {
 	if err != nil || d == nil {
 		t.Fatalf("domain: %v", err)
 	}
-	if _, err = e.srv.engine.UpdateDomain(ctx, d.ID, ca.DomainSettings{Wildcards: ptrTo(true)}, console); err != nil {
+	if _, err = e.srv.engine.UpdateDomain(ctx, d.ID, ca.DomainSettings{Wildcards: new(true)}, console); err != nil {
 		t.Fatal(err)
 	}
 

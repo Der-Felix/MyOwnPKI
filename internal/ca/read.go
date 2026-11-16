@@ -202,7 +202,10 @@ func (e *Engine) Certificates(ctx context.Context, who keys.Who, f CertificateFi
 		limit = DefaultPageSize
 	}
 	limit = min(limit, MaxPageSize)
-	allowedJSON, _ := json.Marshal(allowed)
+	allowedJSON, jerr := json.Marshal(allowed)
+	if jerr != nil {
+		return nil, jerr
+	}
 	p := pkidb.ListCertificatesParams{
 		HideAgents: boolInt(f.HideAgentCertificates),
 		AllCas:     boolInt(tenantWide), AllowedCas: string(allowedJSON), CaID: f.CAID, Preset: f.Preset, Status: f.Status,

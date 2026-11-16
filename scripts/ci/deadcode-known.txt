@@ -1,0 +1,4 @@
+# Functions that task deadcode reports and that were reviewed and kept (docs/PHASE3.md section 18, step 91).
+# One line per function, exactly as the tool prints it without line and column and with forward slashes:
+#   internal/pkg/file.go: unreachable func: Name
+# The list is empty: every function it once held was deleted or moved into a _test.go file.

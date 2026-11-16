@@ -117,18 +117,6 @@ var inventoryExcluded = map[string]string{
 	"/admin/import/{id}":                   "the report of a finished legacy import; the demo has none (read internal/web/app_admin.go, importReport)",
 }
 
-// inventoryRoutes is the set of routes the inventory covers.
-func inventoryRoutes() map[string]bool {
-	m := map[string]bool{}
-	for _, p := range inventoryPages {
-		m[p.route] = true
-	}
-	for r := range inventoryExcluded {
-		m[r] = true
-	}
-	return m
-}
-
 // pageResult is what the inventory found out about one request.
 type pageResult struct {
 	body   []byte // the HTML, for reading what the images do not show (closed <details>)
@@ -139,8 +127,8 @@ type pageResult struct {
 
 // probe requests path like the browser will, follows redirects and reports
 // the final status. The images alone would not show a 404 or a redirect.
-func probe(base, path string) pageResult {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func probe(ctx context.Context, base, path string) pageResult {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, http.NoBody)
 	if err != nil {
@@ -194,7 +182,7 @@ func runInventory(ctx context.Context, in *instance, bases map[viewKind]string, 
 				"{agent}", in.agentID, "{agentold}", in.agentOldID, "{account}", in.accountID, "{user}", in.userID, "{enroll}", in.enrollHost, "{guide}", firstGuide()).Replace(p.path)
 			for _, th := range themesOf(kind) {
 				base := bases[th.kind]
-				res := probe(base, path)
+				res := probe(ctx, base, path)
 				stem := fmt.Sprintf("%02d-%s%s", numberOf(p.name), p.name, th.suffix)
 				if th.suffix == "" {
 					fmt.Fprintf(&manifest, "%s\t%d\t%s\t%s\t%s\n", p.name, res.status, p.route, path, res.final)
@@ -206,7 +194,7 @@ func runInventory(ctx context.Context, in *instance, bases map[viewKind]string, 
 					_ = os.WriteFile(filepath.Join(out, stem+".html"), res.body, 0o600)
 				}
 				file := filepath.Join(out, stem+".png")
-				if err := capture(browser, base+path, file, width, height); err != nil {
+				if err := capture(ctx, browser, base+path, file, width, height); err != nil {
 					fmt.Fprintf(stderr, "FAILED %s: %v\n", stem, err)
 					failed = true
 					continue
@@ -258,7 +246,7 @@ func selected(name, only string) bool {
 	if only == "" {
 		return true
 	}
-	for _, prefix := range strings.Split(only, ",") {
+	for prefix := range strings.SplitSeq(only, ",") {
 		if strings.HasPrefix(name, strings.TrimSpace(prefix)) {
 			return true
 		}

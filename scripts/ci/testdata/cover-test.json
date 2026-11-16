@@ -1,0 +1,9 @@
+{"Time":"2026-11-16T10:00:00Z","Action":"start","Package":"example.test/mod/internal/a"}
+{"Time":"2026-11-16T10:00:01Z","Action":"run","Package":"example.test/mod/internal/a","Test":"TestFirst"}
+{"Time":"2026-11-16T10:00:01Z","Action":"skip","Package":"example.test/mod/internal/a","Test":"TestNeedsBash","Elapsed":0}
+{"Time":"2026-11-16T10:00:01Z","Action":"pass","Package":"example.test/mod/internal/a","Test":"TestFirst","Elapsed":0}
+{"Time":"2026-11-16T10:00:02Z","Action":"pass","Package":"example.test/mod/internal/a","Elapsed":0.5}
+{"Time":"2026-11-16T10:00:02Z","Action":"skip","Package":"example.test/mod/internal/b","Test":"TestX/sub","Elapsed":0}
+{"Time":"2026-11-16T10:00:02Z","Action":"skip","Package":"example.test/mod/internal/b","Test":"TestX","Elapsed":0}
+{"Time":"2026-11-16T10:00:02Z","Action":"pass","Package":"example.test/mod/internal/b","Elapsed":0.2}
+{"Time":"2026-11-16T10:00:02Z","Action":"skip","Package":"example.test/mod/internal/tools/t","Elapsed":0}

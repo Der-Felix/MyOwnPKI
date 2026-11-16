@@ -52,7 +52,7 @@ func approx(a, b float64) bool { return math.Abs(a-b) < 0.011 }
 
 func weekCats(n int, values func(i int) []int64) []view.ChartCategory {
 	var cats []view.ChartCategory
-	for i := 0; i < n; i++ {
+	for i := range n {
 		cats = append(cats, view.ChartCategory{Label: "W" + strconv.Itoa(i+1), Name: "Week " + strconv.Itoa(i+1), Values: values(i)})
 	}
 	return cats
@@ -304,7 +304,7 @@ func TestChartIsDeterministic(t *testing.T) {
 		Categories: weekCats(12, func(i int) []int64 { return []int64{int64(i * 3), int64(12 - i)} }),
 	}
 	first := renderChart(t, c)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if renderChart(t, c) != first {
 			t.Fatal("the same input renders different bytes")
 		}
@@ -376,7 +376,7 @@ func TestChartHasNoCSPRelevantMarkup(t *testing.T) {
 	}
 	// Only classes of components.css are used (the web tests check they are defined).
 	for _, m := range regexp.MustCompile(`class="([^"]*)"`).FindAllStringSubmatch(out, -1) {
-		for _, class := range strings.Fields(m[1]) {
+		for class := range strings.FieldsSeq(m[1]) {
 			if !strings.HasPrefix(class, "ch-") && !strings.HasPrefix(class, "chart") && !strings.HasPrefix(class, "table") &&
 				class != "visually-hidden" {
 				t.Errorf("unexpected class %q", class)

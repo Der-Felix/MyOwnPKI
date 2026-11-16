@@ -57,28 +57,27 @@ func (c *challengeServer) set(token, body string) {
 	c.files[token] = body
 }
 
-func newEnv(t *testing.T, approval string) *env {
-	t.Helper()
-	inst := testinstance.New(t, testinstance.Options{})
-	inst.Unseal(t)
-	return newEnvOn(t, inst, approval)
+func newEnv(tb testing.TB, approval string) *env {
+	tb.Helper()
+	inst := testinstance.New(tb, testinstance.Options{})
+	inst.Unseal(tb)
+	return newEnvOn(tb, inst, approval)
 }
 
 // newEnvOn sets up the domain, the ACME server and the network edges on an
 // unsealed instance.
-func newEnvOn(t *testing.T, inst *testinstance.Instance, approval string) *env {
-	t.Helper()
-	ctx := t.Context()
+func newEnvOn(tb testing.TB, inst *testinstance.Instance, approval string) *env {
+	tb.Helper()
+	ctx := tb.Context()
 	issuing := "issuing"
 	wild := true
-	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{
-		CA: &issuing, Approval: &approval, Wildcards: &wild, IPRanges: []string{"192.0.2.0/24"},
-	}, Who: testinstance.Console}); err != nil {
-		t.Fatal(err)
+	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan",
+		CA: &issuing, Approval: &approval, Wildcards: &wild, IPRanges: []string{"192.0.2.0/24"}, Who: testinstance.Console}); err != nil {
+		tb.Fatal(err)
 	}
 	s, err := New(Options{Engine: inst.Engine, BaseURL: testBase, TrustedProxies: "127.0.0.1, ::1", Clock: inst.Clock})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	v := &env{Instance: inst, s: s, txt: map[string][]string{}, addrFor: map[string]netip.Addr{}}
 	v.chall = &challengeServer{files: map[string]string{}, handlers: map[string]http.HandlerFunc{}}
@@ -99,15 +98,15 @@ func newEnvOn(t *testing.T, inst *testinstance.Instance, approval string) *env {
 		_, _ = io.WriteString(w, body)
 	})
 	v.chall.srv = httptest.NewServer(serve)
-	t.Cleanup(v.chall.srv.Close)
+	tb.Cleanup(v.chall.srv.Close)
 	v.chall.tls = httptest.NewTLSServer(serve)
-	t.Cleanup(v.chall.tls.Close)
-	banner, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	tb.Cleanup(v.chall.tls.Close)
+	banner, err := (&net.ListenConfig{}).Listen(tb.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	v.chall.banner = banner
-	t.Cleanup(func() { _ = banner.Close() })
+	tb.Cleanup(func() { _ = banner.Close() })
 	go func() {
 		for {
 			conn, aerr := banner.Accept()
@@ -148,7 +147,7 @@ func newEnvOn(t *testing.T, inst *testinstance.Instance, approval string) *env {
 		return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 	}
 	v.ts = httptest.NewServer(s)
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		v.ts.Close()
 		s.Close()
 	})
@@ -158,7 +157,7 @@ func newEnvOn(t *testing.T, inst *testinstance.Instance, approval string) *env {
 // client is a minimal ACME client: an ES256 account key and the protocol
 // steps the tests need.
 type client struct {
-	t     *testing.T
+	t     testing.TB
 	v     *env
 	key   *ecdsa.PrivateKey
 	jwk   string
@@ -166,17 +165,17 @@ type client struct {
 	nonce string
 }
 
-func (v *env) client(t *testing.T) *client {
-	t.Helper()
+func (v *env) client(tb testing.TB) *client {
+	tb.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	jk, err := jose.KeyFor(&k.PublicKey)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	return &client{t: t, v: v, key: k, jwk: string(jk.Canonical())}
+	return &client{t: tb, v: v, key: k, jwk: string(jk.Canonical())}
 }
 
 // local turns a URL of the base into one of the test server.
@@ -196,7 +195,7 @@ func (c *client) getNonce() string {
 		c.nonce = ""
 		return n
 	}
-	req, _ := http.NewRequestWithContext(c.t.Context(), http.MethodHead, c.local(testBase+"/new-nonce"), nil)
+	req, _ := http.NewRequestWithContext(c.t.Context(), http.MethodHead, c.local(testBase+"/new-nonce"), http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.t.Fatal(err)
@@ -207,12 +206,12 @@ func (c *client) getNonce() string {
 
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
-func signES256(t *testing.T, key *ecdsa.PrivateKey, input []byte) []byte {
-	t.Helper()
+func signES256(tb testing.TB, key *ecdsa.PrivateKey, input []byte) []byte {
+	tb.Helper()
 	h := sha256.Sum256(input)
 	r, s, err := ecdsa.Sign(rand.Reader, key, h[:])
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	out := make([]byte, 64)
 	r.FillBytes(out[:32])
@@ -232,9 +231,9 @@ func (c *client) jws(url string, payload any, useJWK bool) []byte {
 	return signedBody(c.t, c.key, hdr, payload)
 }
 
-func signedBody(t *testing.T, key *ecdsa.PrivateKey, hdr map[string]any, payload any) []byte {
-	t.Helper()
-	h, _ := json.Marshal(hdr)
+func signedBody(tb testing.TB, key *ecdsa.PrivateKey, hdr map[string]any, payload any) []byte {
+	tb.Helper()
+	h := mustJSON(tb, hdr)
 	var p []byte
 	switch v := payload.(type) {
 	case nil:
@@ -243,11 +242,11 @@ func signedBody(t *testing.T, key *ecdsa.PrivateKey, hdr map[string]any, payload
 	case rawBytes:
 		p = v
 	default:
-		p, _ = json.Marshal(v)
+		p = mustJSON(tb, v)
 	}
 	ph, pl := b64(h), b64(p)
-	sig := signES256(t, key, []byte(ph+"."+pl))
-	body, _ := json.Marshal(map[string]string{"protected": ph, "payload": pl, "signature": b64(sig)})
+	sig := signES256(tb, key, []byte(ph+"."+pl))
+	body := mustJSON(tb, map[string]string{"protected": ph, "payload": pl, "signature": b64(sig)})
 	return body
 }
 
@@ -377,11 +376,11 @@ func (c *client) waitAuthz(url, want string) *answer {
 	return a
 }
 
-func csrFor(t *testing.T, key crypto.Signer, cn string, dns []string, ips []net.IP) []byte {
-	t.Helper()
+func csrFor(tb testing.TB, key crypto.Signer, cn string, dns []string, ips []net.IP) []byte {
+	tb.Helper()
 	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: cn}, DNSNames: dns, IPAddresses: ips}, key)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return der
 }
@@ -414,4 +413,15 @@ func (r rawBytes) MarshalJSON() ([]byte, error) { return r, nil }
 func list(v any) []any {
 	l, _ := v.([]any)
 	return l
+}
+
+// mustJSON encodes v or fails the test: an ignored error would leave an empty
+// request that a test could mistake for a refusal.
+func mustJSON(tb testing.TB, v any) []byte {
+	tb.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return b
 }

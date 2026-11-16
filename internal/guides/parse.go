@@ -13,12 +13,12 @@ import (
 var codeLanguages = map[string]bool{"bash": true, "powershell": true, "yaml": true, "json": true, "ini": true, "text": true}
 
 var (
-	orderedMarker = regexp.MustCompile(`^[0-9]{1,3}\. `)
+	orderedMarker = regexp.MustCompile(`^\d{1,3}\. `)
 	headingID     = regexp.MustCompile(`^[a-z0-9-]{1,60}$`)
 	sitePath      = regexp.MustCompile(`^/[a-z0-9/_-]*$`)
 	sourcePath    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	separatorCell = regexp.MustCompile(`^:?-{3,}:?$`)
-	entityLike    = regexp.MustCompile(`^&(#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
+	entityLike    = regexp.MustCompile(`^&(#\d+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 	linkChars     = regexp.MustCompile(`^[A-Za-z0-9._~/:#?=&-]+$`)
 	uiPath        = regexp.MustCompile(`^/[A-Za-z0-9._~/-]*(\?[A-Za-z0-9._~=&-]*)?(#[a-z0-9-]+)?$`)
 )
@@ -144,9 +144,9 @@ type frontMatterError string
 func (e frontMatterError) Error() string { return string(e) }
 
 func setFrontMatter(g *Guide, key, value string, inSources *bool) error {
-	short := func(max int) error {
-		if value == "" || utf8.RuneCountInString(value) > max || strings.ContainsAny(value, "\t<>`") {
-			return frontMatterError(key + " is one line of 1 to " + strconv.Itoa(max) + " characters without < > or backticks")
+	short := func(limit int) error {
+		if value == "" || utf8.RuneCountInString(value) > limit || strings.ContainsAny(value, "\t<>`") {
+			return frontMatterError(key + " is one line of 1 to " + strconv.Itoa(limit) + " characters without < > or backticks")
 		}
 		return nil
 	}
@@ -276,8 +276,8 @@ func (p *parser) parseHeading(i int) error {
 	line := p.lines[i]
 	level := 2
 	text := strings.TrimPrefix(line, "## ")
-	if strings.HasPrefix(line, "### ") {
-		level, text = 3, strings.TrimPrefix(line, "### ")
+	if after, ok := strings.CutPrefix(line, "### "); ok {
+		level, text = 3, after
 	}
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > 100 || strings.ContainsAny(text, "`*[]<>{}\\") {

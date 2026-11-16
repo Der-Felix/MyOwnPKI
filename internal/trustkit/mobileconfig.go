@@ -132,7 +132,7 @@ func xmlText(s string) string {
 func wrapBase64(der []byte, indent string) string {
 	enc := base64.StdEncoding.EncodeToString(der)
 	var b strings.Builder
-	for len(enc) > 0 {
+	for enc != "" {
 		n := min(64, len(enc))
 		b.WriteString(indent + enc[:n] + "\n")
 		enc = enc[n:]

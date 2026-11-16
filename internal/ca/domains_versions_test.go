@@ -73,7 +73,7 @@ func TestDomainWritersAppendVersions(t *testing.T) {
 	ctx := t.Context()
 	const reason = "needed for the new wiki"
 	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", Who: tester,
-		DomainSettings: DomainSettings{CA: ptr("issuing"), Options: ChangeOptions{Reason: reason}}})
+		CA: new("issuing"), Options: ChangeOptions{Reason: reason}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestDomainWritersAppendVersions(t *testing.T) {
 		t.Errorf("created domain: version %d, want 1", d.Version)
 	}
 	v.clk.Advance(1)
-	d2, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true), ValidityDays: ptr(30)}, tester)
+	d2, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true), ValidityDays: new(30)}, tester)
 	if err != nil || d2.Version != 2 {
 		t.Fatalf("update: %+v %v", d2, err)
 	}
@@ -121,7 +121,11 @@ func TestDomainWritersAppendVersions(t *testing.T) {
 		}
 	}
 	for _, r := range v.auditRows(t) {
-		if text, _ := json.Marshal(r.details); strings.Contains(string(text), reason) || strings.Contains(string(text), "retired") {
+		text, jerr := json.Marshal(r.details)
+		if jerr != nil {
+			t.Fatal(jerr)
+		}
+		if strings.Contains(string(text), reason) || strings.Contains(string(text), "retired") {
 			t.Errorf("the reason is in the audit log: %s %v", r.action, r.details)
 		}
 	}
@@ -156,7 +160,7 @@ func TestFirstChangeWritesTheBaseline(t *testing.T) {
 	if err != nil || got.Version != 0 {
 		t.Fatalf("GetDomain: version %d %v", got.Version, err)
 	}
-	up, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: ptr(ApprovalOpen)}, tester)
+	up, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: new(ApprovalOpen)}, tester)
 	if err != nil || up.Version != 2 {
 		t.Fatalf("update: %+v %v", up, err)
 	}
@@ -196,21 +200,21 @@ func TestDomainExpectedVersion(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var ce *settingsver.ConflictError
 
 	// A stale number changes nothing and names the newest version.
-	_, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true), Options: ChangeOptions{ExpectedVersion: ptr(int64(0))}}, tester)
+	_, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true), Options: ChangeOptions{ExpectedVersion: new(int64(0))}}, tester)
 	if !errors.Is(err, settingsver.ErrConflict) || !errors.As(err, &ce) || ce.Latest.Number != 1 || ce.Expected != 0 || ce.Latest.Actor.Name != "it-admin" {
 		t.Fatalf("stale update: %v", err)
 	}
 	if got, _ := v.e.GetDomain(ctx, tester, d.ID); got.Wildcards || got.Version != 1 {
 		t.Errorf("a refused update changed the domain: %+v", got)
 	}
-	err = v.e.DeleteDomainWith(ctx, d.ID, ChangeOptions{ExpectedVersion: ptr(int64(7))}, tester)
+	err = v.e.DeleteDomainWith(ctx, d.ID, ChangeOptions{ExpectedVersion: new(int64(7))}, tester)
 	if !errors.Is(err, settingsver.ErrConflict) {
 		t.Fatalf("stale delete: %v", err)
 	}
@@ -218,7 +222,7 @@ func TestDomainExpectedVersion(t *testing.T) {
 		t.Errorf("a refused delete removed the domain: %v", gerr)
 	}
 	_, err = v.e.CreateDomain(ctx, DomainRequest{Name: "other.lan", Who: tester,
-		DomainSettings: DomainSettings{CA: ptr("open"), Options: ChangeOptions{ExpectedVersion: ptr(int64(3))}}})
+		CA: new("open"), Options: ChangeOptions{ExpectedVersion: new(int64(3))}})
 	if !errors.Is(err, settingsver.ErrConflict) {
 		t.Fatalf("a create expects no history: %v", err)
 	}
@@ -230,11 +234,11 @@ func TestDomainExpectedVersion(t *testing.T) {
 	}
 
 	// The current number lets the change through, and the next one needs the new number.
-	up, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true), Options: ChangeOptions{ExpectedVersion: ptr(int64(1))}}, tester)
+	up, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true), Options: ChangeOptions{ExpectedVersion: new(int64(1))}}, tester)
 	if err != nil || up.Version != 2 {
 		t.Fatalf("update with the current version: %+v %v", up, err)
 	}
-	if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(false), Options: ChangeOptions{ExpectedVersion: ptr(int64(1))}}, tester); !errors.Is(err, settingsver.ErrConflict) {
+	if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(false), Options: ChangeOptions{ExpectedVersion: new(int64(1))}}, tester); !errors.Is(err, settingsver.ErrConflict) {
 		t.Fatalf("second update with the old number: %v", err)
 	}
 	// The refusal is audited like another refused domain change.
@@ -247,7 +251,7 @@ func TestDomainExpectedVersion(t *testing.T) {
 	}
 
 	// A domain that is not there for the writer stays not found (no history row for a ghost).
-	if _, err = v.e.UpdateDomain(ctx, "dom-nope", DomainSettings{Wildcards: ptr(true), Options: ChangeOptions{ExpectedVersion: ptr(int64(0))}}, tester); !errors.Is(err, ErrNotFound) {
+	if _, err = v.e.UpdateDomain(ctx, "dom-nope", DomainSettings{Wildcards: new(true), Options: ChangeOptions{ExpectedVersion: new(int64(0))}}, tester); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown domain: %v", err)
 	}
 }
@@ -256,7 +260,7 @@ func TestDomainConcurrentWritersHaveOneWinner(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,11 +268,9 @@ func TestDomainConcurrentWritersHaveOneWinner(t *testing.T) {
 	errs := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, errs[i] = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(10 + i), Options: ChangeOptions{ExpectedVersion: ptr(int64(1))}}, tester)
-		}()
+		wg.Go(func() {
+			_, errs[i] = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(10 + i), Options: ChangeOptions{ExpectedVersion: new(int64(1))}}, tester)
+		})
 	}
 	wg.Wait()
 	var won, lost int
@@ -293,11 +295,9 @@ func TestDomainConcurrentWritersHaveOneWinner(t *testing.T) {
 
 	// Without the check every writer goes through, one version each, no gaps.
 	for i := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, errs[i] = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(40 + i)}, tester)
-		}()
+		wg.Go(func() {
+			_, errs[i] = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(40 + i)}, tester)
+		})
 	}
 	wg.Wait()
 	for _, e := range errs {
@@ -320,7 +320,7 @@ func TestDomainChangeRollsBackWhenAuditOrVersionFails(t *testing.T) {
 			t.Parallel()
 			v := domainEnv(t)
 			ctx := t.Context()
-			d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+			d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -328,13 +328,13 @@ func TestDomainChangeRollsBackWhenAuditOrVersionFails(t *testing.T) {
 			before := len(v.domainHistory(t, d.ID))
 			v.failInserts(t, table)
 
-			if _, err = v.e.CreateDomain(ctx, DomainRequest{Name: "new.lan", DomainSettings: DomainSettings{CA: ptr("open")}, Who: tester}); !injected(err) {
+			if _, err = v.e.CreateDomain(ctx, DomainRequest{Name: "new.lan", CA: new("open"), Who: tester}); !injected(err) {
 				t.Error("create succeeded although its audit entry or version could not be written")
 			}
-			if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); !injected(err) {
+			if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); !injected(err) {
 				t.Error("update succeeded")
 			}
-			if _, err = v.e.UpdateDomain(ctx, legacy.ID, DomainSettings{Wildcards: ptr(true)}, tester); !injected(err) {
+			if _, err = v.e.UpdateDomain(ctx, legacy.ID, DomainSettings{Wildcards: new(true)}, tester); !injected(err) {
 				t.Error("update of a domain without history succeeded")
 			}
 			if err = v.e.DeleteDomain(ctx, d.ID, tester); !injected(err) {
@@ -380,12 +380,12 @@ func TestDomainReasonIsChecked(t *testing.T) {
 	ctx := t.Context()
 	long := strings.Repeat("x", settingsver.MaxReason+1)
 	for name, reason := range map[string]string{"too long": long, "newline": "a\nb"} {
-		_, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", Who: tester, DomainSettings: DomainSettings{CA: ptr("issuing"), Options: ChangeOptions{Reason: reason}}})
+		_, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", Who: tester, CA: new("issuing"), Options: ChangeOptions{Reason: reason}})
 		if !deniedWith(err, "reason") {
 			t.Errorf("create, %s: %v", name, err)
 		}
 	}
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}

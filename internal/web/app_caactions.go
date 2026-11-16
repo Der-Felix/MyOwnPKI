@@ -137,8 +137,8 @@ func (a *app) importRootPage(c *rc) {
 func (a *app) importRoot(c *rc) {
 	f := c.r.PostFormValue
 	res, err := a.d.Engine.ImportRoot(c.r.Context(), ca.ImportRootRequest{
-		CASettings: ca.CASettings{Name: strings.TrimSpace(f("name")), BaseURL: strings.TrimSpace(f("base")), CRLDays: atoi(f("crl_days"))},
-		CertPEM:    []byte(strings.TrimSpace(f("cert")) + "\n"), Who: c.who(),
+		Name: strings.TrimSpace(f("name")), BaseURL: strings.TrimSpace(f("base")), CRLDays: atoi(f("crl_days")),
+		CertPEM: []byte(strings.TrimSpace(f("cert")) + "\n"), Who: c.who(),
 	})
 	if err != nil {
 		c.refused(err, "/authorities/import")

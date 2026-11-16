@@ -2643,3 +2643,423 @@ The maintainer was not available; each row takes the cautious option. Review the
 11. **Optional systemd-sandbox test** of `apache2ctl configtest` and `haproxy -c` under the real unit (like `agent-e2e-nginx-systemd.sh`): about three more minutes of CI and one more exported root file system. *Default: not in 0.3.11; the live test covers the sandbox.*
 
 **Still not live tested (for the CHANGELOG's *Known limitations* and the docs; updated at step 77):** all three new recipes on real hosts under the real systemd unit and its sandbox (Debian and Ubuntu for Apache, the Red Hat family with SELinux for `httpd`, HAProxy from the distribution package); the three questions that were open for CI are **answered by the first CI run** (Apache 2.4.58 and HAProxy 2.8.30 on Ubuntu 24.04, packages started by the test with a private configuration; the answers are in the recipe notes, `site/recipes.md` and the CHANGELOG): (1) `apache2ctl configtest` does **not** detect a key that does not match the certificate; (2) a failed graceful reload with a damaged key can stop Apache, and the agent's rollback restores the files (`rolled_back`) without bringing Apache back; (3) `haproxy -c` refuses a certificate and key that do not match, the directory form of `crt` skips the agent's temporary `.myownpki-*` file, and the order of certificate and key in the combined file does not matter. The same run showed that `apache2ctl configtest` creates `/run/apache2`, `/run/apache2/socks` and `/run/lock/apache2` when they are missing, so under `ProtectSystem=strict` (the recipe makes only `/var/log/apache2` writable) the test hook fails when Apache has not been started since the boot. **What remains for the live test:** all of this on real hosts and under the real systemd unit and its sandbox (the reload there is `systemctl reload`, not `apache2 -k graceful` on a private configuration, so whether the unit starts a stopped Apache again is open); `httpd` on the Red Hat family (the answers above come from the `apache2` package); SELinux and AppArmor; other Apache and HAProxy versions than 2.4.58 and 2.8.30; the local check against real bindings (`accept-proxy`, LAN-only binds); every statement about the services' paths, units and logs and the notes on SELinux; the claim that `check` hooks need no low ports (the recipes set none); the six guides as text on a real instance, every command in them (the certbot flags, the EAB flags and the agent and backup commands), and the First steps rows for each role; the demo on a Docker host (CI runs its first act on the snapshot image, **not** its agent act, which needs the approval click) and the agent in the demo's nginx container; the Debian 13 base on the maintainer's Docker host and with real webhooks and SMTP over TLS. **Not tested at all:** the Salt formula with the new recipes (no case was added; `combined` is passed through by the option list only). **Not verified by running:** the site build (Jekyll is not installed on the development machine; `scripts/ci/site-check.sh` ran and passed), the package `internal/publish` tests (blocked on this machine by Windows Defender, run in CI), and `task check` as a whole.
+
+## 18. Quality round: v0.3.12
+
+The roadmap row "Before Beta" (PLAN §10.1) is a stability round, not a feature: dead code and duplicates, consistent
+error messages, a coverage report and the test gaps it shows, **Go fuzzing** of the parsers that read attacker input
+(today `task fuzz` covers the ACME JWS parser only) and stricter lint rules; the outcome in the plan is "fewer surprises
+in the beta". It is called **v0.3.12** here because v0.3.10 is released and v0.3.11 (Apache and HAProxy, guides, demo)
+is in PR #49; **the number can shift** (§10.1: "order before numbers"). The step numbers below continue after 77 and
+assume that §17 (v0.3.11) ends there; when #49 merges, §17 stands above this section. Written on 2026-11-16 as a
+plan for review: the decisions in §18.5 are cautious defaults, not agreements. There is no product
+feature in this release, no migration, no API change and no new dependency; the only changes to behavior are the
+fixes that fuzzing finds, each with its own commit and a committed regression input.
+
+Goal, checked in CI and on the maintainer's machine: `task fuzz` runs every target of §18.2 (the list is one file, a
+test fails when a `Fuzz*` function is missing from it), every target has hostile seeds and asserts what the parser
+promises, CI runs each for a few seconds on every code change and for minutes every night, and a finding is a failing
+test in the repository before it is a fix; `task cover` prints one table that credits integration tests to the
+package they exercise, and the security-relevant error paths of §18.1 steps 95 to 98 are tested; `task deadcode`
+reports nothing that is not on a reviewed list; the lint configuration is stricter by the checks that measured clean or
+nearly clean (§18.1 step 93); and after the release the admin sees the same product, only with fewer crash and
+refusal surprises.
+
+**Facts found in the repository (2026-11-16, `release/v0.3.12` = `origin/main` 65ee465; measured on the development
+machine, Windows Server 2025, Go 1.27.4, golangci-lint 2.15.0 which is the pin in `Taskfile.yml`; `internal/publish`
+was not run here, Windows Defender blocks its test binary):**
+
+- **Fuzzing today.** One `Fuzz*` function exists in the whole repository: `FuzzParse` (`internal/acme/jose/jose_test.go:344`),
+  with three `f.Add` seeds, asserting the accept rules of `jose.Parse` and running `Verify` on an embedded key. There is
+  **no `testdata/fuzz` directory anywhere**, so no corpus and no regression input. `task fuzz` (`Taskfile.yml`, `FUZZTIME`
+  default 30 s) runs only that target; CI runs it in job `check` right after `task check` (step "Fuzz the ACME JWS parser
+  (short run)", `.github/workflows/ci.yml`; registered in `scripts/ci/local.sh`). Go runs one fuzz target per invocation
+  and per package, so more targets need a loop. The daily schedule (04:17) runs only `vuln`; every other job has
+  `github.event_name != 'schedule'`. `.gitignore` ignores `*.out`, `coverage.*` and `*.test`, not `testdata/fuzz`.
+  Measured here: a 15 s run of `FuzzParse` works with `CGO_ENABLED=0` (4 workers, about 19,000 executions a second,
+  36 s wall including the build; found inputs go to the Go cache, never into the tree). `ParseInner`, `ParseJWK`
+  and `VerifyEAB` have unit tests but no fuzz target.
+- **What the roadmap row names, and what exists.** There is **no `internal/guides`** (the guides in `site/guides/` are
+  documentation; the code that writes install steps is `internal/trustkit/guide.go`, a generator of text from a CA's name,
+  URL and SHA-256, not a parser; its User-Agent reader `trustkit.Detect` is the parser, unfuzzed). There is **no OCSP
+  responder** (PLAN §10.1 "Phase 4"; `internal/ca` only writes the OCSP-signing preset, the public listener serves CRLs
+  and CA files by GET), so there is no OCSP request parser. The server **never reads PKCS#12** (`internal/pkcs12` only
+  writes, its package comment says so), so "PKCS#12 import" is not an upload. The real upload parsers are four: the CSR
+  file of the wizard, a PEM certificate (external import, root import, an offline CA's certificate), the CRL of an
+  offline root, and the legacy `.tar.gz`.
+
+| Parser of attacker input | Where | Who can reach it | Tests today | Fuzz |
+|---|---|---|---|---|
+| ACME request envelope: `jose.Parse`, `ParseInner`, `ParseJWK`, `VerifyEAB` | `internal/acme/jose/jws.go`, `jwk.go`, `jws.go:161`; body read with `MaxBytesReader` 64 KiB in `internal/acme/server.go:393` | anybody on the public listener (before any account) | `jose_test.go`: RFC vectors, a negative test per rule | `FuzzParse` only |
+| ACME payloads after the signature: `payload()` (`json.Unmarshal` into small structs), `normalize` (dns/ip identifiers), `planOrder`, the finalize CSR (`checkCSR`: base64url DER), revoke (`certificate` DER, `reason`), key change inner payload, `parseARIID` (GET path, no signature) | `internal/acme/server.go:475`, `order.go:37`, `finalize.go:107`, `revoke.go:37`, `account.go:327`, `ari.go:58` | an account holder, which on an `open` domain is anybody; `parseARIID` is unauthenticated | handler tests (`TestBadCSRs`, `TestRequestRules`, `ari_test.go`, `eab_test.go`); `checkCSR`, `normalize` and `parseARIID` have no direct test | none |
+| CSR, PEM: `ca.parseCSR` (64 KiB, one block, no headers, no trailing data, signature checked) and `InspectCSR` | `internal/ca/csr.go:16`, `renewcert.go:179`; reached from the wizard, `POST /certificates`, the preview, `POST /csr/inspect` (`access: signedIn`, so a viewer can feed it) and the agent renewal | any signed-in user | `TestCSRChecks`, `TestMaliciousCSRGetsNoCAPowers`, `TestCSRNamesAreAWishList`, `TestIssueWithACSR` | none |
+| CSR, DER: `agents.csrKey` (8 KiB) on enrollment and renewal | `internal/agents/enroll.go:661` | an agent with a join token (enrollment is pre-trust) | `agents_test.go`, `pass_test.go` (indirect) | none |
+| CSR file upload: `uploadedCSR` (PEM or DER, 64 KiB) | `internal/web/app_issue.go:218` | operator and up | `TestIssueWithACSR` (indirect) | none |
+| Certificate upload: `parseOneCertificate` (one PEM block, 64 KiB), then `ImportExternal` stores it with every SAN as a row (`certNames`, no cap on the count) | `internal/ca/lifecycle.go:890` (used at `lifecycle.go:717`, `offline.go:281`, `renewcert.go:244`); `POST /imports/external-certificate`, `POST /cas/import` | tenant admin (`ManageTenant`) | the contract test only; no unit test of the parser or of a hostile certificate | none |
+| Names: `checkDNSName`/`NormalizeDNSName`, e-mail, URI, IP, name constraints (`checkNameConstraints`, `ncDomain`, `ncEmail`) | `internal/ca/names.go`, `profile.go:133` and `:183` | every name from a CSR, an API body, an ACME order | `names_test.go`; `ncEmail` 0 % covered | none |
+| CRL upload: `crlDER`, `x509.ParseRevocationList`, the generation, number and freshness checks of `uploadCRL` (4 MiB) | `internal/ca/crlupload.go:270`, `:43` | admin with step-up | `crl_test.go` | none |
+| Legacy archive: `legacy.FromArchive` (tar.gz, 64 MiB, 256 MiB unpacked, 100,000 entries), `parseKV`, `parseIndex`, `parsePrivateKey` and `decryptPKCS8` (PBKDF2 up to 10,000,000 iterations), reached by the wizard (`app_admin.go:463`) and `POST /imports` (base64 in JSON) | `internal/ca/legacy/*.go` | admin with step-up | `archive_test.go` (`TestArchiveRefuses`), `legacy_test.go` (these need `bash` and POSIX OpenSSL and skip on this machine) | none |
+| Agent protocol: Connect-RPC messages (protobuf, generated), `validReport` (bounds), hostnames and patterns (`CheckHostname`, `CheckPattern`, `Matches`) | `internal/agents/rpc.go`, `report.go:75`, `names.go` | an enrolled agent (mTLS); `Enroll` and `EnrollStatus` before trust | `TestReportInputLimits`, `agents_test.go`; no direct test of the name functions | none |
+| REST JSON bodies: `call.decode` (one object, unknown fields refused, 128 KiB) and the reflection walker `unknownFieldPath` | `internal/httpapi/body.go`, `jsonpath.go` | any signed-in role for the routes with a body | `jsonpath_test.go`, `behavior_test.go`, contract tests | none |
+| Web forms: `parseForm` (urlencoded or multipart, 64 KiB) | `internal/web/app.go:402` | signed-in users, CSRF-protected | page tests | none |
+| User-Agent: `trustkit.Detect` (first 512 bytes, fixed table); the generated install commands embed a CA name and URL | `internal/trustkit/detect.go`, `guide.go` | anybody on the public listener (trust page) | `detect_test.go`, `trustkit_test.go` (99 % covered) | none |
+| Files of the operator: `config.Load` (64 KiB), `agent.yaml` (`LoadConfig`, 1 MiB), DNS credentials, agent state and journal JSON | `internal/config/config.go:399`, `internal/agent/config.go`, `dns_creds.go`, `state.go`, `deploy_journal.go` | the machine's administrator (not an attacker in the product's threat model; a hardening target) | `config_test.go` (17 tests), agent tests | none |
+| Replies from attacker-chosen names: the http-01 body (1 KiB), the dns-01 TXT strings, the TLS scan certificate | `internal/acme/validate.go`, `internal/tlsscan` | any ACME client names a host | `validate_test.go`, `validate_guard_test.go` | none |
+
+- **Containment.** `recover()` exists in the admin web server (`internal/web/server.go:177`), as an interceptor of the
+  agent RPC (`internal/agents/recover.go`) and in `internal/agent/dns_wrap.go`. The ACME and publish handlers
+  (`publicHandler`, `internal/server/server.go:799`) have none and rely on `net/http` (a panic ends the connection,
+  the process lives). The ACME **validator runs in goroutines without `recover`**
+  (`internal/acme/validate.go:101`): a panic while it processes a host's reply would end the whole server, which is a
+  CA. That is why a crash found by fuzzing is not a cosmetic bug (§18.7) and why step 90 exists.
+- **Dead code and duplicates are mostly clean.** `golangci-lint run` reports 0 issues (so `unused` finds nothing,
+  tests included). `deadcode` from `golang.org/x/tools` (already in `go.mod` as an indirect module, v0.52.0; it builds with
+  `go build golang.org/x/tools/cmd/deadcode` and **changes neither `go.mod` nor `go.sum`**) reports **38 functions
+  unreachable from the three binaries**, of which **34 are reached by tests** (server accessors `AgentAddr`, `Endpoints`,
+  `Sealed`; `clock.Fake`; `auth.Service.Login`, `StepUp`; `audit.Verify`; `tenant.Store.Set`; the `testinstance`
+  helpers) and **4 are unreachable even with every test as a root**: `ca.LegacyCRLURL`, `ca.LegacyCertURL`
+  (`internal/ca/crl.go:292`), `server.Server.ACME` (`server.go:606`) and `dnsserver.Server.Host`. `dupl` finds **0** at
+  its default threshold 150, **3 pairs at 100** (`cmd/myownpki/ca.go:22` against `db.go:28`, `internal/settingsver/backends.go:25`
+  against `:77`, one pair of page tests) and 16 pairs at 70. `deadcode` sees only functions: unused constants, types and
+  variables of exported API are not covered by any installed tool.
+- **Error messages.** `go-conventions.md` asks for wrapping with context and `%w`, domain errors in the owning
+  package, no secrets or CSRs in strings. Measured over 316 non-test files: 811 `fmt.Errorf` (541 with `%w`), 262
+  `errors.New`; **`revive`'s `error-strings` rule reports 0 findings** (lower case, no trailing punctuation). The
+  deviations: **21 `fmt.Errorf` without a verb** (`internal/agents/names.go:35` and the like; `errors.New` is the form),
+  **8 messages that start with a capital that is not an acronym** (`internal/ca/names.go:143`, `:147`, `:155`,
+  `internal/agent/acme.go:335`, `internal/tools/screenshots/seed.go:103`, two test helpers), 1 `%v` where a `%w` belongs
+  (`internal/tools/screenshots/instance.go:240`), and `deny("...")` (95 calls), `problemErr(...)` (70) and
+  `badRequest(...)` (88) texts that **reach the client** and use one house style (a sentence, lower case, " – " for the
+  second clause, 143 messages). The structural gap is in the other direction: about 1,550 `return err` or
+  `return x, err` lines that pass an error up unwrapped (`wrapcheck` would report 1,225). `slog` calls use constant
+  messages already (`sloglint` is on). 9 `Errorf` calls print a `%s` of a path, a body or a PEM name; none prints a CSR
+  or a key (checked by reading the lines, not by a tool).
+- **Coverage.** Standard toolchain: `go test -coverprofile`, `go tool cover -func`. Measured with
+  `go test -count=1 -coverprofile=cover.out` over 74 packages (all but `internal/publish`); the whole run takes about
+  10 minutes here (`internal/agent` 536 s with a second run competing, `ca` 184 s, `server` 203 s, `web` 193 s). Without
+  generated code (templ, sqlc, protobuf), test helpers and `internal/tools`: **29,909 statements, 79.0 %** covered by
+  each package's **own** tests. That number understates the integration tests, so a second run used
+  `-coverpkg=./cmd/...,./internal/...` over the packages that matter (the merged blocks are counted once):
+
+  | Package | own | combined | | Package | own | combined |
+  |---|---|---|---|---|---|---|
+  | `internal/ca` | 71.9 | 83.6 | | `internal/httpapi` | 86.0 | 86.0 |
+  | `internal/acme` | 73.2 | 77.8 | | `internal/server` | 82.5 | 84.7 |
+  | `internal/acme/jose` | 84.6 | 85.3 | | `internal/keys` | 86.6 | 88.0 |
+  | `internal/agents` | 72.6 | 81.9 | | `internal/store` | 70.3 | 79.2 |
+  | `internal/auth` | 68.5 | 82.3 | | `internal/ca/legacy` | 74.5 | 74.9 |
+  | `internal/authz` | 78.2 | 92.7 | | `internal/web` | 80.7 | 80.8 |
+  | `internal/agent` (own only) | 79.3 | n/a | | `cmd/myownpki` | 76.7 | 76.7 |
+
+  The numbers are a **lower bound for Linux**: the tests that build a real `legacy/pki.sh` fixture skip on this machine
+  (`legacytest.NeedPkiSh`: bash and POSIX paths, or `LEGACY_TEST_OPENSSL=/usr/bin/openssl`), which is why the whole legacy
+  import (`importlegacy.go`, `importjob.go`, `readCA`) shows 0 to 40 %. Without those, the **largest uncovered blocks in
+  security-relevant code** (combined run, uncovered of all statements of the function) are: ACME account update and
+  deactivation `account` 25 of 45, `keyChange` 23 of 54, `newAccount` 18 of 68, `accountOrders` 15 of 15 (never
+  called), `newOrder` 15 of 56, `challenge` 13 of 38, `finalize` 13 of 45, `joseFail` (the mapping of JWS errors to
+  `badSignatureAlgorithm`, `badPublicKey`) 40 % covered, `certIdentifiers` (who may revoke which names) 54 %; in the CA
+  `uploadCRL` 21 of 88, `signAndStore` 17 of 84, `revokeCA` 15 of 56, `installCACertificate` 14 of 60, `Export` 13 of 64,
+  name constraints `ncOutsideParent` 18 % and `ncEmail` 0 %; in auth `CreateToken` (API tokens) 18 of 61, the passkey
+  finish steps 18 of 68 and 15 of 50, `ConfirmTOTP` 0 of 13, `CreateUser` 11 of 55; in agents `applyDeployed` 24 of 79,
+  `Enroll` 13 of 66, `admitBy` 12 of 36; in the server `peerIP` (the admin allow-list reads the peer address here)
+  43 %, `build` 17 of 85; in backup `check` 12 of 66 and `create` 12 of 51. `authz` is at 92.7 %. Packages without any
+  own test: `store/pkidb`, `systemdb`, `auditdb` (generated), `web/pages/*` (generated), `tools/*`, `testinstance`.
+- **Lint today** (`.golangci.yml`, `default: standard` plus 30 linters, `gosec`, `errorlint`, `exhaustive`, `gocritic`
+  default checks, `govet` with every analyzer but `fieldalignment`): **0 issues**. What more linters would find if
+  switched on one at a time (counts of findings, tests included, non-test files in brackets; measured with
+  `golangci-lint run --default none --enable ...`, nothing committed):
+  low noise: `contextcheck` 15 (13), `errchkjson` 33 (17), `unparam` 19 (6), `perfsprint` 13 (10), `intrange` 9 (3),
+  `wastedassign` 3 (3), `canonicalheader` 4 (2), `recvcheck` 3 (3), `containedctx` 3 (3), `dogsled` 6 (0), `mirror` 2 (1),
+  `dupword` 6 (1), `fatcontext` 1 (0), `nilnil` 8 (7), `protogetter` 34 (22); `revive` with its default rules 99
+  (79), of which 10 are real (`max` and `real` redefine a built-in: `internal/acme/util.go:111`, `agents.go:257`);
+  `modernize` 173 (69), all mechanical (`new(x)` for `ptr(x)`, `maps.Copy`, `SplitSeq`, `wg.Go`);
+  `gocritic` with every tag 797, of which the useful checks are `sloppyReassign` 43, `stringXbytes` 12, `builtinShadow`
+  11, `regexpSimplify` 8, `emptyStringTest` 8, `httpNoBody` 7, `evalOrder` 6 (`hugeParam` 395 and `rangeValCopy` 213 are
+  performance noise); `staticcheck` with `checks: ["all"]` 34, all comment forms (`ST1022`, `ST1000`); `exhaustive`
+  without the `default:` shortcut 7; `errcheck` with `check-blank` 766 (195 outside tests: `_ = f.Close()` everywhere).
+  Noise, not adopted: `lll` 4,131, `goconst` 1,904, `wrapcheck` 1,225, `cyclop` 690, `err113` 526, `gochecknoglobals`
+  250, `testpackage` 197, `paralleltest` 125, `gocognit` 125, `prealloc` 74, `nonamedreturns` 37, `nestif` 21,
+  `funlen` 15, `gocyclo` 12, `godox` 4. Left at zero: `copyloopvar`, `predeclared`, `whitespace`, `nakedret`,
+  `unqueryvet`, `exptostd`, `iface`, `asasalint`, `gocheckcompilerdirectives`, `maintidx`.
+- **Housekeeping found on the way.** `SECURITY.md` still says "There is no release yet", although v0.3.10 is out (step
+  100 fixes the text). The `graphify` graph does not exist in this worktree, so all facts come from reading the code
+  and running the tools, not from a graph query.
+
+### 18.1 Work plan
+
+Every step is one commit (or the series named in it), builds and passes `task check`. Steps 78 and 79 come first; the
+rest is grouped in §18.4.
+
+| # | In | Step | Verifies with |
+|---|---|---|---|
+| 78 | 0.3.12 | **Measure first: `task cover`.** `Taskfile.yml`: `cover` runs `go test -count=1 -coverpkg=./cmd/...,./internal/... -coverprofile=coverage.out $COVER_PKGS` (the list defaults to all packages; a machine that cannot run one leaves it out, as here with `internal/publish`) and then `scripts/ci/cover-summary.sh`, an awk script that merges duplicate blocks (the merged profile of several test binaries lists a block once per binary), leaves out generated code (`*_templ.go`, `internal/gen`, `internal/store/{pkidb,systemdb,auditdb}`, `internal/tools`) and test helpers, and prints one line per package (statements, covered, percent) and the total; `task cover:func` prints the uncovered statements per function (the ranking used in §18 Facts); `task cover:html` opens `go tool cover -html`. `coverage.out` is already ignored. The script also counts skipped tests from `go test -json` and prints "N tests skipped" so a Windows number is never read as a Linux one. The baseline table of the Facts goes into this section as *Built*. **No threshold and no CI gate** (decision 6) | `task cover`; the script on a saved profile of this section's run gives the numbers above (a golden test with a small profile in `scripts/ci/testdata/`); `task check` |
+| 79 | 0.3.12 | **One list of fuzz targets, one script, two CI jobs.** `scripts/ci/fuzz-targets.txt` (one line per target: `package target [extra go test flags]`, for example `-parallel 2`), `scripts/ci/fuzz.sh` (for each line: `go test <pkg> -run '^$' -fuzz '^<target>$' -fuzztime $FUZZTIME`; stops at the first failure, then prints every new file under `testdata/fuzz` between lines, so a crash in CI is readable without downloading anything); `task fuzz` calls it (`FUZZTIME` default 10s, `FUZZ_ONLY=<target>` for one); a test in `scripts/ci` (the `lint-meta-registry.sh --self-test` pattern) fails when a `func Fuzz` in any `_test.go` is missing from the list or the list names a target that does not exist; the `scripts/ci/local.sh` registry line moves from job `check` to a new job `fuzz` (same command, `task fuzz`). `.github/workflows/ci.yml`: the fuzz step leaves job `check`; new job `fuzz` (`needs: changes`, same `if` as `check`, `timeout-minutes: 20`, runs in parallel to `check`) with `FUZZTIME=10s`; new job `fuzz-long` (runs only for the events `schedule` and `workflow_dispatch`, so without `needs: changes`, which is skipped on schedule; `timeout-minutes: 75`, `FUZZTIME` from the dispatch input, default `2m`) so the daily 04:17 run does more than the vulnerability scan. `FuzzParse` is the first list entry | `bash scripts/ci/fuzz.sh` locally with `FUZZTIME=2s`; the self-test with a target removed and one invented; `task ci:local -- --only fuzz`; `task lint:ci` (actionlint); a pull request run shows the new job |
+| 80 | 0.3.12 | **JOSE targets.** In `internal/acme/jose`: `FuzzParse` gets seeds for RS256, ES384, EdDSA, the `kid` form, a key change body and the three failure shapes (duplicate members, `crit`, `b64`); new `FuzzParseInner`, `FuzzParseJWK` (accepted key: allowed type and curve, RSA at least 2048 bits, `Canonical()` parses again to the same thumbprint) and `FuzzVerifyEAB` (accepted: the returned key ID is the header's, the MAC is HS256 only). Invariants and the shared rules in §18.2 | `go test ./internal/acme/jose` (seeds as unit tests); `task fuzz FUZZ_ONLY=FuzzParseJWK` |
+| 81 | 0.3.12 | **ACME pure-function targets.** New `internal/acme/fuzz_test.go`: `FuzzNormalizeIdentifier`, `FuzzParseARIID` (round trip against `ariID`), `FuzzCheckCSR` (a fixed order and account key; accepted: the signature verifies, DNS names and IPs equal the order's exactly, no e-mail or URI, key is not the account key). They call `normalize`, `parseARIID` and `(*Server).checkCSR` unchanged | `go test ./internal/acme -run 'Fuzz' -count=1` (seeds only); a mutation check: weaken one rule in `checkCSR` by hand, the target fails inside 10 s, revert |
+| 82 | 0.3.12 | **CA targets.** New `internal/ca/fuzz_test.go`: `FuzzParseCSR` (and `InspectCSR` on the same bytes: never panics, every list in the result is bounded by `maxSANs`/`short`), `FuzzParseCertificate` (`parseOneCertificate`: one PEM block of type `CERTIFICATE`, no headers, nothing after it, at most 64 KiB; an accepted certificate re-encodes to the same DER; `certNames` of it has no duplicate row), `FuzzNames` (DNS, e-mail, URI, IP, name-constraint values in one target with a mode byte: idempotent canonical form, lower case, at most 253 characters, no trailing dot, a wildcard only as the whole left label with two labels behind it), `FuzzCRLDER` (`crlDER` then `x509.ParseRevocationList`). Seeds: certificates and CSRs generated in the test (conventions), plus a CSR with a SAN extension that claims `CA:TRUE`, a 64 KiB + 1 input, PEM with headers, two blocks, `NEW CERTIFICATE REQUEST` | `go test ./internal/ca -run 'Fuzz' -count=1`; `task fuzz FUZZ_ONLY=FuzzParseCSR` |
+| 83 | 0.3.12 | **Legacy import targets.** New `internal/ca/legacy/fuzz_test.go`: `FuzzFromArchive` (seeds built with `archive/tar` and `compress/gzip`: a normal tree, `..`, absolute, backslash, NUL, duplicate names, a symlink, a header that claims 1 TiB with a tiny body, 100,001 entries, a gzip of zeros; invariants: no panic, an accepted FS holds only `fs.ValidPath` names and at most the limits, `fs.WalkDir` ends), `FuzzParseKV`, `FuzzParseIndex` (an entry has a canonical hex serial, status V, E or R, increasing line numbers; a line over 64 KiB is a note, not a panic), `FuzzParsePrivateKey` (a passphrase is given; the target skips an input whose PBKDF2 count is above 100,000 so one slow input does not stall the run, and counts how often it skipped; decision 9) | `go test ./internal/ca/legacy`; `task fuzz FUZZ_ONLY=FuzzFromArchive` (watch memory: the target runs with `-parallel 2` in `fuzz-targets.txt`) |
+| 84 | 0.3.12 | **Agent protocol targets.** New `internal/agents/fuzz_test.go`: `FuzzCSRKey` (accepted: at most 8 KiB, valid signature, ECDSA, Ed25519 or RSA, the result is a 43-character base64url SHA-256), `FuzzValidReport` (a `ReportInput` decoded from the fuzz bytes with `encoding/json`; accepted: every bound of `validReport` re-checked by an independent function in the test), `FuzzHostnamePattern` (`CheckHostname`, `CheckPattern`, `Matches`: an accepted pattern matches only names that are accepted host names; `*` never spans a label; accepting is idempotent) | `go test ./internal/agents -run Fuzz`; `task fuzz FUZZ_ONLY=FuzzValidReport` |
+| 85 | 0.3.12 | **REST body target.** New `internal/httpapi/fuzz_test.go`: `FuzzDecodeBody` runs `call.decode` over three target types (the issue request, a domain request, one with a nested map): accepted means one object and nothing after it, and a second round trip (`json.Marshal` then `decode`) gives an equal value; a refusal is a `*bodyError` with status 400 or 413, its text is at most 300 bytes whatever the input, and `unknownFieldPath` returns a valid JSON Pointer (RFC 6901) that names a field the decoder refused | `go test ./internal/httpapi -run Fuzz`; `task fuzz FUZZ_ONLY=FuzzDecodeBody` |
+| 86 | 0.3.12 | **Upload target in the wizard.** New `internal/web/fuzz_test.go`: `FuzzUploadedCSR` builds a multipart request around the fuzz bytes and calls `uploadedCSR`: no panic; a file over 64 KiB is refused; an accepted file is returned as PEM text of one `CERTIFICATE REQUEST` block that `x509.ParseCertificateRequest` accepts | `go test ./internal/web -run Fuzz` |
+| 87 | 0.3.12 | **Trust page targets.** New `internal/trustkit/fuzz_test.go`: `FuzzDetect` (the result is one of the fixed platforms, the work is bounded by 512 bytes, no byte of the input appears in the result) and `FuzzGuide` (a root with a fuzzed name and URL: when `CertURL` accepts it, no line of any block contains a shell metacharacter outside the quoting the generator adds, checked by a small tokenizer in the test; when it refuses, no command is produced) | `go test ./internal/trustkit -run Fuzz` |
+| 88 | 0.3.12 | **Spike: one ACME handler target.** Widen `newEnv`, `client`, `csrFor` and the `env` helpers of `internal/acme/client_test.go` from `*testing.T` to `testing.TB` (the fuzz function has a `*testing.F`), then `FuzzACMEPayload(endpoint byte, payload []byte)`: a valid account, a valid nonce and a correctly signed JWS around the fuzzed payload for `new-account`, `new-order`, `finalize`, `revoke-cert`, `key-change` and `account`; invariants: no panic, no status 5xx, the answer is `application/problem+json` for every 4xx, and no row of another account changes. **Kept only if it runs at 200 executions a second or more** (one server per worker process, rate limits raised in the test, a cap on rows); otherwise it stays as a test that runs its seeds and is listed under "on demand" | `go test ./internal/acme -run FuzzACMEPayload`; the exec rate printed by `go test -fuzz` is written into this section |
+| 89 | 0.3.12 | **Triage and fix: a reserved slot.** Every finding of steps 80 to 88 becomes one commit `fix(<area>): <what> (found by fuzzing)` holding the minimized input as `testdata/fuzz/<Target>/<hash>` (Go's own file, never edited), the fix, and a plain unit test of the invariant. The classes and who decides are in §18.7. A finding is never "fixed" by loosening the target | `go test` on the package replays the seed (it fails on the parent commit, passes on the fix); the 10 s run of the target |
+| 90 | 0.3.12 | **Contain a panic in the ACME validator** (decision 10, only with the owner's OK): `validator.start` (`internal/acme/validate.go:101`) recovers, fails the challenge with `serverInternal`, writes an audit entry with the panic's type and no text, and logs the stack at error level; a test makes the validator panic through the network seam (`SetNetwork`) and checks the server lives, the challenge is `invalid` and the next challenge works | `go test ./internal/acme -run Validator`; `task check` |
+| 91 | 0.3.12 | **Dead code.** `task deadcode` (new, not in `check`): `go run golang.org/x/tools/cmd/deadcode -test ./...`, no `go.mod` change (decision 7). Delete the four unreachable functions; for the 34 that only tests reach, decide per item: move to `_test.go` or `internal/testutil` when only tests use it, keep (with a comment naming the user) when a build-tagged test, the agent end-to-end or documentation uses it. Report with the commit what stayed and why. One commit per package | `task deadcode` prints only the reviewed list (kept in `scripts/ci/deadcode-known.txt`; the task fails on a new line); `task check` |
+| 92 | 0.3.12 | **Duplicates.** Fix the two pairs outside tests (`cmd/myownpki/ca.go` and `db.go`, `internal/settingsver/backends.go`), then enable `dupl` with `threshold: 100` and `_test.go` excluded | `golangci-lint run` (0 issues); `task check` |
+| 93 | 0.3.12 | **Lint round, a series.** Each commit enables one group and fixes its findings, so `task check` is green after every commit: (a) `contextcheck`, `errchkjson`, `wastedassign`, `containedctx`, `recvcheck` (each finding is read: a detached context for logging stays, with a `//nolint:contextcheck // reason`); (b) `unparam`, `intrange`, `perfsprint`, `mirror`, `canonicalheader`, `dupword`, `dogsled`, `fatcontext`; (c) `revive` with the rules `error-strings`, `error-naming`, `redefines-builtin-id`, `context-as-argument` and `package-comments` (rename the ten shadowed `max` and `real`; the two error rules measured 0); (d) `gocritic` with `enabled-checks` `sloppyReassign`, `stringXbytes`, `builtinShadow`, `regexpSimplify`, `emptyStringTest`, `httpNoBody`, `evalOrder`, `redundantSprint`; (e) `staticcheck` with `checks: ["all", "-ST1000", "-ST1003"]` only if the owner wants the comment forms (decision 8); (f) `exhaustive` without the `default:` shortcut, only where it measured 7 and the switches are real enums. `nilnil` and `protogetter` are **not** enabled unless the owner asks: they change shapes of return values or add noise in generated-style code. Every new linter has a one-line reason in `.golangci.yml`, as the existing ones. **Result (2026-11-16):** (a), (b) without `dupword`, (c), (d) with six of the eight checks and (f) are enabled, one commit each, `golangci-lint run` reports 0 issues on linux, darwin, freebsd and windows after every commit. Left out: `dupword` (12 of 13 findings are test data where the repeat is meant, and its automatic fix broke two tests), `sloppyReassign` (43 findings; its fix collides with `govet` shadow) and `redundantSprint` (three tests print a redacting type through `fmt` on purpose); `perfsprint` runs without its string-concatenation and loop rules, `unparam` without "always receives", `exhaustive` ignores the open sets of the standard library and the protobuf enums, `staticcheck` all-checks and `nilnil`/`protogetter` stay off as decided. The lint round found no defect in the product: `errchkjson` found seven tests whose "the text is not in the audit log" check ran on an empty text when `json.Marshal` failed (they fail now), and `contextcheck` found `myownpki config check` not stopping on Ctrl-C (it takes the context now) | `golangci-lint run` after each commit; `task check` |
+| 94 | 0.3.12 | **Error messages.** Write the rule into `.claude/skills/myownpki/references/go-conventions.md` (lower case start unless an acronym, no trailing punctuation, `%w` when an error is returned, `errors.New` for a constant text, wrap once at the boundary that adds context, texts that reach a client are sentences with " – " and are changed only when wrong); fix the 21 verb-less `Errorf`, the 8 capitals and the one `%v` of the Facts (the `perfsprint` and `revive` groups of step 93 find most of them); review the 9 `%s` calls once more and record the result here. **Texts that reach a client (`deny`, `problemErr`, `badRequest`) are not reworded** (decision 11); a `wrapcheck` pass is not done. **Result (2026-11-16, measured again):** the 22 verb-less `Errorf` calls are `errors.New` with the same text since the `perfsprint` commit of step 93, and `perfsprint` now keeps it that way; the "8 capitals" are acronyms and proper names (URI, ARI, CRLs; in tests Ed25519, ECDSA, OpenSSL and the WebAuthn error names), which the rule allows, so no message was reworded; `staticcheck` (ST1005) and `revive` (`error-strings`) report 0 on the tree and fail on a real capital or a trailing dot (tried with a probe file); the `%v` that the Facts named prints a list of host names, not an error, and is right (the other `%v` calls in `Errorf` print a file mode, an OID or a recovered panic value); the `%s` and `%q` calls with a path, a response body or a PEM block name were read again: paths are the administrator's own, the `/healthz` body is read with a limit of 64 bytes, a PEM block name is clipped to 40 characters and quoted, and none prints a CSR, a key or a secret; no text of `deny`, `problemErr` or `badRequest` changed | `go test ./...` unchanged; `golangci-lint run`; a `git diff` that touches no `testdata` and no contract test |
+| 95 | 0.3.12 | **Test gaps: ACME accounts and orders.** In `internal/acme` (after step 88, same files): account update and deactivation (`account`), `keyChange` refusals (new key already in use, wrong old key, bad inner JWS, account mismatch), `newAccount` (bad contact URL, `onlyReturnExisting`, EAB failures, terms), `accountOrders` (the list, paging, another account's orders), `challenge` and `finalize` error branches (wrong state, order expired, processing), `joseFail` for every error class, `certIdentifiers` (who may revoke which certificate: account that owns it, certificate key, a stranger), the nonce store (expiry, reuse, size cap). Table tests on the existing `env` | `go test ./internal/acme`; the combined coverage of `internal/acme` is written into this section |
+| 96 | 0.3.12 | **Test gaps: CA.** In `internal/ca` (after step 82): `uploadCRL` (older number, wrong generation, thisUpdate in the future, an intermediate that the CRL lists, a delta CRL, DER and PEM, a CRL of another CA), name constraints (`ncOutsideParent`, `ncEmail`, IP and URI rows, an issuing CA wider than its parent), `revokeCA` and `installCACertificate` (the offline root path), `Export` (the step-up and key-never-written rules), `ImportExternal` (today only the contract test: a CA certificate is refused, a duplicate fingerprint, a certificate with thousands of SANs, a viewer is refused), `signAndStore` failure paths (a failing store after signing leaves no half certificate). Needs no `pki.sh` | `go test ./internal/ca`; combined coverage noted |
+| 97 | 0.3.12 | **Test gaps: auth, server, backup.** `internal/auth`: `CreateToken` (scope, expiry, no token for a token), the passkey finish steps with the virtual authenticator (replayed challenge, wrong origin, counter that goes back, unknown credential), `ConfirmTOTP`; `internal/server`: `peerIP` and the allow-list listener (IPv4-mapped IPv6, a unix or odd `net.Addr`), `build` refusal paths; `internal/backup`: `check` and `create` failure paths (a full disk is simulated by a failing writer, a modified database is refused). Authorization is already at 92.7 % and gets only the three uncovered helpers | `go test ./internal/auth ./internal/server ./internal/backup` |
+| 98 | 0.3.12 | **Test gaps: agents.** `internal/agents`: `applyDeployed` (the predecessor policy per state), `Enroll` and `admitBy` refusals (token used up, wrong pattern, name already enrolled, CSR key reuse), the report limits at the exact boundary (100 names, 253 characters, 64 hex digits), `deliverAgain`. The rpc layer is covered by the end-to-end tests; no new e2e | `go test ./internal/agents` |
+| 99 | 0.3.12 | **One mechanical commit: `modernize`.** `golangci-lint run --fix --enable-only modernize` (173 findings, 69 outside tests), reviewed as a diff that must be reproducible by the same command, **only after PR #49 and every other open branch are merged** (it touches many files and would conflict with them). Skipped findings stay with a `nolint` and a reason | `golangci-lint run`; `task check`; `git diff --stat` shows only the files the tool changed; the command run again produces no diff |
+| 100 | 0.3.12 | **Docs and release.** CONTRIBUTING (the tasks `cover`, `fuzz`, `deadcode`, what a seed is, how to run one target for an hour), `SECURITY.md` ("Supported versions" says there is no release: say that the latest release and `main` get fixes), `site/security.md` (what is fuzzed and what is not), `docs/RELEASING.md` (a fuzz run of one hour per target before a tag is an optional checkbox), `.claude/skills/myownpki/references/go-conventions.md` (the Testing section: fuzz and cover), PLAN §10.1 row ✅ after the tag and the "Before Beta" line, CHANGELOG `[0.3.12]` (undated; **Changed:** CI runs more fuzz targets; **Fixed:** one line per finding after the fix is released, in plain words; **Added:** `task cover`, `task fuzz`, `task deadcode`; no Upgrading section needed: no migration, no setting). Version bump as in step 65 (`DEFAULT_VERSION` in `deploy/install.sh` and `deploy/install-agent.sh`, `test/install/agent_functions_test.sh`, `api/openapi.yaml`, `deploy/docker-compose.yml`, README, `docs/OPERATIONS.md`, `docs/RELEASING.md`, the status line of `CLAUDE.md`); CHANGELOG dated by the maintainer | `scripts/ci/site-check.sh`; every documented command run once; `task ci:local` with every SKIP line reported; `docs/RELEASING.md` |
+
+**Built: the fuzz list, steps 90 and 95 (differences from the plan).**
+
+- *Fuzz list.* `scripts/ci/fuzz-targets.txt` lists 24 targets and `fuzz.sh --check` passes. `FuzzACMEPayload` is in
+  (tier 2, step 88's gate is met: the spike measured about 300 executions a second with two workers, 200 was the
+  bar) with `-parallel 2`, because each worker builds its own server and SQLite database. `internal/guides`
+  `FuzzParse` (the guide engine of step 71) exists in the tree too and is listed; the table in 18.2 does not
+  name it, so the CI count in 18.3 is 24 targets, not 22 (about 4 minutes of fuzzing at 10 s a target).
+- *Step 90.* `validator.start` runs `validate` through `guarded`, which recovers: the challenge becomes `invalid`
+  with `serverInternal`, the audit entry (`acme.challenge.validate`, result `failure`) carries `"panic": "<type>"`
+  and never the panic's text, and the log has one error record with the stack. **The recover also had to go into
+  `policyDial`:** `net/http` calls the dialer (and, through it, the `lookupIP` of `SetNetwork`) in a goroutine of
+  its own, so a panic there is outside `guarded` and ended the process (checked by removing it). Tests
+  (`validate_panic_test.go`): a string, an error and a struct as panic value and a nil dereference, at the
+  lookup edge, the dial edge and the TXT lookup; the answer, the audit entry and the log never hold the text;
+  the server answers the next order; and more panicking checks than `parallelChecks` in a row do not block the
+  next one (the slot is released).
+- *Step 95.* New files `account_test.go`, `account_orders_test.go`, `order_branches_test.go`,
+  `server_branches_test.go`, `expire_test.go`: `newAccount` (two dozen contact, payload and EAB cases, an existing key,
+  EAB failures, sealed), account update and clear, deactivation, 17 `keyChange` refusals, `accountOrders`,
+  the `challenge`, `authz` and `finalize` states (wrong state, expired, processing, valid, CSR errors that end
+  the order and request errors that do not), `joseFail` for every class, `fail`, the request rules of `read`,
+  the nonce store, `certIdentifiers` and an account that revokes a certificate with several names, `ExpireStale`,
+  the dns-01 failures. Coverage of `internal/acme` (`go test -coverprofile`, this machine, Windows):
+  **76.7 % before step 95 (after step 90), 82.3 % after.** What stays low is the admin side
+  (`Pending`, `Accounts`, `Names`, `Orders`: used by `internal/server`, which measures them) and the agent binding.
+- *Found by a test:* `accountOrders` read the 1000 newest orders of **all** accounts and then kept the caller's; an
+  account whose orders were older than the newest 1000 of the others got an incomplete or empty list. Fixed with
+  a query by account (`ListACMEOrdersOfAccount`, index `acme_orders_account`) in its own commit. Severity low:
+  a correct, authenticated, own-data read; clients (certbot, lego) do not depend on this list.
+- *Notes for the maintainer, not changed:* a request that fails the contact check still counts against the
+  10-accounts-per-address limit (the limit is checked first); the 409 of a `keyChange` to the account's own key says
+  "belongs to another account already".
+
+**Built: steps 99 and 100 (2026-11-16).**
+
+- *Step 99.* `golangci-lint run --fix --enable-only modernize` ran after PR #49 and `main` were merged into the branch:
+  126 Go files (60 outside tests), 365 lines added and 490 removed, in one commit. What it did: `errors.AsType` for a `var`
+  and `errors.As` (24 places), `strings.SplitSeq` and `FieldsSeq`, `slices.Contains` and `slices.Backward`, `maps.Copy`,
+  `CutPrefix`, `CutSuffix` and `CutLast`, `max()`, `reflect.Type.Fields`, `sync.WaitGroup.Go`, `new(value)` for the pointer
+  helpers of tests (seven helpers that nothing calls any more are deleted), and promoted fields in the literals of embedded
+  structs. **Reviewed, one rewrite refused:** `omitzero` for four `time.Time` fields of `agent.DeploymentResult` would drop
+  the zero times from the JSON (`omitempty` never did anything for a struct); `omitempty` is removed instead and the output
+  is the same as before. The tool skipped two files because two of its own edits collided (`deploy.go`,
+  `trustkit/fuzz_test.go`); both were finished by hand, as were an unnamed loop variable, a shadowing one and a blank line it
+  left behind. `modernize` is **not** a permanent linter: the plan asks for one commit, and a newer `golangci-lint` would
+  add rules and findings. The same command now reports 0 issues on linux, darwin, freebsd and windows with and without the
+  tags `conformance` and `e2etest`; the tests of every touched package pass (not `internal/publish`: Defender, see above).
+- *Step 100.* Documentation (`CONTRIBUTING.md`, `SECURITY.md` "Supported versions", `site/security.md`,
+  `site/contributing.md`, `docs/RELEASING.md` with the optional fuzz hour, `go-conventions.md` Testing), the CHANGELOG
+  section `[0.3.12]` and the version 0.3.12 in the files that the bump of 0.3.11 changed. `CLAUDE.md` and `PLAN.md` follow
+  after the tag. Coverage of this release (`task cover`, Windows, 23 tests skipped, `internal/publish` left out): **85.3 %
+  of 31,181 statements**; combined numbers `acme` 87.1 %, `ca` 86.3 %, `agents` 84.2 %, `auth` 84.2 %, `server` 85.8 %,
+  `jose` 88.7 %, `backup` 87.2 %, `httpapi` 86.2 %, `web` 81.3 %, `ca/legacy` 80.9 % (the baseline of the Facts: 79.0 %
+  own-package, combined `acme` 77.8 %, `ca` 83.6 %, `agents` 81.9 %, `auth` 82.3 %, `server` 84.7 %).
+
+### 18.2 Fuzz targets and invariants
+
+Every target follows the same rules, so a reviewer can check them in one pass:
+
+1. **No panic** on any input, and the production function is called **unchanged**: a target never copies logic, never
+   sets a limit lower, never skips the size check. If a function needs a seam to be called (an unexported method on
+   `Server`), the call is made from the same package's test.
+2. **Bounded.** The production limit is the bound (64 KiB for a CSR, 8 KiB for an agent CSR, 4 MiB for a CRL, 128 KiB
+   for a JSON body, 64 MiB for the archive); a target measures its own wall time per input and fails above 2 s (10 s for the legacy archive, whose seeds are hostile on purpose; ten times as much under `-race`, `internal/testutil/racemode`)
+   (`time.Now` is allowed in tests), except the PBKDF2 case of decision 9. Memory is bounded by the same limits; the
+   archive target runs with two workers.
+3. **Accept means promise.** When the parser says yes, the target re-checks, with code that does not share the
+   parser's helpers, what the function documents: a CSR was PEM of one block and signed by its own key; a name is
+   lower case LDH; a JWS has an allowed algorithm, a nonce, a URL and exactly one of `jwk` and `kid`.
+4. **Round trip where one exists:** `ParseJWK` then `Canonical` then `ParseJWK` (same thumbprint); `ariID` then
+   `parseARIID`; JSON decode, encode, decode; `normalize` applied twice equals applied once.
+5. **Errors are bounded text:** a refusal never echoes more than the `short()` or `clip()` limit of attacker text.
+6. **No I/O:** no network, no temporary file, no database, no real clock; certificates and keys are generated in the
+   test (conventions), one per process, not per input.
+7. **Seeds in code (`f.Add`)** are readable and produced by the test; files under `testdata/fuzz/` are only what the
+   fuzzer wrote after a crash (kept as regression inputs) or a binary seed that cannot be written as code, each with a
+   comment line in its package's test saying what it is.
+
+| Target | Package | Calls | Tier |
+|---|---|---|---|
+| `FuzzParse` (extended), `FuzzParseInner`, `FuzzParseJWK`, `FuzzVerifyEAB` | `internal/acme/jose` | the ACME envelope | 1 |
+| `FuzzNormalizeIdentifier`, `FuzzParseARIID`, `FuzzCheckCSR` | `internal/acme` | payload helpers | 1 |
+| `FuzzParseCSR`, `FuzzParseCertificate`, `FuzzNames`, `FuzzCRLDER` | `internal/ca` | CSR, uploaded certificate, names and name constraints, CRL upload bytes | 1 |
+| `FuzzFromArchive`, `FuzzParseKV`, `FuzzParseIndex`, `FuzzParsePrivateKey` | `internal/ca/legacy` | the archive and the old files | 1 |
+| `FuzzCSRKey`, `FuzzValidReport`, `FuzzHostnamePattern` | `internal/agents` | agent protocol input | 1 |
+| `FuzzDecodeBody` | `internal/httpapi` | REST bodies | 1 |
+| `FuzzUploadedCSR` | `internal/web` | the wizard's file | 1 |
+| `FuzzDetect`, `FuzzGuide` | `internal/trustkit` | the public trust page | 1 |
+| `FuzzACMEPayload` | `internal/acme` | handlers with a real database | 2, only if fast enough (step 88) |
+| `FuzzConfigLoad`, `FuzzAgentConfig`, `FuzzDNSCredentials` | `internal/config`, `internal/agent` | files of the operator | 2, **not in this release** (open point 6) |
+
+That is 22 targets of tier 1 in eight packages (`FuzzParse` included), and tier 2 is the handler-level one.
+
+### 18.3 CI budget for fuzzing
+
+| Where | When | Time per target | Total |
+|---|---|---|---|
+| Job `fuzz` (new, parallel to `check`) | every pull request and push that changes code | 10 s (`FUZZTIME=10s`) | 22 targets, about 3.7 minutes of fuzzing plus about 15 s of build per package (measured on `jose`: 14 s) = about 6 minutes; `timeout-minutes: 20`. `check` gets shorter by the 30 s it spends today |
+| Job `fuzz-long` (new) | the daily 04:17 run and `workflow_dispatch` with an input `fuzztime` | 2 minutes by default | 22 targets, about 45 minutes plus builds; `timeout-minutes: 75`. A failure shows the crashing input in the log (step 79) |
+| `task fuzz FUZZTIME=30m FUZZ_ONLY=<target>` | by hand before a release, or after a change to a parser | free | the maintainer's machine; `docs/RELEASING.md` names it as an optional checkbox |
+| `go test ./...` and the race job | always | the seeds and every file in `testdata/fuzz` run as ordinary tests, a few milliseconds each | a crasher stays a regression test forever |
+
+The fuzzer's own cache is not kept between runs (decision 5), so the nightly run starts from the seeds in the code and
+the committed regression inputs; the price is finding new things a little slower, the gain is no new third-party action
+(`actions/cache`) in a workflow that pins every action by SHA. The repository is public, so the minutes cost nothing.
+
+### 18.4 What can run in parallel
+
+Steps 78 and 79 go first and in this order (both edit `Taskfile.yml`). After 79 the groups below touch **different
+files and packages**; inside a group the steps are in order. One fuzz-list line per target is added by its own step;
+the one-line merge conflicts in `scripts/ci/fuzz-targets.txt` are resolved by whoever merges second.
+
+- **Group A (`internal/acme`):** 81, then 88, then 95 (88 changes the helpers of `client_test.go` that 95 uses).
+- **Group B (`internal/ca`):** 82, then 96.
+- **Group C (`internal/agents`):** 84, then 98.
+- **Independent, any time after 79:** 80 (`jose`), 83 (`ca/legacy`), 85 (`httpapi`), 86 (`web`), 87 (`trustkit`), 97
+  (`auth`, `server`, `backup`).
+- **Then, in order and alone:** 89 (findings; it can start as soon as the first target finds something), 90 (only
+  with the OK), 91, 92, 93 (a series), 94, 99, 100. The lint and dead-code steps run **after** the test steps so the
+  new tests are made lint-clean once; 99 runs last of all because it touches many files; 100 is last.
+
+### 18.5 Decisions
+
+The maintainer was not available; each row takes the cautious option. Review them together with §18.8.
+
+| Topic | Decision | Why |
+|---|---|---|
+| **D1. What gets a fuzz target** | The parsers of §18.2 tier 1: everything that reads bytes from outside the trust boundary (public listener, agent listener before and after trust, signed-in users' uploads and bodies, the legacy archive). Files that only the machine's administrator writes (config, `agent.yaml`, DNS credentials, state) are tier 2 and not in this release | The security rules call CSRs, uploads, ACME payloads and agent reports attacker input; an operator who can write `agent.yaml` already owns the host. Fewer targets keep the CI budget and the triage load small |
+| **D2. Function level, not handler level** | Targets call the pure parsing function (no database, no server); one handler-level target is a spike with a speed gate (step 88) | A target that needs SQLite runs hundreds of times slower and finds the same parser bugs less often. The parts that are only reachable through a handler are small (payload structs) and covered by the handler test table |
+| **D3. Seeds in code, regression inputs in the tree** | `f.Add` seeds are written by the tests; `testdata/fuzz/` holds only what a crash produced (and a rare binary seed), committed with its fix, never alone | Conventions: test certificates are generated in the test. A crasher committed before its fix would publish an unfixed bug on a public repository |
+| **D4. CI time** | 10 s a target on every code change in a parallel job, 2 minutes a target every night, 30 minutes by hand before a release | A PR gate must stay short; the long run finds the rare cases without blocking anyone. Both numbers are inputs of the script and cost one edit to change |
+| **D5. No corpus cache, no artifact upload** | No `actions/cache` and no `actions/upload-artifact` for the fuzz cache; a failing input is printed into the log by the script | A new third-party action needs the owner's OK (and a SHA pin); the log is enough to reproduce, because the input is small |
+| **D6. Coverage is a report, not a gate** | `task cover` prints the table; no minimum in CI and no badge. After the first Linux numbers exist, a floor per security package (for example 80 % for `acme`, `auth`, `authz`, `ca`, `agents`) can be proposed | A gate on an unknown Linux number would be a guess; a gate on the Windows number is wrong. Chasing a percent produces tests that assert nothing; the ranked gap list is more useful |
+| **D7. Dead-code tool** | `task deadcode` runs `go run golang.org/x/tools/cmd/deadcode -test ./...` with the version already in `go.mod`; no `tool` directive, no change to `go.mod` or `go.sum`; a known-list file makes new findings fail the task, but the task is not part of `task check` | Proven here: it builds with the module cache and changes nothing. A `tool` line in `go.mod` would pin it but is a change to the module file, which needs the owner's OK (open point 3) |
+| **D8. Stricter lint = what measured clean or nearly clean** | Groups (a) to (d) and (f) of step 93; `staticcheck` all-checks only on request; no `wrapcheck`, `err113`, `lll`, `goconst`, `cyclop`, `gocognit`, `gochecknoglobals`, `testpackage`, `paralleltest`, `nonamedreturns`, `errcheck check-blank` | Principle of `.golangci.yml`: "pure style linters are left out on purpose – they create noise, not safety". 5,000 findings of style would hide the 15 real ones |
+| **D9. PBKDF2 in the legacy key reader** | The limit of 10,000,000 iterations stays; the fuzz target skips inputs above 100,000 and counts them. If the owner agrees, a later change lowers the limit (OpenSSL writes 2,048 to 600,000) | An admin-supplied, step-up-protected file; 10 M iterations take seconds, not a denial of service of the public listener. A lower limit could refuse a real archive; that is the owner's call |
+| **D10. Panics in background goroutines** | Step 90 recovers in the ACME validator and counts the panic as a failed challenge plus an audit entry. Nothing else gets a blanket `recover` | A panic in a goroutine ends the process; a CA that dies on a hostile host reply is the worst class of finding. A `recover` hides bugs elsewhere, so it is added where attacker data is processed in a goroutine, not everywhere |
+| **D11. Error messages** | Fix Go-internal errors and the rule text; **do not reword texts the client sees** | `deny`, `problemErr` and `badRequest` texts are part of the API as a client reads it, are asserted by contract tests, and are already in one house style; the structural gap (unwrapped `return err`) is not a bug |
+| **D12. Dead code policy** | Delete what nothing reaches, even tests; move test-only helpers into test files; keep what a build-tagged test or a documented seam uses, with a comment that names the user | A deleted function can always come back from git; a production binary that carries test helpers is a small, real attack surface |
+| **D13. Findings go through a public history only after the fix** | A crash found in a **released** version is a vulnerability if it is remotely reachable before authentication (public listener, agent enrollment); then the fix is prepared on a branch without the seed, and the owner decides about a private advisory (`SECURITY.md`) before anything is pushed. Everything else is fixed in the open | The repository is public; a seed file is a proof of concept. The same rule applies to the CHANGELOG line, which is written after the release |
+| **D14. The number** | `v0.3.12`; if the order of releases changes, the section keeps its number 18 and steps 78 to 100 move to the new version | §10.1: "order before numbers" |
+
+### 18.6 Dependencies
+
+None. `testing` (`testing.F`), `go tool cover`, `golang.org/x/tools/cmd/deadcode` through the existing module requirement
+(no new module and no change of `go.mod` or `go.sum`, proven by a build in this worktree), the installed `golangci-lint`
+2.15.0. **Needs the owner's OK only** if the owner chooses an option that adds something: a `tool` directive for
+`deadcode` (D7), `actions/cache` or `actions/upload-artifact` for the fuzz cache (D5), or OSS-Fuzz or ClusterFuzzLite
+(not planned). `THIRD_PARTY.md` does not change.
+
+### 18.7 Security review (an independent reviewer checks, with the diff only)
+
+Fuzz findings are bugs in attacker-facing code. **Triage**, in this order, by the first row that applies:
+
+| Class | Example | Handling |
+|---|---|---|
+| **P1** | an input that a parser **accepts** and must refuse (a CSR with a second block, a JWS with two key members, a name that skips the policy); a panic or unbounded memory or time reachable **before authentication** (ACME, trust page, agent `Enroll`) or inside a goroutine that ends the process | fix first, in the release; D13 decides if a private advisory comes first; the commit message says what, not how; the regression input is committed **with** the fix |
+| **P2** | a panic after authentication that `net/http` or `recover` contains; an input that takes more than 1 s per KiB; an error text that echoes more attacker input than `short()` | fix in the release; the seed is committed with the fix |
+| **P3** | a round-trip or idempotence failure without a security effect; a message in the wrong style | fix if small, otherwise a line in the backlog and the target's assertion relaxed **with a comment that names the open item** |
+
+What the reviewer checks, in the diff:
+
+- **Targets are test code and weaken nothing:** no production function is copied, no limit is lowered or skipped, no
+  seed or file under `testdata/fuzz` contains a real key, token or customer name (all keys are generated in the test),
+  a target does no I/O.
+- **Fixes only narrow:** a fix never widens what a parser accepts; the status codes and problem types of the released API
+  stay as they are unless the old behavior was the bug (then it is named in the CHANGELOG); the hostile-name,
+  hostile-CSR and escaping tests of the existing suites run unchanged.
+- **No secret reaches a log or an error:** a new error text includes no CSR, key, token or passphrase; the 9 `%s` spots
+  of §18 Facts are read again.
+- **Step 90** (if approved): the recover handler records the type of the panic and a stack in the log, never the
+  request data; the challenge fails closed (`invalid`), never `valid`; no second goroutine is left running.
+- **Mechanical commits** (`modernize`, `deadcode`): the reviewer re-runs the tool and gets the same diff; deleted
+  functions are not referenced by `//go:build` files (`go vet -tags conformance,e2etest ./...` is run for the change) and not
+  by the agent end-to-end tests.
+- **The CI job is read-only:** the new jobs keep `permissions: contents: read`, use no secret, pin nothing new; a
+  fuzz failure prints input but uploads nothing.
+- **Seeds and the policy:** every refused input of the new unit tests of steps 95 to 98 asserts the *reason*, not only
+  the status, and a viewer, an operator and another tenant's admin each get the answer the authorization table gives
+  (403 or 404).
+
+### 18.8 Risks and open points
+
+| Risk | Handling |
+|---|---|
+| A target finds a P1 on the first run (several parsers have never been fuzzed) | The slot of step 89 exists; D13 is the process. Expect the first findings in `legacy` (archive, key files) and the name and constraint parsers, which are the most hand-written |
+| A fuzz target is flaky or slow and the PR job becomes a nuisance | The 2 s ceiling per input, `-parallel` per target in the list, and the rule that a target that cannot be made deterministic moves to the nightly job only |
+| A mass lint or `modernize` commit conflicts with other branches | Steps 91 to 94 and 99 run after the test steps and, for 99, after every other branch is merged; the rest of the release is new files |
+| The tests that the fuzz plan adds raise the CI time of `go test ./...` | Seeds run in milliseconds; the new unit tests of steps 95 to 98 are table tests on existing helpers and add seconds, not minutes (the whole suite takes about 10 minutes on this machine, almost all in `agent`, `server`, `web`, `ca` and `acme`) |
+| A fixed finding changes behavior a client relies on | Fixes only narrow acceptance, are covered by the existing contract and ACME conformance runs (`task acme:lego`, the conformance job), and are listed in the CHANGELOG |
+| Windows numbers mislead (legacy tests skip) | `task cover` prints the skip count; the first authoritative table comes from Linux CI (D6) |
+| Fuzzing consumes memory on the archive target | `-parallel 2`, the production 256 MiB cap per input, and the 20 minute job limit |
+
+**Not in v0.3.12:** an OCSP responder and its fuzzing (there is none), a PKCS#12 reader (the server does not read them),
+fuzzing of third-party libraries (`x509`, `protobuf`, `miekg/dns`, `lego`: their own projects fuzz them; our targets test
+our wrapper and the rules around them), tier 2 targets (config, `agent.yaml`, DNS credentials, state, journal, name-constraint
+input of the admin), a coverage gate, mutation testing, OSS-Fuzz or ClusterFuzzLite, a persistent fuzz corpus, fuzzing
+on Windows or macOS in CI, `wrapcheck`, `err113`, `lll`, `goconst` or any other style linter, a rewording of the texts that
+clients see, refactoring for its own sake, performance work (`hugeParam`), any ADR change, any API, migration or
+configuration change, and any new dependency.
+
+**Open points for the maintainer:**
+
+1. **CI budget** (D4): 10 s a target on every code change, 2 minutes a target nightly. Say if the PR gate should be
+   shorter (5 s) or the night longer (10 minutes, about three hours).
+2. **Fuzz cache between nightly runs** (D5): needs `actions/cache`, a new pinned action. Default: no.
+3. **`tool` directive for `deadcode`** (D7): a one-line change of `go.mod`. Default: no, `go run` with the version
+   already required.
+4. **Coverage floors** (D6): after the first Linux table, a minimum for the security packages? Default: report only.
+5. **`modernize`** (step 99): 173 mechanical rewrites in one commit after the other branches are merged. Default: yes.
+6. **Tier 2 targets** (config files and agent files): in this release or later? Default: later.
+7. **Step 90** (a `recover` in the ACME validator): default yes, because the alternative is that a panic ends the CA.
+8. **`staticcheck` with all checks** (the 34 comment-form findings) and **`exhaustive` without the `default:` shortcut**:
+   default no for the first, yes for the second where the switch is a real enum.
+9. **PBKDF2 limit** (D9): keep 10,000,000, or lower it to 1,000,000 once the fuzz target has shown how long an input
+   takes. Default: keep.
+10. **A finding in a released version** (D13): who decides between a quiet fix in the next release and a private
+    advisory, and does `SECURITY.md` promise fixes for the last release only? Default: the owner decides; the text of
+    step 100 says "the latest release and `main`".
+11. **Handler-level ACME target** (step 88): kept only above 200 executions a second. Default: yes, as a gate.
+12. **Not verified:** nothing of the plan is built. Measured here: the baseline lint run (0 issues), the extra linter
+    counts, `deadcode` (38, 34 and 4), `dupl` at three thresholds, the own-package coverage of 74 packages and the
+    combined coverage of 21 packages, one 15 s fuzz run of `FuzzParse`. **Not measured:** the numbers on Linux CI,
+    the number of tests that skip on this machine (`task cover` will print it), the tests of `internal/publish` (Defender
+    blocks the binary here; the package is left out of every number), the speed of the planned targets, whether every
+    target runs with `CGO_ENABLED=0` on all five platforms (only `jose` was run), the exact number of `deadcode` hits
+    that are test seams in the agent end-to-end build (it needs the `e2etest` tag), whether `revive` or `gocritic` flag
+    the same line twice after step 93, and whether a persistent `recover` in `validator.start` changes the timing of
+    the conformance run. The facts come from reading the code and running the tools named in each bullet; no
+    `graphify` query was possible (no graph in this worktree).
+
+**Owner decisions found while building v0.3.12** (none of this is changed in the release; each point needs the
+maintainer's call):
+
+1. **The backup manifest is unsigned.** Editing `pki.db` and rewriting the hashes in the manifest passes `Verify` and
+   `Restore`.
+2. **`ImportExternal` has no SAN cap.**
+3. **The lists of `InspectCSR` are not capped at `maxSANs`.**
+4. **A valid DER CSR whose subject text starts with `-----BEGIN` is treated as PEM.**
+5. **`keys.ChooseRecoveryOutput`, `auth.Service.ConfirmTOTP` and `tenant.Store.Version` have callers only in tests**
+   (step 91 moved them into test files). Check whether `init` should use them; if not, they stay test helpers.
+6. **`auth.Draft.Confirmed` is unused.**
+7. **`apache2ctl configtest` needs `/run/apache2` after a boot** (a limitation of the `apache2` recipe, described in the
+   0.3.11 notes).
+8. **Salt test cases for Apache and HAProxy and `site/demo.md` are not added.**
+9. **The live tests of the v0.3.11 recipes, of the demo's agent act and of the flags of the certbot guide are the
+   owner's** (the live test is pending).

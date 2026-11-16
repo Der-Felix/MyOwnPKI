@@ -484,7 +484,7 @@ See [Verify a download]({{ '/reference/security/' | relative_url }}#verify-a-dow
 
 ### What comes next?
 
-The plan lists a quality round and a beta before 1.0. dns-01 in the agent (v0.3.7), the charts, reports and analysis pages (v0.3.8),
+The plan lists a beta before 1.0. dns-01 in the agent (v0.3.7), the charts, reports and analysis pages (v0.3.8),
 the trust portal (v0.3.9), the preview before issuance and versioned settings (v0.3.10), and the Apache and HAProxy recipes with
-the guides inside the UI and the demo (v0.3.11) are released. The
+the guides inside the UI and the demo (v0.3.11), and the quality round with fuzzing, coverage and stricter lint rules (v0.3.12) are released. The
 order is firmer than the numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).

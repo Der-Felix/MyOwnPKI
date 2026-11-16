@@ -132,7 +132,7 @@ func (a *app) unsealPage(c *rc) {
 		c.redirect(next)
 		return
 	}
-	d := signin.UnsealData{FormData: signin.FormData{Next: next, CSRF: c.sess.CSRFToken, Messages: c.messages()}}
+	d := signin.UnsealData{Next: next, CSRF: c.sess.CSRFToken, Messages: c.messages()}
 	d.Facts = append(d.Facts, view.KV{Key: "Sealed since", Value: view.DateTime(st.SealedSince)})
 	statuses, err := ca.CRLStatuses(c.r.Context(), a.d.Engine.PKI, a.now())
 	if err != nil {
@@ -208,7 +208,7 @@ func (a *app) stepUpPage(c *rc) {
 	p := c.page("Confirm with your second factor", "")
 	p.Description = "This action needs a fresh code and runs once after confirmation."
 	render(c.w, c.r, a.log, http.StatusOK, signin.StepUp(p, signin.StepUpData{
-		FormData:  signin.FormData{Next: entry.back, CSRF: c.sess.CSRFToken, Messages: c.messages()},
+		Next: entry.back, CSRF: c.sess.CSRFToken, Messages: c.messages(),
 		PendingID: c.pendingSelector(), Summary: entry.summary,
 	}))
 }

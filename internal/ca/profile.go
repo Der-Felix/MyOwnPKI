@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -50,7 +51,7 @@ func checkBaseURL(s string) (string, []string, error) {
 	u, err := url.Parse(s)
 	switch {
 	case s == "":
-		return "", nil, fmt.Errorf("the public base URL is required – CRL and CA certificate URLs are built from it")
+		return "", nil, errors.New("the public base URL is required – CRL and CA certificate URLs are built from it")
 	case err != nil || !isASCII(s) || strings.ContainsAny(s, " \t"):
 		return "", nil, fmt.Errorf("public base URL %q is not a valid URL", short(s))
 	case u.Scheme != "http" && u.Scheme != "https":
@@ -101,7 +102,7 @@ func (s Subject) pkix() (n pkix.Name) {
 func importedCAKey(alg string) ([]string, error) {
 	switch alg {
 	case AlgEd25519:
-		return nil, fmt.Errorf("an Ed25519 CA is not accepted – browsers and Windows don't verify Ed25519 chains")
+		return nil, errors.New("an Ed25519 CA is not accepted – browsers and Windows don't verify Ed25519 chains")
 	case AlgRSA2048:
 		return []string{"RSA 2048 is weak for a CA that lives for years – plan its replacement (BSI TR-02102 recommends at least 3000 bits)"}, nil
 	case AlgECDSAP521:
@@ -172,10 +173,15 @@ func ncDomain(v string) (string, error) {
 func ncPrefix(v string) (string, error) {
 	p, err := netip.ParsePrefix(v)
 	if err != nil {
-		return "", fmt.Errorf("want a CIDR prefix like 10.0.0.0/8 or fd00::/8")
+		return "", errors.New("want a CIDR prefix like 10.0.0.0/8 or fd00::/8")
 	}
 	if p.Masked() != p {
 		return "", fmt.Errorf("host bits are set – did you mean %s?", p.Masked())
+	}
+	// A name's IPv4-mapped IPv6 address is turned into IPv4 (checkIP), so a constraint written in the
+	// mapped form would never apply to any name – and it can't be read back from a certificate.
+	if p.Addr().Is4In6() {
+		return "", errors.New("an IPv4-mapped IPv6 prefix never applies – write it as an IPv4 prefix like 10.0.0.0/8")
 	}
 	return p.String(), nil
 }

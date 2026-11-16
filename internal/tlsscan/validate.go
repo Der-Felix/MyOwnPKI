@@ -3,6 +3,7 @@ package tlsscan
 import (
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -100,7 +101,7 @@ func checkHost(raw string) (string, netip.Addr, string) {
 func joinInts(v []int) string {
 	parts := make([]string, len(v))
 	for i, n := range v {
-		parts[i] = fmt.Sprint(n)
+		parts[i] = strconv.Itoa(n)
 	}
 	return strings.Join(parts, ", ")
 }
@@ -117,8 +118,8 @@ func validPunycode(s string) bool {
 		return false
 	}
 	basic, digits := "", s
-	if i := strings.LastIndexByte(s, '-'); i >= 0 {
-		basic, digits = s[:i], s[i+1:]
+	if before, after, ok := strings.CutLast(s, "-"); ok {
+		basic, digits = before, after
 	}
 	if digits == "" {
 		return false // no encoded part: the label would be plain ASCII

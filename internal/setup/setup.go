@@ -12,6 +12,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -303,6 +304,8 @@ func (r *run) proveOperator(ctx context.Context) error {
 	switch r.opt.Mode {
 	case Demo:
 		pass, err = demoPassphrase(r.opt.DemoSecretsFile, r.l.DataDir)
+	case Interactive, Stdin:
+		fallthrough
 	default:
 		r.ui.Printf("An earlier init stopped half-way. To finish it, prove that you may use the root key.\n")
 		pass, err = r.ui.ReadSecret("Unseal passphrase: ")
@@ -373,7 +376,7 @@ func (r *run) askTwice(prompt, again string, check func([]byte) error) ([]byte, 
 			clear(a)
 			return nil, err
 		}
-		same := string(a) == string(b)
+		same := bytes.Equal(a, b)
 		clear(b)
 		if same {
 			return a, nil
@@ -430,7 +433,7 @@ func (r *run) collectUser() error {
 			if err := auth.CheckPassword(r.username, string(p)); err != nil {
 				return err
 			}
-			if strings.EqualFold(string(p), string(r.passphrase)) {
+			if bytes.EqualFold(p, r.passphrase) {
 				return ErrSameSecret
 			}
 			return nil
@@ -695,9 +698,9 @@ func (r *run) createCA(ctx context.Context, ring *keys.Keyring, pki, ta *store.D
 	e := &ca.Engine{PKI: pki.Write, Audit: ta.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: ring, Presets: presets, Clock: r.clk}
 	if !r.state.cas[TestRootName] {
 		res, err := e.CreateRoot(ctx, ca.RootRequest{
-			CASettings: ca.CASettings{Name: TestRootName, BaseURL: r.opt.CABaseURL},
-			Subject:    ca.Subject{CommonName: "MyOwnPKI Test Root CA " + r.suffix(ctx, pki), Organization: r.caOrg},
-			Who:        r.opt.Who,
+			Name: TestRootName, BaseURL: r.opt.CABaseURL,
+			Subject: ca.Subject{CommonName: "MyOwnPKI Test Root CA " + r.suffix(ctx, pki), Organization: r.caOrg},
+			Who:     r.opt.Who,
 		})
 		if err != nil {
 			return err
@@ -710,10 +713,10 @@ func (r *run) createCA(ctx context.Context, ring *keys.Keyring, pki, ta *store.D
 	}
 	if !r.state.cas[TestIntermediateName] {
 		res, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{
-			CASettings: ca.CASettings{Name: TestIntermediateName, BaseURL: r.opt.CABaseURL},
-			Parent:     TestRootName,
-			Subject:    ca.Subject{CommonName: "MyOwnPKI Test Issuing CA " + r.suffix(ctx, pki), Organization: r.caOrg},
-			Who:        r.opt.Who,
+			Name: TestIntermediateName, BaseURL: r.opt.CABaseURL,
+			Parent:  TestRootName,
+			Subject: ca.Subject{CommonName: "MyOwnPKI Test Issuing CA " + r.suffix(ctx, pki), Organization: r.caOrg},
+			Who:     r.opt.Who,
 		})
 		if err != nil {
 			return err

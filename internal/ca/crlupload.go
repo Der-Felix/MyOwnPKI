@@ -59,9 +59,9 @@ func (e *Engine) uploadCRL(ctx context.Context, name string, data []byte, who ke
 	if err != nil {
 		return nil, nil, err
 	}
-	crl, err := x509.ParseRevocationList(der)
+	crl, err := parseUploadedCRL(der)
 	if err != nil {
-		return nil, nil, deny("the CRL can't be parsed: %v", err)
+		return nil, nil, err
 	}
 
 	gens, err := q.ListCAGenerations(ctx, ca.ID)
@@ -266,6 +266,20 @@ func unsupportedReasonNote(code int) string {
 	return ""
 }
 
+// parseUploadedCRL parses an uploaded CRL. x509.ParseRevocationList ignores what follows
+// the CRL, but the DER is stored and served as uploaded: nothing may follow
+// the bytes whose signature was checked.
+func parseUploadedCRL(der []byte) (*x509.RevocationList, error) {
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		return nil, deny("the CRL can't be parsed: %v", err)
+	}
+	if len(crl.Raw) != len(der) {
+		return nil, deny("there is data after the CRL – upload exactly one CRL")
+	}
+	return crl, nil
+}
+
 // crlDER accepts a CRL as DER or as one PEM block "X509 CRL".
 func crlDER(data []byte) ([]byte, error) {
 	if len(data) > MaxCRLSize {
@@ -280,6 +294,8 @@ func crlDER(data []byte) ([]byte, error) {
 		return nil, deny("expected a PEM block -----BEGIN X509 CRL----- or a DER file")
 	case len(bytes.TrimSpace(rest)) > 0:
 		return nil, deny("there is data after the CRL – upload exactly one CRL")
+	case moreThanOnePEM(data):
+		return nil, deny("there is more than one PEM block – upload exactly one CRL")
 	}
 	return block.Bytes, nil
 }

@@ -36,8 +36,7 @@ func cmdDeploymentAdd(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs, configPath := subFlags("deployment add", stderr)
 	cmd, err := agent.ParseDeploymentAdd(fs, configPath, args)
 	if err != nil {
-		var usage *agent.UsageError
-		if errors.As(err, &usage) {
+		if usage, ok := errors.AsType[*agent.UsageError](err); ok {
 			if usage.Message != "" {
 				_, _ = fmt.Fprintln(stderr, usage.Message)
 			}
@@ -46,7 +45,7 @@ func cmdDeploymentAdd(ctx context.Context, args []string, stdout, stderr io.Writ
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	opts := agent.AddOptions{EditOptions: agent.EditOptions{ConfigPath: cmd.ConfigPath, DryRun: cmd.DryRun, Restart: cmd.Restart, Stdout: stdout, Stderr: stderr},
+	opts := agent.AddOptions{ConfigPath: cmd.ConfigPath, DryRun: cmd.DryRun, Restart: cmd.Restart, Stdout: stdout, Stderr: stderr,
 		Spec: cmd.Spec, CreateDirs: cmd.CreateDirs}
 	if err := agent.AddDeployment(ctx, opts); err != nil {
 		_, _ = fmt.Fprintln(stderr, err)

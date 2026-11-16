@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -109,9 +111,7 @@ func TestShellQuoteKeepsEveryValueOneWord(t *testing.T) {
 func goodForm(extra map[string]string) func(string) string {
 	form := map[string]string{"hostname": "proxy1.homelab.lan", "service": "nginx", "challenge": "webroot", "webroot": "/var/www/acme",
 		"format": "deb", "arch": "amd64", "admission": admitToken}
-	for k, v := range extra {
-		form[k] = v
-	}
+	maps.Copy(form, extra)
 	return func(k string) string { return form[k] }
 }
 
@@ -269,7 +269,7 @@ func runBlock(t *testing.T, block string) (agentCalls, installCalls [][]string) 
 			return nil
 		}
 		var calls [][]string
-		for _, rec := range strings.Split(string(data), "\x01") {
+		for rec := range strings.SplitSeq(string(data), "\x01") {
 			if rec == "" {
 				continue
 			}
@@ -436,7 +436,7 @@ func TestGeneratedDeploymentLineIsWhatTheAgentReads(t *testing.T) {
 	for _, svc := range hostServices {
 		for _, challenge := range []string{"webroot", "standalone"} {
 			for _, extras := range [][]string{nil, {"www.homelab.lan", "mail.homelab.lan"}} {
-				t.Run(svc.ID+"/"+challenge+"/"+fmt.Sprint(len(extras)), func(t *testing.T) {
+				t.Run(svc.ID+"/"+challenge+"/"+strconv.Itoa(len(extras)), func(t *testing.T) {
 					p := hostPlanFor(t, svc.ID, challenge, extras...)
 					assertAgentAccepts(t, p, deploymentAddCommand(p, testACMEDirectory))
 				})

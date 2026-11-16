@@ -96,14 +96,6 @@ func dnsChallengeOptions(ctx context.Context, cfg DNSProvider, resolvers []strin
 	}))
 }
 
-// setLegoDNS sets lego's package variables without a challenge, for tests
-// that call lego functions directly.
-func setLegoDNS(resolvers []string) {
-	for _, o := range []dns01.ChallengeOption{dns01.AddRecursiveNameservers(resolvers), dns01.AddDNSTimeout(dnsQueryTimeout)} {
-		_ = o(nil)
-	}
-}
-
 // ScrubProviderEnvironment removes the variables lego and its providers read
 // (LEGO_*, CLOUDFLARE_*, CF_*, RFC2136_*) from the process environment, so
 // that nothing outside agent.yaml and the credentials file can configure a DNS

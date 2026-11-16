@@ -59,7 +59,7 @@ func TestConfigCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			code := runConfigCheck(tt.args, tt.env, &stdout, &stderr)
+			code := runConfigCheck(t.Context(), tt.args, tt.env, &stdout, &stderr)
 			if code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d\nstderr: %s", code, tt.wantCode, stderr.String())
 			}
@@ -97,7 +97,7 @@ func TestConfigCheckRootIssuer(t *testing.T) {
 		{admin: "issuing", acme: "issuing"},
 	} {
 		var stdout, stderr bytes.Buffer
-		code := runConfigCheck([]string{"--config", file}, []string{
+		code := runConfigCheck(t.Context(), []string{"--config", file}, []string{
 			"MYOWNPKI_ADMIN_TLS_ISSUER=" + tt.admin, "MYOWNPKI_ADMIN_TLS_NAMES=pki.homelab.lan",
 			"MYOWNPKI_ACME_BASE_URL=https://pki.homelab.lan/acme", "MYOWNPKI_ACME_LISTEN=:443", "MYOWNPKI_ACME_TLS_ISSUER=" + tt.acme,
 		}, &stdout, &stderr)
@@ -137,7 +137,7 @@ func TestConfigCheckAgentCA(t *testing.T) {
 	inst.Unseal(t)
 	for name, eku := range map[string][]string{"agent-ca": {"clientAuth"}, "wide-ca": nil, "both-ca": {"clientAuth", "serverAuth"}} {
 		if _, err := inst.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
-			CASettings: ca.CASettings{Name: name, BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+			Name: name, BaseURL: "http://pki.homelab.lan", Parent: "root",
 			Subject: ca.Subject{CommonName: name}, EKULimit: eku, Who: testinstance.Console,
 		}); err != nil {
 			t.Fatal(err)
@@ -155,7 +155,7 @@ func TestConfigCheckAgentCA(t *testing.T) {
 		{"both-ca", "CA both-ca may sign more than client certificates"},
 	} {
 		var stdout, stderr bytes.Buffer
-		code := runConfigCheck([]string{"--config", file}, []string{
+		code := runConfigCheck(t.Context(), []string{"--config", file}, []string{
 			"MYOWNPKI_AGENT_BASE_URL=https://pki.homelab.lan:8444", "MYOWNPKI_AGENT_TLS_ISSUER=issuing", "MYOWNPKI_AGENT_CA=" + tt.ca,
 		}, &stdout, &stderr)
 		if code != 0 || !strings.Contains(stdout.String(), "agent.listen   :8444 – mTLS, issued by CA issuing, agents from CA "+tt.ca) {

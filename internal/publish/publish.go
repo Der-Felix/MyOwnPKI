@@ -37,7 +37,7 @@ const MaxAge = 15 * time.Minute
 
 var (
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-	genPattern  = regexp.MustCompile(`^([1-9][0-9]{0,8})\.(crt|crl|pem)$`)
+	genPattern  = regexp.MustCompile(`^([1-9]\d{0,8})\.(crt|crl|pem)$`)
 )
 
 // Handler serves one tenant's CA certificates and CRLs.

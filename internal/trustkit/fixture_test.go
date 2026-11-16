@@ -1,6 +1,7 @@
 package trustkit
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -82,7 +83,7 @@ func golden(t *testing.T, name string, got []byte) {
 	if err != nil {
 		t.Fatalf("%v (go test ./internal/trustkit -update)", err)
 	}
-	if string(want) != string(got) {
+	if !bytes.Equal(want, got) {
 		t.Errorf("%s differs (go test ./internal/trustkit -update, then review the diff):\n--- want\n%s\n--- got\n%s", name, want, got)
 	}
 }

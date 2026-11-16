@@ -29,10 +29,10 @@ func TestACMEIssuanceFollowsTheDomains(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing"), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: ptr(30)}, Who: tester}); err != nil {
+	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: new(30), Who: tester}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "lab.example", DomainSettings: DomainSettings{CA: ptr("open")}, Who: tester}); err != nil {
+	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "lab.example", CA: new("open"), Who: tester}); err != nil {
 		t.Fatal(err)
 	}
 	stored := false

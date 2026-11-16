@@ -23,16 +23,23 @@ func SystemBackend(q *systemdb.Queries) Backend { return systemBackend{q} }
 type pkiBackend struct{ q *pkidb.Queries }
 
 func (b pkiBackend) Insert(ctx context.Context, v Version) (Version, error) {
-	r, err := b.q.InsertSettingsVersion(ctx, pkidb.InsertSettingsVersionParams{
-		Kind: v.Kind, ObjectID: v.ObjectID, Version: v.Number, Change: v.Change, Schema: int64(v.Schema),
-		SnapshotJson: string(v.Snapshot), SnapshotSha256: v.SHA256,
-		ActorType: v.Actor.Type, ActorID: v.Actor.ID, ActorName: v.Actor.Name,
-		Reason: v.Reason, RestoredFrom: nullInt(v.RestoredFrom), CreatedAt: v.CreatedAt.UTC().Format(dbTime),
-	})
+	r, err := b.q.InsertSettingsVersion(ctx, pkidb.InsertSettingsVersionParams(insertParams(v)))
 	if err != nil {
 		return Version{}, insertErr(err)
 	}
 	return pkiVersion(r)
+}
+
+// insertParams are the columns of a version for the INSERT. sqlc generates one
+// parameter type per database with the same fields, so the other database's
+// type is a plain conversion of this one (the compiler checks the fields).
+func insertParams(v Version) systemdb.InsertSettingsVersionParams {
+	return systemdb.InsertSettingsVersionParams{
+		Kind: v.Kind, ObjectID: v.ObjectID, Version: v.Number, Change: v.Change, Schema: int64(v.Schema),
+		SnapshotJson: string(v.Snapshot), SnapshotSha256: v.SHA256,
+		ActorType: v.Actor.Type, ActorID: v.Actor.ID, ActorName: v.Actor.Name,
+		Reason: v.Reason, RestoredFrom: nullInt(v.RestoredFrom), CreatedAt: v.CreatedAt.UTC().Format(dbTime),
+	}
 }
 
 func (b pkiBackend) Latest(ctx context.Context, kind, objectID string) (Version, error) {
@@ -75,12 +82,7 @@ func pkiVersion(r pkidb.SettingsVersion) (Version, error) {
 type systemBackend struct{ q *systemdb.Queries }
 
 func (b systemBackend) Insert(ctx context.Context, v Version) (Version, error) {
-	r, err := b.q.InsertSettingsVersion(ctx, systemdb.InsertSettingsVersionParams{
-		Kind: v.Kind, ObjectID: v.ObjectID, Version: v.Number, Change: v.Change, Schema: int64(v.Schema),
-		SnapshotJson: string(v.Snapshot), SnapshotSha256: v.SHA256,
-		ActorType: v.Actor.Type, ActorID: v.Actor.ID, ActorName: v.Actor.Name,
-		Reason: v.Reason, RestoredFrom: nullInt(v.RestoredFrom), CreatedAt: v.CreatedAt.UTC().Format(dbTime),
-	})
+	r, err := b.q.InsertSettingsVersion(ctx, insertParams(v))
 	if err != nil {
 		return Version{}, insertErr(err)
 	}

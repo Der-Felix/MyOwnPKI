@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -31,25 +32,25 @@ func CheckPattern(s string) (string, error) {
 }
 
 func checkDNSName(h string) error {
-	if len(h) == 0 || len(h) > 253 {
-		return fmt.Errorf("1 to 253 characters")
+	if h == "" || len(h) > 253 {
+		return errors.New("1 to 253 characters")
 	}
 	labels := strings.Split(h, ".")
 	if len(labels) < 2 {
-		return fmt.Errorf("want a fully qualified name such as proxy1.homelab.lan")
+		return errors.New("want a fully qualified name such as proxy1.homelab.lan")
 	}
 	for _, l := range labels {
-		if len(l) == 0 || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
-			return fmt.Errorf("every label 1 to 63 characters, not starting or ending with '-'")
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+			return errors.New("every label 1 to 63 characters, not starting or ending with '-'")
 		}
 		for _, r := range l {
 			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-				return fmt.Errorf("only letters, digits, '-' and '.'")
+				return errors.New("only letters, digits, '-' and '.'")
 			}
 		}
 	}
 	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
-		return fmt.Errorf("an IP address is not a host name")
+		return errors.New("an IP address is not a host name")
 	}
 	return nil
 }

@@ -47,7 +47,7 @@ func parse(body []byte, inner bool) (*JWS, error) {
 		case "signatures":
 			return nil, malformed("the general JSON serialization is not accepted – use the flattened one with one signature")
 		default:
-			return nil, malformed("unknown member %q", name)
+			return nil, malformed("unknown member %q", short(name))
 		}
 	}
 	for _, name := range []string{"protected", "payload", "signature"} {
@@ -134,9 +134,9 @@ func checkAlg(alg string) error {
 	case strings.EqualFold(alg, "none"):
 		return fmt.Errorf("%w: \"none\" – every request must be signed", ErrBadAlgorithm)
 	case strings.HasPrefix(alg, "HS"):
-		return fmt.Errorf("%w: %s is a MAC with a shared secret, not a signature", ErrBadAlgorithm, alg)
+		return fmt.Errorf("%w: %s is a MAC with a shared secret, not a signature", ErrBadAlgorithm, short(alg))
 	}
-	return fmt.Errorf("%w: %q (allowed: ES256, ES384, RS256, EdDSA)", ErrBadAlgorithm, alg)
+	return fmt.Errorf("%w: %q (allowed: ES256, ES384, RS256, EdDSA)", ErrBadAlgorithm, short(alg))
 }
 
 // Verify checks the signature with key – the embedded JWK, or the
@@ -165,7 +165,7 @@ func VerifyEAB(raw json.RawMessage, accountKey *Key, url string, macKeyFor func(
 	}
 	for name := range top {
 		if name != "protected" && name != "payload" && name != "signature" {
-			return "", malformed("externalAccountBinding: unknown member %q", name)
+			return "", malformed("externalAccountBinding: unknown member %q", short(name))
 		}
 	}
 	protectedB64, err := str("externalAccountBinding protected", top["protected"])
@@ -190,7 +190,7 @@ func VerifyEAB(raw json.RawMessage, accountKey *Key, url string, macKeyFor func(
 	}
 	for name := range h {
 		if name != "alg" && name != "kid" && name != "url" {
-			return "", malformed("externalAccountBinding header: member %q is not allowed", name)
+			return "", malformed("externalAccountBinding header: member %q is not allowed", short(name))
 		}
 	}
 	alg, err := str("externalAccountBinding alg", h["alg"])
@@ -198,7 +198,7 @@ func VerifyEAB(raw json.RawMessage, accountKey *Key, url string, macKeyFor func(
 		return "", err
 	}
 	if alg != "HS256" {
-		return "", fmt.Errorf("%w: externalAccountBinding must be HS256, got %q", ErrBadAlgorithm, alg)
+		return "", fmt.Errorf("%w: externalAccountBinding must be HS256, got %q", ErrBadAlgorithm, short(alg))
 	}
 	kid, err := str("externalAccountBinding kid", h["kid"])
 	if err != nil || kid == "" {

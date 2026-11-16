@@ -173,7 +173,7 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 
 func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
+		defer func() { //nolint:contextcheck // false positive: the closure logs with r.Context() of the request it was created for
 			if v := recover(); v != nil {
 				if v == http.ErrAbortHandler { //nolint:errorlint // sentinel compared as panic value, as net/http does
 					panic(v)

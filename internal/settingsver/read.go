@@ -1,6 +1,7 @@
 package settingsver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,7 +33,7 @@ func Same(a, b Snapshot) bool {
 	}
 	da, _, ea := Canonical(a)
 	db, _, eb := Canonical(b)
-	return ea == nil && eb == nil && string(da) == string(db)
+	return ea == nil && eb == nil && bytes.Equal(da, db)
 }
 
 // Comparison is the diff between a compared state and a version.
@@ -101,7 +102,7 @@ func PageChanges(ctx context.Context, b Backend, vs []Version) [][]string {
 	for i, v := range vs {
 		var before Snapshot
 		if v.Number > 1 {
-			prev := Version{}
+			var prev Version
 			if i+1 < len(vs) && vs[i+1].Number == v.Number-1 {
 				prev = vs[i+1]
 			} else {

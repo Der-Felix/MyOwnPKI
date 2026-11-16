@@ -214,7 +214,7 @@ func (e *Engine) createIntermediate(ctx context.Context, req IntermediateRequest
 	plan.newCA.ParentID = sql.NullString{String: parent.ca.ID, Valid: true}
 	plan.newCA.PathLen = sql.NullInt64{Int64: int64(req.PathLen), Valid: true}
 	plan.newCA.NcCritical = boolInt(plan.nc.critical)
-	limit, _ := json.Marshal(oidStrings(plan.ekuLimit))
+	limit, _ := json.Marshal(oidStrings(plan.ekuLimit)) //nolint:errchkjson // a []string always encodes
 	plan.newCA.EkuLimit = string(limit)
 	if parent.ca.KeyMode == KeyModeOffline {
 		plan.newCA.Status = StatusPendingSignature
@@ -901,6 +901,8 @@ func parseOneCertificate(data []byte) (*x509.Certificate, error) {
 		return nil, deny("the PEM block has headers – send a plain PEM certificate")
 	case len(bytes.TrimSpace(rest)) > 0:
 		return nil, deny("there is data after the certificate – send exactly one certificate")
+	case moreThanOnePEM(data):
+		return nil, deny("there is more than one PEM block – send exactly one certificate")
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {

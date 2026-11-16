@@ -1,3 +1,6 @@
+// Package components holds the building blocks that the page packages share
+// (tables, folds, the chart) as templ components, and the geometry of the
+// server-rendered charts in chart.go.
 package components
 
 import (
@@ -330,6 +333,8 @@ func buildChart(c view.Chart) chartModel {
 	switch c.Kind {
 	case view.ChartBars, view.ChartStackedBars:
 		height = layoutHorizontal(&m, d)
+	case view.ChartColumns, view.ChartStacked:
+		fallthrough
 	default:
 		height = layoutVertical(&m, d)
 	}
@@ -383,10 +388,7 @@ func layoutVertical(m *chartModel, d chartData) float64 {
 	for _, c := range d.cats {
 		maxLabel = max(maxLabel, utf8.RuneCountInString(c.label))
 	}
-	every := int(math.Ceil((float64(maxLabel)*glyphWidth + 6) / slot))
-	if every < 1 {
-		every = 1
-	}
+	every := max(int(math.Ceil((float64(maxLabel)*glyphWidth+6)/slot)), 1)
 	for i, c := range d.cats {
 		cx := left + slot*(float64(i)+0.5)
 		x := cx - barW/2

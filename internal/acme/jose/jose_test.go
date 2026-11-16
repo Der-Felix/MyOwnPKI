@@ -339,27 +339,6 @@ func TestEAB(t *testing.T) {
 	}
 }
 
-// FuzzParse: no input makes the parser panic, and what it accepts keeps
-// its promises.
-func FuzzParse(f *testing.F) {
-	s := newSigner(f, ES256)
-	f.Add(s.body(f, s.header(), `{"x":1}`))
-	f.Add([]byte(`{"protected":"","payload":"","signature":""}`))
-	f.Add([]byte(`{"protected":"eyJhbGciOiJub25lIn0","payload":"","signature":""}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		j, err := Parse(data)
-		if err != nil {
-			return
-		}
-		if !allowed[j.Alg] || j.Nonce == "" || j.URL == "" || (j.JWK == nil) == (j.KID == "") {
-			t.Fatalf("accepted a JWS that breaks a rule: %+v", j)
-		}
-		if j.JWK != nil {
-			_ = j.Verify(j.JWK)
-		}
-	})
-}
-
 func TestParseInner(t *testing.T) {
 	t.Parallel()
 	s := newSigner(t, ES256)
@@ -382,5 +361,140 @@ func TestParseInner(t *testing.T) {
 	// The outer form without a nonce is still refused.
 	if _, perr := Parse(s.body(t, inner, `{}`)); !errors.Is(perr, ErrMalformed) {
 		t.Errorf("outer without nonce: %v", perr)
+	}
+}
+
+// TestRefusalsDoNotEchoTheRequest: found by FuzzParse – a refusal named the
+// offending member, algorithm, key type or curve in full, so a request of
+// 64 KiB came back as a response of 64 KiB.
+func TestRefusalsDoNotEchoTheRequest(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 5000)
+	es := newSigner(t, ES256)
+	hdr := func(extra string) string {
+		return `{"alg":"ES256","nonce":"n1","url":"https://acme.example/x","jwk":` + es.jwk + extra + `}`
+	}
+	ecPoint := strings.TrimSuffix(es.jwk, "}")
+	cases := map[string]error{}
+	add := func(name string, err error) { cases[name] = err }
+	_, err := Parse([]byte(`{"protected":"","payload":"","signature":"","` + long + `":1}`))
+	add("unknown member", err)
+	_, err = Parse([]byte(`{"` + long + `":1,"` + long + `":2}`))
+	add("duplicate member", err)
+	_, err = Parse([]byte(`{"` + long + "\xbc" + `":1}`))
+	add("bad member", err)
+	_, err = Parse(es.body(t, strings.Replace(hdr(""), `"ES256"`, `"`+long+`"`, 1), `{}`))
+	add("algorithm", err)
+	_, err = Parse(es.body(t, strings.Replace(hdr(""), `"ES256"`, `"HS`+long+`"`, 1), `{}`))
+	add("MAC algorithm", err)
+	_, err = ParseJWK([]byte(`{"kty":"` + long + `"}`))
+	add("key type", err)
+	_, err = ParseJWK([]byte(`{"kty":"EC","crv":"` + long + `"}`))
+	add("curve", err)
+	_, err = ParseJWK([]byte(`{"kty":"OKP","crv":"` + long + `"}`))
+	add("OKP curve", err)
+	_, err = ParseJWK([]byte(ecPoint + `,"alg":"` + long + `"}`))
+	add("JWK alg", err)
+	_, err = VerifyEAB([]byte(`{"protected":"e30","payload":"e30","signature":"","`+long+`":1}`), nil, "u", nil)
+	add("EAB member", err)
+	eabHeader := b64.EncodeToString([]byte(`{"alg":"HS256","kid":"k","url":"u","` + long + `":1}`))
+	_, err = VerifyEAB([]byte(`{"protected":"`+eabHeader+`","payload":"e30","signature":""}`), nil, "u", nil)
+	add("EAB header member", err)
+	eabHeader = b64.EncodeToString([]byte(`{"alg":"` + long + `","kid":"k","url":"u"}`))
+	_, err = VerifyEAB([]byte(`{"protected":"`+eabHeader+`","payload":"e30","signature":""}`), nil, "u", nil)
+	add("EAB algorithm", err)
+	for name, err := range cases {
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if n := len(err.Error()); n > 300 {
+			t.Errorf("%s: the refusal has %d bytes", name, n)
+		}
+	}
+}
+
+// breakIn returns the JSON object with a line break in the middle of its
+// string member name.
+func breakIn(t *testing.T, raw []byte, name, brk string) []byte {
+	t.Helper()
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := m[name]
+	if !ok || len(v) < 2 {
+		t.Fatalf("no member %q in %s", name, raw)
+	}
+	m[name] = v[:len(v)/2] + brk + v[len(v)/2:]
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestLineBreaksInBase64: encoding/base64 skips CR and LF, also in strict
+// mode, so a JWS with a line break inside "protected", "payload" or
+// "signature" (or a JWK member) decoded like the clean one and had a second
+// spelling. Every base64url text is canonical or refused, EAB included.
+func TestLineBreaksInBase64(t *testing.T) {
+	t.Parallel()
+	s := newSigner(t, ES256)
+	body := s.body(t, s.header(), `{"termsOfServiceAgreed":true}`)
+	if _, err := Parse(body); err != nil {
+		t.Fatalf("the clean request: %v", err)
+	}
+
+	const url = "https://acme.example/new-account"
+	acctKey, err := ParseJWK([]byte(s.jwk))
+	if err != nil {
+		t.Fatal(err)
+	}
+	macKey := []byte("a mac key the admin created, 32b")
+	ph := b64.EncodeToString([]byte(`{"alg":"HS256","kid":"eab-1","url":"` + url + `"}`))
+	pl := b64.EncodeToString([]byte(s.jwk))
+	mac := hmac.New(sha256.New, macKey)
+	mac.Write([]byte(ph + "." + pl))
+	eab := []byte(`{"protected":"` + ph + `","payload":"` + pl + `","signature":"` + b64.EncodeToString(mac.Sum(nil)) + `"}`)
+	lookup := func(kid string) ([]byte, error) {
+		if kid != "eab-1" {
+			return nil, errors.New("unknown EAB key")
+		}
+		return macKey, nil
+	}
+	if _, err = VerifyEAB(eab, acctKey, url, lookup); err != nil {
+		t.Fatalf("the clean binding: %v", err)
+	}
+
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		for _, member := range []string{"protected", "payload", "signature"} {
+			name := member + " " + strings.NewReplacer("\r", "CR", "\n", "LF").Replace(brk)
+			t.Run("JWS "+name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := Parse(breakIn(t, body, member, brk)); !errors.Is(err, ErrMalformed) {
+					t.Fatalf("expected ErrMalformed, got %v", err)
+				}
+			})
+			t.Run("EAB "+name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := VerifyEAB(breakIn(t, eab, member, brk), acctKey, url, lookup); !errors.Is(err, ErrMalformed) {
+					t.Fatalf("expected ErrMalformed, got %v", err)
+				}
+			})
+		}
+		t.Run("JWK x "+strings.NewReplacer("\r", "CR", "\n", "LF").Replace(brk), func(t *testing.T) {
+			t.Parallel()
+			const marker = `"x":"`
+			i := strings.Index(s.jwk, marker)
+			if i < 0 {
+				t.Fatalf("no x in %s", s.jwk)
+			}
+			i += len(marker) + 5
+			jwk := s.jwk[:i] + strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(brk) + s.jwk[i:]
+			if _, err := ParseJWK([]byte(jwk)); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("expected ErrMalformed, got %v (%s)", err, jwk)
+			}
+		})
 	}
 }

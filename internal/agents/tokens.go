@@ -383,7 +383,7 @@ func tokenNoun(kind string) string {
 }
 
 // useText is "3 of 10", as the audit entries and the pages say it.
-func useText(used, max int64) string { return fmt.Sprintf("%d of %d", used, max) }
+func useText(used, limit int64) string { return fmt.Sprintf("%d of %d", used, limit) }
 
 func toJoinToken(r pkidb.JoinToken) JoinToken {
 	var patterns []string

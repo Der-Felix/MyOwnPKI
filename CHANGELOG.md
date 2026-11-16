@@ -15,6 +15,155 @@ change the API, the configuration and the database schema; the release notes say
   from 0.3.5 to 0.3.10 of a host without the key kept the file. The key still installs the file where it is missing and
   lets the pillar state what a host needs.
 
+## [0.3.12] - 2026-11-16
+
+The quality round before the beta. There is no new feature: the parts of the program that read data from outside the trust
+boundary (a CSR, an ACME request, an uploaded CRL, a REST body, the legacy archive) are now **fuzzed**, the test gaps that the
+first coverage table showed are closed, dead code and copied code are gone, and the lint rules are stricter. Fuzzing and the
+new tests found a dozen real defects; the largest group is answers that repeated what the sender wrote without a limit, and
+there are uploads that were accepted although they held more than one object. All of them are fixed in this release and none
+changes a documented behavior of the API. The release adds **no migration, no REST change, no configuration key and no
+dependency**.
+
+### Added
+
+- **24 fuzz targets** (`func Fuzz...`) in nine packages: the ACME request envelope, its key and account-binding parts
+  (`internal/acme/jose`), the ACME payload helpers and the CSR check, and one target that sends fuzzed payloads through the
+  real handlers with a real database (`internal/acme`); the CSR, certificate, name, name-constraint and CRL parsers
+  (`internal/ca`); the legacy archive, key-value, `index.txt` and private key readers (`internal/ca/legacy`); the agent's CSR
+  key check, report limits and host name patterns (`internal/agents`); the REST body decoder (`internal/httpapi`); the file
+  upload of the issue wizard (`internal/web`); the User-Agent reader and the generated commands of the trust page
+  (`internal/trustkit`); and the guide parser (`internal/guides`). Each target calls the production function unchanged, has
+  seeds that are written in the test, and checks what an accepted input must satisfy. What the fuzzer found stays in the
+  repository as a regression test.
+- **`task fuzz`** runs them all, 10 seconds each (`FUZZTIME=30m FUZZ_ONLY=FuzzParseCSR` for one target and longer). The one
+  list is `scripts/ci/fuzz-targets.txt`; `bash scripts/ci/fuzz.sh --check` (and CI) fails when a `func Fuzz...` of the tree is
+  not in it, or the list names one that does not exist, and a crash prints the new input files into the log.
+- **CI job `fuzz`** (every pull request and push that changes code, 10 seconds per target, parallel to `check`) and **job
+  `fuzz-long`** (the daily 04:17 run and a manual run with an input `fuzztime`, 2 minutes per target by default). `task check`
+  does not fuzz.
+- **`task cover`** prints one table of the coverage per package, with integration tests credited to the package they exercise
+  (`-coverpkg`), the number of skipped tests, and no gate; `task cover:func` lists the functions with the most uncovered
+  statements and `task cover:html` opens the profile. More than 130 new test functions closed the gaps that the first table
+  showed in the security-relevant code. The combined numbers (integration tests credited) moved from 77.8 % to 87.1 % for
+  `internal/acme`, 83.6 % to 86.3 % for `internal/ca`, 81.9 % to 84.2 % for `internal/agents`, 82.3 % to 84.2 % for
+  `internal/auth` and 84.7 % to 85.8 % for `internal/server`; `internal/backup` is at 87.2 %. The whole tree is at 85.3 % of
+  31,181 statements (generated code and test helpers left out). These are numbers from Windows, where 23 tests skip (the
+  legacy tests need `pki.sh`) and `internal/publish` could not be run; the first Linux table comes from CI.
+- **`task deadcode`** lists the functions that no binary and no test reaches and fails on one that is not on a reviewed list
+  (`scripts/ci/deadcode-known.txt`, empty today). It runs through the module cache; `go.mod` and `go.sum` are unchanged.
+- **Stricter lint rules** (`.golangci.yml`), every new linter with a one-line reason: `contextcheck`, `containedctx`,
+  `errchkjson`, `wastedassign`, `recvcheck`, `unparam`, `intrange`, `perfsprint`, `mirror`, `canonicalheader`, `dogsled`,
+  `fatcontext`, `dupl` (copied blocks of 100 tokens or more, tests excluded), `revive` with five rules (`error-strings`,
+  `error-naming`, `redefines-builtin-id`, `context-as-argument`, `package-comments`), six more `gocritic` checks, and
+  `exhaustive` without the `default:` shortcut. The tree reports 0 issues on Linux, macOS, FreeBSD and Windows.
+- **Documentation:** `CONTRIBUTING.md` and the site page *Contributing* describe the three tasks, what a seed is and how to run
+  one target for an hour; `docs/RELEASING.md` has an optional fuzz run of one hour per target before a tag; the site page
+  *Security* says what is fuzzed and what is not; the error message rule and the fuzz and coverage rules are in
+  `go-conventions.md`.
+
+### Changed
+
+- **`SECURITY.md` says which versions get fixes:** the latest release and `main`. It said "no release yet".
+- **Error messages follow one rule** (`.claude/skills/myownpki/references/go-conventions.md`): lower case unless an acronym,
+  no trailing punctuation, `%w` for an error that is returned, `errors.New` for a constant text. The 22 `fmt.Errorf` calls
+  without a verb are `errors.New` now; `perfsprint` and `revive` keep it so. **No text that a client sees was reworded.**
+- **`myownpki config check` stops on Ctrl-C.** It took no context; a check that waits for a network answer can be interrupted now.
+- **Dead code is removed:** `Server.Host` of the DNS test server, `PlaceholderNames` of the guides, `LegacyCRLURL` and
+  `LegacyCertURL` of the CA package and the `ACME` accessor of the server; the functions that only tests used moved into
+  test files. Two pairs of copied code are one function each (the `ca` and `db` dispatch in `cmd/myownpki`, the two
+  INSERTs of `settingsver`).
+- **Code modernized by `golangci-lint --enable-only modernize`:** `errors.AsType`, `slices.Contains` and `slices.Backward`,
+  `strings.SplitSeq`, `maps.Copy`, `sync.WaitGroup.Go`, `new(value)` for the pointer helpers and the like, 126 Go files, no
+  change of behavior (the tests of every package that changed pass unchanged).
+- Seven tests checked that a secret is **not** in the audit log with a text that was empty when `json.Marshal` had failed, so
+  they could not fail; they check the real text now.
+- `api/openapi.yaml` `info.version` is 0.3.12.
+
+### Fixed
+
+- **An ACME client could make the server repeat 64 KiB back to it.** The refusals of a JWS with a long member name, algorithm,
+  key type or curve, and of a JWS whose `url` is not the request's, repeated the offending text in full on the endpoints that
+  need no account. The text is cut at 80 bytes now.
+- **The same for names:** a refused DNS name, e-mail address, URI or IP address was repeated in the message in full (up to
+  128 KiB through the REST body). It is cut at 80 bytes. The REST answers for an unknown field and for a value that does not
+  parse repeat at most 200 bytes.
+- **An ACME CSR could carry a look-alike common name.** The common name was lower-cased with a function that also folds the
+  Kelvin sign onto `k`, so a CSR with a different spelling passed as the order's name and was put into the certificate's
+  subject. Only `A` to `Z` are folded now.
+- **A CSR, certificate or CRL upload with a second PEM block was accepted** when the first block was damaged (the PEM reader
+  skips a block it cannot decode). An upload is one block now; the text in front of it (`openssl req -text`) stays accepted.
+- **An uploaded CRL with data behind it was stored and served as it came,** so the signature covered only the first part of
+  what the public listener handed out. It is refused.
+- **A name constraint written as an IPv4-mapped IPv6 prefix** (`::ffff:10.0.0.0/104`) never applied to a name, because the
+  names are converted to IPv4 and a verifier compares the length. It is refused with the hint to write the IPv4 prefix.
+- **A JSON body of `null` was read as an empty request** by every REST endpoint. It answers 400 now.
+- **A hostile legacy archive could stall the import for minutes:** listing a directory walked every entry, and one entry with
+  500,000 levels cost quadratic time. The tree is indexed and capped at 200,000 files and directories, and an entry that is a
+  file and the parent of another one is refused, as `tar` on disk would.
+- **A panic while the ACME validator checked a challenge ended the whole server.** The challenge fails with `serverInternal`
+  now, the audit entry names the type of the panic (never its text) and the stack is in the log. The dialer that `net/http`
+  calls in a goroutine of its own is covered too.
+- **The admin allow-list could panic on a connection without an address** (and read a non-IP address type from its text). Both
+  are an invalid peer now, which no allowed network contains. The admin listener is TCP only, so nothing reachable was affected.
+- **The ACME list of an account's orders could be incomplete:** it read the 1000 newest orders of all accounts and then kept
+  the caller's, so a quiet account saw an incomplete or empty list once others had made 1000 newer orders. It reads the
+  account's own orders from the database now (one new query, the index `acme_orders_account` was there already). Clients
+  such as certbot and lego do not depend on the list.
+- **A restore could delete a file that sits where the data directory goes.** On Windows reading a regular file as a directory
+  reports "not found", so `restore` took the file for a missing directory and removed it. A target that exists and is not a
+  directory is refused.
+- **An empty or zeroed database was accepted as a backup** (copied as migration 0, reported as success, noticed only by a later
+  verify). `backup create` refuses it and names the file.
+- **The start of the server named no setting when `auth.passkey_origin` was the reason for the refusal.** It does now.
+- **An ARI certificate identifier could be written in more than one way.** The decoder of the Go standard library skips
+  carriage returns and line feeds, also in strict mode, so `GET /acme/renewal-info/AQ%0AID.AQ` named the same certificate as
+  `AQID.AQ` (found by the fuzz job). Each part of the identifier has to be canonical base64url now (only `A-Z a-z 0-9 - _`,
+  no padding, no stray bits); anything else answers 400 `malformed`. Clients that write the identifier as RFC 9773 says are
+  not affected.
+- **The same hole in four more places that read base64url from a sender.** A line break inside the text was skipped there
+  as well: the three members of an ACME request (`protected`, `payload`, `signature`), the members of a key (`x`, `y`, `n`,
+  `e`) and of an external account binding, the `csr` of a finalize request, the `certificate` of a revocation, and the
+  key thumbprint that an agent reserves for its ACME account. So a signed request could be sent in several spellings
+  (the signature covers the spelling, so only the holder of the key could do that), and an agent could store a thumbprint
+  with a trailing line feed that never matches its account and blocked the real one with a conflict. All of them read
+  canonical base64url now and answer 400 (`malformed`, `badCSR`, or `invalid` for the agent). Requests from certbot, lego,
+  acme.sh and the agent are not affected: none of them writes a line break. The cookie value of a trusted device was
+  looked at too and left as it is: a cookie cannot carry a line break.
+
+### Security notes
+
+- **Findings of the fuzz targets are treated as bugs in attacker-facing code.** The answers that repeated the sender's text
+  were reachable without an account (the ACME envelope is read before the account is looked up). The two findings with an
+  effect beyond a long answer are the accepted second PEM block and the look-alike common name (a spelling that the order did
+  not name could reach the subject of the certificate; the names in the subject alternative name were checked against the
+  order exactly, as before).
+- **The fixes only narrow what is accepted,** and each has the input the fuzzer found as a regression test (`testdata/fuzz/...`)
+  or a plain unit test of the rule.
+- **The fuzz jobs are read-only:** they keep `permissions: contents: read`, use no secret, add no third-party action and upload
+  nothing; a failing input is printed into the log.
+- **No new dependency**; `go.mod` and `go.sum` are unchanged.
+
+### Known limitations
+
+- **The live test of 0.3.11 by the maintainer is still pending** (the recipes `apache2`, `httpd` and `haproxy`, the guides, the
+  demo, the certbot flags of the guides). 0.3.12 does not change any of them.
+- **Fuzzing covers the parsers of data from outside, not the files an administrator writes** (the server configuration,
+  `agent.yaml`, DNS credentials, the agent state). They are listed as the next step.
+- **Windows numbers are not Linux numbers.** Some tests skip on Windows (the legacy suite needs `pki.sh`), and `internal/publish`
+  could not be run on the development machine, so the coverage table is a first measure; CI has the full run.
+- Open points that need the maintainer, not fixed here: the backup manifest is unsigned, a few input lists are not capped (see
+  `docs/PHASE3.md` section 18, "Owner decisions").
+
+### Upgrade notes
+
+- No migration (`myownpki db status` shows the same versions as 0.3.11), no configuration change and no change to the agent
+  protocol, so going back needs no restore.
+- Clients see the same API. A request that was accepted by mistake (a JSON body of `null`, an upload with a second PEM block, a
+  CRL with data behind it, a name constraint with a mapped IPv6 prefix) is refused with the same kind of answer that other
+  malformed requests get.
+- The step-by-step version is on the site page *Upgrade*.
+
 ## [0.3.11] - 2026-11-16
 
 Apache, HAProxy, guides and the demo. The agent gets three more example recipes (`apache2`, `httpd`, `haproxy`) and a new

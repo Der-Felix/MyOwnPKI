@@ -343,7 +343,7 @@ func (a *API) revokeAgent(c *call) error {
 	return a.agentAction(c, func(s *agents.Service, id string) error { return s.Revoke(c.ctx(), c.who(), id) })
 }
 
-func (a *API) setPredecessorPolicy(c *call, deployment, clear bool) error {
+func (a *API) setPredecessorPolicy(c *call, deployment, remove bool) error {
 	s, err := a.agentsOn(c)
 	if err != nil {
 		return err
@@ -356,7 +356,7 @@ func (a *API) setPredecessorPolicy(c *call, deployment, clear bool) error {
 	if deployment {
 		name = c.r.PathValue("deploymentName")
 	}
-	if clear {
+	if remove {
 		if err := s.SetPredecessorPolicy(c.ctx(), c.who(), id, name, nil); err != nil {
 			return err
 		}

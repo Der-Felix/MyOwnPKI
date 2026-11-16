@@ -20,6 +20,9 @@ const (
 	maxUnpacked        = 256 << 20 // everything inside: a decompression bomb stops here
 	maxArchiveEntries  = 100_000
 	maxArchiveFileSize = 64 << 20
+	// maxNodes bounds the files and directories in memory: a name of 500,000 levels is one entry
+	// and 500,000 directories.
+	maxNodes = 2 * maxArchiveEntries
 )
 
 // FromArchive unpacks a .tar.gz of a pki.sh directory into memory – keys
@@ -60,7 +63,9 @@ func FromArchive(data []byte) (fs.FS, error) {
 		}
 		switch h.Typeflag {
 		case tar.TypeDir:
-			m.addDir(name)
+			if derr := m.addDir(name); derr != nil {
+				return nil, derr
+			}
 		case tar.TypeReg:
 			if h.Size > maxArchiveFileSize {
 				return nil, fmt.Errorf("archive entry %q is larger than %d MiB", clip(name, 80), maxArchiveFileSize>>20)
@@ -73,8 +78,9 @@ func FromArchive(data []byte) (fs.FS, error) {
 			if rerr != nil {
 				return nil, fmt.Errorf("archive entry %q: %w", clip(name, 80), rerr)
 			}
-			m.addDir(path.Dir(name))
-			m[name] = &memFile{data: body, mod: h.ModTime}
+			if ferr := m.addFile(name, &memFile{data: body, mod: h.ModTime}); ferr != nil {
+				return nil, ferr
+			}
 		default:
 			return nil, fmt.Errorf("archive entry %q is a link or special file – only files and directories are accepted", clip(name, 80))
 		}
@@ -98,15 +104,68 @@ type memFile struct {
 	data []byte
 	dir  bool
 	mod  time.Time
+	kids []string // the names of a directory's children, so that listing it doesn't walk the whole table
 }
 
-func (m memFS) addDir(p string) {
-	for p != "." && p != "" {
-		if _, ok := m[p]; !ok {
-			m[p] = &memFile{dir: true}
-		}
-		p = path.Dir(p)
+// parentName is the directory of a clean name ("" for a name at the top).
+func parentName(name string) string {
+	if before, _, ok := strings.CutLast(name, "/"); ok {
+		return before
 	}
+	return ""
+}
+
+// addDir makes the directory p and every directory above it. A name that is a file already can't also be a
+// directory.
+func (m memFS) addDir(p string) error {
+	var missing []string
+	for p != "" {
+		if f, ok := m[p]; ok {
+			if !f.dir {
+				return fmt.Errorf("archive entry %q is a file and a directory", clip(p, 80))
+			}
+			break
+		}
+		missing = append(missing, p)
+		p = parentName(p)
+	}
+	if len(m)+len(missing) > maxNodes {
+		return fmt.Errorf("more than %d files and directories in the archive", maxNodes)
+	}
+	for _, dir := range slices.Backward(missing) {
+		m.create(dir, &memFile{dir: true})
+	}
+	return nil
+}
+
+// addFile stores a regular file; a later file of the same name replaces the earlier one.
+func (m memFS) addFile(name string, f *memFile) error {
+	if err := m.addDir(parentName(name)); err != nil {
+		return err
+	}
+	if old, ok := m[name]; ok {
+		if old.dir {
+			return fmt.Errorf("archive entry %q is a file and a directory", clip(name, 80))
+		}
+		m[name] = f
+		return nil
+	}
+	if len(m)+1 > maxNodes {
+		return fmt.Errorf("more than %d files and directories in the archive", maxNodes)
+	}
+	m.create(name, f)
+	return nil
+}
+
+// create adds a node whose parent exists and lists it with the parent.
+func (m memFS) create(name string, f *memFile) {
+	m[name] = f
+	base := name
+	if _, after, ok := strings.CutLast(name, "/"); ok {
+		base = after
+	}
+	parent := m[parentName(name)]
+	parent.kids = append(parent.kids, base)
 }
 
 func (m memFS) Open(name string) (fs.File, error) {
@@ -125,16 +184,13 @@ func (m memFS) Open(name string) (fs.File, error) {
 	if !f.dir {
 		return &openFile{info: info, r: bytes.NewReader(f.data)}, nil
 	}
-	var entries []fs.DirEntry
+	entries := make([]fs.DirEntry, 0, len(f.kids))
 	prefix := key + "/"
 	if key == "" {
 		prefix = ""
 	}
-	for p, c := range m {
-		if p == "" || !strings.HasPrefix(p, prefix) || strings.Contains(p[len(prefix):], "/") {
-			continue
-		}
-		entries = append(entries, fs.FileInfoToDirEntry(memInfo{name: p[len(prefix):], f: c}))
+	for _, kid := range f.kids {
+		entries = append(entries, fs.FileInfoToDirEntry(memInfo{name: kid, f: m[prefix+kid]}))
 	}
 	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	return &openDir{info: info, entries: entries}, nil

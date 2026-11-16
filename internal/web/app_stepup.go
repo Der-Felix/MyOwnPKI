@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,9 +59,7 @@ func (p *pendingAction) clone() *pendingAction {
 
 func cloneStrings(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -243,7 +242,7 @@ func (c *rc) beginStepUp(back string) {
 func actionPathNames(pattern string) []string {
 	_, path, _ := strings.Cut(pattern, " ")
 	var names []string
-	for _, segment := range strings.Split(path, "/") {
+	for segment := range strings.SplitSeq(path, "/") {
 		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
 			names = append(names, strings.TrimSuffix(strings.TrimPrefix(segment, "{"), "}"))
 		}

@@ -174,12 +174,6 @@ func (s *Service) LoginTOTP(ctx context.Context, pendingToken, code, ip string) 
 	return s.loginTOTP(ctx, pendingToken, code, Client{IP: ip})
 }
 
-// LoginRecoveryCode completes a sign-in with a recovery code (lost phone).
-// Each code works once.
-func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
-	return s.loginRecoveryCode(ctx, pendingToken, code, Client{IP: ip})
-}
-
 // SecondFactor completes a sign-in with what the user typed: six digits are
 // a TOTP code, anything else is tried as a recovery code. Failures of both
 // count in the same throttle and lockout as wrong passwords.
@@ -261,15 +255,18 @@ func (s *Service) pending(ctx context.Context, q *systemdb.Queries, token string
 	}
 	device := s.trustedDevice(c, u, now)
 	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		return row, u, "", refused
 	}
 	if wait := lockedFor(u, now); wait > 0 && device == "" {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		return row, u, "", refused
 	}
 	if u.DisabledAt.Valid {
 		_ = q.DeleteSession(ctx, row.IDHash)
-		return row, u, "", s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
+		refused := s.refuse(ctx, &u, c.IP, "user.login", audit.ResultDenied, "disabled", ErrInvalidLogin)
+		return row, u, "", refused
 	}
 	return row, u, device, nil
 }
@@ -320,12 +317,6 @@ func (s *Service) keepLock(u systemdb.User, device string, now time.Time) sql.Nu
 		return u.LockedUntil
 	}
 	return sql.NullString{}
-}
-
-// StepUp confirms a sensitive action with a fresh TOTP code (security.md):
-// the session snapshots the proof time and the tenant's current lifetime.
-func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session, error) {
-	return s.StepUpFrom(ctx, token, code, Client{IP: ip})
 }
 
 // StepUpFrom is StepUp with the client's device cookie.
@@ -381,10 +372,12 @@ func (s *Service) signedInFrom(ctx context.Context, token string, c Client, acti
 	}
 	device := s.trustedDevice(c, u, now)
 	if wait := s.wait(c, u.Username, true, device, now); wait > 0 {
-		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "throttled", &LockedError{RetryAfter: wait})
+		return nil, u, "", refused
 	}
 	if wait := lockedFor(u, now); wait > 0 && device == "" {
-		return nil, u, "", s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		refused := s.refuse(ctx, &u, c.IP, action, audit.ResultDenied, "locked", &LockedError{RetryAfter: wait})
+		return nil, u, "", refused
 	}
 	return sess, u, device, nil
 }
@@ -662,7 +655,7 @@ func (s *Service) storeRecoveryCodes(ctx context.Context, q *systemdb.Queries, u
 	for _, c := range codes {
 		canon, ok := normalizeRecoveryCode(c)
 		if !ok {
-			return fmt.Errorf("malformed recovery code")
+			return errors.New("malformed recovery code")
 		}
 		if err := q.InsertRecoveryCode(ctx, systemdb.InsertRecoveryCodeParams{UserID: userID, CodeHash: s.Key.recoveryHash(userID, canon), CreatedAt: formatTime(now)}); err != nil {
 			return err

@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,7 +18,7 @@ import (
 var findOpenSSL = sync.OnceValues(func() (string, error) {
 	bin, err := exec.LookPath("openssl")
 	if err != nil {
-		return "", fmt.Errorf("openssl is not on PATH")
+		return "", errors.New("openssl is not on PATH")
 	}
 	// #nosec G204 -- test helper: runs the openssl found on PATH
 	out, err := exec.CommandContext(context.Background(), bin, "version").Output()

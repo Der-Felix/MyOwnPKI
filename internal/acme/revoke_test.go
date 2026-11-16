@@ -200,8 +200,8 @@ func (c *client) postSigned(signer crypto.Signer, url string, payload any) *answ
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	h, _ := json.Marshal(map[string]any{"alg": jk.Algorithm(), "nonce": c.getNonce(), "url": url, "jwk": json.RawMessage(jk.Canonical())})
-	p, _ := json.Marshal(payload)
+	h := mustJSON(c.t, map[string]any{"alg": jk.Algorithm(), "nonce": c.getNonce(), "url": url, "jwk": json.RawMessage(jk.Canonical())})
+	p := mustJSON(c.t, payload)
 	input := b64(h) + "." + b64(p)
 	var sig []byte
 	switch k := signer.(type) {
@@ -231,7 +231,7 @@ func (c *client) postSigned(signer crypto.Signer, url string, payload any) *answ
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"protected": b64(h), "payload": b64(p), "signature": b64(sig)})
+	body := mustJSON(c.t, map[string]string{"protected": b64(h), "payload": b64(p), "signature": b64(sig)})
 	return c.postRaw(url, body)
 }
 
@@ -272,5 +272,29 @@ func TestRevokeWithEachKeyType(t *testing.T) {
 	der := issueWith(p521)
 	if a := owner.post(url, revokePayload(der, 1)); a.code != http.StatusOK {
 		t.Errorf("revoke a P-521 certificate by its account: %d %s", a.code, a.body)
+	}
+}
+
+// A certificate with a line break inside is refused (encoding/base64 would
+// skip it); nothing is revoked, and the clean request still works.
+func TestRevokeCertRefusesLineBreaks(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	owner := v.client(t)
+	owner.register()
+	der, _ := owner.issue("nas.homelab.lan")
+	url := testBase + "/revoke-cert"
+	text := b64(der)
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		a := owner.post(url, map[string]any{"certificate": text[:40] + brk + text[40:]})
+		if a.code != http.StatusBadRequest || a.problem() != "malformed" {
+			t.Errorf("%q inside the certificate: %d %s", brk, a.code, a.body)
+		}
+	}
+	if _, revoked := v.revocation(t, der); revoked {
+		t.Fatal("a refused request revoked the certificate")
+	}
+	if a := owner.post(url, revokePayload(der, -1)); a.code != http.StatusOK {
+		t.Fatalf("the clean request: %d %s", a.code, a.body)
 	}
 }

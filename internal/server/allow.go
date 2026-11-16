@@ -37,11 +37,25 @@ func (l *allowListener) Accept() (net.Conn, error) {
 }
 
 // peerIP is the address of the direct peer; IPv4-mapped IPv6 counts as IPv4.
+// Whatever is not clearly the IP address of a TCP or UDP peer – no address,
+// a Unix socket (its name is chosen by the peer), an unknown network – is
+// invalid, which no allowed network contains.
 func peerIP(a net.Addr) netip.Addr {
-	if tcp, ok := a.(*net.TCPAddr); ok {
-		if ip, ok := netip.AddrFromSlice(tcp.IP); ok {
+	switch v := a.(type) {
+	case nil:
+		return netip.Addr{}
+	case *net.TCPAddr:
+		if v == nil {
+			return netip.Addr{}
+		}
+		if ip, ok := netip.AddrFromSlice(v.IP); ok {
 			return ip.Unmap()
 		}
+	}
+	switch a.Network() {
+	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+	default:
+		return netip.Addr{}
 	}
 	ap, err := netip.ParseAddrPort(a.String())
 	if err != nil {

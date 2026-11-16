@@ -10,8 +10,10 @@ steps=(
   'check|check|check_tools|bash scripts/ci/check-check.sh'
   'check|generate:check|generate_tools|bash scripts/ci/check-generate.sh'
   'check|agent protocol compatibility|go_git|bash scripts/ci/check-agent-protocol.sh'
-  'check|fuzz ACME JWS parser|go_task|task fuzz'
   'check|upgrade from previous release|go_task|task upgrade:test'
+  'fuzz|target list self-test|bash|bash scripts/ci/fuzz.sh --self-test'
+  'fuzz|fuzz every target, 10 s each|go_task|task fuzz'
+  'fuzz-long|fuzz every target, nightly budget|nightly|task fuzz FUZZTIME=2m'
   'race|tests with race detector|race_tools|bash scripts/ci/race-test.sh'
   'test-os|OpenSSL 3 from Homebrew|macos|bash scripts/ci/test-os-openssl.sh'
   'test-os|OpenSSL used by the tests|openssl|bash scripts/ci/test-os-openssl-version.sh'
@@ -21,6 +23,7 @@ steps=(
   'vuln|govulncheck|go_task|task vuln'
   'lint-meta|actionlint|go_task|bash scripts/ci/lint-meta-actionlint.sh'
   'lint-meta|registry coverage|bash|bash scripts/ci/lint-meta-registry.sh --self-test'
+  'lint-meta|coverage summary golden files|bash|bash scripts/ci/cover-summary.sh --self-test'
   'lint-meta|vacuum OpenAPI|vacuum|task lint:api'
   'shellcheck|ShellCheck sources|shellcheck|bash scripts/ci/shellcheck-sources.sh'
   'shellcheck|legacy smoke test|linux|bash scripts/ci/shellcheck-smoke.sh'
@@ -127,6 +130,7 @@ requirement() {
       fi
       ;;
     windows) [ "$os" = windows ] || echo 'needs Windows' ;;
+    nightly) echo 'runs only in the nightly CI (schedule or workflow_dispatch); locally: task fuzz FUZZTIME=2m' ;;
     openssl) has_commands openssl || echo 'needs openssl' ;;
     bash) has_commands bash || echo 'needs bash' ;;
     salt) has_commands bash salt-call jq || echo 'needs bash + salt-call + jq' ;;

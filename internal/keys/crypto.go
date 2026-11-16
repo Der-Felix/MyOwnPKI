@@ -169,7 +169,7 @@ func parseArgon2Params(s string) (argon2Params, error) {
 }
 
 func (p argon2Params) json() string {
-	b, _ := json.Marshal(p)
+	b, _ := json.Marshal(p) //nolint:errchkjson // three numbers always encode
 	return string(b)
 }
 

@@ -37,16 +37,14 @@ type historyDomain struct {
 	base string // "/domains/{id}"
 }
 
-func str(s string) *string { return &s }
-
 func newHistoryDomain(t *testing.T) *historyDomain {
 	t.Helper()
 	v := newUIEnv(t)
 	v.Unseal(t)
 	ctx := t.Context()
 	hostile := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: historyHostile}, Principal: authz.Console()}
-	d, err := v.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", Who: testinstance.Console, DomainSettings: ca.DomainSettings{
-		CA: str("issuing"), ChallengeTypes: []string{ca.ChallengeHTTP01}, Approval: str(ca.ApprovalAccount)}})
+	d, err := v.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", Who: testinstance.Console,
+		CA: new("issuing"), ChallengeTypes: []string{ca.ChallengeHTTP01}, Approval: new(ca.ApprovalAccount)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +55,7 @@ func newHistoryDomain(t *testing.T) *historyDomain {
 			t.Fatal(uerr)
 		}
 	}
-	update(testinstance.Console, ca.DomainSettings{Approval: str(ca.ApprovalOpen), Options: ca.ChangeOptions{Reason: "open for the lab"}})
+	update(testinstance.Console, ca.DomainSettings{Approval: new(ca.ApprovalOpen), Options: ca.ChangeOptions{Reason: "open for the lab"}})
 	update(hostile, ca.DomainSettings{ChallengeTypes: []string{ca.ChallengeHTTP01, ca.ChallengeDNS01}, Options: ca.ChangeOptions{Reason: historyReason}})
 	wild := true
 	update(testinstance.Console, ca.DomainSettings{ChallengeTypes: []string{ca.ChallengeDNS01}, Wildcards: &wild, Options: ca.ChangeOptions{Reason: "wildcards only"}})

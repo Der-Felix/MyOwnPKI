@@ -3,7 +3,9 @@ package agentdist
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,4 +165,9 @@ func TestBinaryPathMatchesInstallation(t *testing.T) {
 			t.Errorf("%s lacks %q", file, want)
 		}
 	}
+}
+
+// IsNotFound reports whether err says that an artifact is not in the store.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, fs.ErrNotExist)
 }

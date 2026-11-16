@@ -41,7 +41,7 @@ func (c *call) problem(status int, kind, detail string, errs []fieldError) error
 	c.status = status
 	c.w.Header().Set("Content-Type", "application/problem+json")
 	c.w.WriteHeader(status)
-	_ = json.NewEncoder(c.w).Encode(problemDoc{
+	_ = json.NewEncoder(c.w).Encode(problemDoc{ //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 		Type: problemPrefix + kind, Title: http.StatusText(status), Status: status, Detail: detail, RequestID: c.reqID, Errors: errs,
 	})
 	return errReply
@@ -119,8 +119,7 @@ func (c *call) fail(err error) {
 
 // deniedText is the reason of a permission refusal, without the internals.
 func deniedText(err error, denied *ca.DeniedError) string {
-	var token *authz.TokenStepUpError
-	if errors.As(err, &token) {
+	if token, ok := errors.AsType[*authz.TokenStepUpError](err); ok {
 		return token.Error()
 	}
 	if errors.As(err, &denied) && len(denied.Reasons) > 0 {

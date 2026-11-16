@@ -143,7 +143,7 @@ func TestConfigCheckNotify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			code := runConfigCheck([]string{"--config", f.config(t, tt.config)}, tt.env, &stdout, &stderr)
+			code := runConfigCheck(t.Context(), []string{"--config", f.config(t, tt.config)}, tt.env, &stdout, &stderr)
 			if code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, tt.wantCode, stdout.String(), stderr.String())
 			}
@@ -198,7 +198,7 @@ func TestConfigCheckNamesAPermissionProblem(t *testing.T) {
 		t.Skip("running as a user that reads every file")
 	}
 	var stdout, stderr bytes.Buffer
-	code := runConfigCheck([]string{"--config", f.config(t, "notify:\n  webhook:\n    url: https://hooks.homelab.lan/x\n    secret_file: "+yamlPath(locked)+"\n")}, nil, &stdout, &stderr)
+	code := runConfigCheck(t.Context(), []string{"--config", f.config(t, "notify:\n  webhook:\n    url: https://hooks.homelab.lan/x\n    secret_file: "+yamlPath(locked)+"\n")}, nil, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "notify.webhook.secret_file "+locked+": the file can't be read (permission denied)") {
 		t.Errorf("exit %d\n%s", code, stderr.String())
 	}

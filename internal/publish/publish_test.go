@@ -62,8 +62,8 @@ func setup(t *testing.T) (http.Handler, *store.DB, []byte, []byte) {
 	}
 	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}, Principal: authz.Console()}
 	if _, ierr := e.ImportRoot(t.Context(), ca.ImportRootRequest{
-		CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"},
-		CertPEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), Who: who,
+		Name: "root", BaseURL: "http://pki.homelab.lan",
+		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), Who: who,
 	}); ierr != nil {
 		t.Fatal(ierr)
 	}
@@ -140,7 +140,7 @@ func TestServesCertificateAndCRL(t *testing.T) {
 
 func TestNotFoundAndMethods(t *testing.T) {
 	t.Parallel()
-	h, _, _, _ := setup(t)
+	h, _, _, _ := setup(t) //nolint:dogsled // setup builds the whole fixture; this test needs the handler
 	for _, path := range []string{
 		"/ca/root/2.crt", "/crl/root/2.crl", "/ca/nope/1.crt", "/ca/ROOT/1.crt", "/ca/root/0.crt", "/ca/root/1.crl",
 		"/crl/root/1.crt", "/ca/root/01.crt", "/root.crt", "/root.crl", "/", "/ca/root/1.crt.pem", "/ca/root",

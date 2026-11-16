@@ -74,8 +74,8 @@ type Instance struct {
 // New runs init --demo with the test CA and wires the services. The clock is
 // not on a whole second: the engine works in seconds, sessions in
 // milliseconds, and the tests must see both.
-func New(t *testing.T, o Options) *Instance {
-	t.Helper()
+func New(tb testing.TB, o Options) *Instance {
+	tb.Helper()
 	if o.Hostname == "" {
 		o.Hostname = "pki01"
 	}
@@ -83,7 +83,7 @@ func New(t *testing.T, o Options) *Instance {
 		o.BaseURL = "http://pki.homelab.lan"
 	}
 	cfg := config.Default()
-	cfg.DataDir = t.TempDir()
+	cfg.DataDir = tb.TempDir()
 	v := &Instance{
 		Clock:   clock.NewFake(clock.System{}.Now().UTC().Truncate(time.Second).Add(700 * time.Millisecond)),
 		secrets: map[string][]byte{}, CAIDs: map[string]string{},
@@ -92,13 +92,13 @@ func New(t *testing.T, o Options) *Instance {
 	if o.NoCA {
 		caBaseURL = "" // a demo init creates the CAs when it is given a base URL
 	}
-	res, err := setup.Run(t.Context(), setup.Options{
+	res, err := setup.Run(tb.Context(), setup.Options{
 		Config: cfg, Mode: setup.Demo, WithCA: !o.NoCA, CABaseURL: caBaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	return v.open(t, cfg, res.DemoSecretsFile, o)
+	return v.open(tb, cfg, res.DemoSecretsFile, o)
 }
 
 // OpenExisting opens a data directory made elsewhere – an older release, a
@@ -120,11 +120,11 @@ func OpenExisting(t *testing.T, dataDir, demoSecretsFile string) *Instance {
 }
 
 // open reads the demo secrets and wires the services to the databases.
-func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string, o Options) *Instance {
-	t.Helper()
+func (v *Instance) open(tb testing.TB, cfg config.Config, demoSecretsFile string, o Options) *Instance {
+	tb.Helper()
 	demo, err := os.ReadFile(demoSecretsFile) // #nosec G304 -- test: the instance's own secrets file
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	for line := range strings.SplitSeq(string(demo), "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -135,17 +135,17 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 			v.DemoPassword = p
 		}
 		if s, ok := strings.CutPrefix(line, "secret:"); ok {
-			v.secrets["demo"] = decodeSecret(t, s)
+			v.secrets["demo"] = decodeSecret(tb, s)
 		}
 	}
 
 	l := store.Layout{DataDir: cfg.DataDir}
 	open := func(path string) *store.DB {
-		db, oerr := store.Open(t.Context(), path)
+		db, oerr := store.Open(tb.Context(), path)
 		if oerr != nil {
-			t.Fatal(oerr)
+			tb.Fatal(oerr)
 		}
-		t.Cleanup(func() { _ = db.Close() })
+		tb.Cleanup(func() { _ = db.Close() })
 		return db
 	}
 	pkiPath, _ := l.TenantDB(store.DefaultTenant, store.KindPKI)
@@ -158,11 +158,11 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 
 	key, _, err := auth.LoadKey(cfg.AuthKeyFile())
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	v.Ring = keys.New(v.SystemDB.Write, v.InstanceAudit.Write, v.Clock, keys.TestKDF())
 	if v.Presets, err = preset.Builtin(); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	v.Engine = &ca.Engine{
 		PKI: pki.Write, Audit: v.TenantAudit.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: v.Ring, Presets: v.Presets,
@@ -179,12 +179,12 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 	v.Auth.Hasher = auth.NewHasher(auth.TestParams(), 4, time.Second)
 	if !o.NoPasskeys {
 		if v.Auth.Passkeys, err = auth.NewPasskeys("pki.homelab.lan", BrowserOrigin); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 	}
-	cas, err := ca.ListCAs(t.Context(), pki.Read)
+	cas, err := ca.ListCAs(tb.Context(), pki.Read)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	for _, c := range cas {
 		v.CAIDs[c.Name] = c.ID
@@ -192,11 +192,11 @@ func (v *Instance) open(t *testing.T, cfg config.Config, demoSecretsFile string,
 	return v
 }
 
-func decodeSecret(t *testing.T, s string) []byte {
-	t.Helper()
+func decodeSecret(tb testing.TB, s string) []byte {
+	tb.Helper()
 	b, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", "")))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return b
 }
@@ -227,10 +227,10 @@ func (v *Instance) Code(name string) string {
 }
 
 // Unseal unlocks the keyring as the console.
-func (v *Instance) Unseal(t *testing.T) {
-	t.Helper()
-	if err := v.Ring.Unseal(t.Context(), []byte(v.Passphrase), Console); err != nil {
-		t.Fatal(err)
+func (v *Instance) Unseal(tb testing.TB) {
+	tb.Helper()
+	if err := v.Ring.Unseal(tb.Context(), []byte(v.Passphrase), Console); err != nil {
+		tb.Fatal(err)
 	}
 }
 

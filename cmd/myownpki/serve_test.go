@@ -28,7 +28,7 @@ func TestServeUntilDoneShutsDownCleanly(t *testing.T) {
 	go func() { done <- serveUntilDone(ctx, srv, ln, slog.New(slog.DiscardHandler)) }()
 
 	// The server answers before the shutdown …
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

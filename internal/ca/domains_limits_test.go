@@ -55,12 +55,12 @@ func TestDomainIPRangeCap(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	ca := ptr("open")
+	ca := new("open")
 
-	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "big.lan", DomainSettings: DomainSettings{CA: ca, IPRanges: longRanges(MaxDomainIPRanges + 1)}, Who: tester}); !deniedWith(err, "at most 256 IP ranges") {
+	if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: "big.lan", CA: ca, IPRanges: longRanges(MaxDomainIPRanges + 1), Who: tester}); !deniedWith(err, "at most 256 IP ranges") {
 		t.Fatalf("257 ranges: %v, want a policy refusal", err)
 	}
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "big.lan", DomainSettings: DomainSettings{CA: ca, IPRanges: longRanges(MaxDomainIPRanges)}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "big.lan", CA: ca, IPRanges: longRanges(MaxDomainIPRanges), Who: tester})
 	if err != nil {
 		t.Fatalf("256 ranges of the longest form: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestOversizedDomainCanBeTrimmed(t *testing.T) {
 	d := v.oversizedDomain(t, "huge.lan", 2000)
 
 	// Any other change is refused with the reason until the list is short enough.
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); !deniedWith(err, "at most 256 IP ranges (this one has 2000)") {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); !deniedWith(err, "at most 256 IP ranges (this one has 2000)") {
 		t.Fatalf("update without trimming: %v", err)
 	}
 	trimmed, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{IPRanges: longRanges(3)}, tester)
@@ -136,7 +136,7 @@ func TestDomainCreateRaceIsARefusal(t *testing.T) {
 	END`); err != nil {
 		t.Fatal(err)
 	}
-	_, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "race.lan", DomainSettings: DomainSettings{CA: ptr("open")}, Who: tester})
+	_, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "race.lan", CA: new("open"), Who: tester})
 	if !deniedWith(err, `domain "race.lan" exists already`) {
 		t.Fatalf("create that lost the race: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestDomainRestoreNeedsTheAuditRight(t *testing.T) {
 	v := domainEnv(t)
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	fresh := v.clk.Now()

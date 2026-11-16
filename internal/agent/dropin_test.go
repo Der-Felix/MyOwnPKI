@@ -18,8 +18,6 @@ func sandboxConfig(dir string, mutate func(*Config)) *Config {
 	return cfg
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestRenderDropinsPathsTable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -165,10 +163,10 @@ func TestRenderDropinsLowPorts(t *testing.T) {
 		{name: "standalone enrollment, edited file is not overwritten", cfg: func(c *Config) { c.Enrollment = Enrollment{Challenge: ChallengeStandalone} }, file: []byte("# mine\n"), want: LowPortsKeep, notes: 1},
 		{name: "a standalone deployment writes it", cfg: standaloneDeployment, want: LowPortsWrite},
 		{name: "the flag writes it", flag: true, want: LowPortsWrite},
-		{name: "low_ports true writes it", cfg: func(c *Config) { c.Sandbox.LowPorts = boolPtr(true) }, want: LowPortsWrite},
-		{name: "low_ports false removes it", cfg: func(c *Config) { c.Sandbox.LowPorts = boolPtr(false) }, file: asset, want: LowPortsRemove},
-		{name: "low_ports false, no file: nothing to do", cfg: func(c *Config) { c.Sandbox.LowPorts = boolPtr(false) }, want: LowPortsKeep},
-		{name: "low_ports false beats a standalone challenge", cfg: func(c *Config) { c.Sandbox.LowPorts = boolPtr(false); standaloneDeployment(c) }, file: asset, want: LowPortsRemove},
+		{name: "low_ports true writes it", cfg: func(c *Config) { c.Sandbox.LowPorts = new(true) }, want: LowPortsWrite},
+		{name: "low_ports false removes it", cfg: func(c *Config) { c.Sandbox.LowPorts = new(false) }, file: asset, want: LowPortsRemove},
+		{name: "low_ports false, no file: nothing to do", cfg: func(c *Config) { c.Sandbox.LowPorts = new(false) }, want: LowPortsKeep},
+		{name: "low_ports false beats a standalone challenge", cfg: func(c *Config) { c.Sandbox.LowPorts = new(false); standaloneDeployment(c) }, file: asset, want: LowPortsRemove},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,7 +184,7 @@ func TestRenderDropinsLowPorts(t *testing.T) {
 			}
 		})
 	}
-	if _, err := RenderDropins(sandboxConfig(dir, func(c *Config) { c.Sandbox.LowPorts = boolPtr(false) }), DropinState{}, asset, DropinOptions{LowPorts: true}); err == nil {
+	if _, err := RenderDropins(sandboxConfig(dir, func(c *Config) { c.Sandbox.LowPorts = new(false) }), DropinState{}, asset, DropinOptions{LowPorts: true}); err == nil {
 		t.Error("--low-ports against sandbox.low_ports: false was accepted")
 	}
 }

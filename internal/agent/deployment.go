@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -193,7 +194,7 @@ type changeSet struct {
 	yamlFirst bool
 }
 
-func (c changeSet) configChanged(s *editSession) bool { return string(c.config) != string(s.data) }
+func (c changeSet) configChanged(s *editSession) bool { return !bytes.Equal(c.config, s.data) }
 
 // apply prints the dry run, or writes: directories, then the files in the
 // order that never leaves a missing entry, then daemon-reload.
@@ -260,8 +261,8 @@ func (s *editSession) writeDropinFiles(plan *DropinPlan) (func() error, error) {
 	var undos []func() error
 	undo := func() error {
 		var errs []error
-		for i := len(undos) - 1; i >= 0; i-- {
-			errs = append(errs, undos[i]())
+		for _, undo := range slices.Backward(undos) {
+			errs = append(errs, undo())
 		}
 		return errors.Join(errs...)
 	}
@@ -646,7 +647,7 @@ func checkNoSymlink(p string) error {
 	vol := filepath.VolumeName(p)
 	rest := strings.TrimPrefix(p, vol)
 	cur := vol + string(filepath.Separator)
-	for _, part := range strings.Split(rest, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rest, string(filepath.Separator)) {
 		if part == "" {
 			continue
 		}
@@ -1023,7 +1024,7 @@ func SyncSandbox(ctx context.Context, opts SyncOptions) error {
 	if err != nil {
 		return err
 	}
-	if string(data) == string(s.data) && plan.InSync() {
+	if bytes.Equal(data, s.data) && plan.InSync() {
 		if len(plan.Kept) > 0 {
 			_, _ = fmt.Fprintf(s.out, "Kept in %s (agent.yaml does not explain them): %s\n  \"sandbox sync --adopt\" records them under sandbox.write, \"sandbox sync --prune\" drops them.\n", dropinPathsName, strings.Join(plan.Kept, " "))
 		}

@@ -1,7 +1,7 @@
 // Package predecessor defines how a replacement handles its predecessor.
 package predecessor
 
-import "fmt"
+import "errors"
 
 const (
 	Now   = "now"
@@ -25,16 +25,16 @@ func (p Policy) Validate() error {
 	switch p.Choice {
 	case Now, Never:
 		if p.Days != 0 && p.Days != 7 {
-			return fmt.Errorf("predecessor days apply only to choice after")
+			return errors.New("predecessor days apply only to choice after")
 		}
 		return nil
 	case After:
 		if p.Days < 1 || p.Days > 30 {
-			return fmt.Errorf("predecessor days must be between 1 and 30")
+			return errors.New("predecessor days must be between 1 and 30")
 		}
 		return nil
 	default:
-		return fmt.Errorf("predecessor choice must be now, after or never")
+		return errors.New("predecessor choice must be now, after or never")
 	}
 }
 

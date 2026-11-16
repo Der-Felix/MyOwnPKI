@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/predecessor"
@@ -52,7 +52,7 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch o.Status {
 	case "processing", "valid":
-		s.replyOrder(w, ctx, o) // finalize again: the state as it is
+		s.replyOrder(ctx, w, o) // finalize again: the state as it is
 		return
 	case "ready":
 	default:
@@ -66,7 +66,7 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, perr)
 		return
 	}
-	der, err := base64.RawURLEncoding.Strict().DecodeString(in.CSR)
+	der, err := b64url.Decode(in.CSR)
 	if err != nil {
 		s.fail(w, r, problemErr(http.StatusBadRequest, "badCSR", "csr is not base64url DER"))
 		return
@@ -89,10 +89,10 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.replyOrder(w, ctx, o)
+	s.replyOrder(ctx, w, o)
 }
 
-func (s *Server) replyOrder(w http.ResponseWriter, ctx context.Context, o *pkidb.AcmeOrder) {
+func (s *Server) replyOrder(ctx context.Context, w http.ResponseWriter, o *pkidb.AcmeOrder) {
 	if o.Status == "processing" {
 		w.Header().Set("Retry-After", "30")
 	}
@@ -122,7 +122,7 @@ func (s *Server) checkCSR(o *pkidb.AcmeOrder, der []byte, accountKey any) error 
 	}
 	got := map[string]bool{}
 	for _, d := range csr.DNSNames {
-		got["dns:"+strings.ToLower(d)] = true
+		got["dns:"+asciiLower(d)] = true
 	}
 	for _, ip := range csr.IPAddresses {
 		a, _ := netip.AddrFromSlice(ip)
@@ -132,7 +132,7 @@ func (s *Server) checkCSR(o *pkidb.AcmeOrder, der []byte, accountKey any) error 
 		return problemErr(http.StatusBadRequest, "badCSR", "the CSR names e-mail addresses or URIs – only the order's DNS names and IPs")
 	}
 	if cn := csr.Subject.CommonName; cn != "" {
-		key := "dns:" + strings.ToLower(cn)
+		key := "dns:" + asciiLower(cn)
 		if a, perr := netip.ParseAddr(cn); perr == nil {
 			key = "ip:" + a.Unmap().String()
 		}
@@ -172,8 +172,7 @@ func (s *Server) invalidate(ctx context.Context, o *pkidb.AcmeOrder, cause error
 	if !errors.As(cause, &ae) {
 		ae = problemErr(http.StatusInternalServerError, "serverInternal", "internal error")
 	}
-	b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:" + ae.typ, "detail": ae.detail, "status": ae.status})
-	if err := pkidb.New(s.db).SetACMEOrderStatus(ctx, pkidb.SetACMEOrderStatusParams{Status: "invalid", Error: sql.NullString{String: string(b), Valid: true}, UpdatedAt: dbTime(s.now()), ID: o.ID}); err != nil {
+	if err := pkidb.New(s.db).SetACMEOrderStatus(ctx, pkidb.SetACMEOrderStatusParams{Status: "invalid", Error: problemJSON(ae.typ, ae.detail, ae.status), UpdatedAt: dbTime(s.now()), ID: o.ID}); err != nil {
 		s.log.Error("acme invalidate order", slog.String("order", o.ID), slog.Any("error", err))
 	}
 }
@@ -336,10 +335,23 @@ func (s *Server) certificate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ExpireStale(ctx context.Context) error {
 	now := dbTime(s.now())
 	q := pkidb.New(s.db)
-	b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:unauthorized", "detail": "the order expired", "status": http.StatusForbidden})
-	if _, err := q.ExpireACMEOrders(ctx, pkidb.ExpireACMEOrdersParams{Error: sql.NullString{String: string(b), Valid: true}, UpdatedAt: now, ExpiresAt: now}); err != nil {
+	if _, err := q.ExpireACMEOrders(ctx, pkidb.ExpireACMEOrdersParams{Error: problemJSON("unauthorized", "the order expired", http.StatusForbidden), UpdatedAt: now, ExpiresAt: now}); err != nil {
 		return err
 	}
 	_, err := q.ExpireACMEAuthzs(ctx, pkidb.ExpireACMEAuthzsParams{UpdatedAt: now, ExpiresAt: now})
 	return err
+}
+
+// asciiLower lower-cases the letters A to Z and nothing else. A name from a
+// CSR is compared with the order's identifiers, which are ASCII; strings.ToLower
+// would also fold look-alikes onto ASCII letters (the Kelvin sign U+212A
+// becomes "k"), and the CSR's common name would pass as an identifier of the
+// order while the certificate then carries the look-alike.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }

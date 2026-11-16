@@ -106,9 +106,9 @@ func newLimiter(clk clock.Clock) *limiter {
 	return &limiter{clk: clk, hits: map[string]*window{}, maxKeys: limiterKeys}
 }
 
-// allow counts one event for key and reports whether it stays within max
+// allow counts one event for key and reports whether it stays within limit
 // per period; when not, it returns how long until the window resets.
-func (l *limiter) allow(key string, max int, period time.Duration) (bool, time.Duration) {
+func (l *limiter) allow(key string, limit int, period time.Duration) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clk.Now()
@@ -120,7 +120,7 @@ func (l *limiter) allow(key string, max int, period time.Duration) (bool, time.D
 		w = &window{start: now}
 		l.hits[key] = w
 	}
-	if w.n >= max {
+	if w.n >= limit {
 		return false, w.start.Add(period).Sub(now)
 	}
 	w.n++
@@ -152,14 +152,14 @@ func (l *limiter) evict(now time.Time, period time.Duration) {
 	}
 }
 
-// peek reports whether key is still within max per period, without
+// peek reports whether key is still within limit per period, without
 // counting (for limits that count only failures).
-func (l *limiter) peek(key string, max int, period time.Duration) (bool, time.Duration) {
+func (l *limiter) peek(key string, limit int, period time.Duration) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clk.Now()
 	w := l.hits[key]
-	if w == nil || now.Sub(w.start) >= period || w.n < max {
+	if w == nil || now.Sub(w.start) >= period || w.n < limit {
 		return true, 0
 	}
 	return false, w.start.Add(period).Sub(now)

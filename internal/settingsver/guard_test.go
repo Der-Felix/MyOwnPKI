@@ -75,8 +75,7 @@ type leaf struct {
 // name, or of a kind that could carry anything (map, interface, pointer,
 // raw bytes, a float, a struct from elsewhere).
 func snapshotLeaves(t reflect.Type, prefix string) (leaves []leaf, problems []string) {
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if !f.IsExported() || name == "" || name == "-" {
 			problems = append(problems, fmt.Sprintf("%s.%s: needs an exported name and a json name", t.Name(), f.Name))
@@ -154,7 +153,7 @@ func TestSnapshotsHaveNoSecrets(t *testing.T) {
 		}
 		// Fields() lists exactly the snapshot's leaves, so a field cannot be
 		// stored and left out of the diff.
-		snap, ok := reflect.New(tc.typ).Elem().Interface().(Snapshot)
+		snap, ok := reflect.TypeAssert[Snapshot](reflect.New(tc.typ).Elem())
 		if !ok {
 			t.Fatalf("%s is not a Snapshot", tc.typ.Name())
 		}

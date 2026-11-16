@@ -179,9 +179,6 @@ func New(d Deps) *API {
 	return a
 }
 
-// Routes lists the operations this build serves (contract tests).
-func (a *API) Routes() []Route { return a.routes }
-
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ServeMux answers an unclean path ("//", "/./") with a redirect in
 	// text/html; under the API it is simply no operation (owner 2026-10-17).
@@ -206,7 +203,7 @@ func (a *API) wrap(rt Route) http.Handler {
 		if ck, err := r.Cookie(auth.CookieName); err == nil {
 			c.token = ck.Value
 		}
-		err := a.serve(c, rt)
+		err := a.serve(c, rt) //nolint:contextcheck // false positive: serve reads the context from c.r, the request of this handler
 		if err != nil {
 			c.fail(err)
 		}

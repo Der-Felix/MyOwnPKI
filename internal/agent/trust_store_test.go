@@ -458,19 +458,19 @@ func TestInstallRefusesSymbolicLinks(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			f := newTrustFixture(t, osReleaseDebian)
-			real := filepath.Join(f.dir, "real")
+			realFile := filepath.Join(f.dir, "real")
 			switch kind {
 			case "ca_bundle":
-				writeTestFile(t, real, f.pem, 0o600)
+				writeTestFile(t, realFile, f.pem, 0o600)
 				_ = os.Remove(f.caBundle)
-				symlinkOrSkip(t, real, f.caBundle)
+				symlinkOrSkip(t, realFile, f.caBundle)
 			case "target":
-				writeTestFile(t, real, []byte("elsewhere\n"), 0o644)
-				symlinkOrSkip(t, real, f.target())
+				writeTestFile(t, realFile, []byte("elsewhere\n"), 0o644)
+				symlinkOrSkip(t, realFile, f.target())
 			case "directory":
-				mkdirAll(t, real)
+				mkdirAll(t, realFile)
 				_ = os.RemoveAll(f.env.path(f.family.Dir))
-				symlinkOrSkip(t, real, f.env.path(f.family.Dir))
+				symlinkOrSkip(t, realFile, f.env.path(f.family.Dir))
 			}
 			config := f.read(f.config)
 			if err := f.install(); err == nil {
@@ -479,7 +479,7 @@ func TestInstallRefusesSymbolicLinks(t *testing.T) {
 			if len(f.runner.calls) != 0 || f.read(f.config) != config {
 				t.Fatal("a refused install changed something")
 			}
-			if kind == "target" && f.read(real) != "elsewhere\n" {
+			if kind == "target" && f.read(realFile) != "elsewhere\n" {
 				t.Fatal("the file behind the link was written")
 			}
 		})

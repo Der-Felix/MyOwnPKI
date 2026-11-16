@@ -15,6 +15,15 @@
 - HTTP API errors use RFC 9457 `application/problem+json`; ACME errors use the ACME problem types
   (`urn:ietf:params:acme:error:*`). Map domain errors in one place per surface.
 - Never put secrets, key material or full CSRs in error strings.
+- Message form: starts in lower case unless the first word is an acronym or a proper name (`URI is longer than …`,
+  `ARI returned …`), no trailing punctuation, no newline.
+- `%w` whenever an error is returned that has a cause; `errors.New` for a constant text (a `fmt.Errorf` without a verb
+  is a lint finding, `perfsprint`).
+- Wrap once, at the boundary that adds context (the function that knows the name, the path or the step), not again on
+  every level on the way up.
+- Texts that reach a client or the UI (`deny`, `problemErr`, `badRequest`, ACME and API problem details) are sentences
+  with ` – ` between the clauses, written for the person who reads them. They are part of the API, tests and docs pin
+  them, and they are changed only when they are wrong, never for style.
 
 ## Logging
 
@@ -78,6 +87,17 @@
 - Legacy importer: build a fixture PKI with `legacy/pki.sh` in CI and import it.
 - ACME: integration tests with real clients (lego in-process; certbot/acme.sh in CI containers).
 - `go test -race ./...` in CI.
+- **Fuzz** every function that reads bytes from outside the trust boundary (CSR, upload, ACME payload, REST body,
+  agent report, legacy archive): `func FuzzXxx(f *testing.F)` in a `_test.go` file next to it, one line in
+  `scripts/ci/fuzz-targets.txt`. The target calls the production function **unchanged** (no copied logic, no lower
+  limit), checks with code of its own what an accepted input must satisfy (round trip, canonical form, a bound), keeps
+  an error text to a short piece of the input, and does no I/O. Seeds are `f.Add` calls in code; the only files under
+  `testdata/fuzz/` are the inputs a crash produced, committed **with** the fix and a plain unit test of the rule.
+  Details and the checklist: `docs/PHASE3.md` §18.2.
+- `task cover` is a report, not a gate: a coverage table per package with integration tests credited to the code they
+  exercise (`-coverpkg`). Read `task cover:func` for the gaps; don't chase a percent. A Windows number is not a Linux
+  number (the table prints how many tests skipped). `task deadcode` lists functions nothing reaches: delete them or move
+  a test-only helper into a `_test.go` file.
 
 ## Build and CI
 

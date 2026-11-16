@@ -63,7 +63,7 @@ func TestPassCreateRules(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, tenant.EnrollVerified)
 	ctx := t.Context()
-	if _, err := e.inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "apps.example", DomainSettings: ca.DomainSettings{CA: ptr("issuing")}, Who: testinstance.Console}); err != nil {
+	if _, err := e.inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "apps.example", CA: new("issuing"), Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	create := func(label string, patterns []string, uses int, ttl time.Duration) (string, *JoinToken, error) {
@@ -249,7 +249,7 @@ func TestPassNeverAdmitsOutsideItsPatternsOrDomain(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, tenant.EnrollVerified)
 	ctx := t.Context()
-	other, err := e.inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "other.example", DomainSettings: ca.DomainSettings{CA: ptr("issuing")}, Who: testinstance.Console})
+	other, err := e.inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "other.example", CA: new("issuing"), Who: testinstance.Console})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,14 +380,12 @@ func TestPassConcurrentUsesNeverExceedTheLimit(t *testing.T) {
 	outs := make([]*EnrollOutput, attempts)
 	errs := make([]error, attempts)
 	for i := range attempts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			outs[i], errs[i] = e.s.Enroll(t.Context(), EnrollInput{
 				Hostname: fmt.Sprintf("minion-%02d.homelab.lan", i), Token: secret, Method: MethodWebroot,
 				OS: "linux", Arch: "amd64", Version: "0.3.5", SourceIP: "192.0.2.10", CSRDER: csrs[i],
 			})
-		}()
+		})
 	}
 	wg.Wait()
 	valid, refused := 0, 0
@@ -599,7 +597,7 @@ func TestPassSecretIsNeverLoggedOrAudited(t *testing.T) {
 	e.enroll(t, "b.homelab.lan", secret, false, mustCSR(t)) // a failed check is logged
 	e.enroll(t, "c.homelab.lan", secret, true, mustCSR(t))  // no uses left
 	// Wrong-pattern and failing-create paths are audited too.
-	_, _, _ = e.s.CreateEnrollmentPass(ctx, testinstance.Console, "bad", []string{"*.nodomain.lan"}, 5, time.Hour)
+	_, _, _ = e.s.CreateEnrollmentPass(ctx, testinstance.Console, "bad", []string{"*.nodomain.lan"}, 5, time.Hour) //nolint:dogsled // only the refusal matters here: it is audited, the pass is not used
 	if err := e.s.RevokeJoinToken(ctx, testinstance.Console, jt.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("revoke a used-up pass: %v", err)
 	}

@@ -36,8 +36,8 @@ func certOf(t *testing.T, r *CAResult) *x509.Certificate {
 func (v *env) root(t *testing.T, name string, mod func(*RootRequest)) *CAResult {
 	t.Helper()
 	req := RootRequest{
-		CASettings: CASettings{Name: name, BaseURL: baseURL + "/"},
-		Subject:    Subject{CommonName: "Homelab " + name, Organization: "Homelab"}, Who: tester,
+		Name: name, BaseURL: baseURL + "/",
+		Subject: Subject{CommonName: "Homelab " + name, Organization: "Homelab"}, Who: tester,
 	}
 	if mod != nil {
 		mod(&req)
@@ -52,7 +52,7 @@ func (v *env) root(t *testing.T, name string, mod func(*RootRequest)) *CAResult 
 func (v *env) intermediate(t *testing.T, name, parent string, mod func(*IntermediateRequest)) *CAResult {
 	t.Helper()
 	req := IntermediateRequest{
-		CASettings: CASettings{Name: name, BaseURL: baseURL}, Parent: parent,
+		Name: name, BaseURL: baseURL, Parent: parent,
 		Subject: Subject{CommonName: "Homelab " + name, Organization: "Homelab"}, Who: tester,
 	}
 	if mod != nil {
@@ -182,7 +182,7 @@ func TestCARequestsAreChecked(t *testing.T) {
 		"maximum certificate validity": func(r *RootRequest) { r.MaxValidityDays = 5000 },
 	}
 	for want, mod := range rootTests {
-		req := RootRequest{CASettings: CASettings{Name: "other", BaseURL: baseURL}, Subject: Subject{CommonName: "Other Root"}, Who: tester}
+		req := RootRequest{Name: "other", BaseURL: baseURL, Subject: Subject{CommonName: "Other Root"}, Who: tester}
 		mod(&req)
 		_, err := v.e.CreateRoot(t.Context(), req)
 		if got := deniedErr(t, err); !strings.Contains(got, want) {
@@ -200,7 +200,7 @@ func TestCARequestsAreChecked(t *testing.T) {
 		"would end after the parent CA": func(r *IntermediateRequest) { r.ValidityDays = DefaultRootDays + 10 },
 	}
 	for want, mod := range interTests {
-		req := IntermediateRequest{CASettings: CASettings{Name: "other", BaseURL: baseURL}, Parent: "root", Subject: Subject{CommonName: "Other CA"}, Who: tester}
+		req := IntermediateRequest{Name: "other", BaseURL: baseURL, Parent: "root", Subject: Subject{CommonName: "Other CA"}, Who: tester}
 		mod(&req)
 		_, err := v.e.CreateIntermediate(t.Context(), req)
 		if got := deniedErr(t, err); !strings.Contains(got, want) {
@@ -243,7 +243,7 @@ func TestPathLengthAndEKUFitTheParent(t *testing.T) {
 		"allows at most 0 below":      func(r *IntermediateRequest) { r.PathLen = 1 },
 		"is not allowed by parent CA": func(r *IntermediateRequest) { r.EKULimit = []string{"clientAuth"} },
 	} {
-		req := IntermediateRequest{CASettings: CASettings{Name: "other", BaseURL: baseURL}, Parent: "policy", Subject: Subject{CommonName: "Other CA"}, Who: tester}
+		req := IntermediateRequest{Name: "other", BaseURL: baseURL, Parent: "policy", Subject: Subject{CommonName: "Other CA"}, Who: tester}
 		mod(&req)
 		_, err := v.e.CreateIntermediate(t.Context(), req)
 		if got := deniedErr(t, err); !strings.Contains(got, want) {
@@ -321,7 +321,7 @@ func (r *offlineRoot) sign(t *testing.T, b *OfflineBundle, nc NameConstraints, m
 
 func (v *env) importRoot(t *testing.T, name string, r *offlineRoot) *CAResult {
 	t.Helper()
-	res, err := v.e.ImportRoot(t.Context(), ImportRootRequest{CASettings: CASettings{Name: name, BaseURL: baseURL}, CertPEM: r.pem(), Who: tester})
+	res, err := v.e.ImportRoot(t.Context(), ImportRootRequest{Name: name, BaseURL: baseURL, CertPEM: r.pem(), Who: tester})
 	if err != nil {
 		t.Fatalf("import root: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestOfflineRootImport(t *testing.T) {
 		if want == "another CA has the subject" {
 			name = "twin"
 		}
-		_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{CASettings: CASettings{Name: name, BaseURL: baseURL}, CertPEM: certPEM, Who: tester})
+		_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{Name: name, BaseURL: baseURL, CertPEM: certPEM, Who: tester})
 		if got := deniedErr(t, err); !strings.Contains(got, want) {
 			t.Errorf("%q, want %q", got, want)
 		}
@@ -369,7 +369,7 @@ func TestOfflineRootImport(t *testing.T) {
 	if r2 := v.importRoot(t, "offline-root", renewed); r2.Generation != 2 || !strings.Contains(strings.Join(r2.Warnings, "|"), "new trust anchor") {
 		t.Errorf("renewed root: %+v", r2)
 	}
-	_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{CASettings: CASettings{Name: "offline-root", BaseURL: baseURL}, CertPEM: other.pem(), Who: tester})
+	_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{Name: "offline-root", BaseURL: baseURL, CertPEM: other.pem(), Who: tester})
 	if got := deniedErr(t, err); !strings.Contains(got, "subject differs") {
 		t.Errorf("other subject: %q", got)
 	}
@@ -516,7 +516,7 @@ func TestOnlineRenewal(t *testing.T) {
 		t.Fatalf("renew intermediate: %+v %v", i2, err)
 	}
 	c1, c2 := certOf(t, i1), certOf(t, i2)
-	if string(c1.RawSubject) != string(c2.RawSubject) || publicKeyEqual(c1.PublicKey, c2.PublicKey) || c2.MaxPathLen != 0 || !c2.MaxPathLenZero {
+	if !bytes.Equal(c1.RawSubject, c2.RawSubject) || publicKeyEqual(c1.PublicKey, c2.PublicKey) || c2.MaxPathLen != 0 || !c2.MaxPathLenZero {
 		t.Error("a renewal keeps the exact subject and the profile, with a new key")
 	}
 	cur := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"b.homelab.lan"}})
@@ -592,7 +592,7 @@ func TestSealedCreationFails(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
 	v.e.Keys = keys.New(nil, nil, v.clk)
-	_, err := v.e.CreateRoot(t.Context(), RootRequest{CASettings: CASettings{Name: "root", BaseURL: baseURL}, Subject: Subject{CommonName: "Root"}, Who: tester})
+	_, err := v.e.CreateRoot(t.Context(), RootRequest{Name: "root", BaseURL: baseURL, Subject: Subject{CommonName: "Root"}, Who: tester})
 	if !errors.Is(err, keys.ErrSealed) {
 		t.Fatalf("sealed: %v", err)
 	}
@@ -622,7 +622,7 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	pki := func(args ...string) string {
+	pki := func(args ...string) {
 		t.Helper()
 		// #nosec G204 -- test: runs the repository's own legacy script
 		cmd := exec.CommandContext(t.Context(), bash, append([]string{posixPath(script), "--dir", posixPath(filepath.Join(dir, "pki")), "-y", "--no-color"}, args...)...)
@@ -634,7 +634,6 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 		if cerr != nil {
 			t.Fatalf("pki %s: %v\n%s", strings.Join(args, " "), cerr, out)
 		}
-		return string(out)
 	}
 	pki("init", "--org", "Legacy Test", "--cn", "Legacy Offline Root", "--key", "rsa3072", "--no-pass")
 	rootPEM, err := os.ReadFile(filepath.Join(dir, "pki", "root", "certs", "ca.crt"))
@@ -645,7 +644,7 @@ func TestLegacyPkiShAsOfflineRoot(t *testing.T) {
 
 	v := newEnv(t)
 	v.clk.Set(rootCert.NotBefore.Add(time.Minute))
-	if _, ierr := v.e.ImportRoot(t.Context(), ImportRootRequest{CASettings: CASettings{Name: "root", BaseURL: baseURL}, CertPEM: rootPEM, Who: tester}); ierr != nil {
+	if _, ierr := v.e.ImportRoot(t.Context(), ImportRootRequest{Name: "root", BaseURL: baseURL, CertPEM: rootPEM, Who: tester}); ierr != nil {
 		t.Fatal(ierr)
 	}
 	ir := v.intermediate(t, "issuing", "root", func(r *IntermediateRequest) {
@@ -897,7 +896,7 @@ func TestUnreadableGenerationIsAnError(t *testing.T) {
 		}
 	}
 	_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{
-		CASettings: CASettings{Name: "offline-root", BaseURL: baseURL}, CertPEM: newOfflineRoot(t, "Offline Root", t0.Add(-day)).pem(), Who: tester,
+		Name: "offline-root", BaseURL: baseURL, CertPEM: newOfflineRoot(t, "Offline Root", t0.Add(-day)).pem(), Who: tester,
 	})
 	if err == nil || errors.Is(err, ErrDenied) || !strings.Contains(err.Error(), "can't be read") {
 		t.Errorf("renewal over an unreadable generation: %v", err)

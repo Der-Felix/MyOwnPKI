@@ -146,7 +146,7 @@ func (h *dnsHarness) round(ctx context.Context, g *dnsGuard, authzs []acme.Autho
 			failed[i] = true
 		}
 	}
-	defer func() {
+	defer func() { //nolint:contextcheck // as in obtainWithClient: cleanup runs on the guard's own budget
 		for _, a := range authzs {
 			_ = ch.CleanUp(a) // lego only logs this error; the guard records it
 		}
@@ -165,12 +165,7 @@ func (h *dnsHarness) round(ctx context.Context, g *dnsGuard, authzs []acme.Autho
 
 // visible reports whether the value is in the zone right now.
 func (h *dnsHarness) visible(name, value string) bool {
-	for _, v := range h.store.TXT(name) {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.store.TXT(name), value)
 }
 
 func (h *dnsHarness) wantNoChallengeRecords() {
@@ -728,4 +723,12 @@ func TestRFC2136ConfiguredZoneRefusesACNAMETargetOutsideIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.wantNoChallengeRecords()
+}
+
+// setLegoDNS sets lego's package variables without a challenge, for tests
+// that call lego functions directly.
+func setLegoDNS(resolvers []string) {
+	for _, o := range []dns01.ChallengeOption{dns01.AddRecursiveNameservers(resolvers), dns01.AddDNSTimeout(dnsQueryTimeout)} {
+		_ = o(nil)
+	}
 }

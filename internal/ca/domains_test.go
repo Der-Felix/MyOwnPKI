@@ -9,8 +9,6 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 // domainEnv: a root, an intermediate "issuing" limited to homelab.lan and
 // 10.0.0.0/8, and "open" without constraints.
 func domainEnv(t *testing.T) *env {
@@ -28,7 +26,7 @@ func TestDomainCreateAndDefaults(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,11 +38,11 @@ func TestDomainCreateAndDefaults(t *testing.T) {
 	if err != nil || got.Name != "homelab.lan" || got.CA != "issuing" {
 		t.Fatalf("get: %+v %v", got, err)
 	}
-	if _, derr := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester}); !deniedWith(derr, "exists already") {
+	if _, derr := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester}); !deniedWith(derr, "exists already") {
 		t.Errorf("duplicate: %v", derr)
 	}
 	// Change: wildcards with dns-01, IP range inside the constraints.
-	d2, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: ptr(30)}, tester)
+	d2, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true), IPRanges: []string{"10.1.0.0/16"}, ValidityDays: new(30)}, tester)
 	if err != nil || !d2.Wildcards || len(d2.IPRanges) != 1 || d2.EffectiveValidityDays() != 30 {
 		t.Fatalf("update: %+v %v", d2, err)
 	}
@@ -77,27 +75,27 @@ func TestDomainRefusals(t *testing.T) {
 		req  DomainRequest
 		want string
 	}{
-		"one label":            {DomainRequest{Name: "lan", DomainSettings: DomainSettings{CA: ptr("open")}}, "one label"},
-		"upper case":           {DomainRequest{Name: "Homelab.LAN", DomainSettings: DomainSettings{CA: ptr("issuing")}}, "must be written as"},
-		"wildcard name":        {DomainRequest{Name: "*.homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}}, "wildcard"},
-		"root CA":              {DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("root")}}, "root CA only signs"},
+		"one label":            {DomainRequest{Name: "lan", CA: new("open")}, "one label"},
+		"upper case":           {DomainRequest{Name: "Homelab.LAN", CA: new("issuing")}, "must be written as"},
+		"wildcard name":        {DomainRequest{Name: "*.homelab.lan", CA: new("issuing")}, "wildcard"},
+		"root CA":              {DomainRequest{Name: "homelab.lan", CA: new("root")}, "root CA only signs"},
 		"no CA":                {DomainRequest{Name: "homelab.lan"}, "needs the CA"},
-		"outside constraints":  {DomainRequest{Name: "example.org", DomainSettings: DomainSettings{CA: ptr("issuing")}}, "example.org"},
-		"IP outside":           {DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing"), IPRanges: []string{"192.168.0.0/24"}}}, "192.168"},
-		"IP host bits":         {DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing"), IPRanges: []string{"10.0.0.1/8"}}}, "host bits"},
-		"wildcard needs dns":   {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Wildcards: ptr(true), ChallengeTypes: []string{ChallengeHTTP01}}}, "dns-01"},
-		"wildcard needs subs":  {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Wildcards: ptr(true), IncludeSubdomains: ptr(false)}}, "include_subdomains"},
-		"IP needs http":        {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), IPRanges: []string{"10.0.0.0/8"}, ChallengeTypes: []string{ChallengeDNS01}}}, "http-01"},
-		"no challenge":         {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), ChallengeTypes: []string{}}}, "at least one challenge"},
-		"unknown challenge":    {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), ChallengeTypes: []string{"tls-alpn-01"}}}, "unknown"},
-		"approval":             {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Approval: ptr("never")}}, "approval"},
-		"preset without DNS":   {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Preset: ptr("smime")}}, "no DNS names"},
-		"no serverAuth":        {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Preset: ptr("client")}}, "serverAuth"},
-		"validity over max":    {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), ValidityDays: ptr(5000)}}, "exceeds the maximum"},
-		"unknown preset":       {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), Preset: ptr("nope")}}, "no preset"},
-		"address policy":       {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("open"), AddressPolicy: ptr("any")}}, "address policy"},
-		"unknown CA":           {DomainRequest{Name: "a.lan2", DomainSettings: DomainSettings{CA: ptr("nope")}}, "no CA named"},
-		"excluded by the root": {DomainRequest{Name: "secret.homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}}, ""},
+		"outside constraints":  {DomainRequest{Name: "example.org", CA: new("issuing")}, "example.org"},
+		"IP outside":           {DomainRequest{Name: "homelab.lan", CA: new("issuing"), IPRanges: []string{"192.168.0.0/24"}}, "192.168"},
+		"IP host bits":         {DomainRequest{Name: "homelab.lan", CA: new("issuing"), IPRanges: []string{"10.0.0.1/8"}}, "host bits"},
+		"wildcard needs dns":   {DomainRequest{Name: "a.lan2", CA: new("open"), Wildcards: new(true), ChallengeTypes: []string{ChallengeHTTP01}}, "dns-01"},
+		"wildcard needs subs":  {DomainRequest{Name: "a.lan2", CA: new("open"), Wildcards: new(true), IncludeSubdomains: new(false)}, "include_subdomains"},
+		"IP needs http":        {DomainRequest{Name: "a.lan2", CA: new("open"), IPRanges: []string{"10.0.0.0/8"}, ChallengeTypes: []string{ChallengeDNS01}}, "http-01"},
+		"no challenge":         {DomainRequest{Name: "a.lan2", CA: new("open"), ChallengeTypes: []string{}}, "at least one challenge"},
+		"unknown challenge":    {DomainRequest{Name: "a.lan2", CA: new("open"), ChallengeTypes: []string{"tls-alpn-01"}}, "unknown"},
+		"approval":             {DomainRequest{Name: "a.lan2", CA: new("open"), Approval: new("never")}, "approval"},
+		"preset without DNS":   {DomainRequest{Name: "a.lan2", CA: new("open"), Preset: new("smime")}, "no DNS names"},
+		"no serverAuth":        {DomainRequest{Name: "a.lan2", CA: new("open"), Preset: new("client")}, "serverAuth"},
+		"validity over max":    {DomainRequest{Name: "a.lan2", CA: new("open"), ValidityDays: new(5000)}, "exceeds the maximum"},
+		"unknown preset":       {DomainRequest{Name: "a.lan2", CA: new("open"), Preset: new("nope")}, "no preset"},
+		"address policy":       {DomainRequest{Name: "a.lan2", CA: new("open"), AddressPolicy: new("any")}, "address policy"},
+		"unknown CA":           {DomainRequest{Name: "a.lan2", CA: new("nope")}, "no CA named"},
+		"excluded by the root": {DomainRequest{Name: "secret.homelab.lan", CA: new("issuing")}, ""},
 	} {
 		tc.req.Who = tester
 		_, err := v.e.CreateDomain(t.Context(), tc.req)
@@ -118,15 +116,15 @@ func TestDomainRejectsCAWithoutServerAuth(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	v.intermediate(t, "agent-ca", "root", func(r *IntermediateRequest) { r.EKULimit = []string{"clientAuth"} })
-	request := DomainRequest{Name: "agent-only.lan", DomainSettings: DomainSettings{CA: ptr("agent-ca"), Preset: ptr("server")}, Who: tester}
+	request := DomainRequest{Name: "agent-only.lan", CA: new("agent-ca"), Preset: new("server"), Who: tester}
 	if _, err := v.e.CreateDomain(t.Context(), request); !deniedWith(err, `CA "agent-ca" does not allow serverAuth required by preset "server"`) {
 		t.Fatalf("create with a clientAuth-only CA: %v", err)
 	}
-	d, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(t.Context(), DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.e.UpdateDomain(t.Context(), d.ID, DomainSettings{CA: ptr("agent-ca"), Preset: ptr("server")}, tester); !deniedWith(err, `CA "agent-ca" does not allow serverAuth required by preset "server"`) {
+	if _, err := v.e.UpdateDomain(t.Context(), d.ID, DomainSettings{CA: new("agent-ca"), Preset: new("server")}, tester); !deniedWith(err, `CA "agent-ca" does not allow serverAuth required by preset "server"`) {
 		t.Fatalf("update to a clientAuth-only CA: %v", err)
 	}
 }
@@ -138,14 +136,14 @@ func TestDomainLookup(t *testing.T) {
 	mk := func(name string, s DomainSettings) {
 		t.Helper()
 		if s.CA == nil {
-			s.CA = ptr("issuing")
+			s.CA = new("issuing")
 		}
 		if _, err := v.e.CreateDomain(ctx, DomainRequest{Name: name, DomainSettings: s, Who: tester}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mk("homelab.lan", DomainSettings{Wildcards: ptr(true), IPRanges: []string{"10.1.0.0/16"}})
-	mk("lab.homelab.lan", DomainSettings{IncludeSubdomains: ptr(false), Approval: ptr(ApprovalOpen)})
+	mk("homelab.lan", DomainSettings{Wildcards: new(true), IPRanges: []string{"10.1.0.0/16"}})
+	mk("lab.homelab.lan", DomainSettings{IncludeSubdomains: new(false), Approval: new(ApprovalOpen)})
 	for _, tc := range []struct{ typ, value, want string }{
 		{"dns", "homelab.lan", "homelab.lan"},
 		{"dns", "nas.homelab.lan", "homelab.lan"},
@@ -180,7 +178,7 @@ func TestDomainPermissions(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", DomainSettings: DomainSettings{CA: ptr("issuing")}, Who: tester})
+	d, err := v.e.CreateDomain(ctx, DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: tester})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,10 +195,10 @@ func TestDomainPermissions(t *testing.T) {
 	if _, err := v.e.GetDomain(ctx, other, d.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("other CA's admin gets: %v", err)
 	}
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: ptr(ApprovalOpen)}, viewer); !errors.Is(err, authz.ErrDenied) {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: new(ApprovalOpen)}, viewer); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("viewer changes: %v", err)
 	}
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: ptr(ApprovalOpen)}, stale); !errors.Is(err, authz.ErrStepUpRequired) {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: new(ApprovalOpen)}, stale); !errors.Is(err, authz.ErrStepUpRequired) {
 		t.Errorf("admin without step-up: %v", err)
 	}
 	if err := v.e.DeleteDomain(ctx, d.ID, other); !errors.Is(err, ErrNotFound) {

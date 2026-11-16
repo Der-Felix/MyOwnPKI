@@ -366,7 +366,7 @@ func TestDomainFormOffersOnlyServerAuthCAs(t *testing.T) {
 	v := newUIEnv(t)
 	v.Unseal(t)
 	if _, err := v.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
@@ -395,7 +395,7 @@ func TestDomainFormOffersOnlyServerAuthCAs(t *testing.T) {
 		t.Errorf("web refusal does not explain serverAuth: %d", r.Code)
 	}
 	issuing := "issuing"
-	domain, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: testinstance.Console})
+	domain, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Who: testinstance.Console})
 	if err != nil {
 		t.Fatal(err)
 	}

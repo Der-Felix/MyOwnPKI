@@ -24,9 +24,13 @@ func acmeTestAccount(t *testing.T, ctx context.Context, v *env, id string) {
 
 func acmeTestOrder(t *testing.T, ctx context.Context, v *env, account string, cert *Issued, names ...string) {
 	t.Helper()
-	identifiers, _ := json.Marshal([]map[string]string{{"type": "dns", "value": names[0]}})
+	list := []map[string]string{{"type": "dns", "value": names[0]}}
 	if len(names) > 1 {
-		identifiers, _ = json.Marshal([]map[string]string{{"type": "dns", "value": names[0]}, {"type": "dns", "value": names[1]}})
+		list = append(list, map[string]string{"type": "dns", "value": names[1]})
+	}
+	identifiers, jerr := json.Marshal(list)
+	if jerr != nil {
+		t.Fatal(jerr)
 	}
 	stamp := v.clk.Now().Format(audit.TimeFormat)
 	q := pkidb.New(v.pki)

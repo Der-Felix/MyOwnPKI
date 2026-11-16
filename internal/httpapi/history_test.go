@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -46,9 +47,7 @@ func (h *historyEnv) call(t *testing.T, c *client, op, method, path string, body
 func (h *historyEnv) newDomain(t *testing.T, name string, extra map[string]any) string {
 	t.Helper()
 	body := map[string]any{"name": name, "ca_id": h.caIDs["issuing"], "approval": "open", "ip_ranges": []string{}}
-	for k, v := range extra {
-		body[k] = v
-	}
+	maps.Copy(body, extra)
 	r := h.call(t, h.admin, "createDomain", http.MethodPost, "/domains", body)
 	if r.Code != http.StatusCreated {
 		t.Fatalf("create domain %s: %d %s", name, r.Code, r.Body.String())
@@ -261,7 +260,11 @@ func TestHistoryAndRestoreOfADomain(t *testing.T) {
 		entries[0]["restored_from"] != float64(2) || entries[0]["snapshot_sha256"] != rows[3].SHA256 {
 		t.Fatalf("audit: %v", entries)
 	}
-	if text, _ := json.Marshal(entries); strings.Contains(string(text), "undo") {
+	text, jerr := json.Marshal(entries)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	if strings.Contains(string(text), "undo") {
 		t.Errorf("the reason is in the audit log: %s", text)
 	}
 

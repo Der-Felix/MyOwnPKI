@@ -65,7 +65,7 @@ func ParseJWK(raw []byte) (*Key, error) {
 	case "OKP":
 		err = k.parseOKP(m)
 	default:
-		return nil, fmt.Errorf("%w: key type %q (allowed: EC P-256/P-384, RSA, OKP Ed25519)", ErrBadKey, kty)
+		return nil, fmt.Errorf("%w: key type %q (allowed: EC P-256/P-384, RSA, OKP Ed25519)", ErrBadKey, short(kty))
 	}
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func ParseJWK(raw []byte) (*Key, error) {
 			return nil, serr
 		}
 		if alg != k.alg {
-			return nil, fmt.Errorf("%w: the JWK says alg %q, its key signs with %s", ErrBadAlgorithm, alg, k.alg)
+			return nil, fmt.Errorf("%w: the JWK says alg %q, its key signs with %s", ErrBadAlgorithm, short(alg), k.alg)
 		}
 	}
 	return k, nil
@@ -94,7 +94,7 @@ func (k *Key) parseEC(m map[string]json.RawMessage) error {
 	case "P-384":
 		curve, k.alg = elliptic.P384(), ES384
 	default:
-		return fmt.Errorf("%w: curve %q (allowed: P-256, P-384)", ErrBadKey, crv)
+		return fmt.Errorf("%w: curve %q (allowed: P-256, P-384)", ErrBadKey, short(crv))
 	}
 	size := (curve.Params().BitSize + 7) / 8
 	coord := func(name string) ([]byte, error) {
@@ -171,7 +171,7 @@ func (k *Key) parseOKP(m map[string]json.RawMessage) error {
 		return err
 	}
 	if crv != "Ed25519" {
-		return fmt.Errorf("%w: OKP curve %q (allowed: Ed25519)", ErrBadKey, crv)
+		return fmt.Errorf("%w: OKP curve %q (allowed: Ed25519)", ErrBadKey, short(crv))
 	}
 	s, err := str("jwk x", m["x"])
 	if err != nil {

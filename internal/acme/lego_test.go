@@ -50,7 +50,7 @@ func newLegoRig(t *testing.T, approval string) *legoRig {
 	g := &legoRig{bin: bin, inst: testinstance.New(t, testinstance.Options{})}
 	g.inst.Unseal(t)
 	issuing := "issuing"
-	if _, err := g.inst.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing, Approval: &approval}, Who: testinstance.Console}); err != nil {
+	if _, err := g.inst.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Approval: &approval, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	handler := http.NotFoundHandler()
@@ -149,7 +149,7 @@ func TestLegoWalkingSkeleton(t *testing.T) {
 	opensslBin := testutil.OpenSSL(t)
 	inst, dir := g.inst, g.dir
 	legoDir := filepath.Join(dir, "lego")
-	run := func(args ...string) string { t.Helper(); return g.run(t, args...) }
+	run := func(args ...string) { t.Helper(); g.run(t, args...) }
 	proxy, ariCalls := g.proxy, &g.ariCalls
 	obtain := g.obtain(legoDir)
 	run(obtain...)

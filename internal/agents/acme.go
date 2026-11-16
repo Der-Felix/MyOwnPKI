@@ -3,11 +3,11 @@ package agents
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/b64url"
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
 )
 
@@ -15,7 +15,7 @@ import (
 // The ACME request itself later proves possession of that key and binds
 // the account. A reservation never transfers another agent's account.
 func (s *Service) RegisterACMEAccount(ctx context.Context, c *Caller, thumbprint string) error {
-	b, decodeErr := base64.RawURLEncoding.Strict().DecodeString(thumbprint)
+	b, decodeErr := b64url.Decode(thumbprint)
 	if decodeErr != nil || len(b) != 32 {
 		return fmt.Errorf("%w: key_thumbprint: a base64url SHA-256 JWK thumbprint", ErrInvalid)
 	}

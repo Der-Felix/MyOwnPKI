@@ -26,8 +26,8 @@ func (in *instance) sampleACME(ctx context.Context, e *ca.Engine, clk clock.Cloc
 		return nil, err
 	}
 	issuing, wild := "issuing", false
-	if _, derr := e.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.example", DomainSettings: ca.DomainSettings{CA: &issuing, Wildcards: &wild,
-		IPRanges: []string{"192.0.2.0/24"}}, Who: console}); derr != nil {
+	if _, derr := e.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.example", CA: &issuing, Wildcards: &wild,
+		IPRanges: []string{"192.0.2.0/24"}, Who: console}); derr != nil {
 		return nil, derr
 	}
 	if _, kerr := s.CreateEABKey(ctx, "backup.homelab.example", acme.DefaultEABDays, console); kerr != nil {

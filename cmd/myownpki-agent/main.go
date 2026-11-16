@@ -118,7 +118,8 @@ func subFlags(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	if def == "" {
 		def = agent.DefaultConfigPath
 	}
-	return fs, fs.String("config", def, "agent.yaml (default $"+EnvConfig+", then "+agent.DefaultConfigPath+")")
+	config := fs.String("config", def, "agent.yaml (default $"+EnvConfig+", then "+agent.DefaultConfigPath+")")
+	return fs, config
 }
 
 func cmdSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int {

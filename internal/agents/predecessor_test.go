@@ -54,7 +54,10 @@ func predecessorLink(t *testing.T, e *env, account string, issued *ca.Issued, na
 	for _, name := range names {
 		identifiers = append(identifiers, map[string]string{"type": "dns", "value": name})
 	}
-	raw, _ := json.Marshal(identifiers)
+	raw, err := json.Marshal(identifiers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stamp := dbTime(e.inst.Clock.Now())
 	q := pkidb.New(e.s.PKI)
 	orderID := "ord-" + issued.ID

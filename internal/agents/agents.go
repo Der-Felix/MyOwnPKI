@@ -254,7 +254,7 @@ type limiter struct {
 	seen map[string][]time.Time
 }
 
-func (l *limiter) allow(key string, max int, window time.Duration, now time.Time) bool {
+func (l *limiter) allow(key string, limit int, window time.Duration, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.seen) > 10000 { // never grows without bound
@@ -270,7 +270,7 @@ func (l *limiter) allow(key string, max int, window time.Duration, now time.Time
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) >= max {
+	if len(kept) >= limit {
 		l.seen[key] = kept
 		return false
 	}

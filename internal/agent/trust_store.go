@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -130,10 +131,8 @@ func familyOf(id, like string) (*trustFamily, error) {
 	names := strings.Fields(strings.ToLower(id + " " + like))
 	has := func(want ...string) bool {
 		for _, n := range names {
-			for _, w := range want {
-				if n == w {
-					return true
-				}
+			if slices.Contains(want, n) {
+				return true
 			}
 		}
 		return false
@@ -150,7 +149,7 @@ func familyOf(id, like string) (*trustFamily, error) {
 
 // parseOSRelease returns ID and ID_LIKE of an os-release file.
 func parseOSRelease(data []byte) (id, like string) {
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {
 			continue

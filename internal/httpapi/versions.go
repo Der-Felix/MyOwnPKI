@@ -23,7 +23,7 @@ import (
 // gzip, turns a strong ETag weak, and the client sends it back as it got it).
 // A weak tag counts as the strong one. A list, "*" and anything else are
 // refused as a bad request instead of being guessed at.
-var etagPattern = regexp.MustCompile(`^(?:W/)?"([0-9]{1,15})"$`)
+var etagPattern = regexp.MustCompile(`^(?:W/)?"(\d{1,15})"$`)
 
 // ifMatch returns the version the caller expects, nil when the header is
 // absent (the released behavior: the last writer wins).
@@ -68,12 +68,10 @@ func (c *call) preconditionFailed(err error) bool {
 		return false
 	}
 	doc := preconditionDoc{
-		problemDoc: problemDoc{
-			Type: problemPrefix + "precondition-failed", Title: http.StatusText(http.StatusPreconditionFailed),
-			Status: http.StatusPreconditionFailed, RequestID: c.reqID,
-			Detail: "the object was changed after you read it (If-Match " + strconv.FormatInt(ce.Expected, 10) +
-				", current version " + strconv.FormatInt(ce.Latest.Number, 10) + "); read it again and retry",
-		},
+		Type: problemPrefix + "precondition-failed", Title: http.StatusText(http.StatusPreconditionFailed),
+		Status: http.StatusPreconditionFailed, RequestID: c.reqID,
+		Detail: "the object was changed after you read it (If-Match " + strconv.FormatInt(ce.Expected, 10) +
+			", current version " + strconv.FormatInt(ce.Latest.Number, 10) + "); read it again and retry",
 		CurrentVersion: ce.Latest.Number,
 	}
 	if ce.Latest.Number > 0 {
@@ -88,7 +86,7 @@ func (c *call) preconditionFailed(err error) bool {
 	c.status = http.StatusPreconditionFailed
 	c.w.Header().Set("Content-Type", "application/problem+json")
 	c.w.WriteHeader(http.StatusPreconditionFailed)
-	_ = json.NewEncoder(c.w).Encode(doc)
+	_ = json.NewEncoder(c.w).Encode(doc) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 	return true
 }
 

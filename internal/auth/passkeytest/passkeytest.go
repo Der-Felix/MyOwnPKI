@@ -100,7 +100,13 @@ func (a *Authenticator) Create(options []byte) ([]byte, error) {
 
 // Get answers PublicKeyCredentialRequestOptions with the first allowed
 // credential it holds.
-func (a *Authenticator) Get(options []byte) ([]byte, error) {
+func (a *Authenticator) Get(options []byte) ([]byte, error) { return a.get(options, false) }
+
+// GetAny answers with any credential it holds, ignoring allowCredentials: a
+// hostile client that presents a passkey the server did not offer.
+func (a *Authenticator) GetAny(options []byte) ([]byte, error) { return a.get(options, true) }
+
+func (a *Authenticator) get(options []byte, ignoreAllow bool) ([]byte, error) {
 	var o struct {
 		PublicKey struct {
 			Challenge string `json:"challenge"`
@@ -118,6 +124,12 @@ func (a *Authenticator) Get(options []byte) ([]byte, error) {
 	for _, al := range o.PublicKey.Allow {
 		if k, ok := a.creds[al.ID]; ok {
 			id, c = al.ID, k
+			break
+		}
+	}
+	if c == nil && ignoreAllow {
+		for k, v := range a.creds {
+			id, c = k, v
 			break
 		}
 	}
@@ -159,7 +171,7 @@ func (a *Authenticator) flags() byte {
 }
 
 func (a *Authenticator) clientData(typ, challenge string) []byte {
-	b, _ := json.Marshal(map[string]any{"type": typ, "challenge": challenge, "origin": a.Origin, "crossOrigin": false})
+	b, _ := json.Marshal(map[string]any{"type": typ, "challenge": challenge, "origin": a.Origin, "crossOrigin": false}) //nolint:errchkjson // strings and a bool always encode
 	return b
 }
 

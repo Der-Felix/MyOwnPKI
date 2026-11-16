@@ -157,7 +157,7 @@ func (p *Preset) validateSANs(fail failFunc) {
 			fail("subject_alt_names.required_any_of", "%q is required but not in offered", t)
 		}
 	}
-	switch p.CommonNameFrom {
+	switch p.CommonNameFrom { //nolint:exhaustive // the default rejects every type but DNS and e-mail on purpose
 	case "":
 	case SANDNS, SANEmail:
 		if !slices.Contains(r.Offered, p.CommonNameFrom) {

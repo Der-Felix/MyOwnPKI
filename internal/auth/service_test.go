@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -708,4 +709,16 @@ func TestLockedNameCostsAHashToo(t *testing.T) {
 			t.Errorf("%s with every hash slot taken: %v, want ErrBusy (no answer before a hash)", name, err)
 		}
 	}
+}
+
+// LoginRecoveryCode completes a sign-in with a recovery code (lost phone).
+// Each code works once.
+func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
+	return s.loginRecoveryCode(ctx, pendingToken, code, Client{IP: ip})
+}
+
+// StepUp confirms a sensitive action with a fresh TOTP code (security.md):
+// the session snapshots the proof time and the tenant's current lifetime.
+func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session, error) {
+	return s.StepUpFrom(ctx, token, code, Client{IP: ip})
 }

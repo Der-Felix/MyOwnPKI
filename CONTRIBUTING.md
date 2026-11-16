@@ -57,6 +57,41 @@ task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, lo
   binaries and state as root. Without GitHub Actions or this explicit opt-in they are skipped;
   the scripts also refuse to overwrite a pre-existing installation.
 
+## Coverage, fuzzing and dead code
+
+Three tasks measure the quality of the tests and the code. None of them is part of `task check`; CI
+runs the fuzz targets and you run the other two when you touch the code they measure.
+
+- **`task cover`** runs every test with `-coverpkg`, so an integration test is credited to the
+  package it exercises, and prints one line per package (statements, covered, percent), the total
+  and the number of tests that skipped on this machine (a Windows number is not a Linux number).
+  It needs several minutes. `COVER_PKGS=./internal/ca/...` limits it to a few packages and
+  `COVER_SKIP=<regexp>` leaves packages out. Afterwards `task cover:func` lists the functions with
+  the most uncovered statements and `task cover:html` opens the merged profile in the browser.
+  There is no minimum and no CI gate: the ranked list of gaps is the use of it, not the percent.
+- **`task fuzz`** runs the Go fuzz targets listed in `scripts/ci/fuzz-targets.txt`, one after the
+  other, 10 seconds each by default. A fuzz target (`func FuzzXxx(f *testing.F)`) feeds random
+  input to a parser that reads data from outside the trust boundary (a CSR, an ACME request, an
+  uploaded CRL, a REST body) and checks what the parser promises: no panic, bounded work, and what
+  it accepted holds what the parser says it holds. A **seed** is one input the target starts from:
+  seeds are added in code with `f.Add`, or, when the fuzzer found a crash, as the file it wrote
+  under `testdata/fuzz/<Target>/`. Both run as ordinary tests in `go test ./...`, so a crash that
+  was fixed stays a regression test. To fuzz one target for longer, for example for an hour before
+  a release:
+
+  ```sh
+  task fuzz FUZZTIME=1h FUZZ_ONLY=FuzzParseCSR
+  ```
+
+  A new `func Fuzz...` needs one line in `scripts/ci/fuzz-targets.txt` (`bash scripts/ci/fuzz.sh
+  --check` and the CI job `fuzz` fail otherwise). If a run finds a crash, keep the file the fuzzer
+  wrote, fix the parser and commit both, plus a plain unit test of the rule that was broken. A
+  target calls the production function unchanged and never loosens a limit to pass.
+- **`task deadcode`** lists the functions that no binary and no test reaches (`go run` of
+  `golang.org/x/tools/cmd/deadcode`, `go.mod` stays as it is) and fails on any that is not in
+  `scripts/ci/deadcode-known.txt`. Delete the function, or move it into a `_test.go` file when only
+  tests use it; add it to the list only with a reason, for example a build-tagged test that uses it.
+
 ## Documentation-only pull requests
 
 A pull request that changes **only** documentation skips the heavy CI jobs (tests, race

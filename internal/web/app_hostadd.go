@@ -92,20 +92,19 @@ func (a *app) nameCheck(ctx context.Context, name string) (string, error) {
 
 // checkPlan runs the domain rules over every name of the plan and the ACME
 // directory of this server. It returns one sentence per name.
-func (a *app) checkPlan(c *rc, p hostPlan) ([]string, string, error) {
-	acme, err := acmeDirectoryFor(a.d.ACMEDirectory)
-	if err != nil {
-		return nil, "", err
+func (a *app) checkPlan(c *rc, p hostPlan) ([]string, error) {
+	if _, err := acmeDirectoryFor(a.d.ACMEDirectory); err != nil {
+		return nil, err
 	}
 	var words []string
 	for _, name := range p.Names {
 		w, nameErr := a.nameCheck(c.r.Context(), name)
 		if nameErr != nil {
-			return nil, "", nameErr
+			return nil, nameErr
 		}
 		words = append(words, w)
 	}
-	return words, acme, nil
+	return words, nil
 }
 
 // ---------------------------------------------------------------- step 1
@@ -178,7 +177,7 @@ func (a *app) hostAddNext(c *rc) {
 		c.refused(err, hostAddPath)
 		return
 	}
-	words, _, err := a.checkPlan(c, plan)
+	words, err := a.checkPlan(c, plan)
 	if err != nil {
 		c.refused(err, hostAddPath)
 		return
@@ -299,7 +298,7 @@ func (a *app) hostAddShow(c *rc) {
 		c.refused(err, hostAddPath)
 		return
 	}
-	if _, _, err = a.checkPlan(c, plan); err != nil {
+	if _, err = a.checkPlan(c, plan); err != nil {
 		c.refused(err, hostAddPath)
 		return
 	}

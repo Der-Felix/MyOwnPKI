@@ -14,7 +14,8 @@
 #   makes it a code change; so does an empty or unreadable diff.
 # - Pushes to main, the daily schedule and workflow_dispatch are never reduced:
 #   main always runs everything, and workflow_dispatch forces a full run of
-#   any branch. `vuln` has no dependency and runs in every case.
+#   any branch. `vuln` has no dependency and runs in every case; so does
+#   `fuzz-long`, which runs only on the daily schedule and on request.
 # - The other jobs depend on `changes` through a job-level `if:` (not
 #   `paths-ignore`): a skipped job reports as skipped, which counts as
 #   success for branch protection, so a required check never stays pending.
@@ -28,9 +29,15 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Daily vulnerability scan: new advisories appear without any code change.
+    # Daily vulnerability scan (new advisories appear without any code change)
+    # and the long fuzz run (job fuzz-long).
     - cron: "17 4 * * *"
   workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Fuzz time per target for the job fuzz-long (a Go duration such as 2m or 30m, or a count such as 5000x)"
+        type: string
+        default: "2m"
 
 permissions:
   contents: read
@@ -106,12 +113,52 @@ jobs:
       - run: bash scripts/ci/check-generate.sh
       - name: Agent protocol stays compatible with main
         run: bash scripts/ci/check-agent-protocol.sh
-      - name: Fuzz the ACME JWS parser (short run)
-        run: task fuzz
       # The previous release (Taskfile UPGRADE_FROM) makes an instance and a
       # backup; this build restores, migrates and issues by ACME.
       - name: Upgrade test from the previous release
         run: task upgrade:test
+
+  # Every fuzz target of scripts/ci/fuzz-targets.txt for a few seconds, in
+  # parallel to `check`. The script first compares the list with the `func
+  # Fuzz…` declarations of the tree, and on a crash it prints the failing
+  # input into the log (no artifact, no cache: docs/PHASE3.md section 18.5).
+  fuzz:
+    name: fuzz (every target, 10 seconds each)
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FUZZTIME: 10s
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Self-test of the target list check
+        run: bash scripts/ci/fuzz.sh --self-test
+      - name: Fuzz every target
+        run: task fuzz
+
+  # The same targets for minutes each: the daily run and "Run workflow" with
+  # an input. No `needs: changes` (that job is skipped on a schedule). The
+  # fuzzer's cache is not kept between runs; it starts from the seeds in the
+  # code and the regression inputs under testdata/fuzz.
+  fuzz-long:
+    name: fuzz, long run (nightly or on request)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      # The input exists only for workflow_dispatch; the schedule uses the default.
+      FUZZTIME: ${{ inputs.fuzztime || '2m' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Fuzz every target
+        run: task fuzz
 
   race:
     name: tests with race detector
@@ -219,6 +266,8 @@ jobs:
           vacuum: "true"
       - run: bash scripts/ci/lint-meta-actionlint.sh
       - run: bash scripts/ci/lint-meta-registry.sh --self-test
+      - name: Coverage summary matches its golden files
+        run: bash scripts/ci/cover-summary.sh --self-test
       - run: task lint:api
 
   shellcheck:

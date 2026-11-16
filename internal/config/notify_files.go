@@ -45,8 +45,7 @@ func fileProblem(path string, secret bool) string {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "the file does not exist"
 		}
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*fs.PathError](err); ok {
 			err = pe.Err
 		}
 		return "the file can't be read (" + err.Error() + ") – the service user must be able to read it"

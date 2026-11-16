@@ -342,7 +342,7 @@ func (c *apiClient) do(t *testing.T, method, path string, body any) (int, []byte
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if c.csrf != "" {
-		req.Header.Set("X-CSRF-Token", c.csrf)
+		req.Header.Set("X-CSRF-Token", c.csrf) //nolint:canonicalheader // the documented spelling; net/http sends the canonical form either way
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -386,7 +386,7 @@ func (c *apiClient) raw(t *testing.T, path string) []byte {
 
 func httpGet(t *testing.T, u string) []byte {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, u, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

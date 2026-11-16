@@ -171,9 +171,8 @@ func (m *issuedTLS) renew(ctx context.Context) {
 	}
 	issued, err := m.issue(ctx, now)
 	if err != nil {
-		var denied *ca.DeniedError
 		wait := issuedRetryError
-		if errors.As(err, &denied) {
+		if _, ok := errors.AsType[*ca.DeniedError](err); ok {
 			wait = issuedRetryDenied
 		}
 		m.nextTry, m.problem = now.Add(wait), err.Error()

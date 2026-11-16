@@ -218,7 +218,7 @@ func TestStandalone(t *testing.T) {
 		t.Fatal(perr)
 	}
 	get := func(path string) (int, string, error) {
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+path, nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+path, http.NoBody)
 		resp, derr := http.DefaultClient.Do(req)
 		if derr != nil {
 			return 0, "", derr

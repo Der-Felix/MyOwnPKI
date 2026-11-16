@@ -98,7 +98,7 @@ func healthcheck(ctx context.Context, cfg config.Config, timeout time.Duration) 
 	defer client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/healthz", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/healthz", http.NoBody)
 	if err != nil {
 		return err
 	}
