@@ -3,8 +3,8 @@
 Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
 templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 …
 v0.2.2 released); phase 3 (agent, monitoring) in progress: v0.3.0 Linux agent, v0.3.1 packages and
-guided installation, v0.3.2 agent package fix, v0.3.3 monitoring, v0.3.4 TLS scan, v0.3.5 host onboarding, v0.3.6 Salt formula, v0.3.7 dns-01 in the agent, v0.3.8 charts and analysis, v0.3.9 trust portal, v0.3.10 preview and versioned settings, v0.3.11 Apache and HAProxy, guides and demo, v0.3.12 quality round (current); next
-the beta: feature freeze and upgrade tests (see docs/PLAN.md §10.1). From v0.9.0 on the project is in the **beta freeze**: only fixes, docs, tests, security hardening and dependency security updates (CONTRIBUTING.md, "Feature freeze").
+guided installation, v0.3.2 agent package fix, v0.3.3 monitoring, v0.3.4 TLS scan, v0.3.5 host onboarding, v0.3.6 Salt formula, v0.3.7 dns-01 in the agent, v0.3.8 charts and analysis, v0.3.9 trust portal, v0.3.10 preview and versioned settings, v0.3.11 Apache and HAProxy, guides and demo, v0.3.12 quality round, v0.9.0 beta start (current); next
+bug fixes from the beta (v0.9.x) and v1.0.0 when no blocker is open (see docs/PLAN.md §10.1). Since v0.9.0 the project is in the **beta freeze**: only fixes, docs, tests, security hardening and dependency security updates (CONTRIBUTING.md, "Feature freeze").
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
