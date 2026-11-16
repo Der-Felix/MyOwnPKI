@@ -1,3 +1,118 @@
+# Night log - v0.3.10 to v0.3.12 released
+
+> Autonomous run 3, night of 2026-11-15 to 2026-11-16, on the maintainer's standing permission in
+> chat (the same as runs 1 and 2): worktrees, subagents for the code, push, pull requests, merge
+> green pull requests, tag, and publish after a checked draft. The limits stayed: no ADR change, no
+> Defender or other security change on the machine, no commands on the maintainer's servers, no
+> force push, no deleted or moved tag, and no new dependency (`go.mod` and `go.sum` are identical
+> between v0.3.10 and v0.3.12). The only new pins are CI and demo images by digest in
+> `THIRD_PARTY.md`: `certbot/certbot:v5.9.0`, `nginx:1.31.7-trixie` and the
+> `distroless/static-debian13` base.
+
+## Released
+
+| Version | Tag on | Published (UTC) | What |
+|---|---|---|---|
+| v0.3.10 | `c1b6bee` | 2026-11-15 21:43 | Preview before issuance and versioned settings (two migrations) |
+| v0.3.11 | `bbcd130` | 2026-11-16 03:55 | Recipes `apache2`, `httpd`, `haproxy`; `files.combined`; guides and *First steps* in the UI; demo `deploy/demo` with `demo.sh`; image snapshot script; base image Debian 13 |
+| v0.3.12 | `dd9ba31` | 2026-11-16 09:27 | Quality round: 24 fuzz targets, CI jobs `fuzz` and `fuzz-long`, `task cover`, `task fuzz`, `task deadcode`, `dupl` and a lint series, one error message rule, `modernize`, about 15 real defects fixed |
+
+The drafts of v0.3.11 and v0.3.12 were checked as `docs/RELEASING.md` says: 22 assets, release
+notes not empty, `cosign verify-blob` of `checksums.txt` Verified OK, the SHA-256 of the Windows
+archive OK, `cosign verify` of the image `:version` and `:latest` with the same digest (v0.3.12:
+`sha256:f0a37147e84ef48c4f558504329b9db95fbaa598de27cf1cb4ba2d2fb694b290`), and the Windows
+binary's `--version` prints the release (v0.3.12: commit `dd9ba31c3fe3`). Not done:
+`docker run ... --version` (no Docker on the maintainer's machine; the CI job "release image"
+stands in for it) and **any live test on the maintainer's servers**.
+
+## Merged pull requests
+
+| PR | Merged (UTC) | Title |
+|---|---|---|
+| #45 | 2026-11-15 12:19 | release: v0.3.10, certificate preview and settings history |
+| #47 | 2026-11-15 21:45 | docs: mark v0.3.10 as released |
+| #48 | 2026-11-15 23:36 | docs: correct what happens to 20-low-ports.conf without low_ports |
+| #49 | 2026-11-16 02:52 | release: v0.3.11, Apache and HAProxy recipes, guides in the UI, demo |
+| #50 | 2026-11-16 05:34 | docs: mark v0.3.11 as released |
+| #51 | 2026-11-16 09:02 | release: v0.3.12 quality round before the beta |
+
+## Findings and corrections
+
+- **CI of #49 had three reds, all fixed on the branch.** `apache2ctl` run as a non-root user
+  needed its own `envvars` file in the test; the TOTP secret of the demo had the wrong format;
+  the parallel subtests of `TestApacheConfigCheckHint` were removed.
+- **The new fuzz job found a real bug on its first run in CI.** Base64 decoding of the Go standard
+  library skips CR and LF, also in strict mode, so `ParseARIID` accepted `000.A\r000` as the same
+  certificate as `000.A000`. The same hole was in four more places that read base64url from a
+  sender: `jose.decodeB64` (the members of an ACME request and of a key), the `csr` of an ACME
+  finalize (a CSR with a line break was accepted and a certificate was issued), the `certificate`
+  of a revocation, and the key thumbprint in `agents.RegisterACMEAccount`. All of them read
+  canonical base64url now, through the new package `internal/b64url` (standard library only).
+  The signature covers the spelling, so only the holder of the key could use the finalize hole.
+- **Other defects fixed in v0.3.12** (full list in `CHANGELOG.md` 0.3.12, "Fixed"): answers that
+  repeated the sender's text without a limit (now clipped at 80 bytes), a look-alike common name
+  (the Kelvin sign folded onto `k`), a second PEM block and CRL trailing data that were accepted,
+  a `::ffff:` name constraint that never applied, a JSON `null` body read as empty, a legacy
+  archive that could stall the import, a panic in the ACME validator and in the peer address
+  check, an incomplete ACME order list, a restore that could delete a file, and an empty database
+  accepted as a backup. Fixes only narrow what is accepted and add no migration, REST change or
+  configuration key.
+- **Coverage (Windows numbers, `task cover`):** `internal/acme` 77.8 % to 87.1 %, `internal/ca`
+  83.6 % to 86.3 %, `internal/agents` 81.9 % to 84.2 %, `internal/auth` 82.3 % to 84.2 %,
+  `internal/server` 84.7 % to 85.8 %, `internal/backup` at 87.2 %. The tree is at 85.3 % of 31,181
+  statements. 23 tests skip on Windows and `internal/publish` could not run; the first Linux
+  table comes from CI.
+- **Test-quality findings.** Seven tests checked that a secret is not in the audit log with a text
+  that was empty when `json.Marshal` had failed, so they could not fail. `myownpki config check`
+  did not stop on Ctrl-C.
+- **Flaky tests found by CI and fixed:** a 5 second budget on macOS in `TestArchiveTreeStaysCheap`;
+  per-input fuzz time limits under `-race` (now `internal/testutil/racemode`); `TestGuideList`
+  failed on Windows by chance when the random CSRF token contained `hx-` (about 1 in 6000; the
+  test was fixed, the page is unchanged).
+- **Windows Defender** blocks the `internal/publish` test binary (a known false positive,
+  documented). This run never touched Defender; locally `task ci:local` passed once with the
+  package, and CI is the full check.
+- **Live incident found on 2026-11-15, before the run (the outage began on 2026-11-12).** Postfix on the SMTP relay host had been down
+  for three days after a reboot because of a boot race (`inet_interfaces` could not find the
+  local address). The update did not cause it. The reload hook of the agent on that host failed
+  because of it. The maintainer's decision is pending (see below).
+
+## Open for the maintainer
+
+1. **Live tests of v0.3.6 to v0.3.12** are still pending: the recipes `apache2`, `httpd` and
+   `haproxy`, the guides, the agent act of the demo and the certbot flags of the guides. The
+   recipes are examples until then.
+2. **The nine "Owner decisions" at the end of `docs/PHASE3.md` section 18.** Why each matters:
+   - The backup manifest is unsigned: editing `pki.db` and rewriting the hashes passes `Verify`
+     and `Restore`.
+   - `ImportExternal` has no SAN cap, and the lists of `InspectCSR` are not capped at `maxSANs`.
+   - A valid DER CSR whose subject text starts with `-----BEGIN` is treated as PEM.
+   - `keys.ChooseRecoveryOutput`, `auth.Service.ConfirmTOTP` and `tenant.Store.Version` have
+     callers only in tests: should `init` use them, or do they stay test helpers?
+   - `auth.Draft.Confirmed` is unused.
+   - `apache2ctl configtest` needs `/run/apache2` after a boot (a limit of the `apache2` recipe).
+   - Salt test cases for Apache and HAProxy and the page `site/demo.md` are not added.
+3. **`deploy/demo` still names 0.3.11.** The 0.3.12 image exists now: decide whether the next
+   release moves the tag.
+4. **The compare links at the bottom of `CHANGELOG.md` are stale since v0.3.10.** `[Unreleased]`
+   still compares from v0.3.10, and there are no links for 0.3.11 and 0.3.12.
+5. **The SMTP relay host:** a systemd drop-in so Postfix starts after the network is up, and a
+   monitoring check that notices a dead Postfix. Without both the boot race can happen again.
+6. **Housekeeping from the live update:** add the second host to the `low_ports` pillar mapping;
+   delete the leftover `/root/myownpki-0.3.10` directory on the server; watch the next renewals
+   of the SMTP relay host and the second updated host.
+7. **`system_trust`** may be enabled only when every agent is at 0.3.9 or newer. All agents were
+   updated to 0.3.10 on the evening of 2026-11-15; the switch is the
+   maintainer's.
+
+## What was not run
+
+`docker run ... --version` and every command on the maintainer's servers (see above), the
+`internal/publish` tests on the Windows machine (Defender), and a Linux coverage table (CI has
+it).
+
+---
+
 # Night log - v0.3.3 and v0.3.4 released, v0.3.5 in progress
 
 > Autonomous run on 2026-11-12, about 00:50 to 05:50 local, on the maintainer's standing permission
