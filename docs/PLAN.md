@@ -124,7 +124,8 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
   and all tenant databases (`VACUUM INTO` / SQLite online backup; the audit databases – instance and
   tenants – **last**) with a SHA-256
   manifest that also records the head (seq + hash) of every audit chain; restore with integrity,
-  migration-version and manifest checks and a full verification of every audit chain against those heads.
+  migration-version and manifest checks and a full verification of every audit chain against those heads;
+  since v0.9.0 the manifest is signed with the backup key (§5).
   Litestream (ADR-07) adds continuous replication later.
 - No transactions across database boundaries → design flows so each transaction stays in one DB (outbox pattern where needed).
 
@@ -194,6 +195,18 @@ MyOwnPKI is your own, fully controlled PKI – from homelab to enterprise:
 - The **auth key** (`auth.key_file`) encrypts the TOTP secrets; it may live outside the data
   directory. Losing it means every user's second factor must be reset (`myownpki user reset-2fa`,
   which needs the unseal passphrase or the recovery key).
+- The **backup key** *(owner decision D1, 2026-11-16, docs/PHASE3.md §19.3)* signs the manifest of every
+  backup. An Ed25519 key in `<data_dir>/backup-signing.key` (mode 0600, never overwritten), made by
+  `myownpki init` or, for an older instance, by its first backup. It needs **no passphrase** – the daily timer is a
+  process of its own that never unseals – and it is **never part of a backup**, so whoever holds a backup alone can't
+  sign a changed one. Its fingerprint (`SHA256:` and 32 hex digits) is shown at init and at every backup, written to the
+  `system.backup` audit entry, and pinned with `backup verify|restore --backup-key`. What the signature promises: the
+  holder of that key made exactly these files. What it does **not** promise: whose key that is – whoever can write
+  the backup directory can sign a changed backup with a key of his own, so a backup is *authentic* only when the
+  fingerprint was compared with the one noted earlier (or when it is the key file of the host that verifies). Whoever
+  holds backup **and** key file can sign. A lost key file costs the continuity, nothing else: the next backup makes
+  a new key, and older backups verify with the fingerprint noted for them. Backups of format 1 (before 0.9.0) have
+  no signature; they still verify and restore, reported as *unauthenticated*.
 - Admin listener TLS: at first start a **self-signed bootstrap certificate**, its SHA-256
   fingerprint printed on the console for verification; alternatively an operator-provided
   certificate. After setup the admin certificate is issued by the own CA. The bootstrap
@@ -781,7 +794,7 @@ tables with "how to reverse".
 | Legacy import: reader `internal/ca/legacy` (parses, never executes) + `ca.ImportLegacy` in one transaction + `myownpki import legacy DIR [--dry-run]`; the root becomes an **offline root** by default (`--root-key online` imports its key) | pki.sh stays the offline root tool; all or nothing; the dry run shows every problem first |
 | Import keeps serials, revocation time and reason and the CRL numbering: `crlnumber` (hex) − 1 becomes the last number, pki.sh's CRL is kept as evidence, every online CA signs its next CRL in the import transaction; certificateHold → unspecified, CACompromise on a leaf → keyCompromise, both with a warning | RFC 5280 §5.2.3 (numbers never go back); what relying parties see stays the same |
 | Older certificates of a key pki.sh renewed (`renew-ca`) go into `ca_certificate_history` (pki.db 0006) | They verify the same leaves and are evidence |
-| Backup = a new directory with `VACUUM INTO` copies (audit logs last) and `manifest.json` (SHA-256, migration versions, audit heads, checkpoint key); `backup verify` and `restore` run the same checks on a work copy, incl. integrity, chains ending at the heads and the SAN index; restore only into an empty data directory | Works while the server runs; a manipulated or damaged backup never becomes the PKI |
+| Backup = a new directory with `VACUUM INTO` copies (audit logs last), `manifest.json` (SHA-256, migration versions, audit heads, checkpoint key) and, in format 2 (0.9.0), `manifest.sig`: an Ed25519 signature by the backup key (§5) over the exact bytes of the manifest, checked before any field is trusted; `backup verify` and `restore` run the same checks on a work copy, incl. integrity, chains ending at the heads and the SAN index; restore only into an empty data directory. `--backup-key FP` pins the signer: then an unsigned (format 1) or wrongly signed backup is refused (`--allow-unsigned` accepts format 1); without a pin a valid signature by an unknown key verifies and says by whom; format 1 verifies as *unauthenticated* | Works while the server runs; a damaged backup never becomes the PKI, and – with the key pinned – neither does a manipulated one (before 0.9.0 whoever could write the backup directory could change a database and recompute the hashes; the daily timer has no passphrase, so a MAC from the root key was not an option) |
 | Passkeys (go-webauthn v0.18.2) as **second factor and step-up**, only with `auth.passkey_origin`; adding one needs step-up + current password, raises the credentials epoch and ends other sessions; UV required, no attestation; reset-2fa removes passkeys | Same rules as TOTP (decision 45); WebAuthn binds passkeys to the host name users type |
 | No passkey button in the UI until esbuild (ADR-04) or one plain script is approved | A browser needs `navigator.credentials`; no ADR change at night |
 | PKCS#12 export written by our own code (`internal/pkcs12`: PBES2 AES-256-CBC, PBKDF2-SHA256 600,000 iterations, MAC HMAC-SHA256, password ≥ 12 characters); "delete the key after the download" overwrites DEK and ciphertext, the row stays (pki.db 0007) | No PKCS#12 module approved; what OpenSSL 3 writes and current Windows/macOS/Java import |

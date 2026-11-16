@@ -92,6 +92,12 @@ Implemented in `internal/auth` (step 10); the numbers are PHASE1 decisions 39–
 - Private key material: keep in memory as briefly as possible, zero buffers where Go allows (best effort),
   never log, never put in error messages, never send to the browser except an explicit, audited,
   step-up-authenticated download.
+- **Backup key** (`<data_dir>/backup-signing.key`, `internal/backup/backupkey`): an Ed25519 key that signs the manifest of every
+  backup (`manifest.sig`, format `myownpki-backup/2`). It needs no passphrase (the daily timer never unseals), is written
+  with `O_EXCL` and mode 0600, is **never copied into a backup** and never logged; only its fingerprint is (audit entry,
+  CLI output). The signature is checked **before** any manifest field is used; a pinned fingerprint (`--backup-key`) is
+  what makes it authenticity, not only integrity. Format 1 backups verify as *unauthenticated*. Never derive it from the
+  root key or ask for the passphrase in `backup`, `backup verify` or `restore`.
 - HSM mode via PKCS#11 behind the `hsm` build tag (needs CGO).
 
 ## Untrusted input
