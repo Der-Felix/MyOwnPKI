@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/guides"
 )
 
 // The UI inventory (docs/PHASE3.md step 50): every page of the real UI, shot
@@ -20,7 +22,7 @@ import (
 
 // inventoryPage is one page of the UI. route is the pattern registerApp
 // (internal/web/app.go) registers, without the method; path is what is
-// requested, with the placeholders {cert} {pending} {ca} {domain} {agent}
+// requested, with the placeholders {cert} {pending} {ca} {domain} {agent} {guide}
 // {account} {user} {enroll}.
 type inventoryPage struct {
 	name  string
@@ -98,6 +100,9 @@ var inventoryPages = []inventoryPage{
 	{"appearance", "/admin/appearance", "/admin/appearance", light},
 	{"account", "/account", "/account", light},
 	{"design", "/design", "/design", light},
+
+	{"guides", "/guides", "/guides", light},
+	{"guide", "/guides/{slug}", "/guides/{guide}", light},
 }
 
 // inventoryExcluded are the GET routes of registerApp that are not shot, with
@@ -185,7 +190,7 @@ func runInventory(ctx context.Context, in *instance, bases map[viewKind]string, 
 				continue
 			}
 			path := strings.NewReplacer("{cert}", in.detailID, "{pending}", in.pendingID, "{ca}", in.issuingID, "{domain}", in.domainID,
-				"{agent}", in.agentID, "{agentold}", in.agentOldID, "{account}", in.accountID, "{user}", in.userID, "{enroll}", in.enrollHost).Replace(p.path)
+				"{agent}", in.agentID, "{agentold}", in.agentOldID, "{account}", in.accountID, "{user}", in.userID, "{enroll}", in.enrollHost, "{guide}", firstGuide()).Replace(p.path)
 			for _, th := range themesOf(kind) {
 				base := bases[th.kind]
 				res := probe(base, path)
@@ -283,4 +288,14 @@ func errNote(err error) string {
 		return ""
 	}
 	return ", " + err.Error()
+}
+
+// firstGuide is the slug of the first guide in the binary, for the shot of one
+// guide page.
+func firstGuide() string {
+	reg, err := guides.Embedded()
+	if err != nil || len(reg.List()) == 0 {
+		return "none"
+	}
+	return reg.List()[0].Slug
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/legacy"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
+	"github.com/Der-Felix/MyOwnPKI/internal/guides"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/monitor"
 	"github.com/Der-Felix/MyOwnPKI/internal/notify"
@@ -87,6 +88,9 @@ type AppDeps struct {
 	// nil hides the pages and the dashboard charts.
 	Reports  ReportSource
 	Analysis AnalysisSource
+	// Guides are the guides of the Help area; nil = the ones in the binary
+	// (internal/guides). Tests set their own.
+	Guides *guides.Registry
 
 	// onRequest, set only by tests, sees the engine request of the issue
 	// wizard's review step ("review") and of its final submit ("issue").
@@ -146,13 +150,14 @@ type app struct {
 	log     *slog.Logger
 	actions map[string]actionSpec
 	pending *pendingActions
+	guides  *guides.Registry
 }
 
 func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	if d.Clock == nil {
 		d.Clock = clock.System{}
 	}
-	a := &app{d: d, log: log, actions: map[string]actionSpec{}, pending: newPendingActions()}
+	a := &app{d: d, log: log, actions: map[string]actionSpec{}, pending: newPendingActions(), guides: guideRegistry(d, log)}
 	mux.HandleFunc("GET /login", a.anon(a.loginPage))
 	mux.HandleFunc("POST /login", a.anon(a.login))
 	mux.HandleFunc("GET /login/code", a.anon(a.codePage))
@@ -283,6 +288,8 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /account/passkeys/{id}/remove", a.removePasskey, "password")
 	mux.HandleFunc("GET /admin/appearance", a.signedIn(a.appearance))
 	mux.HandleFunc("POST /admin/appearance", a.signedIn(a.saveAppearance))
+	mux.HandleFunc("GET /guides", a.signedIn(a.guideList))
+	mux.HandleFunc("GET /guides/{slug}", a.signedIn(a.guidePage))
 	mux.HandleFunc("GET /design", a.signedIn(a.design))
 }
 
