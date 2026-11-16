@@ -510,6 +510,17 @@ limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
 `MYOWNPKI_ACME_*` variable: v0.1 refuses unknown `MYOWNPKI_*` variables and would not start.
 
+From v0.3.10 to v0.3.11: no migration, no configuration change and no change to the agent protocol (`myownpki db status`
+shows the same versions, 0021 and 0015), so going back needs no restore. **Update the agents first** if a host will get the
+new HAProxy recipe: an agent older than 0.3.11 refuses an `agent.yaml` that has `files.combined` (strict parsing, as for
+`dns_providers` and `system_trust`); a host without the key is untouched. The release adds the recipes `apache2`, `httpd`
+and `haproxy` ([§12.9](#129-recipes)), the **Help** group with *First steps* and *Guides* and the demo
+([chapter 17](#17-help-first-steps-and-the-demo)), and moves the container image from `distroless/static-debian12` to
+`static-debian13`, pinned by digest ([§17.4](#174-the-container-base)); the user, the data directory and the health check
+are unchanged. **Changed:** the hint of `deployment add` about log files and low ports is no longer printed for `haproxy -c`, and for
+`apache2ctl configtest` it names only the log directory (Apache opens its error log even for a check; without a writable
+directory the check fails with `AH00091`).
+
 From v0.3.9 to v0.3.10: `pki.db` migration 0021 and `system.db` migration 0015 each add the table `settings_versions` with its
 index and three triggers; they are additive (no existing row, column or constraint changes) and `audit.db` is untouched
 (`myownpki db status` shows 0021 and 0015). There is no configuration change and no change to the agent or its protocol. An
@@ -1160,7 +1171,7 @@ supported deployment platform in v0.3.0; Windows, macOS and FreeBSD are build/te
 ### 12.1 Agent CA and server
 
 Create an intermediate **directly below the root**, not below an intermediate with `pathlen: 0`.
-In *Certificate authorities → New intermediate*, choose the root as parent and set the EKU limit to
+In *Certificate authorities*, choose **New CA**, set **Parent CA** to the root and set the EKU limit to
 **clientAuth only**. Name it `agent-ca`. It signs only the agents' 7-day client certificates; it is
 not the CA that issues the agent listener's server certificate.
 
@@ -1303,7 +1314,7 @@ The file is `/etc/myownpki-agent/agent.yaml`, state is `/var/lib/myownpki-agent`
 After editing, run `/usr/local/bin/myownpki-agent config check` and `systemctl restart myownpki-agent`.
 Since v0.3.5 you do not have to write a deployment by hand: `myownpki-agent deployment add`
 ([§12.7](#127-adding-a-host)) adds it to this file and adjusts the systemd drop-ins in one step, and
-[§12.9](#129-recipes) has ready-made ones for nginx, Postfix, Dovecot and Proxmox VE. Do not mix the
+[§12.9](#129-recipes) has ready-made ones for nginx, Apache, HAProxy, Postfix, Dovecot and Proxmox VE. Do not mix the
 two ways for the same file in a configuration tool: either an admin uses `deployment add`, or Salt
 renders the whole file and then runs `sandbox sync`, because a rendered file overwrites what `add` wrote.
 The Salt formula ([§12.10](#1210-rolling-out-with-salt)) offers both and refuses the mix.
@@ -1382,6 +1393,13 @@ deployments:
 
 Every key of `dns_providers`, the credentials file and the DNS server settings are in
 [§12.11](#1211-dns-01-in-the-agent).
+
+**One file with the key (since 0.3.11).** `files.combined` replaces the four other keys for a service such as
+HAProxy that reads the certificate chain and the private key from one PEM file: `files: {combined:
+"/etc/ssl/myownpki/haproxy/www.pem"}`. The file holds the certificate first, then the chain, then the key,
+and gets the deployment's key mode (default `0600`, never rights for others), owner and group. `combined` is
+used alone, lies under `paths`, and is written atomically. **An agent older than 0.3.11 refuses the key**
+(unknown field), so update the agents first.
 
 `files.certificate` and `files.chain` are available when separate files are needed. Optional
 `owner`, `group` and `key_mode` apply locally. Deployments sharing a nonempty reload hook are staged,
@@ -1646,12 +1664,13 @@ Linux and systemd only; run it as root, **also with `--dry-run`**.
 
 | Flag | Meaning |
 |---|---|
-| `--recipe nginx`, `postfix`, `dovecot` or `proxmox` | Fills the defaults of [§12.9](#129-recipes). Every other flag overrides it. |
+| `--recipe nginx`, `apache2`, `httpd`, `haproxy`, `postfix`, `dovecot` or `proxmox` | Fills the defaults of [§12.9](#129-recipes). Every other flag overrides it. |
 | `--profile nginx` or `file` | As in `agent.yaml`. Default: `nginx` with `--dir`, `file` with the file flags. |
 | `--name FQDN` (repeat) | Certificate names, validated like `names:`; the first one is the SNI of the local check. Default: the host name of `agent.yaml`. |
 | `--challenge webroot` or `standalone`, `--webroot DIR` | Default: what `enrollment:` uses. |
 | `--dir DIR` | nginx profile: `fullchain.pem` and `privkey.pem` go here. |
 | `--certificate`, `--chain`, `--fullchain`, `--key FILE` | file profile, as `files:`. |
+| `--combined FILE` | file profile: the certificate chain and the private key in **one** file (HAProxy), as `files.combined`. Used alone: it refuses `--certificate`, `--chain`, `--fullchain` and `--key`. The file gets the key mode. An agent older than 0.3.11 refuses a configuration with this key, so update agents first. |
 | `--owner`, `--group`, `--key-mode` | As in `agent.yaml`; the key mode may not give rights to others. |
 | `--hook NAME='CMD ARGS'` (repeat), `--test-hook NAME`, `--reload-hook NAME` | Define hooks and refer to them. The command is split on spaces and quotes, there is **no shell**, and the first element must be an absolute path. A command line that exists already is reused under its name, so deployments of one service share one reload and one rollback group. |
 | `--check HOST:PORT` | Local TLS check. It is an **implicit-TLS** handshake, so STARTTLS ports (25, 143, 587) cannot be checked. |
@@ -1818,22 +1837,40 @@ reason when the pass did not count, and the source address. The secret is in no 
 `deployment add --recipe NAME` fills the files, owner, hooks, local check and sandbox of a service; a
 flag you pass wins, and `--dry-run` shows what the recipe expands to. **Only the nginx recipe rests on a
 setup the CI job (the agent end-to-end test) has run; the `--recipe` command itself is new in this
-release. The Postfix, Dovecot and Proxmox VE recipes are examples, written from the documentation of
-each service and not yet run on a live host. Test them on a non-production host first**;
-`deployment add` says so itself and lists what to verify.
+release. The Apache (`apache2`, `httpd`), HAProxy, Postfix, Dovecot and Proxmox VE recipes are examples,
+written from the documentation of each service and not yet run on a live host. Test them on a
+non-production host first**; `deployment add` says so itself and lists what to verify. The `apache2` and
+`haproxy` recipes also run in CI against the Apache and HAProxy packages of the CI runner, started by the
+test with a private configuration (the job *agent end-to-end (Apache, HAProxy)*, which records what
+`configtest` and `haproxy -c` did in its job summary). That is not a live host: the real systemd unit, its
+sandbox, the Red Hat layout and SELinux are not covered. `{name}` in a recipe path is the name of the
+deployment (lower case letters, digits and `-`) in every path of every recipe.
 
 | Recipe | Files | Owner, key mode | Hooks | Local check | Sandbox |
 |---|---|---|---|---|---|
 | `nginx` | nginx profile: `fullchain.pem` and `privkey.pem` in `/etc/ssl/myownpki/<deployment name>` | root, `0600` | `nginx-test` = `/usr/sbin/nginx -t`, `nginx-reload` = `/usr/bin/systemctl reload nginx` | `127.0.0.1:443` | write `/var/log/nginx`, low ports |
+| `apache2` | nginx profile: `fullchain.pem` and `privkey.pem` in `/etc/ssl/myownpki/<deployment name>` | root, `0600` | `apache2-test` = `/usr/sbin/apache2ctl configtest`, `apache2-reload` = `/usr/bin/systemctl reload apache2` | `127.0.0.1:443` | write `/var/log/apache2` |
+| `httpd` | nginx profile: `fullchain.pem` and `privkey.pem` in `/etc/ssl/myownpki/<deployment name>` | root, `0600` | `httpd-test` = `/usr/sbin/httpd -t`, `httpd-reload` = `/usr/bin/systemctl reload httpd` | `127.0.0.1:443` | write `/var/log/httpd` |
+| `haproxy` | file profile: **one** file `/etc/ssl/myownpki/haproxy/<deployment name>.pem` (`files.combined`: certificate chain, then key) | root:root, `0600` | `haproxy-test` = `/usr/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg`, `haproxy-reload` = `/usr/bin/systemctl reload haproxy` | `127.0.0.1:443` | none |
 | `postfix` | file profile: `/etc/ssl/myownpki/postfix/fullchain.pem` and `privkey.pem` | root:root, `0600` | `postfix-test` = `/usr/sbin/postfix check`, `postfix-reload` = `/usr/bin/systemctl reload postfix` | none | none |
 | `dovecot` | file profile: `/etc/ssl/myownpki/dovecot/fullchain.pem` and `privkey.pem` | root:root, `0600` | `dovecot-test` = `/usr/bin/doveconf -n`, `dovecot-reload` = `/usr/bin/systemctl reload dovecot` | `127.0.0.1:993` | none |
 | `proxmox` | file profile: `/etc/ssl/myownpki/pve/fullchain.pem` and `privkey.pem` | root:root, `0600` | `proxmox-install` as the reload hook, no test hook: `/usr/bin/pvenode cert set /etc/ssl/myownpki/pve/fullchain.pem /etc/ssl/myownpki/pve/privkey.pem --force 1 --restart 1` | `127.0.0.1:8006` | write `/etc/pve` |
 
 The parent directory of the files must exist before the command (the assistant makes it for you):
-`install -d -m 0755 /etc/ssl/myownpki` for nginx, `/etc/ssl/myownpki/postfix`, `…/dovecot` or
-`…/pve` for the others, or pass `--create-dirs`. The service must be pointed at the files; the agent
+`install -d -m 0755 /etc/ssl/myownpki` for nginx, Apache and HAProxy (`/etc/ssl/myownpki/haproxy` for HAProxy),
+`/etc/ssl/myownpki/postfix`, `…/dovecot` or `…/pve` for the others, or pass `--create-dirs`. The service must be pointed at the files; the agent
 does not edit its configuration:
 
+- **Apache** (`apache2`, `httpd`): enable `mod_ssl` (`a2enmod ssl`; `dnf install mod_ssl`) and set
+  `SSLCertificateFile /etc/ssl/myownpki/<name>/fullchain.pem` and
+  `SSLCertificateKeyFile /etc/ssl/myownpki/<name>/privkey.pem` in the virtual host (the chain belongs in
+  the first file since Apache 2.4.8). All deployments of one Apache recipe share one test hook and one
+  reload hook, so they are one reload and one rollback group.
+- **HAProxy**: `bind :443 ssl crt /etc/ssl/myownpki/haproxy/<name>.pem` for one certificate, or
+  `crt /etc/ssl/myownpki/haproxy/` for every file in the directory; a `crt-list` is your own file. The test
+  hook names `/etc/haproxy/haproxy.cfg` only: when the service reads more (`-f /etc/haproxy/conf.d`), give
+  the deployment a test hook of your own (`--hook`, `--test-hook`). The agent needs 0.3.11 for the
+  `combined` target.
 - **Postfix**, `main.cf`, Postfix 3.4 and later: `smtpd_tls_chain_files =
   /etc/ssl/myownpki/postfix/privkey.pem, /etc/ssl/myownpki/postfix/fullchain.pem` (older:
   `smtpd_tls_cert_file` and `smtpd_tls_key_file`). The recipe has no local check, because the agent
@@ -1849,11 +1886,13 @@ To verify on a test host (and note what differed from this page):
 
 | Recipe | Verify |
 |---|---|
+| Apache | The test hook (`apache2ctl configtest`, `httpd -t`) is **not known** to check that key and certificate match; the agent checks the pair before it writes. What a corrupted `privkey.pem` does to the test hook and to the graceful reload, and whether the rollback restores the old pair; that `journalctl -u myownpki-agent` shows no `Read-only file system` from a hook; on the Red Hat family `ls -Z /etc/ssl/myownpki` and, if `httpd` cannot read the files, `restorecon -R /etc/ssl/myownpki` |
+| HAProxy | `haproxy -c` refuses a corrupted file; whether `crt` as a directory ignores the agent's temporary `.myownpki-*` file; two deployments both serve their certificate after a reload; `systemctl show myownpki-agent -p ReadWritePaths` shows no log directory; the local check against your real `bind` lines (`accept-proxy` or a bind to another address needs `--check HOST:PORT`, or no `check:`) |
 | Postfix | `postfix check` runs inside the sandbox without writing; no group is needed (the key is read before Postfix drops privileges); new connections use the new certificate after the reload |
 | Dovecot | A reload makes new connections use the new certificate; which `doveconf` option is a syntax-only test on your version |
 | Proxmox VE | The `pvenode cert set` syntax of your version; that `pvenode` works under the sandbox (it writes `/etc/pve`); `https://<node>:8006` serves the new certificate |
 
-None of the three should need a group, as far as the documentation says: the daemons read their keys
+None of the five should need a group, as far as the documentation says: the daemons read their keys
 as root. A service that reads its key as an unprivileged user takes `--group` and `--key-mode 0640`
 (for example `ssl-cert` on Debian). That is a claim to verify on each host.
 
@@ -3603,3 +3642,97 @@ live installation at the time of writing.
 8. *Tenant settings → History*: change the ACME limits and restore: works without a second factor. Change the agent
    enrollment mode and restore the old one: it asks for the second factor. An API token cannot restore a domain (`forbidden`).
 9. Read the History pages and `GET …/versions` for a password, token or the notification secrets: there is none.
+
+## 17. Help, First steps and the demo
+
+Since v0.3.11 the web UI has a **Help** group in the navigation with *First steps* and *Guides*, and the
+repository has a throwaway demo in `deploy/demo/`. Neither changes how the server works: no migration, no
+setting, no new permission and no REST operation.
+
+### 17.1 First steps
+
+*Help → First steps* (`/first-steps`) is a checklist of what a new instance still needs. Every row has a state,
+a short text and links to the page that finishes it and to the guide that explains it. The rows, in order:
+*Unseal the server*, *Create a certificate authority*, *Public base URL and CRL*, *Add a domain*, *Turn on ACME*,
+*Issue a first certificate*, *Add a host with an agent (optional)*, *Back up the instance*, *Trust the root on
+your devices*, *Set up notifications (optional)*.
+
+| State | Meaning |
+|---|---|
+| Done | The instance has what the row asks for |
+| Open | It does not, and the row says what to do |
+| Not detected | The server cannot know: whether a backup runs (the daily timer belongs to the host), which devices trust the root, whether a notification channel exists. The row links to the guide |
+| Not available to your role | The signed-in role does not read that part of the instance (for example a role limited to one CA, for tenant-wide rows) |
+
+The page **writes nothing and stores nothing**. It is computed again on every request from the calls the dashboard
+and the list pages already make, under the permissions of the signed-in user. There is no "done" flag, no
+dismiss button and no redirect after sign-in, so a row cannot get out of date and nothing is added to `system.db`.
+Its buttons are links: the actions happen on the existing pages, each with its own second factor. The row *Public
+base URL and CRL* uses what the dashboard already knows about CA base URLs and CRLs; it does **not** test whether
+a client can reach that address.
+
+While an instance has no CA or no certificate, or, with ACME on, no domain, the dashboard shows one information
+message, "Your instance is new – see First steps." It disappears when the data exists, and only a role that reads
+the whole tenant sees it. `myownpki init` ends with one line, "Next: sign in and open Help, First steps."; it
+prints no address and no secret.
+
+### 17.2 Guides
+
+*Help → Guides* (`/guides`) lists the guides of this build; each opens at `/guides/<name>`. Five are task guides:
+*Build a certificate authority*, *Keep the root offline*, *Connect certbot*, *Install the agent and add a host*
+and *Back up and restore*; a sixth, *Using these guides*, explains how to read them. A guide is a short text for
+this instance: where a command needs the ACME directory or the name of a CA, it shows the value of this instance,
+or a marked example (`https://pki.homelab.lan/acme/directory`) when there is none. A role that does not read the
+whole tenant always gets the example for the ACME directory. A guide is complete on its own and ends with a link to
+the longer page on the documentation site.
+
+Every signed-in user can read them. A guide only shows text: it runs no command, changes nothing and shows no
+secret (a passphrase, a recovery key, a token and an EAB secret exist only where they are created, once). Values
+that appear in commands come from the configuration and from the engine, never from the request.
+
+The text is not Markdown that a library renders. A small closed format is parsed by the program itself (headings,
+paragraphs, lists, code blocks, tables, notes, bold, italic, code and links); raw HTML, images, scripts and every
+unknown construct are errors at build time, and links lead only to pages of the UI, other guides, the documentation
+site and the project repository. The format and how to add a guide are on
+[Guides in the UI](https://der-felix.github.io/MyOwnPKI/guides/guides-in-the-ui/). The five guides were written
+from the commands of this guide and the code, and have **not yet been run on a live installation**: run a
+guide's commands on a test host once and correct any difference.
+
+### 17.3 The demo
+
+`deploy/demo/` is a Docker Compose project for trying MyOwnPKI out in about two minutes. Not for production: the
+instance is marked as a demo for good (banner in the UI, a warning in the log at every start), and every secret
+is in one file, `init-demo-secrets.txt` in the data volume. Its commands and what to look at after each are in
+[`deploy/demo/README.md`](../deploy/demo/README.md); in short:
+
+```bash
+cd deploy/demo
+```
+
+```bash
+./demo.sh run
+```
+
+`run` starts the server **sealed** (`up`), unseals it (`unseal`), creates the domain `demo.test` (`domain`), has
+`certbot` fetch a certificate for `www.demo.test` by http-01 (`certbot`) and checks the chain against the demo root
+with `openssl verify` (`verify`). It is **not** one `docker compose up`: the server never reads its passphrase from
+a file or a variable, and a domain needs a second factor, so a script reads the demo secrets file and does what a
+person would do at the keyboard. A production instance keeps its manual `init` and unseal. `./demo.sh agent` is
+a second act: nginx with `myownpki-agent` from the image's own verified package; it ends with one approval click in
+*Agents → Enrollment requests*. `./demo.sh down` removes the containers, the network and all demo volumes.
+
+The demo runs on the release image `ghcr.io/der-felix/myownpki:0.3.11`, which exists after the release is published;
+until then name your own image with `MYOWNPKI_IMAGE`. CI runs the first act against the snapshot image in the job `image`
+(`scripts/ci/demo-check.sh`). **Not yet run on a live Docker host by the maintainer**, and the second act, the
+agent, is not part of CI at all.
+
+### 17.4 The container base
+
+Since v0.3.11 the image is built on `gcr.io/distroless/static-debian13:nonroot` (Debian 13), pinned by the digest
+of its multi-platform index; it was `static-debian12`. The user (65532), the data directory, the health check and
+the CA certificates for outbound TLS (webhooks, SMTP over TLS) are the same as before. The CI job `image` now checks
+the user, `--version`, `etc/ssl/certs/ca-certificates.crt` and the owner of the data directory in the built image.
+`THIRD_PARTY.md` says how the digest is chosen (the newest index older than two weeks) and how to read a new one.
+After updating to the new image, `docker compose ps` should show `healthy`, and a notification test
+(`myownpki notify test`) proves the CA certificates. This has not been run on a live Docker host at the time of
+writing.
