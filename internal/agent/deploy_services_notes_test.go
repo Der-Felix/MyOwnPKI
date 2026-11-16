@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/recipe"
 )
 
 // The note check of the real-service tests must not pass or fail by accident:
@@ -42,6 +44,41 @@ func TestServiceNoteSentencesAreDistinct(t *testing.T) {
 	} {
 		if strings.Contains(pair[0], pair[1]) || strings.Contains(pair[1], pair[0]) {
 			t.Errorf("%q and %q contain each other", pair[0], pair[1])
+		}
+	}
+}
+
+// The notes of the recipes carry what the first CI run observed with the real
+// services (Apache 2.4.58 and HAProxy 2.8.30 on Ubuntu 24.04), so the e2e
+// tests report no NOTES-UPDATE line. Flipped, the same observation is a
+// contradiction: if a later run sees something else, the e2e test fails and
+// names the sentence to change.
+func TestRecipeNotesCarryTheObservedFacts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		recipe, ifSeen, ifNot string
+		seen                  bool // what CI observed
+	}{
+		{"apache2", apacheNoteRejects, apacheNoteMissesKey, false},
+		{"httpd", apacheNoteRejects, apacheNoteMissesKey, false},
+		{"apache2", apacheNoteSurvives, apacheNoteStops, false},
+		{"httpd", apacheNoteSurvives, apacheNoteStops, false},
+		{"haproxy", haproxyNoteRefuses, haproxyNoteAccepts, true},
+		{"haproxy", haproxyNoteSkipsTemp, haproxyNoteLoadsTemp, true},
+		{"haproxy", haproxyNoteOrderMatter, haproxyNoteOrderFree, false},
+	} {
+		r, ok := recipe.Get(tc.recipe)
+		if !ok {
+			t.Fatalf("recipe %q does not exist", tc.recipe)
+		}
+		claim := noteClaim{recipe: tc.recipe, topic: "t", result: "x", ifSeen: tc.ifSeen, ifNot: tc.ifNot}
+		claim.seen = tc.seen
+		if got, message := claim.verdict(r.Notes); got != noteAgrees {
+			t.Errorf("%s: the notes do not carry the observed fact: %s", tc.recipe, message)
+		}
+		claim.seen = !tc.seen
+		if got, _ := claim.verdict(r.Notes); got != noteContradicts {
+			t.Errorf("%s: the opposite observation is not a contradiction of the notes (verdict %d)", tc.recipe, got)
 		}
 	}
 }

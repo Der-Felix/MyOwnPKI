@@ -34,7 +34,7 @@ live test by the maintainer is pending.
   directory of the service as a sandbox directory. `haproxy` is the file profile with one file per deployment,
   `/etc/ssl/myownpki/haproxy/<deployment name>.pem`, the test hook `haproxy -c -f /etc/haproxy/haproxy.cfg` and no sandbox
   directory. No recipe edits the configuration of its service. The notes of each recipe say what `configtest` and `haproxy -c`
-  are not known to cover, what to set in the service's configuration, and (for `httpd`) the SELinux label of
+  were observed to cover in CI and what not, what to set in the service's configuration, and (for `httpd`) the SELinux label of
   `/etc/ssl/myownpki`.
 - **`files.combined`** (`--combined FILE`): a target of the file profile, used alone, that holds the certificate, the chain
   and the private key in one PEM file. It gets the key mode of the deployment (`0600` by default, never rights for others), its
@@ -62,9 +62,14 @@ live test by the maintainer is pending.
   by `myownpki-agent` from the image's own verified package, ending with one approval click in the UI. CI runs the first act
   on the snapshot image (`scripts/ci/demo-check.sh`).
 - **CI job `agent end-to-end (Apache, HAProxy)`**: the `apache2` and `haproxy` recipes against the Apache and HAProxy
-  packages of the CI runner, started by the tests with a private configuration. It also records three observations in the job
-  summary instead of assuming them: what `apache2ctl configtest` does with a mismatched key, whether the directory form of
-  HAProxy's `crt` skips the agent's temporary file, and whether the order of certificate and key in the combined file matters.
+  packages of the CI runner, started by the tests with a private configuration. It records its observations in the job
+  summary instead of assuming them, and compares each with the notes of the recipe (a note that says the opposite fails the
+  test). The first CI run, with Apache 2.4.58 and HAProxy 2.8.30 on Ubuntu 24.04, observed five facts: `apache2ctl configtest`
+  passes although the key does not belong to the certificate; a graceful reload of Apache with a damaged key stopped the
+  process and the agent's rollback did not bring it back (result `rolled_back`, process gone); `haproxy -c` fails on a key
+  that does not match the certificate; the directory form of HAProxy's `crt` ignores the agent's temporary `.myownpki-*`
+  file; and the order of certificate and key in the combined file does not matter. They are in the recipe notes and on the
+  recipes page.
 - **Documentation:** the site page *Guides in the UI*, the recipes page for Apache, HAProxy and `files.combined`, the upgrade
   row and the agents-first note, the Salt page and README (`combined`), operations guide chapter 17 and the updates of §12.
 
@@ -121,11 +126,17 @@ live test by the maintainer is pending.
 - **The live test by the maintainer is pending.** `apache2`, `httpd` and `haproxy` are **example recipes, not yet run on a live
   host**: the real systemd unit and its sandbox, the Red Hat layout, SELinux, a reload with a failing configuration and the
   local check against real `bind` lines are untested. CI runs the recipes against the Ubuntu packages only.
-- **`apache2ctl configtest` and `httpd -t` are not known to check that the key matches the certificate.** The agent checks the
-  pair before it writes, the TLS check runs after the reload and the rollback restores the old files; the CI job records what
-  `configtest` does, but its answer is not in the recipe notes yet. A reload with a broken key can take Apache down.
-- **The directory form of HAProxy's `crt` and the temporary file:** CI records whether HAProxy ignores the agent's temporary
-  `.myownpki-*` file; until the answer is known, point `crt` at the single file.
+- **`apache2ctl configtest` and `httpd -t` do not detect a key that does not match the certificate** (observed in CI with Apache
+  2.4.58 on Ubuntu 24.04; `httpd` on the Red Hat family was not run). The agent's check of the pair before it writes is the
+  guard; a pair damaged after it reaches the reload. `haproxy -c`, in contrast, fails on such a pair.
+- **A failed reload can stop Apache, and the rollback does not start it again.** In CI a graceful reload with a damaged key ended
+  the Apache process; the agent restored the previous files and reported `rolled_back`, but Apache stayed down. After a
+  `rolled_back` result look at `systemctl status apache2` (`httpd`). Seen with `apache2 -k graceful` on a private
+  configuration, not under the real unit.
+- **`apache2ctl configtest` in the agent's sandbox needs Apache to have started once since the boot.** It creates
+  `/run/apache2`, `/run/apache2/socks` and `/run/lock/apache2` when they are missing; the unit runs with `ProtectSystem=strict`
+  and the recipe makes only `/var/log/apache2` writable, so the test hook (and a `systemctl reload`) fails on a host where
+  Apache has not been started since the boot. After one normal start the directories exist and nothing is written.
 - **The six guides have not been run on a live instance**, nor have the certbot and EAB flags in them. A guide may differ from the
   program in a detail; the long page on the site is the reference.
 - **The demo has not been run on the maintainer's Docker host,** and the image tag `0.3.11` exists only after the release is

@@ -37,8 +37,6 @@ const (
 	haproxyNoteLoadsTemp   = "the directory form of crt does not skip the agent's temporary .myownpki-* file"
 	haproxyNoteOrderMatter = "the key must come after the certificate in the file"
 	haproxyNoteOrderFree   = "the order of the certificate and the key in the file does not matter"
-	// The wording of the lane A note that asks for these checks.
-	haproxyNotePending = "verify that haproxy -c refuses a broken file"
 )
 
 // haproxyConfig is a minimal configuration: one TLS frontend on addr with
@@ -180,7 +178,7 @@ func TestHAProxyCheckOnKeyMismatch(t *testing.T) {
 	}
 	noteClaim{
 		recipe: "haproxy", topic: "haproxy -c with a certificate/key mismatch", result: result,
-		seen: failure != nil, ifSeen: haproxyNoteRefuses, ifNot: haproxyNoteAccepts, pending: haproxyNotePending,
+		seen: failure != nil, ifSeen: haproxyNoteRefuses, ifNot: haproxyNoteAccepts,
 	}.check(t)
 }
 
@@ -248,7 +246,7 @@ func TestHAProxyDirectoryAndTemporaryFile(t *testing.T) {
 	}
 	noteClaim{
 		recipe: "haproxy", topic: "the crt directory and the agent's temporary file", result: result,
-		seen: truncatedSkipped, ifSeen: haproxyNoteSkipsTemp, ifNot: haproxyNoteLoadsTemp, pending: haproxyNotePending,
+		seen: truncatedSkipped, ifSeen: haproxyNoteSkipsTemp, ifNot: haproxyNoteLoadsTemp,
 	}.check(t)
 }
 

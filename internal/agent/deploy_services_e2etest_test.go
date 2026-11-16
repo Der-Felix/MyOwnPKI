@@ -67,10 +67,12 @@ func TestApacheStagedFaultRollsBack(t *testing.T) {
 	if !survived {
 		result = fmt.Sprintf("after the reload with the damaged key Apache did not recover through the rollback (result %q, process alive %t)", results[0].State, h.svc.alive())
 	}
-	noteClaim{
-		recipe: "apache2", topic: "graceful reload with a broken key", result: result,
-		seen: survived, ifSeen: apacheNoteSurvives, ifNot: apacheNoteStops,
-	}.check(t)
+	for _, name := range []string{"apache2", "httpd"} {
+		noteClaim{
+			recipe: name, topic: "graceful reload with a broken key", result: result,
+			seen: survived, ifSeen: apacheNoteSurvives, ifNot: apacheNoteStops,
+		}.check(t)
+	}
 }
 
 // TestHAProxyStagedFaultRollsBack: haproxy -c must refuse the damaged combined

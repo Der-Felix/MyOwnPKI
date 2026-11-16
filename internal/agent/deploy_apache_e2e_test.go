@@ -26,11 +26,10 @@ const (
 	apacheModules = "/usr/lib/apache2/modules"
 )
 
-// What the notes of the apache2 recipe may say about the three observations.
+// What the notes of the apache2 and httpd recipes may say about the two observations.
 const (
 	apacheNoteRejects      = "configtest rejects a key that does not match the certificate"
 	apacheNoteMissesKey    = "configtest does not detect a key that does not match the certificate"
-	apacheNotePendingKey   = "it is not known to check that key and certificate match"
 	apacheNoteSurvives     = "a failed reload leaves Apache serving the previous certificate"
 	apacheNoteStops        = "a failed reload can stop Apache"
 	apacheMismatchSerial   = 900
@@ -196,9 +195,14 @@ func TestApacheConfigtestOnKeyMismatch(t *testing.T) {
 	if n := reloadCount(t, h.marker); n != 0 {
 		t.Fatalf("the observation reloaded Apache %d times", n)
 	}
-	noteClaim{
-		recipe: "apache2", topic: "configtest with a certificate/key mismatch (apache2ctl -f <config> -t)", result: result,
-		seen: failure != nil, ifSeen: apacheNoteRejects, ifNot: apacheNoteMissesKey, pending: apacheNotePendingKey,
-	}.check(t)
-	t.Log("the httpd recipe carries the same sentence; Apache httpd on the Red Hat family was not run here (live test)")
+	// The httpd recipe shares the claim (httpd -t is the same test); the
+	// observation is of the apache2 package, so its notes must not say the
+	// opposite either.
+	for _, name := range []string{"apache2", "httpd"} {
+		noteClaim{
+			recipe: name, topic: "configtest with a certificate/key mismatch (apache2ctl -f <config> -t)", result: result,
+			seen: failure != nil, ifSeen: apacheNoteRejects, ifNot: apacheNoteMissesKey,
+		}.check(t)
+	}
+	t.Log("Apache httpd on the Red Hat family was not run here (live test)")
 }

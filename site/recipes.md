@@ -152,20 +152,36 @@ agent runs the hooks with the argument vector of the table; no shell and no valu
 part of them.
 
 **What the test hook covers.** `apache2ctl configtest` and `httpd -t` check that the files exist and that
-the directives parse. It is **not known** to check that the key matches the certificate. The agent checks
-the pair itself before it writes anything, so the gap is a file that is corrupted afterwards. The project's
-CI runs the real `apache2ctl configtest` against a deliberately mismatched key, and a pass with a
-corrupted staged key through the agent, and prints what it saw in the job summary; this page does not claim more than the recipe's notes,
-which say *not known* until that answer is written down.
+the directives parse. They do **not** detect a key that does not belong to the certificate: the project's
+CI ran the real Apache 2.4.58 (the Ubuntu 24.04 package) with a deliberately mismatched key, and
+`configtest` passed. So the recipe's check protects against a missing file and a syntax error, not against
+a wrong key. What stands between a wrong key and the reload is the agent: it checks the pair before it
+writes anything, which is why that pre-flight check matters for Apache (HAProxy's own check, below, does
+catch it). A pair that is damaged after the agent's check reaches the reload. `httpd -t` is the same
+test; `httpd` on the Red Hat family was not run, so treat it the same.
+
+**A failed reload can stop Apache.** In the same CI run the staged key was damaged after the test hook,
+and the graceful reload that followed ended the Apache process. The agent restored the previous
+certificate and key on disk and reported `rolled_back`, but the rollback did not bring Apache back (the
+process was gone). After a `rolled_back` result for an Apache deployment, look at `systemctl status
+apache2` (`httpd`) and start the service if it is stopped. This was seen with `apache2 -k graceful` on a
+private configuration, not under the real systemd unit.
+
+**`configtest` after a boot without Apache.** `apache2ctl configtest` creates `/run/apache2`,
+`/run/apache2/socks` and `/run/lock/apache2` when they are missing. The agent's unit runs with
+`ProtectSystem=strict`, and the recipe makes only `/var/log/apache2` writable, so the test hook fails
+while Apache has not been started since the boot, and a `systemctl reload` would fail as well. After one
+normal start of Apache the directories exist and the check writes nothing. Start Apache once
+(`systemctl start apache2`) before a pass runs on a host that has not started it since the boot. This
+applies to the Debian `apache2ctl`; the `httpd` recipe was not run.
 
 **What to verify** (on a test host, as `deployment add --dry-run` also tells you):
 
 - `apache2ctl configtest` (or `httpd -t`) passes after you pointed the virtual host at the files. A
   *Renew now* in the UI (or `openssl s_client -connect <host>:443 -servername <name> </dev/null`) shows
   the new serial, and the agent reports `deployed`.
-- What the test hook says when `privkey.pem` is corrupted by hand, and whether the rollback restores the
-  old pair. A reload with a broken key can take Apache down; the open question is whether a failed
-  graceful reload leaves the old process serving.
+- That the rollback restores the old pair on your host, and what a failed reload does to the real
+  service under its unit; CI saw the process stop with a private configuration.
 - The local check connects to `127.0.0.1:443` with the certificate's first name as SNI. When Apache
   listens elsewhere, set `--check HOST:PORT`, or delete the `check:` line of the deployment in
   `agent.yaml`: a check that fails on a valid setup rolls back every renewal.
@@ -216,16 +232,30 @@ of your own with `--hook` and `--test-hook`; the recipe cannot know. The check p
 and loads the certificate files; it is expected to bind no port, so the recipe adds no sandbox directory
 and no low-ports entry.
 
+**What the test hook covers.** The project's CI ran the real HAProxy 2.8.30 (the Ubuntu 24.04 package)
+with a private configuration, and three things were observed:
+
+- `haproxy -c` **refuses a certificate and key that do not match** (`inconsistencies between private key
+  and certificate`). Unlike `configtest` for Apache, the recipe's test hook catches a damaged file before
+  the reload: in the staged-fault test the agent stopped at the test hook, issued no reload, restored the
+  previous file and reported `rolled_back`.
+- With `crt` set to the **directory**, HAProxy **skips the agent's temporary `.myownpki-*` file**. A
+  truncated one in the directory did not break `haproxy -c`, and a complete one was not served for its
+  name. An agent that is killed during a write leaves such a file behind; the agent removes leftovers of
+  its own naming scheme when it starts, and you can look for them with `ls -a /etc/ssl/myownpki/haproxy`.
+- The **order of the certificate and the key** in the combined file does not matter: HAProxy accepted and
+  served a file with the key before the certificate. The agent writes the certificate chain first.
+
+This is one HAProxy version on one distribution, started by the test with a private configuration, not a
+live host.
+
 **What to verify** (on a test host):
 
-- `haproxy -c -f /etc/haproxy/haproxy.cfg` refuses a broken file. The project's CI asks the real HAProxy
-  this and records the answer in the job summary; the recipe's notes say *verify* until it is written down.
-- With `crt` set to the **directory**, HAProxy ignores the agent's temporary `.myownpki-*` file while it
-  is being written. This is also something CI asks and records. An agent that is killed during a write
-  leaves such a file behind; the agent removes leftovers of its own naming scheme when it starts, and
-  you can look for them with `ls -a /etc/ssl/myownpki/haproxy`.
+- That `haproxy -c -f /etc/haproxy/haproxy.cfg` also refuses a damaged file with your real configuration
+  and under the agent's unit.
 - Two deployments (two names) both serve their own certificate after a reload, with the directory form
-  and with one `crt` per file.
+  and with one `crt` per file, and that your version of HAProxy skips the temporary file in a directory
+  as 2.8.30 did.
 - `systemctl show myownpki-agent -p ReadWritePaths` shows no log directory for HAProxy, and
   `journalctl -u myownpki-agent` has no `Read-only file system` from the hooks.
 - The local check connects to `127.0.0.1:443` with the first name as SNI. With `accept-proxy` or a `bind`
