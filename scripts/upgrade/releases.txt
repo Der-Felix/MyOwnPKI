@@ -1,0 +1,27 @@
+# Old release files of the upgrade test (PHASE3 section 19.5, D6, D7).
+# Columns: version, asset, SHA-256. Linux amd64 only: the server archive, the agent
+# archive (from 0.3.0), install.sh (from 0.2.2) and checksums.txt of each start version.
+# Never edit by hand: the hashes come from the cosign-verified checksums.txt of the release.
+#   bash scripts/upgrade/pin-release.sh vX.Y.Z --write      (the owner, after each release)
+# fetch.sh downloads only what is listed here and refuses a file with another hash.
+0.1.0 myownpki_0.1.0_linux_amd64.tar.gz d97fad14b1acfc30fda6c59c84439a7c921bc66620c1ca07fa0025c01e4abf84
+0.1.0 checksums.txt 3217974b3c455a487611af63542821890e39892213439f18ba0a9f6de4d9de08
+0.2.2 myownpki_0.2.2_linux_amd64.tar.gz 77d7e485f92f80abcb343391e5d30aabe90faa4c39a22e07279d010addee68b2
+0.2.2 install.sh 4a58cd57a1c524e4ce82e4c390228d20cbb0f3c2e591264de81cd69044f645bf
+0.2.2 checksums.txt 985c2ee15abbaf2812f1d8b2fbe857f8a0812273a8a26ed771ba3123a4923845
+0.3.0 myownpki_0.3.0_linux_amd64.tar.gz 1483ffd513987552b9a924249fe81297a52b3310519da8df28f6079aa9df0042
+0.3.0 myownpki-agent_0.3.0_linux_amd64.tar.gz ff78e461d80b2590c32115f364aef28b2a5cededa4a427755266cad9874d6595
+0.3.0 install.sh d86ce61461aca6532f911f0bbdd7bb6d011b30c35137af665e6e28e3b530bfb0
+0.3.0 checksums.txt 243194569aa5514d674fe8a3585410f098cb79be619739bffc70551c971cd8dd
+0.3.5 myownpki_0.3.5_linux_amd64.tar.gz ee07c9792d743df2d5bbaa9978bcdaf45cbb949a845359620918873d05b9db5b
+0.3.5 myownpki-agent_0.3.5_linux_amd64.tar.gz a187ee381253303af84f329aeee0d16f956047391bbb6b35115340cee46dfee9
+0.3.5 install.sh e9fad68ed7a7520fbc9e59210f03d193ebf045905bbd71bbded0977ce488a19f
+0.3.5 checksums.txt bcf4dc0e574e3625884d1f529239cfe0ea088c903248bfcb8fd8d365496c4c7d
+0.3.10 myownpki_0.3.10_linux_amd64.tar.gz 2a3fcc207ec852568d81eb50e3612e02b293c0522b90a455634bef9492cc5275
+0.3.10 myownpki-agent_0.3.10_linux_amd64.tar.gz 41333e89437af379c1096d4e5098c1331489e234184e5c6fd290d9141db12642
+0.3.10 install.sh 89f74a2ab153d775ca6cdb96943cf3d52ec236703fec04cf3c7e4a79042be67d
+0.3.10 checksums.txt dd69c85d0f46eecc6e7f21aad4deaacaff4df2cdbf197eee785eb26535fdbbde
+0.3.12 myownpki_0.3.12_linux_amd64.tar.gz defe1ae54bc0af7248c600a6ae5a431f2a91199b892721bf6434a161c819660b
+0.3.12 myownpki-agent_0.3.12_linux_amd64.tar.gz 1e5cc6dae1545859321b1b369cda37c01cbddec87185ba9ca990f3bd8cd0c445
+0.3.12 install.sh 73cd63724e2abf5dfa15fc25bd96fb56d7e8e292c5871c9c83a2313c88b99351
+0.3.12 checksums.txt 03b58052edce7b0f7b2f60563c3d6efd5713fb93e648a4d5fa881238e53eae81

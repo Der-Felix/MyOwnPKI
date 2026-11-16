@@ -184,6 +184,11 @@ tasks:
     cmds:
       - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/ci/pin-migrations.sh --check
 
+  upgrade:fetch:
+    desc: Download and verify the old release files of the upgrade test into .tools/upgrade/cache (pinned SHA-256 in scripts/upgrade/releases.txt); once done, UPGRADE_OFFLINE=1 needs no network
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/upgrade/fetch.sh --all
+
   upgrade:test:
     desc: Upgrade test – the previous release (UPGRADE_FROM) makes an instance and a backup; this build restores, migrates and issues by ACME
     cmds:
