@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 )
 
@@ -169,7 +171,7 @@ func (a *Agent) atomicTarget(t targetFile) error {
 	if merr := root.MkdirAll(dir, 0o755); merr != nil {
 		return merr
 	}
-	tmp := filepath.Join(dir, ".myownpki-"+rand.Text())
+	tmp := filepath.Join(dir, tempPrefix+rand.Text())
 	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -237,4 +239,83 @@ func (a *Agent) removeTarget(path string) error {
 		return err
 	}
 	return syncDirectory(root, filepath.Dir(name))
+}
+
+// tempPrefix starts the name of the exclusive temporary file of atomicTarget.
+const tempPrefix = ".myownpki-"
+
+// tempName is exactly what atomicTarget creates: the prefix and the 26
+// characters of crypto/rand.Text (base32, upper case). Nothing else is ever
+// removed as a leftover.
+var tempName = regexp.MustCompile(`^\.myownpki-[A-Z2-7]{26}$`)
+
+// removeStaleTemps removes the temporary files a killed or power-cut agent
+// left in the directories of its deployment targets. Such a file holds a copy
+// of a target, and for a combined file the private key; HAProxy may even load
+// it when its crt is a directory. It runs under the deployment lock, so no
+// write of this agent is in flight. Everything goes through os.Root on an
+// allowed path: only a regular file whose name is exactly a temporary name is
+// removed, a symlink or any other name is left alone. A failure is logged with
+// the path only and never stops the agent.
+func (a *Agent) removeStaleTemps() {
+	done := map[string]bool{}
+	for _, d := range a.cfg.Deployments {
+		for _, target := range deploymentPaths(d).Targets() {
+			dir := filepath.Dir(target)
+			if done[dir] {
+				continue
+			}
+			done[dir] = true
+			a.removeStaleTempsIn(target)
+		}
+	}
+}
+
+// removeStaleTempsIn cleans the directory of one target file.
+func (a *Agent) removeStaleTempsIn(target string) {
+	root, name, err := a.openTarget(target)
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	dir := filepath.Dir(name)
+	f, err := root.Open(dir)
+	if err != nil {
+		return
+	}
+	entries, err := f.ReadDir(-1)
+	_ = f.Close()
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !tempName.MatchString(e.Name()) || !e.Type().IsRegular() {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		// Look again right before the removal: a symlink put there since the
+		// listing is removed as a link at worst, but never counted as ours.
+		if info, lerr := root.Lstat(p); lerr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		full := filepath.Join(root.Name(), p)
+		if rerr := root.Remove(p); rerr != nil {
+			a.warn("deployment: a leftover temporary file could not be removed", full, rerr)
+			continue
+		}
+		a.warn("deployment: removed a leftover temporary file of an interrupted write", full, nil)
+	}
+}
+
+// warn logs one warning that carries a path and, for a failure, the error
+// text; never file contents.
+func (a *Agent) warn(msg, path string, err error) {
+	if a.log == nil {
+		return
+	}
+	if err != nil {
+		a.log.Warn(msg, slog.String("path", path), slog.Any("error", err))
+		return
+	}
+	a.log.Warn(msg, slog.String("path", path))
 }

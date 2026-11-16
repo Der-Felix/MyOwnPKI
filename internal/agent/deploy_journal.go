@@ -255,6 +255,7 @@ func (a *Agent) Recover(ctx context.Context) ([]DeploymentResult, error) {
 	}
 	defer unlock()
 	a.st.cleanupWritten()
+	a.removeStaleTemps()
 	data, err := os.ReadFile(a.st.path(journalFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
