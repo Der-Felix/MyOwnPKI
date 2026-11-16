@@ -87,8 +87,8 @@ func FuzzDecodeBody(f *testing.F) {
 		strings.Repeat("[", 10001),
 		`{"anything":` + strings.Repeat("[", 9990) + strings.Repeat("]", 9990) + `}`,
 		`{"zz":` + strings.Repeat("[", 9990) + strings.Repeat("]", 9990) + `}`,
-		`{"` + strings.Repeat("k", 100) + `":1}`,
-		`{"items":[{"` + strings.Repeat("é", 30) + `":1}]}`,
+		`{"` + strings.Repeat("k", 100_000) + `":1}`,
+		`{"items":[{"` + strings.Repeat("é", 40_000) + `":1}]}`,
 		`{"reason":"` + strings.Repeat("a", bodyBudget) + `"}`,
 		strings.Repeat(" ", bodyBudget) + `{}`,
 		strings.Repeat(" ", bodyBudget+1),
@@ -207,6 +207,9 @@ func checkRefusal(t *testing.T, shape fuzzShape, data []byte, err error) {
 		}
 	}
 
+	if be.status == http.StatusRequestEntityTooLarge {
+		return // the body was not read to its end, there is no field to compare
+	}
 	// The walker, checked against the decoder's own answer.
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -229,6 +232,13 @@ func checkRefusal(t *testing.T, shape fuzzShape, data []byte, err error) {
 		}
 		if got, want := tokens[len(tokens)-1], strings.Trim(name, `"`); !equalKey(got, want) {
 			t.Fatalf("the walker names %q, the decoder refused %s", path, name)
+		}
+		// The answer names the same field; a long path is cut, never changed.
+		if len(be.fields) != 1 {
+			t.Fatalf("an unknown field gave %d field errors", len(be.fields))
+		}
+		if shown := be.fields[0].Field; shown != path && !strings.HasPrefix(path, strings.TrimSuffix(shown, "…")) {
+			t.Fatalf("the answer names %.60q, the walker %.60q", shown, path)
 		}
 		if !existsIn(t, data, tokens) {
 			t.Fatalf("%q does not point into the input", path)
