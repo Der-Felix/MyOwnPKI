@@ -33,6 +33,9 @@ steps=(
   'agent-e2e|real server agent ACME nginx rollback|linux_docker|bash scripts/ci/agent-e2e-nginx.sh'
   'agent-e2e|systemd verify and security|linux_systemd_disposable|bash scripts/ci/agent-e2e-systemd.sh'
   'agent-e2e|nginx port 443 systemd controls|linux_systemd_docker_disposable|bash scripts/ci/agent-e2e-nginx-systemd.sh'
+  'agent-e2e-services|download pinned Go modules|go|bash scripts/ci/agent-e2e-download.sh'
+  'agent-e2e-services|apache2 recipe with the real Apache|linux_apache|bash scripts/ci/agent-e2e-apache.sh'
+  'agent-e2e-services|haproxy recipe with the real HAProxy|linux_haproxy|bash scripts/ci/agent-e2e-haproxy.sh'
   'install|GoReleaser snapshot|linux_goreleaser|bash scripts/ci/install-snapshot.sh'
   'install|agent package formats and architectures|linux_docker_dpkg|bash scripts/ci/agent-package-inspect.sh'
   'install|agent packages in pinned distributions|linux_docker_openssl|bash scripts/ci/agent-package-distros.sh'
@@ -132,6 +135,18 @@ requirement() {
     shellcheck) has_commands bash shellcheck || echo 'needs bash + shellcheck' ;;
     vacuum) has_commands go task vacuum || echo 'needs Go + Task + vacuum' ;;
     linux) [ "$os" = linux ] || echo 'needs Linux' ;;
+    linux_apache)
+      # The tests start their own Apache; the package only has to be installed
+      # (sudo apt-get install apache2). The job on GitHub installs it itself.
+      if [ "$os" != linux ] || ! has_commands go || [ ! -x /usr/sbin/apache2 ] || [ ! -x /usr/sbin/apache2ctl ] || [ ! -f /usr/lib/apache2/modules/mod_ssl.so ]; then
+        echo "needs Linux + Go + the Debian or Ubuntu package apache2 (the test runs its own instance, the installed service stays untouched)"
+      fi
+      ;;
+    linux_haproxy)
+      if [ "$os" != linux ] || ! has_commands go || [ ! -x /usr/sbin/haproxy ]; then
+        echo "needs Linux + Go + the Debian or Ubuntu package haproxy (the test runs its own instance, the installed service stays untouched)"
+      fi
+      ;;
     linux_docker)
       if [ "$os" != linux ] || ! has_commands go task docker; then
         echo 'needs Linux + docker'

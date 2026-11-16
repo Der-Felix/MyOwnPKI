@@ -64,6 +64,21 @@ days before (on or before 2026-11-02); the newer `certbot` v5.10.0 (2026-11-10) 
 The demo's second image (`web`) is built on the server image of the same release and adds only
 the agent tarball of that release, checked against the `checksums.txt` that is in the image.
 
+## Distribution packages of the Apache and HAProxy tests (v0.3.11)
+
+Used only by the CI job `agent end-to-end (Apache, HAProxy)` (docs/PHASE3.md §17, step 69) and by
+`scripts/ci/agent-e2e-apache.sh` and `agent-e2e-haproxy.sh`; not shipped, not in `go.mod`, not an
+image. The job installs the packages of the runner's own distribution (`ubuntu-24.04`) with
+`apt-get`, so the version is the one that distribution carries on the day of the run, which is
+what an admin on that release gets; the tests print `apache2 -v` and `haproxy -v` into the log.
+They are not pinned by digest: the tests start the service with a private configuration and
+check behavior, not a version.
+
+| Package | License | For |
+|---|---|---|
+| `apache2` (Debian and Ubuntu) | Apache-2.0 | the real Apache of the `apache2` recipe test (`mod_ssl`, `apache2ctl`) |
+| `haproxy` (Debian and Ubuntu) | GPL-2.0-or-later (headers LGPL-2.1) | the real HAProxy of the `haproxy` recipe test (`haproxy -c`, master-worker reload) |
+
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 
 Used only by `.github/workflows/release.yml` (and locally by `task release:check` /
