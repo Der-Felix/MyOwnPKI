@@ -23,7 +23,7 @@ unless you prefer not to be.
 
 ## Supported versions
 
-MyOwnPKI is pre-1.0 (the 0.3 series, see [docs/PLAN.md](docs/PLAN.md) and the
+MyOwnPKI is pre-1.0 (the beta, the 0.9 series, see [docs/PLAN.md](docs/PLAN.md) and the
 [changelog](CHANGELOG.md)). Security fixes go to the **latest release** and to the `main` branch;
 earlier releases get no backport, so the answer to a report is "update to the next release". Before
 1.0 a minor version may change the API, the configuration and the database schema; the release
@@ -31,7 +31,7 @@ notes say how to upgrade.
 
 | Version | Security fixes |
 |---|---|
-| the latest 0.3.x release | yes |
+| the latest 0.9.x release | yes |
 | `main` | yes |
 | earlier releases | no, please update |
 

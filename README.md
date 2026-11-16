@@ -7,7 +7,11 @@
 
 **Your own PKI – self-hosted, automated, from homelab to enterprise.**
 
-> **Status: v0.3.** A working CA with web UI, REST API, legacy import and backup – it replaces the
+> **Status: public beta (v0.9.x).** The feature set is frozen; only fixes follow until v1.0. Try it, break it,
+> report it – and never post secrets. What to test and how to report: the
+> [beta page](https://der-felix.github.io/MyOwnPKI/beta/).
+
+> **What it is (since v0.3).** A working CA with web UI, REST API, legacy import and backup – it replaces the
 > `pki.sh` Bash suite – an **ACME server** for your own CA (behind a reverse proxy, or with its own
 > TLS since v0.2.2) and, new in v0.3.0, the **Linux agent** that gets and deploys certificates by
 > ACME, with "Renew now" in the web UI. Monitoring comes with v0.3.x. See

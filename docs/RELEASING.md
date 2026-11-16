@@ -102,6 +102,11 @@ $env:NO_PROXY = "github.com,api.github.com"
    grep "^DEFAULT_VERSION=" deploy/install.sh deploy/install-agent.sh
    ```
 
+   The demo names the release too, and a static compose file cannot read it: bump the image tag
+   `ghcr.io/der-felix/myownpki:<version>` by hand in `deploy/demo/docker-compose.yml` (three
+   places), `deploy/demo/web/Dockerfile`, `deploy/demo/.env.example` and `deploy/demo/README.md`.
+   `go test ./deploy/demo` fails when one of them differs from `DEFAULT_VERSION`.
+
 4. Merge into main – through the pull request once its CI is green – and bring the local main up
    to date, so the tags below land on the merged commit:
 

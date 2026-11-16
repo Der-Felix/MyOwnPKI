@@ -1009,6 +1009,22 @@ func (k RecoveryKey) equal(other RecoveryKey) bool {
 	return subtle.ConstantTimeCompare(k[:], other[:]) == 1
 }
 
+// RecoveryOutput is where init shows a new recovery key. init itself decides
+// by mode (setup.go, cmd/myownpki/init.go); the type only names the rule for
+// the test below.
+type RecoveryOutput int
+
+// Output targets.
+const (
+	ShowOnTerminal RecoveryOutput = iota + 1
+	WriteToFile
+)
+
+// ErrRecoveryKeyNeedsFile: without an interactive terminal (Docker, systemd,
+// a pipe) the key would end up in a log, so it may only go to a file.
+var ErrRecoveryKeyNeedsFile = errors.New("standard output is not an interactive terminal – " +
+	"the recovery key would end up in a log; use --recovery-key-file <path>")
+
 // ChooseRecoveryOutput applies the rule (owner decision 2026-10-13): a file
 // if one is given, the terminal only if stdout is interactive, otherwise
 // refuse.

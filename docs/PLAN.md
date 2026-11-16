@@ -456,6 +456,11 @@ release plan below – v1.0 takes parts of phases 2–4 and leaves others for la
 - **Order before numbers:** the version numbers after v0.3.4 are the current plan and can shift;
   the order is the owner's decision (2026-11-08).
 - Each v0.3.x release gets its own work plan in `docs/PHASE3.md` before it is built.
+- **Feature freeze (from v0.9.0 until v1.0.0, PHASE3 §19.4):** the beta accepts fixes, docs, tests and the CI for them,
+  security hardening that only narrows what is accepted, and dependency security updates; a new migration only to fix a
+  defect, never an edit of a released one. Everything else needs the owner's exception (label `freeze-exception`);
+  ideas get the label `post-1.0` and wait for the list above and §12. The rules for contributors are in
+  `CONTRIBUTING.md`, "Feature freeze".
 
 **v1.0 contains:**
 

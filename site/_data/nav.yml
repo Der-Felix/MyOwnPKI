@@ -8,10 +8,14 @@
       url: /
     - title: Choose your setup
       url: /choose/
+    - title: Try the demo
+      url: /demo/
     - title: Installation
       url: /install/
     - title: Upgrade
       url: /upgrade/
+    - title: Test the beta
+      url: /beta/
 - group: Learn
   items:
     - title: Learn

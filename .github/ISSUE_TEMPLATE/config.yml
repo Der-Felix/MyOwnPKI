@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem (private)
+    url: https://github.com/Der-Felix/MyOwnPKI/security/advisories/new
+    about: A vulnerability, a certificate issued outside policy, a key that can be read, a login bypass. Do not open a public issue for it; see SECURITY.md.
+  - name: Test the beta (checklist)
+    url: https://der-felix.github.io/MyOwnPKI/beta/
+    about: What to try, what is known not to work yet and what never to post.
