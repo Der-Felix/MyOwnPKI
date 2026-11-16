@@ -2508,7 +2508,9 @@ paths:
       summary: Parse a CSR and show what it asks for – nothing is issued
       description: |
         Lets the UI preview a CSR (untrusted input) before issuing. The signature is verified; a
-        broken CSR is a policy violation. Needs the operator role on one CA at least.
+        broken CSR is a policy violation. Needs the operator role on one CA at least. A CSR with
+        more than 100 names still gets a preview: `sans` lists the first 100 names (DNS, IP, e-mail
+        and URI in this order, each cut to 80 bytes) and `problems` says how many names there are.
       x-required-role: operator
       requestBody:
         description: "PKCS#10 request in PEM (untrusted input)"
@@ -2597,7 +2599,10 @@ paths:
       tags: [imports]
       operationId: importExternalCertificate
       summary: Add a certificate from another CA for expiry monitoring
-      description: "Stored with `source: external`; never signed, renewed or revoked by this server."
+      description: |
+        Stored with `source: external`; never signed, renewed or revoked by this server. A
+        certificate with more than 100 names (DNS, IP, e-mail and URI together, as the certificate
+        lists them) is refused with 422 `policy-violation`, as an issuance would be; nothing is stored.
       x-required-role: admin
       requestBody:
         description: "One certificate in PEM"
@@ -4840,7 +4845,7 @@ components:
           items: { type: string }
         problems:
           type: array
-          description: What the key policy refuses (an issuance would be denied)
+          description: "What an issuance would refuse: a key the policy does not take, or more than 100 names (then `sans` lists only the first 100)"
           items: { type: string }
         warnings:
           type: array

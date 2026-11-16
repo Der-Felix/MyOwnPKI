@@ -213,7 +213,8 @@ func (a *app) validateKey(c *rc, pr *preset.Preset, info ca.CAInfo, st *certific
 	}
 }
 
-// uploadedCSR reads the uploaded CSR file, PEM or DER, as PEM text.
+// uploadedCSR reads the uploaded CSR file, PEM or DER, as PEM text. A file
+// that parses as a DER request is DER; any other file with a PEM header is PEM.
 // ok = a file was uploaded; msg = what is wrong with it.
 func uploadedCSR(r *http.Request) (text string, ok bool, msg string) {
 	if r.MultipartForm == nil || len(r.MultipartForm.File["csrfile"]) == 0 {
@@ -235,14 +236,20 @@ func uploadedCSR(r *http.Request) (text string, ok bool, msg string) {
 	if err != nil || len(data) > maxCSRFile {
 		return "", true, "The file can't be read."
 	}
+	// DER is decided by parsing: one request, nothing after it. Looking for
+	// "-----BEGIN" in the bytes would take a request whose subject contains
+	// that text for PEM – the subject is chosen by whoever made the request.
+	// PEM text never parses as DER, it starts with "-".
+	if _, err := x509.ParseCertificateRequest(data); err == nil {
+		return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: data})), true, ""
+	}
+	// Any other file with a PEM header is PEM text, with or without text in
+	// front of the block (openssl req -text); parseCSR checks it in the next
+	// call, one block and one request.
 	if bytes.Contains(data, []byte("-----BEGIN")) {
 		return string(data), true, ""
 	}
-	// DER: one request, nothing after it.
-	if _, err := x509.ParseCertificateRequest(data); err != nil {
-		return "", true, "The file is neither a PEM nor a DER certificate request."
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: data})), true, ""
+	return "", true, "The file is neither a PEM nor a DER certificate request."
 }
 
 // prefill puts the CSR's names into the name fields – once per CSR, so the

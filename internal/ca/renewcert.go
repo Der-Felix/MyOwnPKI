@@ -182,14 +182,9 @@ func InspectCSR(data []byte) (*CSRInspection, error) {
 		return nil, err
 	}
 	out := &CSRInspection{Subject: csr.Subject.String(), CommonName: csr.Subject.CommonName, SignatureValid: true,
-		DNSNames: append([]string{}, csr.DNSNames...), IPs: []string{}, Emails: append([]string{}, csr.EmailAddresses...), URIs: []string{},
+		DNSNames: []string{}, IPs: []string{}, Emails: []string{}, URIs: []string{},
 		RequestedExtensions: []string{}, Problems: []string{}, Warnings: []string{}}
-	for _, ip := range csr.IPAddresses {
-		out.IPs = append(out.IPs, ip.String())
-	}
-	for _, u := range csr.URIs {
-		out.URIs = append(out.URIs, u.String())
-	}
+	total := previewNames(csr, out)
 	for _, ext := range csr.Extensions {
 		name := extensionName(ext.Id.String())
 		if ext.Critical {
@@ -201,10 +196,41 @@ func InspectCSR(data []byte) (*CSRInspection, error) {
 		out.KeyAlgorithm = describeKey(csr.PublicKey)
 		out.Problems = append(out.Problems, err.Error())
 	}
+	if total > maxSANs {
+		out.Problems = append(out.Problems, fmt.Sprintf("%d names – at most %d per certificate; the list shows the first %d", total, maxSANs, maxSANs))
+	}
 	if len(out.RequestedExtensions) > 0 {
 		out.Warnings = append(out.Warnings, "the CSR asks for extensions – they are never copied; the preset decides them")
 	}
 	return out, nil
+}
+
+// previewNames fills the four name lists of a preview and returns how many
+// names the CSR has. The lists hold the first maxSANs names over all four
+// types, in the order DNS, IP, e-mail, URI (the count of an issuance), each
+// cut to 80 bytes like every echo of attacker text: 64 KiB of CSR hold about
+// 2,500 names and the answer would repeat every one of them.
+func previewNames(csr *x509.CertificateRequest, out *CSRInspection) (total int) {
+	total = len(csr.DNSNames) + len(csr.IPAddresses) + len(csr.EmailAddresses) + len(csr.URIs)
+	room := maxSANs
+	take := func(n int) int {
+		k := min(n, room)
+		room -= k
+		return k
+	}
+	for _, d := range csr.DNSNames[:take(len(csr.DNSNames))] {
+		out.DNSNames = append(out.DNSNames, short(d))
+	}
+	for _, ip := range csr.IPAddresses[:take(len(csr.IPAddresses))] {
+		out.IPs = append(out.IPs, short(ip.String()))
+	}
+	for _, m := range csr.EmailAddresses[:take(len(csr.EmailAddresses))] {
+		out.Emails = append(out.Emails, short(m))
+	}
+	for _, u := range csr.URIs[:take(len(csr.URIs))] {
+		out.URIs = append(out.URIs, short(u.String()))
+	}
+	return total
 }
 
 func extensionName(oid string) string {
@@ -237,6 +263,19 @@ func (e *Engine) ImportExternal(ctx context.Context, certPEM []byte, who keys.Wh
 	return e.Certificate(ctx, who, id)
 }
 
+// checkExternalNames refuses a certificate of another CA with more than maxSANs
+// names, the limit the issuance path has (names.go). The names are counted as
+// the certificate lists them, over all four types and before any is stored: a
+// 64 KiB certificate holds about 3,000 of them and each would become a
+// certificate_sans row. The text names the count and the limit only; it echoes
+// no name of the certificate.
+func checkExternalNames(cert *x509.Certificate) error {
+	if n := len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs); n > maxSANs {
+		return deny("%d names – at most %d per certificate", n, maxSANs)
+	}
+	return nil
+}
+
 func (e *Engine) importExternal(ctx context.Context, certPEM []byte, who keys.Who, now time.Time) (string, error) {
 	if err := e.authorize(who, authz.ManageTenant, "", now); err != nil {
 		return "", err
@@ -247,6 +286,9 @@ func (e *Engine) importExternal(ctx context.Context, certPEM []byte, who keys.Wh
 	}
 	if cert.IsCA {
 		return "", deny("this is a CA certificate – import a root with POST /cas/import")
+	}
+	if err = checkExternalNames(cert); err != nil {
+		return "", err
 	}
 	sum := sha256.Sum256(cert.Raw)
 	fp := strings.ToUpper(hex.EncodeToString(sum[:]))

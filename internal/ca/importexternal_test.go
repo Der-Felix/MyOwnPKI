@@ -165,38 +165,100 @@ func TestImportExternalRefusals(t *testing.T) {
 	}
 }
 
-// TestImportExternalWithThousandsOfSANs: the certificate is a record like any
-// other – every SAN once, nothing lost – and the audit entry stays small.
-func TestImportExternalWithThousandsOfSANs(t *testing.T) {
+// namesCert is a certificate of another CA with the given number of names of each type.
+func namesCert(t *testing.T, dns, ips, emails, uris int) []byte {
+	t.Helper()
+	return foreignCert(t, func(c *x509.Certificate) {
+		for i := range dns {
+			c.DNSNames = append(c.DNSNames, fmt.Sprintf("h%d.ex.org", i))
+		}
+		for i := range ips {
+			c.IPAddresses = append(c.IPAddresses, net.IPv4(10, byte(i>>8), byte(i), 1))
+		}
+		for i := range emails {
+			c.EmailAddresses = append(c.EmailAddresses, fmt.Sprintf("u%d@ex.org", i))
+		}
+		for i := range uris {
+			c.URIs = append(c.URIs, &url.URL{Scheme: "spiffe", Host: "ex.org", Path: fmt.Sprintf("/w%d", i)})
+		}
+	}, nil)
+}
+
+// TestImportExternalNameLimit: a certificate of another CA is a record, but a
+// record of at most maxSANs names, as for an issuance. More is refused with the
+// limit named, before anything is stored: a 64 KiB certificate holds about
+// 3,000 names, and every one of them would become a certificate_sans row.
+// This reverses the old TestImportExternalWithThousandsOfSANs, which recorded
+// 3,000 names on purpose (decision D3 of docs/PHASE3.md section 19).
+func TestImportExternalNameLimit(t *testing.T) {
 	t.Parallel()
 	v := newEnv(t)
-	const count = 3000
-	var names []string
-	for i := range count {
-		names = append(names, fmt.Sprintf("h%d.ex.org", i))
+
+	// At the limit: counted over all four types, every name stored once.
+	for _, tt := range []struct {
+		name                  string
+		dns, ips, emails, uri int
+	}{
+		{"100 DNS names", 100, 0, 0, 0},
+		{"100 names of four types", 70, 20, 9, 1},
+	} {
+		info, err := v.e.ImportExternal(t.Context(), namesCert(t, tt.dns, tt.ips, tt.emails, tt.uri), tester)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		var rows int
+		if err = v.pki.QueryRowContext(t.Context(), `SELECT count(*) FROM certificate_sans WHERE certificate_id = ?`, info.ID).Scan(&rows); err != nil || rows != maxSANs {
+			t.Errorf("%s: %d SAN rows, want %d (%v)", tt.name, rows, maxSANs, err)
+		}
 	}
-	names = append(names, names[:100]...) // twice
-	certPEM := foreignCert(t, func(c *x509.Certificate) { c.DNSNames = names }, nil)
-	if len(certPEM) > MaxCertSize {
-		t.Fatalf("the test certificate is %d bytes, over the limit", len(certPEM))
+	stored := v.certificateCount(t)
+
+	// Over it.
+	refused := []struct {
+		name                  string
+		dns, ips, emails, uri int
+		count                 int
+	}{
+		{"101 DNS names", 101, 0, 0, 0, 101},
+		{"101 names of four types", 70, 20, 10, 1, 101},
+		{"101 IP addresses", 0, 101, 0, 0, 101},
+		{"3,000 DNS names", 3000, 0, 0, 0, 3000},
 	}
-	info, err := v.e.ImportExternal(t.Context(), certPEM, tester)
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range refused {
+		certPEM := namesCert(t, tt.dns, tt.ips, tt.emails, tt.uri)
+		if len(certPEM) > MaxCertSize {
+			t.Fatalf("%s: the test certificate is %d bytes, over the limit", tt.name, len(certPEM))
+		}
+		_, err := v.e.ImportExternal(t.Context(), certPEM, tester)
+		want := fmt.Sprintf("%d names – at most %d per certificate", tt.count, maxSANs)
+		if got := deniedErr(t, err); got != want {
+			t.Errorf("%s: %q, want %q", tt.name, got, want)
+		}
 	}
-	if len(info.DNSNames) != count {
-		t.Errorf("%d DNS names, want %d", len(info.DNSNames), count)
+	if n := v.certificateCount(t); n != stored {
+		t.Errorf("%d certificates after the refusals, want %d", n, stored)
 	}
-	var rows int
-	if err = v.pki.QueryRowContext(t.Context(), `SELECT count(DISTINCT value) FROM certificate_sans WHERE certificate_id = ? AND type = 'dns'`, info.ID).Scan(&rows); err != nil || rows != count {
-		t.Errorf("%d distinct SAN rows, want %d (%v)", rows, count, err)
+	var sanRows int
+	if err := v.pki.QueryRowContext(t.Context(), `SELECT count(*) FROM certificate_sans`).Scan(&sanRows); err != nil || sanRows != 2*maxSANs {
+		t.Errorf("%d SAN rows after the refusals, want %d (%v)", sanRows, 2*maxSANs, err)
 	}
+	denied, success := 0, 0
 	for _, row := range v.auditRows(t) {
-		if row.action == ActionImportExternal {
+		if row.action != ActionImportExternal {
+			continue
+		}
+		switch row.result {
+		case "denied":
+			denied++
+		case "success":
+			success++
 			if n := len(fmt.Sprint(row.details)); n > 2000 {
 				t.Errorf("audit details are %d bytes", n)
 			}
 		}
+	}
+	if denied != len(refused) || success != 2 {
+		t.Errorf("audit log: %d denied and %d success entries, want %d and 2", denied, success, len(refused))
 	}
 }
 
