@@ -63,7 +63,6 @@ func TestAddPrintsTheHintOnlyForHooksThatOpenSockets(t *testing.T) {
 // and fails with AH00091 when the log directory is not writable: the check
 // form gets its own hint, and none once a --sandbox-write directory exists.
 func TestApacheConfigCheckHint(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		cmd  []string
 		want bool
@@ -82,7 +81,9 @@ func TestApacheConfigCheckHint(t *testing.T) {
 	}
 	for name, withWrite := range map[string]bool{"without sandbox write": false, "with sandbox write": true} {
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+			// Not parallel: the fixture swaps the package-level systemctl
+			// runner, and a second subtest would restore the real one under
+			// the first (the CI run then ran a real daemon-reload).
 			f := freshFixture(t)
 			spec := DeploymentSpec{
 				Name: "p", Dir: f.p("ssl", "p"), ACMEDirectory: recipeACME,
