@@ -237,6 +237,10 @@ func FuzzParseCSR(f *testing.F) {
 	for i := range 2500 {
 		many = append(many, "host"+strconv.Itoa(i)+".homelab.lan")
 	}
+	var manyIPs []net.IP
+	for i := range 60 {
+		manyIPs = append(manyIPs, net.IPv4(10, 0, byte(i), 1))
+	}
 	flipped := bytes.Clone(good)
 	flipped[len(flipped)-1] ^= 0xff
 	padded := append(bytes.Clone(goodPEM), bytes.Repeat([]byte{'\n'}, MaxCSRSize-len(goodPEM)+1)...)
@@ -256,6 +260,9 @@ func FuzzParseCSR(f *testing.F) {
 	f.Add(append(bytes.Clone(goodPEM), []byte("trailing\n")...)) // data after the block
 	f.Add(append(bytes.Clone(goodPEM), '\n', '\r', ' '))         // white space after it is fine
 	f.Add(append([]byte("Certificate Request:\n  Data:\n"), goodPEM...))
+	f.Add(fuzzPEM("CERTIFICATE REQUEST", fuzzCSRDER(&x509.CertificateRequest{DNSNames: many[:101]}, k.ec)))                                          // one over the cap
+	f.Add(fuzzPEM("CERTIFICATE REQUEST", fuzzCSRDER(&x509.CertificateRequest{DNSNames: many[:60], IPAddresses: manyIPs[:41]}, k.ec)))                // the cap counts all four types
+	f.Add(fuzzPEM("CERTIFICATE REQUEST", fuzzCSRDER(&x509.CertificateRequest{DNSNames: []string{strings.Repeat("a", 300) + ".homelab.lan"}}, k.ec))) // a name over 80 bytes
 	f.Add(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: good}))
 	f.Add(fuzzPEM("CERTIFICATE", good))
 	f.Add(fuzzPEM("CERTIFICATE REQUEST", flipped))
@@ -301,8 +308,33 @@ func FuzzParseCSR(f *testing.F) {
 		if !insp.SignatureValid {
 			t.Error("preview of an accepted CSR says the signature is invalid")
 		}
-		if n, items := inspectionBytes(insp); n > 16*len(data)+4096 || items > len(data)/2+8 {
+		if n, items := inspectionBytes(insp); n > 16*len(data)+4096 || items > 100+len(again.Extensions)+8 {
 			t.Errorf("preview is %d bytes in %d items for %d bytes of CSR", n, items, len(data))
+		}
+
+		// The names of the preview: the first 100 over all four types in the order DNS, IP, e-mail, URI, none
+		// longer than 80 bytes, and a problem that names the cap whenever the CSR has more.
+		have := len(again.DNSNames) + len(again.IPAddresses) + len(again.EmailAddresses) + len(again.URIs)
+		shown := 0
+		for _, list := range [][]string{insp.DNSNames, insp.IPs, insp.Emails, insp.URIs} {
+			shown += len(list)
+			for _, s := range list {
+				if len(s) > 80 {
+					t.Errorf("a name of the preview is %d bytes", len(s))
+				}
+			}
+		}
+		if shown != min(have, 100) {
+			t.Errorf("preview shows %d of %d names, want %d", shown, have, min(have, 100))
+		}
+		capProblems := 0
+		for _, p := range insp.Problems {
+			if strings.Contains(p, "names – at most 100 per certificate") {
+				capProblems++
+			}
+		}
+		if (have > 100) != (capProblems == 1) || capProblems > 1 {
+			t.Errorf("%d names in the CSR and %d problems about the cap: %q", have, capProblems, insp.Problems)
 		}
 		if got, want := len(insp.RequestedExtensions), len(again.Extensions); got != want {
 			t.Errorf("preview lists %d extensions, the CSR has %d", got, want)

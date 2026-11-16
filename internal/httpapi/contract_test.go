@@ -354,6 +354,13 @@ func TestContract(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "web.homelab.lan"}, DNSNames: []string{"web.homelab.lan"}}, priv)
 	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+	// A CSR with 1,000 names still gets a preview: the first 100 names and a problem that says how many there are.
+	var csrNames []string
+	for i := range 1000 {
+		csrNames = append(csrNames, "h"+strconv.Itoa(i)+".example.org")
+	}
+	manyCSRDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "many.example.org"}, DNSNames: csrNames}, priv)
+	manyCSR := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: manyCSRDER}))
 	issue := func(dns string) map[string]any {
 		return map[string]any{"ca_id": issuing, "preset": "server", "sans": map[string]any{"dns": []string{dns}}, "key": map[string]string{"algorithm": "ecdsa-p256"}}
 	}
@@ -567,6 +574,13 @@ func TestContract(t *testing.T) {
 	}
 	for _, cc := range cases {
 		run(cc)
+	}
+	run(contractCase{op: "inspectCSR", as: op, body: map[string]string{"csr_pem": manyCSR}, want: 200}) // the answer is checked against the schema: at most 100 names a list
+	if r := op.do(t, http.MethodPost, "/csr/inspect", map[string]string{"csr_pem": manyCSR}); r.Code != http.StatusOK {
+		t.Errorf("preview of a CSR with 1,000 names: %d %s", r.Code, r.Body.String())
+	} else if sans, _ := r.body["sans"].(map[string]any); len(anyList(sans["dns"])) != 100 ||
+		fmt.Sprint(r.body["problems"]) != "[1000 names – at most 100 per certificate; the list shows the first 100]" {
+		t.Errorf("preview of a CSR with 1,000 names: %s", r.Body.String())
 	}
 	// What a client reads when a certificate has too many names: the count and the limit, no name.
 	if r := admin.do(t, http.MethodPost, "/imports/external-certificate", map[string]string{"certificate_pem": manyPEM}); r.Code != http.StatusUnprocessableEntity ||
@@ -1456,3 +1470,9 @@ func withMode(settings map[string]any, mode string) map[string]any {
 
 // Routes lists the operations this build serves (contract tests).
 func (a *API) Routes() []Route { return a.routes }
+
+// anyList is a decoded JSON array, nil for anything else.
+func anyList(v any) []any {
+	l, _ := v.([]any)
+	return l
+}
