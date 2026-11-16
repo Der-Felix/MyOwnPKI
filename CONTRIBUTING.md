@@ -116,10 +116,23 @@ runs the fuzz targets and you run the other two when you touch the code they mea
   `scripts/ci/deadcode-known.txt`. Delete the function, or move it into a `_test.go` file when only
   tests use it; add it to the list only with a reason, for example a build-tagged test that uses it.
 
+## The upgrade test
+
+An installation made by a released version must keep working after the update: the job `upgrade`
+(`test/upgrade/run.sh`, `docs/PHASE3.md` section 19.5) lets the binaries of old releases make an
+instance, fills it, takes it over with the binary of your branch and checks it (A1 to A10). Release
+files come from `scripts/upgrade/releases.txt` with a pinned SHA-256; a released migration file
+never changes (`internal/store/testdata/released-migrations.txt`). A pull request runs three start
+versions when it touches the store, backup, keys, configuration, the CLI, `proto/`, `deploy/` or the
+test itself (`scripts/ci/changes.sh`); `main` and the nightly run every version. It is not a required
+check, and a red run is a bug to fix, not a flake to restart. Locally it needs Linux (amd64), Go,
+Task, curl and OpenSSL: `task upgrade:lego` once, then `task upgrade UPGRADE_ONLY=0.3.12` (`-- --dry-run`
+shows the plan). Read the SKIP lines of its table: a skipped check is not a passed one.
+
 ## Documentation-only pull requests
 
 A pull request that changes **only** documentation skips the heavy CI jobs (tests, race
-detector, cross-build, conformance, agent end-to-end, install, image, Salt formula); the job `changes`
+detector, cross-build, conformance, agent end-to-end, install, upgrade, image, Salt formula); the job `changes`
 (`scripts/ci/changes.sh`) decides. "Documentation" is exactly: `.claude/**`, `docs/**/*.md` and
 `*.md` files in the repository root. Everything else counts as code, including other Markdown
 files such as `presets/README.md` and `assets/brand/README.md`, `.github/**` and `scripts/**`;

@@ -554,6 +554,21 @@ drop-ins stay as they are.
 3. `myownpki db status` shows the versions; a newer database than the binary is refused, so going
    back means restoring the backup from step 1.
 
+**Servers and agents of different versions.** One direction is promised and tested, the other is not:
+
+- **Old agent, new server: promised.** Update the server first; every agent keeps working until you
+  update it. The CI job `upgrade` proves it for the start versions of
+  `scripts/upgrade/releases.txt` (v0.3.0, v0.3.5, v0.3.10 and the previous release): the agent of
+  that release enrolls with a server of that release, the server is updated in place, and the
+  same agent, unchanged and still running, must report to the new server. The wire format is
+  guarded as well: `buf breaking` (WIRE_JSON) compares `proto/` with `main` and with the previous
+  release on every CI run, and with v0.3.0, the first protocol, every night. Check an agent after
+  an update under *Agents* (last seen, version); an `outdated_agent` note only says that the agent
+  is older, not that it is broken.
+- **New agent, old server: not promised.** It happens only when you roll the server back after you
+  have updated agents, and the protocol guard does not look at it. Roll the agents back with the
+  server, or leave the server on the new version.
+
 From v0.1 to v0.2: the migrations add the domains and the ACME tables (`pki.db`) and the ACME rate
 limits in the tenant settings (`system.db`). ACME stays off until `acme.base_url` is set
 ([chapter 10](#10-acme-server)). Going back to v0.1 means the backup from step 1 – and removing every
