@@ -34,7 +34,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 )
 
 // Limits (docs/PHASE3.md step 71).
@@ -192,16 +191,6 @@ func (g *Guide) Headings() []Block {
 var placeholderExamples = map[string]string{
 	"acme_directory": "https://pki.homelab.lan/acme/directory",
 	"ca_name":        "homelab-issuing",
-}
-
-// PlaceholderNames lists the closed set of placeholders.
-func PlaceholderNames() []string {
-	names := make([]string, 0, len(placeholderExamples))
-	for n := range placeholderExamples {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
 }
 
 var (
