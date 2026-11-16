@@ -54,6 +54,7 @@ linters:
 
     # --- Hygiene ---
     - nolintlint    # every //nolint must name the linter and say why
+    - dupl          # copied blocks of 100 tokens or more drift apart; tests are excluded (see settings, exclusions)
 
   settings:
     errcheck:
@@ -79,6 +80,9 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+
+    dupl:
+      threshold: 100         # tokens; the default 150 finds nothing in this tree, 100 found the two pairs fixed in step 92
 
     depguard:
       rules:
@@ -142,6 +146,9 @@ linters:
       - path: _test\.go
         linters: [forbidigo]
         text: time\.Now
+      # Table tests and fixtures repeat on purpose; a shared helper there would hide what each case does.
+      - path: _test\.go
+        linters: [dupl]
 
 formatters:
   enable:
