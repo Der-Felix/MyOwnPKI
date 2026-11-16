@@ -9,6 +9,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
@@ -999,4 +1000,21 @@ func TestUnsealIsThrottledPerAddress(t *testing.T) {
 	if err := try(a, e.passphrase); err != nil {
 		t.Errorf("a must not suffer from b: %v", err)
 	}
+}
+
+func (k RecoveryKey) equal(other RecoveryKey) bool {
+	return subtle.ConstantTimeCompare(k[:], other[:]) == 1
+}
+
+// ChooseRecoveryOutput applies the rule (owner decision 2026-10-13): a file
+// if one is given, the terminal only if stdout is interactive, otherwise
+// refuse.
+func ChooseRecoveryOutput(interactive bool, file string) (RecoveryOutput, error) {
+	switch {
+	case file != "":
+		return WriteToFile, nil
+	case interactive:
+		return ShowOnTerminal, nil
+	}
+	return 0, ErrRecoveryKeyNeedsFile
 }

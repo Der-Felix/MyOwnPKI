@@ -27,9 +27,6 @@ func (RecoveryKey) GoString() string             { return redacted }
 func (RecoveryKey) MarshalJSON() ([]byte, error) { return []byte(`"` + redacted + `"`), nil }
 func (RecoveryKey) MarshalText() ([]byte, error) { return []byte(redacted), nil }
 func (k *RecoveryKey) clear()                    { clear(k[:]) }
-func (k RecoveryKey) equal(other RecoveryKey) bool {
-	return subtle.ConstantTimeCompare(k[:], other[:]) == 1
-}
 
 // Crockford Base32: no I, L, O, U. Typed I/L are read as 1, O as 0.
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -191,19 +188,6 @@ const (
 // a pipe) the key would end up in a log, so it may only go to a file.
 var ErrRecoveryKeyNeedsFile = errors.New("standard output is not an interactive terminal – " +
 	"the recovery key would end up in a log; use --recovery-key-file <path>")
-
-// ChooseRecoveryOutput applies the rule (owner decision 2026-10-13): a file
-// if one is given, the terminal only if stdout is interactive, otherwise
-// refuse.
-func ChooseRecoveryOutput(interactive bool, file string) (RecoveryOutput, error) {
-	switch {
-	case file != "":
-		return WriteToFile, nil
-	case interactive:
-		return ShowOnTerminal, nil
-	}
-	return 0, ErrRecoveryKeyNeedsFile
-}
 
 // IsTerminal reports whether f is a character device (a terminal). Note: a
 // container started with -t has a terminal whose output still reaches the
