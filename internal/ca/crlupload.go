@@ -59,9 +59,9 @@ func (e *Engine) uploadCRL(ctx context.Context, name string, data []byte, who ke
 	if err != nil {
 		return nil, nil, err
 	}
-	crl, err := x509.ParseRevocationList(der)
+	crl, err := parseUploadedCRL(der)
 	if err != nil {
-		return nil, nil, deny("the CRL can't be parsed: %v", err)
+		return nil, nil, err
 	}
 
 	gens, err := q.ListCAGenerations(ctx, ca.ID)
@@ -264,6 +264,20 @@ func unsupportedReasonNote(code int) string {
 		return fmt.Sprintf("reason code %d is not used by MyOwnPKI – recorded as unspecified, the revocation is final", code)
 	}
 	return ""
+}
+
+// parseUploadedCRL parses an uploaded CRL. x509.ParseRevocationList ignores what follows
+// the CRL, but the DER is stored and served as uploaded: nothing may follow
+// the bytes whose signature was checked.
+func parseUploadedCRL(der []byte) (*x509.RevocationList, error) {
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		return nil, deny("the CRL can't be parsed: %v", err)
+	}
+	if len(crl.Raw) != len(der) {
+		return nil, deny("there is data after the CRL – upload exactly one CRL")
+	}
+	return crl, nil
 }
 
 // crlDER accepts a CRL as DER or as one PEM block "X509 CRL".
