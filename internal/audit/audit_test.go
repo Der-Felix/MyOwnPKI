@@ -497,3 +497,79 @@ func TestRecomputedEntryBreaksTheNextLink(t *testing.T) {
 		t.Errorf("break = %+v, want seq 8 (link broken)", r.Break)
 	}
 }
+
+// LogHeads and Run are the old standalone delivery loop. The server runs the
+// same work as jobs (internal/server/server.go: audit-heads, checkpoint, outbox
+// cleanup), so only TestLogHeadsAndRun still calls them; they live here, not in
+// outbox.go, so that `task deadcode` reports nothing for them.
+
+// LogHeads writes the head of every audit log to the process log. The
+// process log usually ends up somewhere else (journald, a log collector), so
+// it is an anchor for `myownpki audit verify --expect-head`.
+func (d *Deliverer) LogHeads(ctx context.Context) {
+	seen := map[*sql.DB]bool{}
+	for _, r := range d.Routes {
+		if seen[r.To] {
+			continue
+		}
+		seen[r.To] = true
+		rep, err := Verify(ctx, r.To, r.Scope)
+		switch {
+		case err != nil:
+			d.Log.ErrorContext(ctx, "audit chain head", slog.String("scope", r.Scope), slog.Any("error", err))
+		case rep.Break != nil:
+			d.Log.ErrorContext(ctx, "audit chain BROKEN", slog.String("scope", r.Scope),
+				slog.Int64("seq", rep.Break.Seq), slog.String("reason", rep.Break.Reason))
+		default:
+			d.Log.InfoContext(ctx, "audit chain head", slog.String("scope", r.Scope),
+				slog.Int64("entries", rep.Entries), slog.String("head", rep.Head.String()))
+		}
+	}
+}
+
+// Run delivers at start, whenever wake fires (send after committing outbox
+// rows), and every pollInterval; once a day it logs the chain heads and
+// cleans up the outbox. It returns when ctx ends.
+func (d *Deliverer) Run(ctx context.Context, wake <-chan struct{}, pollInterval time.Duration) {
+	deliver := func() {
+		if _, err := d.DeliverPending(ctx); err != nil && ctx.Err() == nil {
+			d.Log.ErrorContext(ctx, "audit delivery", slog.Any("error", err))
+		}
+		if d.Checkpoints != nil {
+			if err := d.Checkpoints.MaybeEvery(ctx); err != nil && ctx.Err() == nil {
+				d.Log.ErrorContext(ctx, "audit checkpoint", slog.Any("error", err))
+			}
+		}
+	}
+	daily := func() {
+		if d.Checkpoints != nil {
+			if err := d.Checkpoints.MakeAll(ctx, "daily"); err != nil {
+				d.Log.ErrorContext(ctx, "audit checkpoint", slog.Any("error", err))
+			}
+		}
+		d.LogHeads(ctx)
+		if n, err := d.Cleanup(ctx); err != nil {
+			d.Log.ErrorContext(ctx, "outbox cleanup", slog.Any("error", err))
+		} else if n > 0 {
+			d.Log.InfoContext(ctx, "outbox cleanup", slog.Int64("deleted", n))
+		}
+	}
+	deliver()
+	daily()
+	poll := time.NewTicker(pollInterval)
+	defer poll.Stop()
+	day := time.NewTicker(24 * time.Hour)
+	defer day.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+			deliver()
+		case <-poll.C:
+			deliver()
+		case <-day.C:
+			daily()
+		}
+	}
+}
