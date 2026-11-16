@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -208,7 +207,7 @@ func (a *Agent) currentLeaf(d Deployment) (*x509.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	block, _ := pem.Decode(data)
+	block := firstPEMBlock(data)
 	if block == nil || block.Type != "CERTIFICATE" {
 		return nil, errors.New("deployed certificate is not PEM")
 	}

@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/x509"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -97,4 +98,29 @@ func TestRecoverRemovesStaleTemporaryFiles(t *testing.T) {
 		t.Error("file contents reached the log")
 	}
 	r.assertFiles(t, r.old)
+}
+
+// TestFirstPEMBlockClearsTheBuffer: the "certificate" read of a combined file
+// also holds the private key, so the buffer is cleared once the first block
+// is decoded; the block itself stays usable.
+func TestFirstPEMBlockClearsTheBuffer(t *testing.T) {
+	t.Parallel()
+	m := testMaterial(t, "svc.homelab.lan", 1)
+	data := combinedPEM(m)
+	if !bytes.Contains(data, []byte("PRIVATE KEY")) {
+		t.Fatal("the test file holds no key")
+	}
+	block := firstPEMBlock(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("the first block is not the certificate: %v", block)
+	}
+	if !bytes.Equal(data, make([]byte, len(data))) {
+		t.Error("the buffer was not cleared")
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		t.Errorf("the block is not usable after the clear: %v", err)
+	}
+	if firstPEMBlock([]byte("no pem")) != nil || firstPEMBlock(nil) != nil {
+		t.Error("garbage must give no block")
+	}
 }

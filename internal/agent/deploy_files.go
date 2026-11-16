@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -318,4 +319,13 @@ func (a *Agent) warn(msg, path string, err error) {
 		return
 	}
 	a.log.Warn(msg, slog.String("path", path))
+}
+
+// firstPEMBlock decodes the first PEM block of data and then clears data. The
+// "certificate" of a combined file is the whole file, so the buffer holds the
+// private key too; the block holds a decoded copy of the first block only.
+func firstPEMBlock(data []byte) *pem.Block {
+	block, _ := pem.Decode(data)
+	clear(data)
+	return block
 }

@@ -98,10 +98,12 @@ func (a *Agent) stageGroup(group reloadGroup, materials map[string]*Material) (*
 		case errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist):
 			meta.First = true
 		case certErr != nil || keyErr != nil:
+			clear(cert) // a combined file holds the key in both buffers
 			clear(key)
 			return nil, errors.Join(errors.New("deployment: previous certificate and key must both exist or both be absent"), certErr, keyErr)
 		default:
 			pair, err := tls.X509KeyPair(cert, key)
+			clear(cert)
 			clear(key)
 			if err != nil {
 				return nil, errors.New("deployment: previous certificate and key do not match")
