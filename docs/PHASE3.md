@@ -3077,6 +3077,13 @@ steps continue after 100 and **nothing is built**. The release number can shift 
 keeps number 19. **No ADR (§2) is changed by any step.** Step 101 touches two owner-approved design records (PLAN §5 key list,
 §14 backup row) and is therefore marked "needs owner decision": the main session asks before step 102 starts.
 
+**Status (2026-11-16): v0.9.0 is released** (tag `v0.9.0`, commit `2b483f0`, marked `latest`). Steps 101 to 124 are done. Step 125
+is partly done: the release is pinned in `scripts/upgrade/releases.txt` (with `--packages`). **Open (decision D14):** the
+maintainer's live tests of v0.3.6 to v0.3.12 are not finished (Salt formula, dns-01 in the agent, charts and analysis, trust
+portal, preview and settings history, Apache and HAProxy recipes, guides and demo); the "Known limitations" of the CHANGELOG
+`[0.9.0]` name them, and the notes of each 0.9.x release say what is still open. The exit criteria of 19.9 are **pending**; v1.0.0
+follows when they are met.
+
 Goal, checked by CI and by the owner: (a) the four security points are fixed with tests; (b) the freeze rules are written where
 contributors and sessions read them; (c) **an installation made by a released version keeps working after the update**, proved
 by a test that runs the old release binaries, not only the current source built twice; (d) a stranger can install the beta,

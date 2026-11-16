@@ -8,19 +8,25 @@
 #     timer on, the low-ports drop-in
 #  2. init, start, unseal through the API – the old release as an operator runs it; the root
 #     certificate, the CRL, the audit heads and the checkpoint key are noted; the daily backup
-#     of the old release runs once (format 1, no signature)
+#     of the old release runs once. A release before 0.9.0 makes format 1 without a signature
+#     and has no backup key; from 0.9.0 on, `init` makes the key (its fingerprint is noted)
+#     and the backup is format 2 with manifest.sig
 #  3. an update that fails its check is rolled back by THIS TREE's install.sh: the old binary
 #     is back and healthy, the text names the backup the OLD binary made before the swap
 #  4. the update: this tree's install.sh over the old installation. The backup of the update is
-#     made by the OLD binary (<time>-<old version>, format 1) and verifies; the new binary is
-#     installed and running, the config, the drop-ins and the timer are as they were, the
-#     units pass systemd-analyze, sealed after the restart and unsealed with the old passphrase
+#     made by the OLD binary (<time>-<old version>) and verifies: format 1 with
+#     --allow-unsigned before 0.9.0; format 2, signed, with --backup-key (the key noted at
+#     init, no --allow-unsigned) from 0.9.0 on. The new binary is installed and running, the
+#     config, the drop-ins and the timer are as they were, the units pass systemd-analyze,
+#     sealed after the restart and unsealed with the old passphrase
 #  5. what the old installation had is still there: root certificate, CRL (number not lower),
 #     the old audit heads and the checkpoint key (audit verify), db status "up to date"
 #  6. the first backup of the NEW binary (the timer's service, in its sandbox) creates the
-#     backup key (0600, owner myownpki), signs the backup (format 2, manifest.sig) and verifies;
-#     a second run keeps the key. The old backups still verify with --allow-unsigned; what
-#     the plain `backup verify` of an old backup does on a host with a key is printed as a note
+#     backup key (0600, owner myownpki) when the old release had none, or keeps the key of the
+#     old release (the same file, the same fingerprint); it signs the backup (format 2,
+#     manifest.sig) and verifies; a second run keeps the key. The old backups still verify:
+#     with --allow-unsigned before 0.9.0, with the plain command from 0.9.0 on; what the plain
+#     `backup verify` of an unsigned old backup does on a host with a key is printed as a note
 #
 # The old release's own install.sh is used as it was published. ARCHIVE paths stay relative in
 # CI on purpose: install.sh changes to / before it reads them. It refuses to run where MyOwnPKI
@@ -41,6 +47,10 @@ backups=/var/backups/myownpki
 lowports=/etc/systemd/system/myownpki.service.d/low-ports.conf
 acme_url=https://acme.ci.test/acme
 old_version=v$version
+# signed_old: the old release is 0.9.0 or newer, so it makes the backup key at init and signs
+# its backups (format 2). Older releases make format 1 and have no key.
+signed_old=0
+if [ "$(printf '%s\n%s\n' "$version" 0.9.0 | sort -V | head -n 1)" = 0.9.0 ]; then signed_old=1; fi
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
 if [ -e /etc/myownpki ] || [ -e "$data" ] || [ -e "$bin" ]; then
@@ -158,6 +168,11 @@ if [ -n "${GITHUB_ACTIONS:-}" ]; then printf '::add-mask::%s\n' "$secret"; fi
 rm -f "$data/ci-recovery.txt" "$data/ci-otpauth.txt"
 checkpoint_key=$(awk '/^Checkpoint key fingerprint/ { getline; gsub(/[ \t]/, ""); print; exit }' "$tmp/init.log")
 [ -n "$checkpoint_key" ] || fail "init printed no checkpoint key fingerprint"
+old_backup_key=
+if [ "$signed_old" = 1 ]; then
+	old_backup_key=$(awk '/^Backup key fingerprint/ { getline; gsub(/[ \t]/, ""); print; exit }' "$tmp/init.log")
+	[ -n "$old_backup_key" ] || fail "init of $old_version printed no backup key fingerprint"
+fi
 systemctl start myownpki.service
 healthy || fail "not healthy after the start"
 unseal_api
@@ -166,13 +181,22 @@ crl_before=$(crl_number)
 heads_before=$(heads)
 [ -n "$heads_before" ] || fail "audit verify names no heads"
 printf 'facts: %s, CRL number %s, heads %s\n' "$root_fp" "$crl_before" "$(printf '%s' "$heads_before" | tr '\n' ' ')"
-# The daily backup of the old release: a scheduled backup, format 1, no signature.
+# The daily backup of the old release: a scheduled backup (format 1, no signature before 0.9.0;
+# format 2, signed by the key of init from 0.9.0 on).
 systemctl start myownpki-backup.service || { journalctl -u myownpki-backup.service --no-pager -n 40; fail "the daily backup of $old_version failed"; }
 mapfile -t scheduled < <(find "$backups" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z' | sort)
 [ ${#scheduled[@]} -eq 1 ] || fail "want one scheduled backup of $old_version, found: ${scheduled[*]:-none}"
 old_scheduled=${scheduled[0]}
-[ "$(manifest_format "$old_scheduled")" = "myownpki-backup/1" ] || fail "the backup of $old_version is not format 1: $(manifest_format "$old_scheduled")"
-[ ! -e "$data/backup-signing.key" ] || fail "$old_version made a backup key"
+if [ "$signed_old" = 1 ]; then
+	[ "$(manifest_format "$old_scheduled")" = "myownpki-backup/2" ] || fail "the backup of $old_version is not format 2: $(manifest_format "$old_scheduled")"
+	[ -s "$old_scheduled/manifest.sig" ] || fail "the backup of $old_version has no manifest.sig"
+	[ "$(stat -c '%a %U' "$data/backup-signing.key")" = "600 myownpki" ] || fail "backup key of $old_version: $(stat -c '%a %U' "$data/backup-signing.key" 2>&1)"
+	svc "$bin" backup verify "$old_scheduled" --backup-key "$old_backup_key" >"$tmp/verify0.log" 2>&1 || { cat "$tmp/verify0.log"; fail "backup verify of the backup of $old_version with the key noted at init"; }
+	grep -q 'Signature valid' "$tmp/verify0.log" || fail "the verify of the backup of $old_version does not say 'Signature valid'"
+else
+	[ "$(manifest_format "$old_scheduled")" = "myownpki-backup/1" ] || fail "the backup of $old_version is not format 1: $(manifest_format "$old_scheduled")"
+	[ ! -e "$data/backup-signing.key" ] || fail "$old_version made a backup key"
+fi
 
 step "3. An update that fails its check is rolled back by this tree's install.sh"
 new_version=$(basename "$new_archive")
@@ -202,11 +226,19 @@ bash "$install_sh" --archive "$new_archive" | tee "$tmp/run3.log"
 mapfile -t ubackups < <(update_backups)
 [ ${#ubackups[@]} -eq 2 ] || fail "want two update backups (the rolled-back and the real one), found: ${ubackups[*]:-none}"
 for b in "${ubackups[@]}"; do
-	[ "$(manifest_format "$b")" = "myownpki-backup/1" ] || fail "$b was made by $old_version and must be format 1, is $(manifest_format "$b")"
 	grep -q "\"version\": *\"$old_version\"" "$b/manifest.json" || fail "$b does not say it was made by $old_version"
-	[ ! -e "$b/manifest.sig" ] || fail "$b has a signature although $old_version cannot sign"
-	svc "$bin" backup verify "$b" --allow-unsigned >"$tmp/verify.log" 2>&1 || { cat "$tmp/verify.log"; fail "backup verify --allow-unsigned $b"; }
-	grep -q 'unauthenticated' "$tmp/verify.log" || fail "the verify of $b does not say that the backup is unauthenticated"
+	if [ "$signed_old" = 1 ]; then
+		[ "$(manifest_format "$b")" = "myownpki-backup/2" ] || fail "$b was made by $old_version and must be format 2, is $(manifest_format "$b")"
+		[ -s "$b/manifest.sig" ] || fail "$b has no manifest.sig although $old_version signs its backups"
+		# No --allow-unsigned: a signed backup must verify against the key noted at init.
+		svc "$bin" backup verify "$b" --backup-key "$old_backup_key" >"$tmp/verify.log" 2>&1 || { cat "$tmp/verify.log"; fail "backup verify --backup-key $b"; }
+		grep -q 'Signature valid' "$tmp/verify.log" || fail "the verify of $b does not say 'Signature valid'"
+	else
+		[ "$(manifest_format "$b")" = "myownpki-backup/1" ] || fail "$b was made by $old_version and must be format 1, is $(manifest_format "$b")"
+		[ ! -e "$b/manifest.sig" ] || fail "$b has a signature although $old_version cannot sign"
+		svc "$bin" backup verify "$b" --allow-unsigned >"$tmp/verify.log" 2>&1 || { cat "$tmp/verify.log"; fail "backup verify --allow-unsigned $b"; }
+		grep -q 'unauthenticated' "$tmp/verify.log" || fail "the verify of $b does not say that the backup is unauthenticated"
+	fi
 done
 [ "$(version_of "$bin")" = "$new_version" ] || fail "the binary is $(version_of "$bin"), want $new_version"
 [ "$(running)" = "$new_version" ] || fail "the service runs $(running), not $new_version"
@@ -225,8 +257,13 @@ done
 # The restart left the server sealed; the old passphrase and the old second factor unseal it.
 [ "$(curl -fsS --insecure https://127.0.0.1:9443/healthz)" = ok ] || fail "/healthz"
 unseal_api
-printf 'Update %s -> %s: two backups by %s (format 1, verify with --allow-unsigned), running, unsealed with the old passphrase.\n\n' \
-	"$old_version" "$new_version" "$old_version" >>"$summary"
+if [ "$signed_old" = 1 ]; then
+	backup_text="format 2, signed, verify with --backup-key"
+else
+	backup_text="format 1, verify with --allow-unsigned"
+fi
+printf 'Update %s -> %s: two backups by %s (%s), running, unsealed with the old passphrase.\n\n' \
+	"$old_version" "$new_version" "$old_version" "$backup_text" >>"$summary"
 
 step "5. What the old installation had is still there"
 [ "$(root_fingerprint)" = "$root_fp" ] || fail "the root certificate changed"
@@ -241,9 +278,19 @@ done
 status=$(svc "$bin" db status --config "$conf") || { printf '%s\n' "$status"; fail "db status after the update"; }
 [ "$(printf '%s\n' "$status" | grep -c 'up to date')" -ge 4 ] || { printf '%s\n' "$status"; fail "db status: not every database is up to date"; }
 
-step "6. The first backup of the new binary makes the backup key"
+if [ "$signed_old" = 1 ]; then
+	step "6. The first backup of the new binary keeps the backup key of $old_version"
+else
+	step "6. The first backup of the new binary makes the backup key"
+fi
 key=$data/backup-signing.key
-if [ -e "$key" ]; then note "the update or the start already made $key (before the first backup)"; fi
+key_before=
+if [ "$signed_old" = 1 ]; then
+	[ -f "$key" ] || fail "the backup key of $old_version is gone after the update"
+	key_before=$(sha256sum "$key")
+elif [ -e "$key" ]; then
+	note "the update or the start already made $key (before the first backup)"
+fi
 systemctl start myownpki-backup.service || { journalctl -u myownpki-backup.service --no-pager -n 50; fail "the backup service of $new_version failed (does its sandbox allow the key file?)"; }
 [ -f "$key" ] || fail "no backup key $key after the first backup of $new_version"
 [ "$(stat -c '%a %U' "$key")" = "600 myownpki" ] || fail "backup key: $(stat -c '%a %U' "$key")"
@@ -257,21 +304,33 @@ grep -q 'Signature valid' "$tmp/verify2.log" || fail "the verify of the new back
 journalctl -u myownpki-backup.service -o cat | grep -q 'backup key SHA256:' || fail "the journal of the backup service does not show the backup key"
 fp=$(sed -n 's/.*made by key \(SHA256:[0-9a-f]*\).*/\1/p' "$tmp/verify2.log" | head -n 1)
 [ -n "$fp" ] || fail "no key fingerprint in the verify output"
+if [ "$signed_old" = 1 ]; then
+	[ "$(sha256sum "$key")" = "$key_before" ] || fail "the new binary replaced the backup key of $old_version"
+	[ "$fp" = "$old_backup_key" ] || fail "the new backup is signed by $fp, not by the key $old_backup_key that $old_version made at init"
+fi
 # A second run signs with the same key.
 sleep 1
 systemctl start myownpki-backup.service || fail "the second backup run failed"
 mapfile -t scheduled < <(find "$backups" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z' | sort)
 svc "$bin" backup verify "${scheduled[-1]}" --backup-key "$fp" >/dev/null 2>&1 || fail "the second backup is not signed by $fp"
 # The backups of the old release.
-svc "$bin" backup verify "$old_scheduled" --allow-unsigned >/dev/null 2>&1 || fail "the scheduled backup of $old_version does not verify with --allow-unsigned"
-if svc "$bin" backup verify "$old_scheduled" --config "$conf" >"$tmp/verify3.log" 2>&1; then
-	note "on a host with a backup key a plain 'backup verify' of a backup from before 0.9.0 passes"
-	verdict=passes
+if [ "$signed_old" = 1 ]; then
+	# Signed by the same key: it verifies with the pin and, on this host, as the host's own key.
+	svc "$bin" backup verify "$old_scheduled" --backup-key "$fp" >/dev/null 2>&1 || fail "the scheduled backup of $old_version does not verify with --backup-key $fp"
+	svc "$bin" backup verify "$old_scheduled" --config "$conf" >"$tmp/verify3.log" 2>&1 || { cat "$tmp/verify3.log"; fail "a plain backup verify of the scheduled backup of $old_version"; }
+	grep -q 'the backup key of this host' "$tmp/verify3.log" || fail "the plain verify of the backup of $old_version does not name the key of this host"
+	printf 'Backup key %s made by %s at init and kept by %s; the backups of both verify with it (format 2).\n\n' "$fp" "$old_version" "$new_version" >>"$summary"
 else
-	note "on a host with a backup key a plain 'backup verify' of a backup from before 0.9.0 is refused unless --allow-unsigned (the host key is the expected key):"
-	sed 's/^/NOTE:   /' "$tmp/verify3.log"
-	verdict="is refused without --allow-unsigned"
+	svc "$bin" backup verify "$old_scheduled" --allow-unsigned >/dev/null 2>&1 || fail "the scheduled backup of $old_version does not verify with --allow-unsigned"
+	if svc "$bin" backup verify "$old_scheduled" --config "$conf" >"$tmp/verify3.log" 2>&1; then
+		note "on a host with a backup key a plain 'backup verify' of a backup from before 0.9.0 passes"
+		verdict=passes
+	else
+		note "on a host with a backup key a plain 'backup verify' of a backup from before 0.9.0 is refused unless --allow-unsigned (the host key is the expected key):"
+		sed 's/^/NOTE:   /' "$tmp/verify3.log"
+		verdict="is refused without --allow-unsigned"
+	fi
+	printf 'Backup key %s made by the first backup of %s; new backups format 2, verified; a plain verify of a pre-0.9.0 backup %s.\n\n' "$fp" "$new_version" "$verdict" >>"$summary"
 fi
-printf 'Backup key %s made by the first backup of %s; new backups format 2, verified; a plain verify of a pre-0.9.0 backup %s.\n\n' "$fp" "$new_version" "$verdict" >>"$summary"
 
 step "All checks passed for the update from $old_version"
