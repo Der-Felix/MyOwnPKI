@@ -242,3 +242,33 @@ func TestEveryEmbeddedGuideRenders(t *testing.T) {
 		}
 	}
 }
+
+// TestGuideACMEDirectoryFollowsFirstSteps: First steps names the directory
+// address only to a role that reads the whole tenant. The guides do the same:
+// a role limited to one CA gets the documented example in the commands.
+func TestGuideACMEDirectoryFollowsFirstSteps(t *testing.T) {
+	t.Parallel()
+	const real, example = "https://pki.example.test/acme/directory", "https://pki.homelab.lan/acme/directory"
+	v := newCustomUIEnv(t, func(d *AppDeps) {
+		d.Guides = testRegistry(t)
+		d.ACMEDirectory = real
+	})
+	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
+	v.User(t, "scoped", false, authz.Binding{CA: "issuing", Role: authz.Operator})
+	v.User(t, "noroles", false)
+	for i, tt := range []struct{ user, want, other string }{
+		{"viewer", real, example}, {"scoped", example, real}, {"noroles", example, real},
+	} {
+		b := v.browser(fmt.Sprintf("192.0.2.%d", 20+i))
+		b.signIn(t, tt.user, testinstance.Password)
+		html := b.get(t, "/guides/zeta").html()
+		if !strings.Contains(html, "curl --silent "+tt.want+"\n") || strings.Contains(html, tt.other) {
+			t.Errorf("%s: the commands do not use %s only", tt.user, tt.want)
+		}
+	}
+	b := v.browser("192.0.2.30")
+	b.signIn(t, "demo", v.DemoPassword)
+	if html := b.get(t, "/guides/zeta").html(); !strings.Contains(html, "curl --silent "+real+"\n") {
+		t.Errorf("the admin must get the real address: %s", html)
+	}
+}

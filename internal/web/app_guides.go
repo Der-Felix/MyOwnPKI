@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/guides"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/pages/admin"
@@ -41,7 +42,13 @@ func guideRegistry(d AppDeps, log *slog.Logger) *guides.Registry {
 
 // guideValues are the instance values for the placeholders of a guide.
 func (a *app) guideValues(c *rc) guides.Values {
-	v := guides.Values{ACMEDirectory: a.d.ACMEDirectory}
+	var v guides.Values
+	// First steps names the directory address to a role that reads the whole
+	// tenant only; every other role gets the documented example, as when ACME
+	// is off.
+	if c.may(authz.ReadPKI, "") {
+		v.ACMEDirectory = a.d.ACMEDirectory
+	}
 	if cas, err := a.issuableCAs(c); err == nil && len(cas) > 0 {
 		v.CAName = cas[0].Name
 	}
