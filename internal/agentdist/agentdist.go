@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"os"
 	"strconv"
@@ -225,8 +224,4 @@ func contentType(name string) string {
 	default:
 		return "application/gzip"
 	}
-}
-
-func IsNotFound(err error) bool {
-	return errors.Is(err, ErrNotFound) || errors.Is(err, fs.ErrNotExist)
 }
