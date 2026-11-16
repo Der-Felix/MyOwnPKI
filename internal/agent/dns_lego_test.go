@@ -729,3 +729,11 @@ func TestRFC2136ConfiguredZoneRefusesACNAMETargetOutsideIt(t *testing.T) {
 	}
 	h.wantNoChallengeRecords()
 }
+
+// setLegoDNS sets lego's package variables without a challenge, for tests
+// that call lego functions directly.
+func setLegoDNS(resolvers []string) {
+	for _, o := range []dns01.ChallengeOption{dns01.AddRecursiveNameservers(resolvers), dns01.AddDNSTimeout(dnsQueryTimeout)} {
+		_ = o(nil)
+	}
+}
