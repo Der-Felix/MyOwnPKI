@@ -69,6 +69,7 @@ func ParseDeploymentAdd(fs *flag.FlagSet, configPath *string, args []string) (De
 	fs.StringVar(&spec.Files.Chain, "chain", "", "file profile: chain file")
 	fs.StringVar(&spec.Files.Fullchain, "fullchain", "", "file profile: certificate and chain in one file")
 	fs.StringVar(&spec.Files.Key, "key", "", "file profile: private key file")
+	fs.StringVar(&spec.Files.Combined, "combined", "", "file profile: certificate chain and private key in one file (HAProxy), alone")
 	fs.StringVar(&spec.Owner, "owner", "", "owner of the files")
 	fs.StringVar(&spec.Group, "group", "", "group of the files")
 	fs.StringVar(&spec.KeyMode, "key-mode", "", "mode of the key, without rights for others (default 0600)")

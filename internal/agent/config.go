@@ -131,11 +131,15 @@ type Deployment struct {
 }
 
 // Files are the targets of the file profile.
+//
+// Combined is the single-file form (HAProxy): the certificate chain and the
+// private key in one PEM file. It excludes the other four.
 type Files struct {
 	Certificate string `yaml:"certificate"`
 	Chain       string `yaml:"chain"`
 	Fullchain   string `yaml:"fullchain"`
 	Key         string `yaml:"key"`
+	Combined    string `yaml:"combined"`
 }
 
 // LoadConfig reads and validates agent.yaml.
@@ -334,8 +338,13 @@ func (c *Config) Validate() error {
 		case ProfileNginx:
 			under(where+": dir", d.Dir)
 		case ProfileFile:
-			if d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "" {
-				add("%s: files: key and certificate or fullchain at least", where)
+			switch {
+			case d.Files.Combined != "":
+				if d.Files.Certificate != "" || d.Files.Chain != "" || d.Files.Fullchain != "" || d.Files.Key != "" {
+					add("%s: files.combined: not together with certificate, chain, fullchain or key (it holds all of them in one file)", where)
+				}
+			case d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "":
+				add("%s: files: key and certificate or fullchain at least, or combined alone", where)
 			}
 			for _, field := range d.Files.fields() {
 				if field.Path != "" {

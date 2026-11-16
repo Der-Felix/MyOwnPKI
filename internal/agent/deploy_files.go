@@ -59,7 +59,33 @@ func targets(d Deployment, m *Material) ([]targetFile, error) {
 			out = append(out, targetFile{part.path, part.data, part.mode, uid, gid})
 		}
 	}
+	if f.Combined != "" {
+		// One file with the private key in it: the key mode, never the 0644 of
+		// a certificate. The buffer is a copy; stageGroup clears it.
+		out = append(out, targetFile{f.Combined, combinedPEM(m), os.FileMode(mode), uid, gid})
+	}
 	return out, nil
+}
+
+// combinedPEM is the certificate chain followed by the private key, the form
+// HAProxy reads from one file. The certificate comes first so that every
+// reader of "the first PEM block" gets the leaf, and crypto/tls takes the same
+// bytes as certificate and as key (it skips the blocks that are not its kind).
+// The buffer holds the key: its owner clears it after the write and it is
+// never logged or put into an error.
+func combinedPEM(m *Material) []byte {
+	chain := m.Fullchain
+	if len(chain) == 0 {
+		chain = append(append([]byte(nil), m.Certificate...), m.Chain...)
+	}
+	out := make([]byte, 0, len(chain)+len(m.Key)+2)
+	for _, part := range [][]byte{chain, m.Key} {
+		out = append(out, part...)
+		if len(out) > 0 && out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
+	}
+	return out
 }
 
 func deploymentOwner(owner, group string) (int, int, error) {

@@ -470,16 +470,23 @@ func (s *editSession) completeSpec(spec *DeploymentSpec) (Deployment, error) {
 	case d.Profile == "" && d.Dir == "" && hasFiles:
 		d.Profile = ProfileFile
 	case d.Profile == "":
-		return d, errors.New("pick a profile: --recipe, --profile, --dir (nginx profile) or --certificate/--fullchain/--key (file profile)")
+		return d, errors.New("pick a profile: --recipe, --profile, --dir (nginx profile) or --certificate/--fullchain/--key/--combined (file profile)")
 	}
 	switch d.Profile {
 	case ProfileNginx:
 		if d.Dir == "" || hasFiles {
-			return d, errors.New("profile nginx needs --dir and takes no --certificate, --chain, --fullchain or --key")
+			return d, errors.New("profile nginx needs --dir and takes no --certificate, --chain, --fullchain, --key or --combined")
 		}
 	case ProfileFile:
-		if d.Dir != "" || d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "" {
-			return d, errors.New("profile file needs --key and --fullchain or --certificate, and takes no --dir")
+		switch {
+		case d.Dir != "":
+			return d, errors.New("profile file takes no --dir")
+		case d.Files.Combined != "":
+			if d.Files.Certificate != "" || d.Files.Chain != "" || d.Files.Fullchain != "" || d.Files.Key != "" {
+				return d, errors.New("--combined holds the chain and the key in one file: use it alone, without --certificate, --chain, --fullchain or --key")
+			}
+		case d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "":
+			return d, errors.New("profile file needs --key and --fullchain or --certificate (or --combined alone), and takes no --dir")
 		}
 	default:
 		return d, errors.New("--profile: nginx or file")

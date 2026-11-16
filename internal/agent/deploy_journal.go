@@ -66,12 +66,24 @@ func (a *Agent) stageGroup(group reloadGroup, materials map[string]*Material) (*
 	}
 	j := &deployJournal{Version: 1, ID: hex.EncodeToString(random), Group: group.name, Phase: "prepared"}
 	var files []targetFile
+	// A combined file holds a private key and is a copy made for this write:
+	// clear it on every way out.
+	var secrets [][]byte
+	defer func() {
+		for _, b := range secrets {
+			clear(b)
+		}
+	}()
 	for _, d := range group.deployments {
 		items, err := targets(d, materials[d.Name])
 		if err != nil {
 			return nil, err
 		}
+		combined := deploymentPaths(d).Combined
 		for i := range items {
+			if combined != "" && items[i].path == combined {
+				secrets = append(secrets, items[i].data)
+			}
 			items[i].path, err = resolveUnder(a.cfg.Paths, items[i].path)
 			if err != nil {
 				return nil, err

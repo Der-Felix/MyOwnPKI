@@ -40,9 +40,9 @@ func TestFilesCertPathPrefersTheFullchain(t *testing.T) {
 // root of the dry run, and fields lists the same names agent.yaml uses.
 func TestFilesMapAndFieldsCoverEveryTarget(t *testing.T) {
 	t.Parallel()
-	every := Files{Certificate: "/a", Chain: "/b", Fullchain: "/c", Key: "/d"}
+	every := Files{Certificate: "/a", Chain: "/b", Fullchain: "/c", Key: "/d", Combined: "/e"}
 	mapped := every.Map(func(p string) string { return "/root" + p })
-	if got, want := mapped.Targets(), []string{"/root/a", "/root/b", "/root/c", "/root/d"}; !slices.Equal(got, want) {
+	if got, want := mapped.Targets(), []string{"/root/a", "/root/b", "/root/c", "/root/d", "/root/e"}; !slices.Equal(got, want) {
 		t.Errorf("Map: %v, want %v", got, want)
 	}
 	if got := every.Map(func(p string) string { return p }); got != every {
@@ -52,7 +52,7 @@ func TestFilesMapAndFieldsCoverEveryTarget(t *testing.T) {
 	for _, f := range every.fields() {
 		names = append(names, f.Name)
 	}
-	if got := strings.Join(names, ","); got != "certificate,chain,fullchain,key" {
+	if got := strings.Join(names, ","); got != "certificate,chain,fullchain,key,combined" {
 		t.Errorf("fields() = %s", got)
 	}
 }

@@ -14,7 +14,7 @@ type fileField struct {
 func (f Files) fields() []fileField {
 	return []fileField{
 		{"certificate", f.Certificate}, {"chain", f.Chain},
-		{"fullchain", f.Fullchain}, {"key", f.Key},
+		{"fullchain", f.Fullchain}, {"key", f.Key}, {"combined", f.Combined},
 	}
 }
 
@@ -30,21 +30,31 @@ func (f Files) Targets() []string {
 	return out
 }
 
-// CertPath is the file that starts with the certificate: the full chain, else
-// the certificate alone. The agent reads it back for the expiry, the leaf
-// and the previous pair.
+// CertPath is the file that starts with the certificate: the combined file
+// (certificate chain first, key last), else the full chain, else the
+// certificate alone. The agent reads it back for the expiry, the leaf and the
+// previous pair.
 func (f Files) CertPath() string {
+	if f.Combined != "" {
+		return f.Combined
+	}
 	if f.Fullchain != "" {
 		return f.Fullchain
 	}
 	return f.Certificate
 }
 
-// KeyPath is the file that holds the private key.
-func (f Files) KeyPath() string { return f.Key }
+// KeyPath is the file that holds the private key: the combined file, else the
+// key file.
+func (f Files) KeyPath() string {
+	if f.Combined != "" {
+		return f.Combined
+	}
+	return f.Key
+}
 
 // Map returns the files with fn applied to every path (empty ones stay
 // empty if fn keeps them so).
 func (f Files) Map(fn func(string) string) Files {
-	return Files{Certificate: fn(f.Certificate), Chain: fn(f.Chain), Fullchain: fn(f.Fullchain), Key: fn(f.Key)}
+	return Files{Certificate: fn(f.Certificate), Chain: fn(f.Chain), Fullchain: fn(f.Fullchain), Key: fn(f.Key), Combined: fn(f.Combined)}
 }
