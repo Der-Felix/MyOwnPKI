@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -66,5 +67,26 @@ func TestUnknownFieldEchoesLittle(t *testing.T) {
 	var be *bodyError
 	if !errors.As(err, &be) || be.fields[0].Field != "/at/nn" {
 		t.Errorf("short name: %v", err)
+	}
+}
+
+// TestParseErrorEchoesLittle: a value that does not parse (here a time) comes
+// back in the text of the decoder; the answer cuts it (found by fuzzing,
+// FuzzDecodeBody).
+func TestParseErrorEchoesLittle(t *testing.T) {
+	t.Parallel()
+	var v struct {
+		At *time.Time `json:"at"`
+	}
+	err := decodeBytes(t, []byte(`{"at":"`+strings.Repeat("9", 100_000)+`"}`), &v)
+	var be *bodyError
+	if !errors.As(err, &be) || be.status != http.StatusBadRequest {
+		t.Fatalf("got %v, want a 400", err)
+	}
+	if n := refusalText(be); n > 300 {
+		t.Errorf("the refusal says %d bytes", n)
+	}
+	if len(be.fields) != 1 || !strings.HasPrefix(be.fields[0].Message, "parsing time") {
+		t.Errorf("the answer lost its reason: %+v", be.fields)
 	}
 }

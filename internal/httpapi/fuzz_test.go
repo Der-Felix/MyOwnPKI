@@ -77,7 +77,7 @@ func FuzzDecodeBody(f *testing.F) {
 		`{"validity_days":1e400}`,
 		`{"validity_days":"30"}`,
 		`{"invalidity_date":"not a time"}`,
-		`{"invalidity_date":"` + strings.Repeat("9", 40) + `"}`,
+		`{"invalidity_date":"` + strings.Repeat("9", 3000) + `"}`,
 		`{"reason":"\ud800"}`,
 		"{\"reason\":\"\xff\xfe\"}",
 		"\xef\xbb\xbf{}",

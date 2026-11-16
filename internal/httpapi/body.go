@@ -80,7 +80,8 @@ func (c *call) decode(v any) error {
 			name := strings.Trim(strings.TrimPrefix(err.Error(), "json: unknown field "), `"`)
 			return badRequest(clipText("/"+pointerToken(name), maxEchoed), "unknown field")
 		}
-		return badRequest("", "%v", err)
+		// The text of a value that does not parse (a time) repeats the client's own text.
+		return badRequest("", "%s", clipText(err.Error(), maxEchoed))
 	}
 	// "null" decodes into a struct without an error and without a field, so
 	// the one thing left to check is that the value is an object.
