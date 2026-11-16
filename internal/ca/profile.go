@@ -177,6 +177,11 @@ func ncPrefix(v string) (string, error) {
 	if p.Masked() != p {
 		return "", fmt.Errorf("host bits are set – did you mean %s?", p.Masked())
 	}
+	// A name's IPv4-mapped IPv6 address is turned into IPv4 (checkIP), so a constraint written in the
+	// mapped form would never apply to any name – and it can't be read back from a certificate.
+	if p.Addr().Is4In6() {
+		return "", fmt.Errorf("an IPv4-mapped IPv6 prefix never applies – write it as an IPv4 prefix like 10.0.0.0/8")
+	}
 	return p.String(), nil
 }
 
