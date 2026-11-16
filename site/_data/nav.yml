@@ -8,6 +8,8 @@
       url: /
     - title: Choose your setup
       url: /choose/
+    - title: Try the demo
+      url: /demo/
     - title: Installation
       url: /install/
     - title: Upgrade
