@@ -20,6 +20,14 @@
 #   `paths-ignore`): a skipped job reports as skipped, which counts as
 #   success for branch protection, so a required check never stays pending.
 #
+# The upgrade test (docs/PHASE3.md section 19.5) has its own switch:
+# - `changes` also prints `upgrade`: true for every event except a pull request,
+#   and for a pull request when a changed path can change what an update does to an
+#   installation (scripts/ci/changes.sh is_upgrade_path). Job `upgrade` runs the
+#   three versions of the pull-request subset, and on main (push) every start version of
+#   scripts/upgrade/releases.txt; `upgrade-nightly` runs them all every night. The matrix
+#   is `test/upgrade/run.sh --print-matrix`. Neither is a required check (like `salt`).
+#
 # Pinned versions must match Taskfile.yml – `task tools:check` fails otherwise.
 
 name: CI
@@ -77,6 +85,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      upgrade: ${{ steps.filter.outputs.upgrade }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,7 +120,7 @@ jobs:
         if: failure()
         run: bash scripts/ci/check-failed-tests.sh
       - run: bash scripts/ci/check-generate.sh
-      - name: Agent protocol stays compatible with main
+      - name: Agent protocol stays compatible with main and the previous release
         run: bash scripts/ci/check-agent-protocol.sh
       # The previous release (Taskfile UPGRADE_FROM) makes an instance and a
       # backup; this build restores, migrates and issues by ACME.
@@ -266,6 +275,13 @@ jobs:
           vacuum: "true"
       - run: bash scripts/ci/lint-meta-actionlint.sh
       - run: bash scripts/ci/lint-meta-registry.sh --self-test
+      # The scripts of the upgrade test test themselves against a local directory and a
+      # throwaway repository: no network, no server, no root.
+      - run: bash scripts/upgrade/fetch.sh --self-test
+      - run: bash scripts/upgrade/pin-release.sh --self-test
+      - run: bash scripts/ci/pin-migrations.sh --self-test
+      - name: Upgrade harness self-test (parsers, config files, profiles, TOTP)
+        run: bash test/upgrade/run.sh --self-test
       - name: Coverage summary matches its golden files
         run: bash scripts/ci/cover-summary.sh --self-test
       - run: task lint:api
@@ -392,7 +408,8 @@ jobs:
     needs: changes
     if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Two more installations (0.2.2 and the previous release), each updated by this tree.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -415,11 +432,101 @@ jobs:
       # A second binary with another version for the update path.
       - name: Second build for the update
         run: bash scripts/ci/install-second-build.sh
+      # The update of an installation made by an OLD release (0.2.2 and the previous
+      # release, from scripts/upgrade/releases.txt, SHA-256 pinned): the release's own
+      # install.sh installs it, this tree's install.sh updates it; the automatic backup,
+      # the rollback text, the timer, the drop-ins and the backup key of the new binary
+      # are checked (test/install/upgrade_systemd_test.sh). It removes what it installed,
+      # so the step below finds a clean machine.
+      - name: Update over old releases (as root)
+        run: bash scripts/ci/upgrade-systemd.sh
       - name: Install, start, update (as root)
         run: bash scripts/ci/install-systemd.sh
       - name: Service log
         if: failure()
         run: bash scripts/ci/install-service-log.sh
+
+  # The versions of the upgrade test, from scripts/upgrade/releases.txt: `pr` the oldest,
+  # 0.3.5 and the previous release; `all` every start version. A job of its own, because
+  # the nightly run has no `changes` job. A few seconds, no network.
+  upgrade-matrix:
+    name: upgrade test versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.versions.outputs.pr }}
+      all: ${{ steps.versions.outputs.all }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Versions of the pull-request subset and of the full run
+        id: versions
+        run: |
+          echo "pr=$(bash test/upgrade/run.sh --print-matrix pr --json)" >> "$GITHUB_OUTPUT"
+          echo "all=$(bash test/upgrade/run.sh --print-matrix all --json)" >> "$GITHUB_OUTPUT"
+
+  # An installation made by an old release keeps working after the update (docs/PHASE3.md
+  # section 19.5, U1): per start version the release binaries (SHA-256 pinned in
+  # scripts/upgrade/releases.txt) make an instance, fill it (REST, ACME with lego, an
+  # agent, a backup), and the binary of this tree takes it over on the same data directory
+  # and config; checks A1 to A10. One job per version, in parallel; a version takes 8 to 10
+  # minutes (the agent reports every five minutes), so 30 minutes is the limit. Pull
+  # requests run the subset when a path that matters changes (changes.sh), pushes to main
+  # run every version: the green main run is the check before a tag. Not a required check.
+  # permissions: contents: read, no secret, no cache, no third-party action.
+  upgrade:
+    name: upgrade from ${{ matrix.version }} (old release, update in place)
+    needs: [changes, upgrade-matrix]
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true' && needs.changes.outputs.upgrade == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(github.event_name == 'pull_request' && needs.upgrade-matrix.outputs.pr || needs.upgrade-matrix.outputs.all) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/upgrade-test
+        with:
+          version: ${{ matrix.version }}
+
+  # The same, every version, with the daily vulnerability scan. A manual run
+  # (workflow_dispatch) already runs the full matrix in `upgrade`.
+  upgrade-nightly:
+    name: upgrade from ${{ matrix.version }} (nightly)
+    needs: upgrade-matrix
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.upgrade-matrix.outputs.all) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/upgrade-test
+        with:
+          version: ${{ matrix.version }}
+
+  # An agent of the previous release and of v0.3.0 (the baseline) keeps talking to the
+  # server of this tree: `buf breaking` against both tags (the pull-request run compares
+  # with the previous release in `check`). New agent against an old server is not promised.
+  protocol-nightly:
+    name: agent protocol against v0.3.0 (nightly)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bash scripts/ci/check-agent-protocol.sh --nightly
 
   # The release image as release.yml builds it (dockers_v2), without push or
   # signatures: the other snapshots skip the image, so an image problem would
