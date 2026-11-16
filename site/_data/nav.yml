@@ -14,6 +14,8 @@
       url: /install/
     - title: Upgrade
       url: /upgrade/
+    - title: Test the beta
+      url: /beta/
 - group: Learn
   items:
     - title: Learn

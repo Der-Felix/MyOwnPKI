@@ -43,6 +43,7 @@ of ordinary releases (v0.9.0, v0.9.1, …); what it needs from contributors is f
 An exception is the owner's decision, written on the issue or pull request and marked with the label
 `freeze-exception`. Ideas for later get the label `post-1.0`: they are welcome, and they are looked at
 after v1.0.0. The pull request template asks which of the allowed kinds your change is.
+If you want to test the beta rather than change it, the [beta page]({{ '/beta/' | relative_url }}) has a checklist.
 
 ## Fixing a page on this site
 
