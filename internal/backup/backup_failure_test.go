@@ -24,21 +24,21 @@ const pkiRel = "tenants/default/pki.db"
 func tree(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+	fsys := os.DirFS(dir)
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
-		rel, _ := filepath.Rel(dir, p)
 		if d.IsDir() {
-			out[filepath.ToSlash(rel)+"/"] = ""
+			out[p+"/"] = ""
 			return nil
 		}
-		data, rerr := os.ReadFile(p)
+		data, rerr := fs.ReadFile(fsys, p)
 		if rerr != nil {
 			return rerr
 		}
 		sum := sha256.Sum256(data)
-		out[filepath.ToSlash(rel)] = hex.EncodeToString(sum[:])
+		out[p] = hex.EncodeToString(sum[:])
 		return nil
 	})
 	if err != nil {
@@ -124,7 +124,6 @@ func targetOptions(t *testing.T, v *testinstance.Instance) Options {
 // TestCreateRefusals: a backup never overwrites, never starts without an
 // instance, and a refusal before the first byte leaves the target alone.
 func TestCreateRefusals(t *testing.T) {
-	t.Parallel()
 	v, o := newInstance(t)
 	base := t.TempDir()
 	if err := os.WriteFile(filepath.Join(base, "afile"), []byte("keep"), 0o600); err != nil {
@@ -302,7 +301,7 @@ func TestAuthKeyOutsideTheBackup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(outside), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(outside, key, 0o600); err != nil {
+	if err := os.WriteFile(outside, key, 0o600); err != nil { // #nosec G703 -- a file of the test's own temp directory
 		t.Fatal(err)
 	}
 	tests := []struct {
@@ -405,7 +404,6 @@ func TestInside(t *testing.T) {
 // that can't be read as a file, and never leaves a half-written key readable
 // by others.
 func TestCopyFileFailures(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	if err := os.WriteFile(src, []byte("secret"), 0o600); err != nil {
@@ -657,7 +655,7 @@ func TestModifiedBackupIsRefused(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(pkiRel)), data, 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(pkiRel)), data, 0o600); err != nil { // #nosec G703 -- a file of the test's own backup copy
 				t.Fatal(err)
 			}
 			rehash(t, dir, pkiRel)
@@ -740,8 +738,8 @@ func TestRestoredAuditLogContinues(t *testing.T) {
 	}
 	target := targetOptions(t, v)
 	v.Clock.Advance(time.Hour)
-	if _, err := Restore(t.Context(), dir, "", target); err != nil {
-		t.Fatal(err)
+	if _, rerr := Restore(t.Context(), dir, "", target); rerr != nil {
+		t.Fatal(rerr)
 	}
 	db, err := store.OpenAuditLog(t.Context(), store.AuditLog{Scope: store.InstanceScope, Path: target.Layout.InstanceAuditDB()})
 	if err != nil {
