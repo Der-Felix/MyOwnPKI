@@ -41,7 +41,7 @@ func TestAddPrintsTheHintOnlyForHooksThatOpenSockets(t *testing.T) {
 	}{
 		"nginx -t":            {[]string{"nginx", "-t"}, true},
 		"haproxy -c":          {[]string{"haproxy", "-c", "-f", "/etc/haproxy/haproxy.cfg"}, false},
-		"apache2ctl check":    {[]string{"apache2ctl", "configtest"}, false},
+		"apache2ctl check":    {[]string{"apache2ctl", "configtest"}, true},
 		"haproxy starting":    {[]string{"haproxy", "-f", "/etc/haproxy/haproxy.cfg"}, true},
 		"apache2ctl graceful": {[]string{"apache2ctl", "graceful"}, true},
 	} {
@@ -54,6 +54,49 @@ func TestAddPrintsTheHintOnlyForHooksThatOpenSockets(t *testing.T) {
 			}
 			if got := strings.Contains(f.stderr.String(), "hint: hook"); got != tc.want {
 				t.Errorf("hint printed = %v, want %v:\n%s", got, tc.want, f.stderr.String())
+			}
+		})
+	}
+}
+
+// apachectl -t binds nothing, but Apache opens its error log even for a check
+// and fails with AH00091 when the log directory is not writable: the check
+// form gets its own hint, and none once a --sandbox-write directory exists.
+func TestApacheConfigCheckHint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		cmd  []string
+		want bool
+	}{
+		{[]string{"/usr/sbin/apachectl", "-t"}, true},
+		{[]string{"/usr/sbin/apache2ctl", "configtest"}, true},
+		{[]string{"/usr/sbin/apache2ctl", "-f", "/etc/apache2/apache2.conf", "-t"}, true},
+		{[]string{"/usr/sbin/apache2ctl", "graceful"}, false},
+		{[]string{"/usr/sbin/httpd", "-t"}, false},
+		{[]string{"/usr/sbin/nginx", "-t"}, false},
+		{nil, false},
+	} {
+		if got := apacheConfigCheck(tc.cmd); got != tc.want {
+			t.Errorf("%v: %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+	for name, withWrite := range map[string]bool{"without sandbox write": false, "with sandbox write": true} {
+		t.Run(name, func(t *testing.T) {
+			f := freshFixture(t)
+			spec := DeploymentSpec{
+				Name: "p", Dir: f.p("ssl", "p"), ACMEDirectory: recipeACME,
+				Hooks:    []HookSpec{{Name: "check", Command: []string{f.p("bin", "apachectl"), "-t"}}},
+				TestHook: "check",
+			}
+			opts := AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}
+			if withWrite {
+				opts.Spec.SandboxWrite = []string{f.p("log", "apache2")}
+			}
+			if err := AddDeployment(context.Background(), opts); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(f.stderr.String(), "AH00091"); got == withWrite {
+				t.Errorf("AH00091 hint printed = %v with sandbox write = %v:\n%s", got, withWrite, f.stderr.String())
 			}
 		})
 	}

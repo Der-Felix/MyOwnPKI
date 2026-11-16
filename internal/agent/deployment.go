@@ -709,6 +709,9 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 		if len(cmd) == 0 {
 			continue
 		}
+		if apacheConfigCheck(cmd) && len(cfg.Sandbox.Write) == 0 {
+			_, _ = fmt.Fprintf(s.opts.Stderr, "hint: hook %q runs %s as a configuration check; Apache opens its error log even then, and without a writable log directory the check fails with AH00091 (cannot open the error log); if it does, add the directory with --sandbox-write (Debian and Ubuntu: /var/log/apache2, Red Hat family: /var/log/httpd).\n", name, filepath.Base(cmd[0]))
+		}
 		if opensSocketsAndLogs(cmd) {
 			if len(cfg.Sandbox.Write) == 0 {
 				_, _ = fmt.Fprintf(s.opts.Stderr, "hint: hook %q runs %s, which writes its log files; if it fails with \"Read-only file system\" add its log directory with --sandbox-write (for nginx: /var/log/nginx).\n", name, filepath.Base(cmd[0]))
@@ -725,7 +728,8 @@ func (s *editSession) hint(d Deployment, cfg *Config, plan *DropinPlan) {
 // nginx (even "nginx -t" does), and the Apache and HAProxy programs in a form
 // that starts the server. Their check-only forms (apache2ctl configtest,
 // apachectl -t, haproxy -c) parse the configuration and, as far as the
-// documentation says, bind nothing, so no hint is printed for them.
+// documentation says, bind nothing, so the sockets and logs hint is not printed
+// for them (apacheConfigCheck has the log directory hint of the Apache forms).
 func opensSocketsAndLogs(cmd []string) bool {
 	if len(cmd) == 0 {
 		return false
@@ -1027,4 +1031,20 @@ func SyncSandbox(ctx context.Context, opts SyncOptions) error {
 		return nil
 	}
 	return s.apply(ctx, changeSet{config: data, plan: plan})
+}
+
+// apacheConfigCheck says whether a hook command is the configuration check of
+// Apache through its control script (apachectl -t, apache2ctl configtest).
+// opensSocketsAndLogs leaves it out because it binds no socket, but Apache
+// opens its error log even for a check, and a check run as a user that cannot
+// write the log directory fails with AH00091.
+func apacheConfigCheck(cmd []string) bool {
+	if len(cmd) == 0 {
+		return false
+	}
+	switch filepath.Base(cmd[0]) {
+	case "apachectl", "apache2ctl":
+		return slices.Contains(cmd[1:], "configtest") || slices.Contains(cmd[1:], "-t")
+	}
+	return false
 }
