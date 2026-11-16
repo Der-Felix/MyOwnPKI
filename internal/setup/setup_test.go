@@ -17,6 +17,7 @@ import (
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
@@ -167,6 +168,10 @@ func TestInteractiveInit(t *testing.T) {
 	}
 	if res.CheckpointFingerprint == "" || strings.Join(res.CAs, ",") != "root,issuing" || res.Resumed {
 		t.Errorf("result %+v", res)
+	}
+	// The key that signs the backups: a file in the data directory, shown at the end.
+	if k, _, kerr := backupkey.Load(backupkey.Path(opt.Config.DataDir)); kerr != nil || res.BackupKeyFingerprint != k.Fingerprint() {
+		t.Errorf("backup key: %q %v", res.BackupKeyFingerprint, kerr)
 	}
 
 	q := systemdb.New(db(t, opt, "sys").Read)
@@ -352,7 +357,7 @@ func TestDemoInit(t *testing.T) {
 // TestResumeAfterEachStep: init stops after every write step; running it
 // again (with the passphrase as proof) finishes only what is missing.
 func TestResumeAfterEachStep(t *testing.T) {
-	for _, stop := range []string{"files", "migrate", "auth-key", "root-key", "user", "ca-root", "ca"} {
+	for _, stop := range []string{"files", "migrate", "auth-key", "backup-key", "root-key", "user", "ca-root", "ca"} {
 		t.Run(stop, func(t *testing.T) {
 			opt := options(t, Stdin)
 			dir := t.TempDir()
@@ -364,6 +369,7 @@ func TestResumeAfterEachStep(t *testing.T) {
 				t.Fatal("no stop")
 			}
 			keyBefore, _ := os.ReadFile(opt.Config.AuthKeyFile())
+			backupKeyBefore, _ := os.ReadFile(backupkey.Path(opt.Config.DataDir))
 
 			opt.failAfter = ""
 			res, err := Run(t.Context(), opt, input())
@@ -393,6 +399,13 @@ func TestResumeAfterEachStep(t *testing.T) {
 					t.Error("the auth key was replaced")
 				}
 			}
+			backupKeyAfter, berr := os.ReadFile(backupkey.Path(opt.Config.DataDir))
+			if berr != nil || (backupKeyBefore != nil && !bytes.Equal(backupKeyAfter, backupKeyBefore)) {
+				t.Errorf("the backup key after the resume: %v (replaced: %v)", berr, backupKeyBefore != nil)
+			}
+			if fp, _, _ := backupkey.Load(backupkey.Path(opt.Config.DataDir)); res.BackupKeyFingerprint == "" || fp == nil || res.BackupKeyFingerprint != fp.Fingerprint() {
+				t.Errorf("fingerprint in the result %q", res.BackupKeyFingerprint)
+			}
 			var cas int
 			if err := db(t, opt, "pki").Read.QueryRowContext(t.Context(), `SELECT count(*) FROM cas`).Scan(&cas); err != nil || cas != 2 {
 				t.Errorf("%d CAs, %v", cas, err)
@@ -401,7 +414,7 @@ func TestResumeAfterEachStep(t *testing.T) {
 			if len(subjects) != 1 {
 				t.Errorf("root and intermediate tags differ after resume: %v", subjects)
 			}
-			wantResumed := stop != "files" && stop != "migrate" && stop != "auth-key"
+			wantResumed := stop != "files" && stop != "migrate" && stop != "auth-key" && stop != "backup-key"
 			if res.Resumed != wantResumed {
 				t.Errorf("resumed %v, want %v", res.Resumed, wantResumed)
 			}

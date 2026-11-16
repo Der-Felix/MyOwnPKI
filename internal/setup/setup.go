@@ -30,6 +30,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca/preset"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
@@ -102,9 +103,12 @@ type Options struct {
 type Result struct {
 	Resumed               bool
 	CheckpointFingerprint string
-	CAs                   []string // created now
-	Warnings              []string
-	DemoSecretsFile       string
+	// BackupKeyFingerprint is the key that signs the backups of the instance
+	// (made here, or found from an earlier run of init).
+	BackupKeyFingerprint string
+	CAs                  []string // created now
+	Warnings             []string
+	DemoSecretsFile      string
 	// Enrollment of the new user (interactive): the recovery codes to show
 	// at the end. nil when no user was created.
 	Enrollment *auth.Enrollment
@@ -545,6 +549,7 @@ func (r *run) write(ctx context.Context) error {
 		{"files", r.writeFiles},
 		{"migrate", r.migrate},
 		{"auth-key", r.authKey},
+		{"backup-key", r.backupKey},
 		{"root-key", r.rootKey},
 		{"user", r.createUser},
 		{"finish", r.unsealPart},
@@ -602,6 +607,18 @@ func (r *run) authKey(context.Context) error {
 	_, warnings, err := auth.LoadKey(path)
 	r.res.Warnings = append(r.res.Warnings, warnings...)
 	return err
+}
+
+// backupKey makes the key that signs every backup (PHASE3 section 19.3): in
+// the data directory, never inside a backup. A run that finds it keeps it.
+func (r *run) backupKey(context.Context) error {
+	k, _, warnings, err := backupkey.LoadOrCreate(backupkey.Path(r.l.DataDir), r.rnd)
+	if err != nil {
+		return err
+	}
+	r.res.BackupKeyFingerprint = k.Fingerprint()
+	r.res.Warnings = append(r.res.Warnings, warnings...)
+	return nil
 }
 
 func (r *run) rootKey(ctx context.Context) error {

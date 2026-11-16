@@ -101,8 +101,13 @@ func TestCreateSignsTheManifest(t *testing.T) {
 	t.Parallel()
 	v, o, dir, c := signedBackup(t)
 	keyPath := backupkey.Path(o.Layout.DataDir)
-	if !c.NewKey || !strings.HasPrefix(c.SigningKey, backupkey.Prefix) {
-		t.Errorf("first backup: new key %v, fingerprint %q", c.NewKey, c.SigningKey)
+	// The key is the one init made (setup step "backup-key"), not a new one.
+	initKey, _, kerr := backupkey.Load(keyPath)
+	if kerr != nil {
+		t.Fatal(kerr)
+	}
+	if c.NewKey || c.SigningKey != initKey.Fingerprint() || !strings.HasPrefix(c.SigningKey, backupkey.Prefix) {
+		t.Errorf("first backup: new key %v, fingerprint %q, init made %q", c.NewKey, c.SigningKey, initKey.Fingerprint())
 	}
 	if runtime.GOOS != "windows" {
 		if fi, err := os.Stat(keyPath); err != nil || fi.Mode().Perm() != 0o600 {
@@ -624,5 +629,34 @@ func TestPruneKeepsFormat2Complete(t *testing.T) {
 	res, err := Prune(parent, 1, true)
 	if err != nil || len(res.Kept) != 1 || res.Kept[0] != "20200102T000000Z" || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Reason, SignatureFile) {
 		t.Errorf("%+v %v", res, err)
+	}
+}
+
+// TestFirstBackupMakesTheKey: an instance from before 0.9.0 has no key file;
+// its first backup makes one (0600) and says so, and the next one keeps it.
+func TestFirstBackupMakesTheKey(t *testing.T) {
+	t.Parallel()
+	v, o := newInstance(t)
+	issue(t, v, "nas.homelab.lan")
+	keyPath := backupkey.Path(o.Layout.DataDir)
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "first")
+	c, err := Create(t.Context(), dir, o)
+	if err != nil || !c.NewKey {
+		t.Fatalf("first backup: %+v %v", c, err)
+	}
+	if runtime.GOOS != "windows" {
+		if fi, serr := os.Stat(keyPath); serr != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("key file: %v %v", fi, serr)
+		}
+	}
+	if rep, verr := Verify(t.Context(), dir, Check{BackupKey: c.SigningKey}); verr != nil || rep.Authenticity != Pinned {
+		t.Errorf("verify: %v %+v", verr, rep)
+	}
+	c2, err := Create(t.Context(), filepath.Join(t.TempDir(), "second"), o)
+	if err != nil || c2.NewKey || c2.SigningKey != c.SigningKey {
+		t.Errorf("second backup: %+v %v", c2, err)
 	}
 }
