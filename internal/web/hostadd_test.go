@@ -453,6 +453,10 @@ func TestGeneratedDeploymentLines(t *testing.T) {
 			"install -d -m 0755 '/etc/ssl/myownpki'\n" +
 			"/usr/local/bin/myownpki-agent deployment add 'nginx' \\\n  --recipe nginx \\\n  --name 'proxy1.homelab.lan' \\\n  --challenge webroot --webroot '/var/www/acme' \\\n" +
 			"  --acme-directory 'https://pki.homelab.lan/acme/directory' \\\n  --restart\n )\n",
+		"haproxy": "( set -euo pipefail\n" +
+			"install -d -m 0755 '/etc/ssl/myownpki/haproxy'\n" +
+			"/usr/local/bin/myownpki-agent deployment add 'haproxy' \\\n  --recipe haproxy \\\n  --name 'proxy1.homelab.lan' \\\n  --challenge webroot --webroot '/var/www/acme' \\\n" +
+			"  --acme-directory 'https://pki.homelab.lan/acme/directory' \\\n  --restart\n )\n",
 		"postfix": "( set -euo pipefail\n" +
 			"install -d -m 0755 '/etc/ssl/myownpki/postfix'\n" +
 			"/usr/local/bin/myownpki-agent deployment add 'postfix' \\\n  --recipe postfix \\\n  --name 'proxy1.homelab.lan' \\\n  --challenge webroot --webroot '/var/www/acme' \\\n" +
@@ -564,7 +568,7 @@ func TestDeploymentAddCommandQuotesWhateverItIsGiven(t *testing.T) {
 func TestCertParentsAreTheRecipeDirectories(t *testing.T) {
 	t.Parallel()
 	for id, want := range map[string][]string{
-		"nginx": {"/etc/ssl/myownpki"}, "apache2": {"/etc/ssl/myownpki"}, "httpd": {"/etc/ssl/myownpki"}, "postfix": {"/etc/ssl/myownpki/postfix"}, "dovecot": {"/etc/ssl/myownpki/dovecot"},
+		"nginx": {"/etc/ssl/myownpki"}, "apache2": {"/etc/ssl/myownpki"}, "httpd": {"/etc/ssl/myownpki"}, "haproxy": {"/etc/ssl/myownpki/haproxy"}, "postfix": {"/etc/ssl/myownpki/postfix"}, "dovecot": {"/etc/ssl/myownpki/dovecot"},
 		"proxmox": {"/etc/ssl/myownpki/pve"}, "files": {"/etc/ssl/myownpki"},
 	} {
 		svc, _ := hostServiceByID(id)
@@ -616,5 +620,28 @@ func TestRecipeFilesReplaceTheDeploymentName(t *testing.T) {
 	two := recipe.Recipe{Profile: "file", Fullchain: "/etc/ssl/myownpki/postfix/fullchain.pem", Key: "/etc/ssl/myownpki/postfix/privkey.pem"}
 	if got := recipeFiles(two, "mail"); !slices.Equal(got, []string{"/etc/ssl/myownpki/postfix/fullchain.pem", "/etc/ssl/myownpki/postfix/privkey.pem"}) {
 		t.Errorf("two files: %q", got)
+	}
+}
+
+// The page says what the HAProxy recipe writes: one file with the chain and the
+// key, the hooks, and that the recipe stays an example.
+func TestHAProxyExplanationNamesTheOneFile(t *testing.T) {
+	t.Parallel()
+	lines := (&app{}).deploymentExplanation(hostPlanFor(t, "haproxy", "webroot"))
+	text := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"files /etc/ssl/myownpki/haproxy/haproxy.pem (the certificate chain and the private key in one file, mode 0600)",
+		"hook haproxy-test: /usr/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg",
+		"hook haproxy-reload: /usr/bin/systemctl reload haproxy",
+		"local TLS check 127.0.0.1:443", "Example recipe: test it on a non-production host first.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the explanation lacks %q:\n%s", want, text)
+		}
+	}
+	for _, not := range []string{"sandbox may write", "below 1024", "fullchain.pem"} {
+		if strings.Contains(text, not) {
+			t.Errorf("the explanation says %q:\n%s", not, text)
+		}
 	}
 }
