@@ -185,6 +185,9 @@ func create(ctx context.Context, dir string, o Options) (*Manifest, error) {
 		if f.Migration, err = migrationVersion(ctx, dst, s.kind); err != nil {
 			return nil, fmt.Errorf("%s: %w", s.rel, err)
 		}
+		if f.Migration == 0 {
+			return nil, fmt.Errorf("%s: the database has no schema (the file is empty or damaged) – there is nothing to back up", s.rel)
+		}
 		m.Files = append(m.Files, f)
 		if s.kind != store.KindAudit {
 			continue
