@@ -402,18 +402,25 @@ cmd_run() {
   note "The second act (nginx served by the agent): ./demo.sh agent. Clean up: ./demo.sh down"
 }
 
-case "${1:-}" in
-  run) cmd_run ;;
-  up) cmd_up ;;
-  unseal) cmd_unseal ;;
-  domain) cmd_domain ;;
-  certbot) cmd_certbot ;;
-  verify) cmd_verify ;;
-  agent) cmd_agent ;;
-  logs) cmd_logs ;;
-  down) cmd_down ;;
-  *)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
-    exit 2
-    ;;
-esac
+main() {
+  case "${1:-}" in
+    run) cmd_run ;;
+    up) cmd_up ;;
+    unseal) cmd_unseal ;;
+    domain) cmd_domain ;;
+    certbot) cmd_certbot ;;
+    verify) cmd_verify ;;
+    agent) cmd_agent ;;
+    logs) cmd_logs ;;
+    down) cmd_down ;;
+    *)
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
+      exit 2
+      ;;
+  esac
+}
+
+# Sourced (by a test), it only defines the functions.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

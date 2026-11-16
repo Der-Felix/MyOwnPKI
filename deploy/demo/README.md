@@ -10,7 +10,7 @@ certificate is deployed by `myownpki-agent`.
 
 ## What you need
 
-- Docker with the compose plugin (`docker compose version`), on Linux or macOS
+- Docker with the compose plugin, version 2.20 or newer (`docker compose version`), on Linux or macOS
 - `curl`, `openssl` (1.1.1 or newer; on macOS `brew install openssl`), `sed` and bash 3.2 or newer
 - Ports: `127.0.0.1:9443` on this host. Nothing else is published, and nothing listens on a
   network address of the host.

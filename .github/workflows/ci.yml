@@ -344,13 +344,15 @@ jobs:
   # signatures: the other snapshots skip the image, so an image problem would
   # show only after the release tag. Checks that the image points
   # agent.package_dir at /opt/myownpki/agent-dist and carries every agent
-  # package with the snapshot's checksums.txt.
+  # package with the snapshot's checksums.txt. Then the demo of deploy/demo runs
+  # on that image (scripts/ci/demo-check.sh).
   image:
     name: release image (snapshot)
     needs: changes
     if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The snapshot and the demo (pulls certbot, waits for second-factor windows).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -362,6 +364,11 @@ jobs:
           goreleaser: "true"
       - name: Snapshot with the image, check the agent packages in it
         run: bash scripts/ci/image-snapshot.sh
+      # The demo (deploy/demo) on the image the snapshot just built: certbot gets
+      # a certificate by http-01 and the chain verifies against the demo root.
+      # The agent act of the demo is a live test; its image only builds here.
+      - name: Demo with the snapshot image (certbot, http-01, openssl verify)
+        run: bash scripts/ci/demo-check.sh
 
   # The Salt formula (deploy/salt/myownpki, docs/PHASE3.md section 12): every test
   # pillar is rendered and applied with test=True by a pinned Salt (no minion, no

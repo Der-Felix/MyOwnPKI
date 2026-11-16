@@ -41,6 +41,7 @@ steps=(
   'install|second build for update|linux|bash scripts/ci/install-second-build.sh'
   'install|install start update as root|linux_systemd_goreleaser_disposable|bash scripts/ci/install-systemd.sh'
   'image|release image snapshot with agent packages|linux_docker_goreleaser_disposable|bash scripts/ci/image-snapshot.sh'
+  'image|demo from the snapshot image|linux_docker_demo|bash scripts/ci/demo-check.sh'
   'salt|self-test without Salt|bash|bash scripts/ci/salt-test.sh --self-test'
   'salt|render and apply test=True|salt|bash scripts/ci/salt-test.sh'
   # Documentation site: the same steps as the build job of .github/workflows/pages.yml
@@ -134,6 +135,15 @@ requirement() {
     linux_docker)
       if [ "$os" != linux ] || ! has_commands go task docker; then
         echo 'needs Linux + docker'
+      fi
+      ;;
+    linux_docker_demo)
+      # The demo runs on the image the snapshot step above leaves in the local
+      # image store (or on MYOWNPKI_IMAGE).
+      if [ "$os" != linux ] || ! has_commands docker curl openssl; then
+        echo 'needs Linux + docker + curl + openssl'
+      elif [ -z "${MYOWNPKI_IMAGE:-}" ] && ! docker image ls ghcr.io/der-felix/myownpki --format '{{.Tag}}' 2>/dev/null | grep -q .; then
+        echo 'needs the snapshot image of the previous step (ghcr.io/der-felix/myownpki) or MYOWNPKI_IMAGE'
       fi
       ;;
     linux_docker_dpkg)
