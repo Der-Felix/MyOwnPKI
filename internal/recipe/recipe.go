@@ -27,14 +27,19 @@ type Recipe struct {
 	Name    string
 	Summary string
 
-	// Profile is "nginx" (Dir) or "file" (Certificate, Chain, Fullchain, Key).
+	// Profile is "nginx" (Dir) or "file" (Certificate, Chain, Fullchain, Key,
+	// or Combined alone).
 	Profile string
-	// Dir may contain {name}, the name of the deployment.
+	// Dir, and every file path of the file profile, may contain {name}: the
+	// name of the deployment (a validated name of letters, digits and "-").
 	Dir         string
 	Certificate string
 	Chain       string
 	Fullchain   string
 	Key         string
+	// Combined is the single-file form (HAProxy): the certificate chain and the
+	// private key in one PEM file. It excludes the four fields above.
+	Combined string
 
 	Owner   string
 	Group   string

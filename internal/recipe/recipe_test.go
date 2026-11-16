@@ -43,14 +43,16 @@ func TestEveryRecipeIsWellFormed(t *testing.T) {
 			}
 			switch r.Profile {
 			case "nginx":
-				if !strings.HasPrefix(r.Dir, "/etc/ssl/myownpki/") || r.Fullchain != "" || r.Key != "" {
-					t.Errorf("nginx profile: dir %q files %q %q", r.Dir, r.Fullchain, r.Key)
+				if !strings.HasPrefix(r.Dir, "/etc/ssl/myownpki/") || r.Fullchain != "" || r.Key != "" || r.Combined != "" {
+					t.Errorf("nginx profile: dir %q files %q %q %q", r.Dir, r.Fullchain, r.Key, r.Combined)
 				}
 			case "file":
-				if r.Dir != "" || r.Key == "" || r.Certificate == "" && r.Fullchain == "" {
-					t.Errorf("file profile: %+v", r)
+				oneFile := r.Combined != "" && r.Certificate == "" && r.Chain == "" && r.Fullchain == "" && r.Key == ""
+				twoFiles := r.Combined == "" && r.Key != "" && (r.Certificate != "" || r.Fullchain != "")
+				if r.Dir != "" || oneFile == twoFiles {
+					t.Errorf("file profile: want the combined file alone, or a key with a certificate or fullchain: %+v", r)
 				}
-				for _, p := range []string{r.Certificate, r.Chain, r.Fullchain, r.Key} {
+				for _, p := range []string{r.Certificate, r.Chain, r.Fullchain, r.Key, r.Combined} {
 					if p != "" && !strings.HasPrefix(p, "/etc/ssl/myownpki/") {
 						t.Errorf("file %q is not below /etc/ssl/myownpki/", p)
 					}
@@ -147,5 +149,34 @@ func TestRecipeFacts(t *testing.T) {
 	nginx, _ := Get("nginx")
 	if !nginx.LowPorts || nginx.Check != "127.0.0.1:443" || !slices.Equal(nginx.SandboxWrite, []string{"/var/log/nginx"}) {
 		t.Errorf("nginx: %+v", nginx)
+	}
+}
+
+// {name} stands for the deployment name and nothing else: it is in paths only,
+// never in a hook, a check or a directory the sandbox opens.
+func TestNameAppearsOnlyInPaths(t *testing.T) {
+	t.Parallel()
+	for _, name := range Names() {
+		r, _ := Get(name)
+		for _, h := range r.Hooks {
+			if strings.Contains(strings.Join(h.Command, " "), "{") {
+				t.Errorf("%s: hook %s has a placeholder: %v", name, h.Name, h.Command)
+			}
+		}
+		for _, v := range append([]string{r.Check, r.Owner, r.Group, r.KeyMode}, r.SandboxWrite...) {
+			if strings.Contains(v, "{") {
+				t.Errorf("%s: placeholder in %q", name, v)
+			}
+		}
+		for _, p := range []string{r.Dir, r.Certificate, r.Chain, r.Fullchain, r.Key, r.Combined} {
+			if strings.Contains(strings.ReplaceAll(p, "{name}", ""), "{") {
+				t.Errorf("%s: unknown placeholder in %q", name, p)
+			}
+		}
+		// A file shared by every deployment of a recipe (no {name}) would
+		// collide at the second one; only the single-service recipes may do that.
+		if r.Profile == "file" && r.Combined != "" && !strings.Contains(r.Combined, "{name}") {
+			t.Errorf("%s: the combined file has no {name}", name)
+		}
 	}
 }

@@ -604,3 +604,17 @@ func clipForLog(s string) string {
 	}
 	return s
 }
+
+// A file-profile recipe names its files with {name} replaced by the deployment
+// name, the one-file form included; the order is the one of the page.
+func TestRecipeFilesReplaceTheDeploymentName(t *testing.T) {
+	t.Parallel()
+	one := recipe.Recipe{Profile: "file", Combined: "/etc/ssl/myownpki/haproxy/{name}.pem"}
+	if got := recipeFiles(one, "www"); !slices.Equal(got, []string{"/etc/ssl/myownpki/haproxy/www.pem"}) {
+		t.Errorf("combined: %q", got)
+	}
+	two := recipe.Recipe{Profile: "file", Fullchain: "/etc/ssl/myownpki/postfix/fullchain.pem", Key: "/etc/ssl/myownpki/postfix/privkey.pem"}
+	if got := recipeFiles(two, "mail"); !slices.Equal(got, []string{"/etc/ssl/myownpki/postfix/fullchain.pem", "/etc/ssl/myownpki/postfix/privkey.pem"}) {
+		t.Errorf("two files: %q", got)
+	}
+}
