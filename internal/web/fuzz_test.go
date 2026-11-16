@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // csrFileLimit is the size limit of an uploaded CSR file written as a
@@ -93,7 +95,7 @@ func FuzzUploadedCSR(f *testing.F) {
 
 		start := time.Now()
 		text, ok, msg := uploadedCSR(req)
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > racemode.Scale(2*time.Second) {
 			t.Fatalf("uploadedCSR took %v for %d bytes", d, len(data))
 		}
 

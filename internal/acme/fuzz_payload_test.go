@@ -330,7 +330,7 @@ func (fz *payloadFuzz) run(t *testing.T, endpoint byte, payload []byte) {
 	start := time.Now()
 	rec := httptest.NewRecorder()
 	fz.v.s.ServeHTTP(rec, req)
-	if d := time.Since(start); d > 2*time.Second {
+	if d := time.Since(start); d > fuzzMaxTime {
 		t.Fatalf("endpoint %d took %v", kind, d)
 	}
 	res := rec.Result()

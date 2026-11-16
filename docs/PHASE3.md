@@ -2879,7 +2879,7 @@ Every target follows the same rules, so a reviewer can check them in one pass:
    sets a limit lower, never skips the size check. If a function needs a seam to be called (an unexported method on
    `Server`), the call is made from the same package's test.
 2. **Bounded.** The production limit is the bound (64 KiB for a CSR, 8 KiB for an agent CSR, 4 MiB for a CRL, 128 KiB
-   for a JSON body, 64 MiB for the archive); a target measures its own wall time per input and fails above 2 s
+   for a JSON body, 64 MiB for the archive); a target measures its own wall time per input and fails above 2 s (10 s for the legacy archive, whose seeds are hostile on purpose; ten times as much under `-race`, `internal/testutil/racemode`)
    (`time.Now` is allowed in tests), except the PBKDF2 case of decision 9. Memory is bounded by the same limits; the
    archive target runs with two workers.
 3. **Accept means promise.** When the parser says yes, the target re-checks, with code that does not share the

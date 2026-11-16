@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // Fuzz targets of the ACME envelope (PHASE3 section 18.2). Every target calls
@@ -27,9 +29,10 @@ import (
 // any other helper of the parser. Seeds are written in code; the files
 // under testdata/fuzz are what the fuzzer stored after a failure.
 
+// fuzzMaxTime is the wall time one input may take (section 18.2, rule 2); wider under the race detector.
+var fuzzMaxTime = racemode.Scale(2 * time.Second)
+
 const (
-	// fuzzMaxTime is the wall time one input may take (section 18.2, rule 2).
-	fuzzMaxTime = 2 * time.Second
 	// fuzzMaxError bounds the text of a refusal: the parser may name the rule
 	// and a short piece of the input, never the input (rule 5).
 	fuzzMaxError = 400

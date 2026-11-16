@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // The targets of docs/PHASE3.md section 18.1 step 87: the two places where
@@ -44,7 +46,7 @@ func FuzzDetect(f *testing.F) {
 	f.Fuzz(func(t *testing.T, ua string) {
 		start := time.Now()
 		got := Detect(ua)
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > racemode.Scale(2*time.Second) {
 			t.Fatalf("Detect took %v for %d bytes", d, len(ua))
 		}
 		if !known[got.Platform] {
@@ -190,7 +192,7 @@ func FuzzGuide(f *testing.F) {
 		r := Root{Name: name, BaseURL: base, Generation: gen, Current: current, DER: der}
 		start := time.Now()
 		blocks := Guide(p, r)
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > racemode.Scale(2*time.Second) {
 			t.Fatalf("Guide took %v", d)
 		}
 		u, ok := r.CertURL()

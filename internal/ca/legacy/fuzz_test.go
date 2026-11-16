@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // Fuzz targets of the legacy import (docs/PHASE3.md §18.2): the archive an admin uploads and the text files
@@ -38,8 +40,10 @@ import (
 // with code of its own. Seeds are built here; files under testdata/fuzz are only what the fuzzer wrote after a
 // failure.
 
-// fuzzDeadline is the longest one input may take.
-const fuzzDeadline = 2 * time.Second
+// fuzzDeadline is the longest one input may take. The seeds of the archive target are hostile on purpose (100,000
+// entries, a name of 524,000 levels) and need up to 1 s without the race detector on a developer machine and 8 s with it;
+// the quadratic code that the limit is for needs minutes, so the limit is 10 s, and 100 s under -race.
+var fuzzDeadline = racemode.Scale(10 * time.Second)
 
 // fuzzTimer fails the target when one input needed longer than fuzzDeadline.
 func fuzzTimer(t *testing.T) func() {

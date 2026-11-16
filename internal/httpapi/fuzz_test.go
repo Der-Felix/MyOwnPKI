@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // FuzzDecodeBody is the target of docs/PHASE3.md section 18.1 step 85: the
@@ -104,7 +106,7 @@ func FuzzDecodeBody(f *testing.F) {
 		start := time.Now()
 		v := shape.fresh()
 		err := decodeBytes(t, data, v)
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > racemode.Scale(2*time.Second) {
 			t.Fatalf("decode of %d bytes took %v", len(data), d)
 		}
 

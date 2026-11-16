@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 	"unicode"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // Fuzz targets of the parsers that read attacker input in this package (docs/PHASE3.md §18.2): the CSR and
@@ -35,7 +37,7 @@ import (
 // testdata/fuzz are only what the fuzzer wrote after a failure.
 
 // fuzzDeadline is the longest one input may take.
-const fuzzDeadline = 2 * time.Second
+var fuzzDeadline = racemode.Scale(2 * time.Second)
 
 // fuzzTimer fails the target when one input needed longer than fuzzDeadline: a slow input is a denial of
 // service on the server, whatever it returns.

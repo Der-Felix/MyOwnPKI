@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/store/pkidb"
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // Fuzz targets of the ACME payload helpers (PHASE3 section 18.2): the
@@ -28,9 +29,10 @@ import (
 // with the standard library and code written here, never with the helpers
 // of the function under test. No database, no network, no real clock.
 
+// fuzzMaxTime is the wall time one input may take (section 18.2, rule 2); wider under the race detector.
+var fuzzMaxTime = racemode.Scale(2 * time.Second)
+
 const (
-	// fuzzMaxTime is the wall time one input may take (section 18.2, rule 2).
-	fuzzMaxTime = 2 * time.Second
 	// fuzzMaxDetail bounds the text of a refusal. The names the ca package
 	// quotes are at most 253 bytes (longer ones are cut by its short()) and a
 	// message can quote one twice; what must not happen is a text that grows

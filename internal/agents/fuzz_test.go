@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Der-Felix/MyOwnPKI/internal/testutil/racemode"
 )
 
 // The targets of docs/PHASE3.md section 18.2 for the agent protocol: what a
@@ -29,7 +31,7 @@ import (
 // checked by code of its own, not by calling the parser a second time.
 
 // fuzzBudget is the most a single input may take (section 18.2, rule 2).
-const fuzzBudget = 2 * time.Second
+var fuzzBudget = racemode.Scale(2 * time.Second)
 
 // maxNameRefusal bounds the text of a name refusal: it echoes at most 64
 // bytes of the input (clip), and %q writes a byte that is no valid UTF-8 as
