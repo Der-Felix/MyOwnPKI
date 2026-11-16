@@ -1,0 +1,73 @@
+name: Bug report
+description: "Something does not work as the documentation says, or an update broke an installation."
+title: "bug: "
+labels: ["bug", "beta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. **This is a public page.** Never post keys, the recovery key, the unseal passphrase, API tokens, join tokens or enrollment passes, session cookies, backup files or directories, `init-demo-secrets.txt`, `auth.key`, TOTP seeds or `otpauth://` links, DNS credentials, or an `agent.yaml` with credentials. Remove them from logs before you paste.
+
+        A **security problem** (a certificate issued outside policy, a key that can be read, a login bypass) is not reported here: use the [private advisory](https://github.com/Der-Felix/MyOwnPKI/security/advisories/new), see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `myownpki --version` (or `myownpki-agent --version`, if the agent is the problem).
+      placeholder: "myownpki 0.9.0 ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - install.sh (systemd service)
+        - Container image
+        - The demo (deploy/demo)
+        - Built from source
+        - Agent package (deb or rpm)
+        - Agent from the archive
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: update
+    attributes:
+      label: Updated from
+      description: Only if this appeared after an update, for example "0.3.12". Leave empty for a new installation.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: Say which page, command or guide you followed, with its address if it is on the site.
+    validations:
+      required: true
+  - type: textarea
+    id: seen
+    attributes:
+      label: What happened instead
+      description: The steps in order, and the exact message you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: dbstatus
+    attributes:
+      label: Output of `db status`
+      description: "`myownpki db status --config /etc/myownpki/config.yaml`. Needed for every problem after an update or a start."
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: "For example `journalctl -u myownpki --since '10 minutes ago'`. Only the lines around the problem, and only after you checked them for secrets."
+      render: text
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you send
+      options:
+        - label: I removed every secret from what I pasted (keys, passphrases, tokens, join tokens, TOTP seeds, backup files, credentials).
+          required: true
+        - label: This is not a security problem. Those go to the private advisory.
+          required: true
