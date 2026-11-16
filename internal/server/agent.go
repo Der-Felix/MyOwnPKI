@@ -165,15 +165,6 @@ func (s *Server) listenAgents(ctx context.Context, lc *net.ListenConfig) error {
 	return nil
 }
 
-// AgentAddr is "" while the agent listener is off; else its address (tests
-// use port 0).
-func (s *Server) AgentAddr() string {
-	if s.agent == nil || s.agent.ln == nil {
-		return ""
-	}
-	return s.agent.ln.Addr().String()
-}
-
 // Agents is the agent service, nil while agents are off.
 func (s *Server) Agents() *agents.Service {
 	if s.agent == nil {

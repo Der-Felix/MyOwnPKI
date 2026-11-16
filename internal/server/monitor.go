@@ -241,25 +241,6 @@ func (s *Server) buildScan() (config.ScanValues, error) {
 	return sv, nil
 }
 
-// Endpoints is the TLS scan endpoint service for the UI and the API.
-func (s *Server) Endpoints() *tlsscan.Service {
-	if s.scan == nil {
-		return nil
-	}
-	return s.scan.svc
-}
-
-// EndpointStates is every TLS endpoint with its assessed state – the same
-// one the scan alerts follow – for the page and the API. It reads the
-// certificates like the evaluation does; nothing is changed. Without
-// monitoring it returns nothing.
-func (s *Server) EndpointStates(ctx context.Context) ([]monitor.EndpointState, error) {
-	if s.monitor == nil {
-		return nil, nil
-	}
-	return s.monitor.eval.EndpointStates(ctx, s.clk.Now())
-}
-
 // EndpointAdmin is the TLS endpoints with their assessed state for the REST
 // API; nil without monitoring.
 func (s *Server) EndpointAdmin() *monitor.Endpoints {

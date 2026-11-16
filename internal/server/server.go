@@ -594,17 +594,6 @@ func (s *Server) ServedAdminCertificate() CertInfo {
 	return s.CertInfo
 }
 
-// ACMEAddr is "" when ACME is off; else the listener's address (tests use port 0).
-func (s *Server) ACMEAddr() string {
-	if s.acmeLn == nil {
-		return ""
-	}
-	return s.acmeLn.Addr().String()
-}
-
-// ACME is the ACME server, nil while ACME is off.
-func (s *Server) ACME() *acme.Server { return s.acme }
-
 // PublicAddr is "" when the public listener is off.
 func (s *Server) PublicAddr() string {
 	if s.publicLn == nil {
@@ -657,9 +646,6 @@ func loopbackOnly(listen string) bool {
 func (s *Server) Unseal(ctx context.Context, passphrase []byte, who keys.Who) error {
 	return s.ring.Unseal(ctx, passphrase, who)
 }
-
-// Sealed reports the seal state.
-func (s *Server) Sealed() bool { return s.ring.Status().Sealed }
 
 // Serve runs listeners and jobs until ctx ends, then shuts down within
 // ShutdownBudget: no new connections, in-flight requests get a few seconds,
