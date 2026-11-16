@@ -12,7 +12,8 @@ them privately, never as a public issue or pull request.
   (§10). The current work plan is [docs/PHASE3.md](docs/PHASE3.md); phases 1 and 2 are finished
   ([docs/PHASE1.md](docs/PHASE1.md), [docs/PHASE2.md](docs/PHASE2.md)).
 - For anything larger than a small fix, open an issue first and describe what you want to change.
-  Features from a later phase are usually not merged early.
+  Features from a later phase are usually not merged early, and from v0.9.0 until v1.0.0 no feature
+  is merged at all: see [Feature freeze](#feature-freeze-from-v090-until-v100).
 - **ADRs are deliberate trade-offs.** If your change conflicts with one, propose an ADR change in
   the issue instead of working around it.
 
@@ -27,6 +28,29 @@ task              # list all tasks
 task check        # formatting, lint, tests, build – must pass before every commit
 task dev          # UI prototype at http://127.0.0.1:9443/ (no TLS, no login, loopback only)
 ```
+
+## Feature freeze (from v0.9.0 until v1.0.0)
+
+The tag v0.9.0 starts the beta. The beta is made of ordinary releases (v0.9.0, v0.9.1, …), and from
+the first of them the feature set is **frozen**: what is in v0.9.0 is what v1.0.0 will be, minus the
+defects testers find. The point is that testers test one thing, not a moving target. The rules are in
+[docs/PHASE3.md](docs/PHASE3.md) §19.4.
+
+| Allowed | Not allowed without an exception |
+|---|---|
+| **Fixes**: `fix:` or `fix(<area>):`, and the commit says what was wrong | Features, new pages, new settings or configuration keys, new CLI commands |
+| **Docs** (`docs:`), **tests** and the CI that runs them (`test:`, `ci:`) | REST additions (a path, a field) and changes to `api/openapi.yaml`, except to correct it |
+| **Security hardening** that only narrows what is accepted (`fix(security):` in the title of the pull request) | Schema changes. A **new** migration that fixes a defect is allowed; a released migration file is never edited |
+| **Dependency security updates** (branch `deps/<short>`, `chore(deps):`) | New dependencies, protocol changes in `proto/` beyond what `buf breaking` accepts, new agent profiles or recipes, any ADR change |
+
+- **An exception is the owner's decision.** The owner writes "freeze exception" on the issue or the pull
+  request and adds the label `freeze-exception`; the commit body names the issue and the CHANGELOG
+  lists the change under *Changed*. A contributor, and a coding session, never decides it.
+- **Ideas and wishes are welcome**, but they are not built during the beta. They get the label `post-1.0`
+  and are looked at after v1.0.0; the list is in [docs/PLAN.md](docs/PLAN.md) §10.1 and §12.
+- **Fixes only narrow.** A fix that changes behavior a client may have relied on is named in the CHANGELOG.
+- The pull request template asks you to tick one box: this is a fix, docs, a test, a security
+  hardening, a dependency security update, or it has a freeze exception.
 
 ## Rules for changes
 

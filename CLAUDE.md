@@ -4,7 +4,7 @@ Self-hosted PKI platform in Go: CA engine, ACME server + client, optional agent,
 templ + htmx web UI, multiple SQLite databases. Status: phases 1 and 2 complete (v0.1.0 …
 v0.2.2 released); phase 3 (agent, monitoring) in progress: v0.3.0 Linux agent, v0.3.1 packages and
 guided installation, v0.3.2 agent package fix, v0.3.3 monitoring, v0.3.4 TLS scan, v0.3.5 host onboarding, v0.3.6 Salt formula, v0.3.7 dns-01 in the agent, v0.3.8 charts and analysis, v0.3.9 trust portal, v0.3.10 preview and versioned settings, v0.3.11 Apache and HAProxy, guides and demo, v0.3.12 quality round (current); next
-the beta: feature freeze and upgrade tests (see docs/PLAN.md §10.1).
+the beta: feature freeze and upgrade tests (see docs/PLAN.md §10.1). From v0.9.0 on the project is in the **beta freeze**: only fixes, docs, tests, security hardening and dependency security updates (CONTRIBUTING.md, "Feature freeze").
 
 - **Source of truth:** `docs/PLAN.md` (architecture, ADR-01…20, roadmap); work plans of the finished phases in `docs/PHASE1.md` and `docs/PHASE2.md`.
 - **Always use the `myownpki` skill** (`.claude/skills/myownpki/`) before working on code,
@@ -18,6 +18,10 @@ the beta: feature freeze and upgrade tests (see docs/PLAN.md §10.1).
   (pushes, releases, container images).
 - Conventional Commits; small commits that each build and pass `task check`.
 - Don't commit or push on your own unless the maintainer asked for it.
+- **From v0.9.0 until v1.0.0 (the beta) refuse feature work.** Fixes, docs, tests, security hardening that only narrows what is
+  accepted, and dependency security updates are fine; a feature, a new setting, REST field, CLI command, page, schema change,
+  dependency or ADR change is not. Name the post-1.0 list (`docs/PLAN.md` §10.1, §12) and the label `post-1.0`; only the
+  maintainer grants a `freeze-exception`, a session never does. Rules: `CONTRIBUTING.md`, "Feature freeze".
 
 ## Branches and worktrees
 
