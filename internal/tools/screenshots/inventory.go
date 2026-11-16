@@ -117,18 +117,6 @@ var inventoryExcluded = map[string]string{
 	"/admin/import/{id}":                   "the report of a finished legacy import; the demo has none (read internal/web/app_admin.go, importReport)",
 }
 
-// inventoryRoutes is the set of routes the inventory covers.
-func inventoryRoutes() map[string]bool {
-	m := map[string]bool{}
-	for _, p := range inventoryPages {
-		m[p.route] = true
-	}
-	for r := range inventoryExcluded {
-		m[r] = true
-	}
-	return m
-}
-
 // pageResult is what the inventory found out about one request.
 type pageResult struct {
 	body   []byte // the HTML, for reading what the images do not show (closed <details>)

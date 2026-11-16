@@ -67,11 +67,6 @@ type instance struct {
 	shift                                                    *shiftClock       // set with the inventory seeds only
 }
 
-// newInstance is the demo instance of the README screenshots.
-func newInstance(ctx context.Context, dir string) (*instance, error) {
-	return newInstanceWith(ctx, dir, false)
-}
-
 // newInstanceWith is newInstance; with inventory it also fills the pages
 // the README shots do not show (agents, alerts, TLS endpoints, reports) and
 // switches them on (seed.go).
