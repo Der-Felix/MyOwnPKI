@@ -214,7 +214,7 @@ func (e *Engine) createIntermediate(ctx context.Context, req IntermediateRequest
 	plan.newCA.ParentID = sql.NullString{String: parent.ca.ID, Valid: true}
 	plan.newCA.PathLen = sql.NullInt64{Int64: int64(req.PathLen), Valid: true}
 	plan.newCA.NcCritical = boolInt(plan.nc.critical)
-	limit, _ := json.Marshal(oidStrings(plan.ekuLimit))
+	limit, _ := json.Marshal(oidStrings(plan.ekuLimit)) //nolint:errchkjson // a []string always encodes
 	plan.newCA.EkuLimit = string(limit)
 	if parent.ca.KeyMode == KeyModeOffline {
 		plan.newCA.Status = StatusPendingSignature

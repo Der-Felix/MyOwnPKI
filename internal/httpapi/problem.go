@@ -41,7 +41,7 @@ func (c *call) problem(status int, kind, detail string, errs []fieldError) error
 	c.status = status
 	c.w.Header().Set("Content-Type", "application/problem+json")
 	c.w.WriteHeader(status)
-	_ = json.NewEncoder(c.w).Encode(problemDoc{
+	_ = json.NewEncoder(c.w).Encode(problemDoc{ //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 		Type: problemPrefix + kind, Title: http.StatusText(status), Status: status, Detail: detail, RequestID: c.reqID, Errors: errs,
 	})
 	return errReply

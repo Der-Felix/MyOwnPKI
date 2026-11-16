@@ -47,7 +47,7 @@ func (s *Store) Digest(ctx context.Context, now time.Time, opt DigestOptions) (n
 	}
 	for _, r := range open {
 		a := toAlert(r)
-		state := ""
+		var state string
 		switch {
 		case a.NotifiedSeverity == "":
 			state = notify.Opened

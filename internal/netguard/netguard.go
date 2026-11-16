@@ -196,7 +196,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 	for _, a := range addrs {
 		if perr := Allowed(a, d.Policy); perr != nil {
 			policyRefused++
-			d.logf(": address refused", slog.String("host", host), slog.String("reason", perr.Error()))
+			d.logf(ctx, ": address refused", slog.String("host", host), slog.String("reason", perr.Error()))
 			continue
 		}
 		if d.MaxTries > 0 && dialFailed >= d.MaxTries {
@@ -209,7 +209,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 		dialFailed++
 		last = derr
 		kinds = append(kinds, NetProblem(derr))
-		d.logf(": connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", NetProblem(derr)))
+		d.logf(ctx, ": connect failed", slog.String("host", host), slog.String("address", a.String()), slog.String("kind", NetProblem(derr)))
 	}
 	switch {
 	case len(addrs) == 0:
@@ -232,12 +232,12 @@ func (d *Dialer) dialOne(ctx context.Context, dial DialFunc, network, addr strin
 	return dial(ctx, network, addr)
 }
 
-func (d *Dialer) logf(suffix string, attrs ...slog.Attr) {
+func (d *Dialer) logf(ctx context.Context, suffix string, attrs ...slog.Attr) {
 	if d.Log == nil {
 		return
 	}
 	// The message is the caller's constant prefix plus one of two fixed suffixes: operators keep the log lines they know.
-	d.Log.LogAttrs(context.Background(), d.LogLevel, d.LogName+suffix, attrs...) //nolint:sloglint // message = fixed prefix of the caller + fixed suffix
+	d.Log.LogAttrs(ctx, d.LogLevel, d.LogName+suffix, attrs...) //nolint:sloglint // message = fixed prefix of the caller + fixed suffix
 }
 
 // NewResolver returns the resolver for names the server connects to:

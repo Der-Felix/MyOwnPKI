@@ -98,7 +98,11 @@ func TestRestoreDomainUpdateCreatesANewVersion(t *testing.T) {
 		}
 	}
 	for _, r := range v.auditRows(t) {
-		if text, _ := json.Marshal(r.details); strings.Contains(string(text), "wildcard setup") {
+		text, jerr := json.Marshal(r.details)
+		if jerr != nil {
+			t.Fatal(jerr)
+		}
+		if strings.Contains(string(text), "wildcard setup") {
 			t.Errorf("the reason is in the audit log: %s %v", r.action, r.details)
 		}
 	}

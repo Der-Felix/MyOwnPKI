@@ -48,7 +48,7 @@ type Scanner struct {
 	Rand func(n int64) int64
 
 	once       sync.Once
-	ctx        context.Context
+	ctx        context.Context //nolint:containedctx // the scanner's lifetime: Close cancels it, and every scan hangs on it
 	cancel     context.CancelFunc
 	dispatchMu sync.Mutex
 	mu         sync.Mutex
@@ -154,7 +154,7 @@ func (s *Scanner) Dispatch(ctx context.Context) error {
 		s.running[ep.ID] = true
 		s.wg.Add(1)
 		s.mu.Unlock()
-		go s.run(ep)
+		go s.run(ep) //nolint:contextcheck // a scan runs on the scanner's lifetime context (Close cancels it), not on the dispatch call's: Dispatch does not wait for it
 	}
 	return nil
 }
@@ -339,7 +339,7 @@ func (s *Scanner) probe(ctx context.Context, ep Endpoint) (Result, error) {
 	// with the deadline in sight still gets a result. Close still cancels it.
 	cctx, cancel := context.WithTimeout(s.ctx, ChainTimeout)
 	defer cancel()
-	res.Served.ChainState, err = s.chainState(cctx, leaf, inter)
+	res.Served.ChainState, err = s.chainState(cctx, leaf, inter) //nolint:contextcheck // cctx is built from the scanner's lifetime on purpose (see the comment above)
 	return res, err
 }
 

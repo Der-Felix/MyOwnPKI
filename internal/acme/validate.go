@@ -56,7 +56,7 @@ type validator struct {
 	log      *slog.Logger
 	resolver *net.Resolver
 	sem      chan struct{}
-	ctx      context.Context
+	ctx      context.Context //nolint:containedctx // the validator's lifetime: Close cancels it, and every check hangs on it
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 
@@ -373,8 +373,7 @@ func (v *validator) finish(j job, verr error) {
 		if !errors.As(verr, &ve) {
 			s.log.Error("acme validation", slog.String("challenge", j.challenge.ID), slog.Any("error", verr))
 		}
-		b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:" + ve.typ, "detail": ve.detail, "status": http.StatusForbidden})
-		perr = sql.NullString{String: string(b), Valid: true}
+		perr = problemJSON(ve.typ, ve.detail, http.StatusForbidden)
 		status, authzStatus, expires, result = "invalid", "invalid", j.authz.ExpiresAt, audit.ResultFailure
 		details["error"] = ve.typ + ": " + clip(ve.detail)
 		var pe *panicError

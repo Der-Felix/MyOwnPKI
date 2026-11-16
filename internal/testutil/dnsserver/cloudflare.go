@@ -106,7 +106,7 @@ func (c *CloudflareStub) LoseCreateAnswers(body string) {
 func (c *CloudflareStub) answer(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(body) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 }
 
 func (c *CloudflareStub) fail(w http.ResponseWriter, status, code int, msg string) {

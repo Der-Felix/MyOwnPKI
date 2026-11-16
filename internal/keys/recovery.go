@@ -14,7 +14,7 @@ import (
 // RecoveryKey is the second way to unlock the root key: 256 random bits,
 // shown once at init. It is printed only on purpose (Reveal); String, %v,
 // %#v and JSON all show a placeholder, so it can't end up in a log by accident.
-type RecoveryKey [32]byte
+type RecoveryKey [32]byte //nolint:recvcheck // the printing methods must work on a copy (redaction), clear must work on the original
 
 // ErrRecoveryKeyFormat means a typed recovery key is malformed or has a typo
 // (wrong length, unknown character, check characters don't match).

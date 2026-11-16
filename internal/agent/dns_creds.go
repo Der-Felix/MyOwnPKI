@@ -144,7 +144,7 @@ func (secret) MarshalYAML() (any, error)    { return redacted, nil }
 
 // dnsCredentials is the content of a credentials file. Only the fields of its
 // provider type are set.
-type dnsCredentials struct {
+type dnsCredentials struct { //nolint:recvcheck // the printing methods must work on a copy (redaction), secrets and wipe must work on the original
 	Type string
 
 	// rfc2136

@@ -46,6 +46,11 @@ linters:
     - sloglint      # structured logging rules (go-conventions.md "Logging")
     - usestdlibvars
     - misspell
+    - contextcheck  # a function that has a context must hand it on; a detached one (a check that outlives its request) needs a //nolint with the reason
+    - containedctx  # a context in a struct hides who cancels it; the few lifetime contexts (validator, scanner) say so in a //nolint
+    - errchkjson    # an ignored json.Marshal error leaves an empty body that a test can mistake for "absent"
+    - wastedassign  # a value assigned and overwritten before it is read hides a branch that forgot to set it
+    - recvcheck     # mixed value and pointer receivers; the few deliberate ones (redaction on a copy, wipe on the original) say so in a //nolint
 
     # --- Tests ---
     - usetesting
@@ -149,6 +154,12 @@ linters:
       # Table tests and fixtures repeat on purpose; a shared helper there would hide what each case does.
       - path: _test\.go
         linters: [dupl]
+
+issues:
+  # Report every finding. The defaults cap equal messages at 3 and a linter at 50,
+  # which would hide the rest when a linter is switched on.
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
 formatters:
   enable:

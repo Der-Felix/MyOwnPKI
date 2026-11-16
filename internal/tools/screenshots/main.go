@@ -199,7 +199,7 @@ func run(stdout, stderr io.Writer) int {
 		if size, ok := shotSizes[s.name]; ok {
 			w, h = size[0], size[1]
 		}
-		if err := capture(*browser, base+path, file, w, h, flagsOf(s.kind)...); err != nil {
+		if err := capture(ctx, *browser, base+path, file, w, h, flagsOf(s.kind)...); err != nil {
 			fmt.Fprintf(stderr, "FAILED %s: %v\n", s.name, err)
 			failed = true
 			continue
@@ -281,7 +281,7 @@ func withCookie(h http.Handler, cookie string) http.Handler {
 
 // capture loads url in a headless browser with a fresh profile and saves a
 // screenshot of the window to file.
-func capture(browser, url, file string, width, height int, extra ...string) error {
+func capture(ctx context.Context, browser, url, file string, width, height int, extra ...string) error {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		return err
@@ -293,7 +293,7 @@ func capture(browser, url, file string, width, height int, extra ...string) erro
 	}
 	defer func() { _ = os.RemoveAll(profile) }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	args := []string{
 		"--headless=new",

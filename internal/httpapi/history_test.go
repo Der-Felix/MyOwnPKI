@@ -261,7 +261,11 @@ func TestHistoryAndRestoreOfADomain(t *testing.T) {
 		entries[0]["restored_from"] != float64(2) || entries[0]["snapshot_sha256"] != rows[3].SHA256 {
 		t.Fatalf("audit: %v", entries)
 	}
-	if text, _ := json.Marshal(entries); strings.Contains(string(text), "undo") {
+	text, jerr := json.Marshal(entries)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	if strings.Contains(string(text), "undo") {
 		t.Errorf("the reason is in the audit log: %s", text)
 	}
 

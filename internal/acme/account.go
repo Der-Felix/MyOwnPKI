@@ -140,7 +140,7 @@ func (s *Server) newAccount(w http.ResponseWriter, r *http.Request) {
 		ID: id, KeyThumbprint: req.key.Thumbprint(), Jwk: string(req.key.Canonical()), Status: "valid",
 		CreatedAt: dbTime(now), CreatedIp: req.ip, UpdatedAt: dbTime(now),
 	}
-	cj, _ := json.Marshal(contact)
+	cj, _ := json.Marshal(contact) //nolint:errchkjson // a []string always encodes
 	acct.Contact = string(cj)
 	eabID := ""
 	if len(in.EAB) > 0 && !bytes.Equal(in.EAB, []byte("null")) {
@@ -279,7 +279,7 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
-		cj, _ := json.Marshal(contact)
+		cj, _ := json.Marshal(contact) //nolint:errchkjson // a []string always encodes
 		err = s.inTx(ctx, func(q *pkidb.Queries, tx *sql.Tx) error {
 			if uerr := q.UpdateACMEAccountContact(ctx, pkidb.UpdateACMEAccountContactParams{Contact: string(cj), UpdatedAt: dbTime(now), ID: id}); uerr != nil {
 				return uerr

@@ -365,7 +365,7 @@ func (e *Engine) legacyConstraints(p *legacyPlan, c *legacyCA, where string) {
 	}
 	c.row.NcCritical = boolInt(c.nc.critical)
 	eku, _ := certEKUs(cert)
-	limit, _ := json.Marshal(oidStrings(eku))
+	limit, _ := json.Marshal(oidStrings(eku)) //nolint:errchkjson // a []string always encodes
 	c.row.EkuLimit = string(limit)
 }
 

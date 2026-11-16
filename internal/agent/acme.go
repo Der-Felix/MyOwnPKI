@@ -68,7 +68,7 @@ func (u *accountUser) GetRegistration() *registration.Resource { return u.reg }
 // contextTransport propagates shutdown and the pass deadline through a
 // library whose public obtain API does not take a context.
 type contextTransport struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // the pass's context for a library whose obtain API takes none; a http.RoundTripper has no other way to see it
 	rt  http.RoundTripper
 }
 
@@ -77,7 +77,7 @@ func (t contextTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	// shutdown of the enclosing pass. Keep cancellation alive until the
 	// response body has been consumed and closed by lego.
 	ctx, cancel := context.WithCancel(r.Context())
-	stop := context.AfterFunc(t.ctx, cancel)
+	stop := context.AfterFunc(t.ctx, cancel) //nolint:contextcheck // the shutdown of the enclosing pass, not the request: see the comment above
 	done := func() { stop(); cancel() }
 	response, err := t.rt.RoundTrip(r.Clone(ctx))
 	if err != nil {
@@ -277,7 +277,7 @@ func (a *Agent) obtainWithClient(ctx context.Context, d Deployment, u *accountUs
 		defer routeLegoLog(a.log, dns)()
 		// lego removes the records itself; this catches what it skipped, and
 		// runs also when the issuance was canceled.
-		defer dns.finish()
+		defer dns.finish() //nolint:contextcheck // cleanup deliberately runs after a canceled issuance, on its own budget (dnsGuard.cleanupParent)
 	} else {
 		r := newResponder(d.Challenge, d.Webroot, a.cfg.Paths, a.st, a.StandaloneAddr, a.log)
 		if perr := ac.Challenge.SetHTTP01Provider(httpProvider{r}); perr != nil {

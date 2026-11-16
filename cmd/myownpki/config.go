@@ -18,7 +18,7 @@ import (
 )
 
 // runConfig handles `myownpki config <subcommand>`.
-func runConfig(args []string, stdout, stderr io.Writer) int {
+func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "check" {
 		_, _ = fmt.Fprintf(stderr, "Usage:\n  %s config check [--config FILE]\n", binary)
 		if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
@@ -27,13 +27,13 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "%s config: unknown subcommand %q\n", binary, args[0])
 		return 2
 	}
-	return runConfigCheck(args[1:], os.Environ(), stdout, stderr)
+	return runConfigCheck(ctx, args[1:], os.Environ(), stdout, stderr)
 }
 
 // runConfigCheck loads and validates the configuration exactly like the
 // server will and prints the effective values with their source. Exit code
 // 0 = valid, 1 = invalid, 2 = usage error.
-func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
+func runConfigCheck(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	path := configFlag(fs)
@@ -53,7 +53,7 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printConfig(stdout, cfg, src)
-	checkTLSIssuers(cfg, stdout, stderr)
+	checkTLSIssuers(ctx, cfg, stdout, stderr)
 	if !checkNotify(cfg, stdout, stderr) {
 		return 1
 	}
@@ -66,8 +66,8 @@ func runConfigCheck(args, environ []string, stdout, stderr io.Writer) int {
 // an invalid config (exit 0): the server starts with it and serves the
 // bootstrap certificate (owner 2026-10-24) – and install.sh, which hides
 // stdout, still shows it.
-func checkTLSIssuers(cfg config.Config, stdout, stderr io.Writer) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func checkTLSIssuers(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	problems, err := server.TLSIssuerProblems(ctx, cfg)
 	if err != nil {

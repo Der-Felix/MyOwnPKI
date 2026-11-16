@@ -100,7 +100,10 @@ func rewrite(t *testing.T, db *sql.DB, seq int64, resign *testSigner) {
 				sig, pub, _ := resign.SignCheckpoint(checkpointMessage(tenantScope, d.CoversSeq, d.CoversHash, row.Time))
 				d.Signature, d.PublicKey = hex.EncodeToString(sig), hex.EncodeToString(pub)
 			}
-			b, _ := json.Marshal(map[string]any{"covers_seq": d.CoversSeq, "covers_hash": d.CoversHash, "public_key": d.PublicKey, "signature": d.Signature})
+			b, err := json.Marshal(map[string]any{"covers_seq": d.CoversSeq, "covers_hash": d.CoversHash, "public_key": d.PublicKey, "signature": d.Signature})
+			if err != nil {
+				t.Fatal(err)
+			}
 			row.DetailsJson = string(b)
 		}
 		row.Hash = entryHash(row)

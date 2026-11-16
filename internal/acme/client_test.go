@@ -234,7 +234,7 @@ func (c *client) jws(url string, payload any, useJWK bool) []byte {
 
 func signedBody(tb testing.TB, key *ecdsa.PrivateKey, hdr map[string]any, payload any) []byte {
 	tb.Helper()
-	h, _ := json.Marshal(hdr)
+	h := mustJSON(tb, hdr)
 	var p []byte
 	switch v := payload.(type) {
 	case nil:
@@ -243,11 +243,11 @@ func signedBody(tb testing.TB, key *ecdsa.PrivateKey, hdr map[string]any, payloa
 	case rawBytes:
 		p = v
 	default:
-		p, _ = json.Marshal(v)
+		p = mustJSON(tb, v)
 	}
 	ph, pl := b64(h), b64(p)
 	sig := signES256(tb, key, []byte(ph+"."+pl))
-	body, _ := json.Marshal(map[string]string{"protected": ph, "payload": pl, "signature": b64(sig)})
+	body := mustJSON(tb, map[string]string{"protected": ph, "payload": pl, "signature": b64(sig)})
 	return body
 }
 
@@ -414,4 +414,15 @@ func (r rawBytes) MarshalJSON() ([]byte, error) { return r, nil }
 func list(v any) []any {
 	l, _ := v.([]any)
 	return l
+}
+
+// mustJSON encodes v or fails the test: an ignored error would leave an empty
+// request that a test could mistake for a refusal.
+func mustJSON(tb testing.TB, v any) []byte {
+	tb.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return b
 }

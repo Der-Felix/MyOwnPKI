@@ -382,7 +382,10 @@ func TestTamperedBackupRefused(t *testing.T) {
 	var raw map[string]any
 	_ = json.Unmarshal(data, &raw)
 	raw["extra"] = true
-	data, _ = json.Marshal(raw)
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = os.WriteFile(filepath.Join(dir, ManifestFile), data, 0o600)
 	if _, err := Verify(t.Context(), dir, ""); err == nil {
 		t.Error("manifest with an unknown field accepted")

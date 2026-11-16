@@ -261,7 +261,10 @@ func (v *env) addCA(t *testing.T, name string, o caOpts) *fixtureCA {
 	for _, u := range o.ekuLimit {
 		limit = append(limit, ekuOID[u])
 	}
-	limitJSON, _ := json.Marshal(limit)
+	limitJSON, jerr := json.Marshal(limit)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
 	or := func(s, def string) string {
 		if s == "" {
 			return def

@@ -146,7 +146,7 @@ func (h *dnsHarness) round(ctx context.Context, g *dnsGuard, authzs []acme.Autho
 			failed[i] = true
 		}
 	}
-	defer func() {
+	defer func() { //nolint:contextcheck // as in obtainWithClient: cleanup runs on the guard's own budget
 		for _, a := range authzs {
 			_ = ch.CleanUp(a) // lego only logs this error; the guard records it
 		}

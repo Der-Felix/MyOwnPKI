@@ -200,8 +200,8 @@ func (c *client) postSigned(signer crypto.Signer, url string, payload any) *answ
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	h, _ := json.Marshal(map[string]any{"alg": jk.Algorithm(), "nonce": c.getNonce(), "url": url, "jwk": json.RawMessage(jk.Canonical())})
-	p, _ := json.Marshal(payload)
+	h := mustJSON(c.t, map[string]any{"alg": jk.Algorithm(), "nonce": c.getNonce(), "url": url, "jwk": json.RawMessage(jk.Canonical())})
+	p := mustJSON(c.t, payload)
 	input := b64(h) + "." + b64(p)
 	var sig []byte
 	switch k := signer.(type) {
@@ -231,7 +231,7 @@ func (c *client) postSigned(signer crypto.Signer, url string, payload any) *answ
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"protected": b64(h), "payload": b64(p), "signature": b64(sig)})
+	body := mustJSON(c.t, map[string]string{"protected": b64(h), "payload": b64(p), "signature": b64(sig)})
 	return c.postRaw(url, body)
 }
 

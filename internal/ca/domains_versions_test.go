@@ -121,7 +121,11 @@ func TestDomainWritersAppendVersions(t *testing.T) {
 		}
 	}
 	for _, r := range v.auditRows(t) {
-		if text, _ := json.Marshal(r.details); strings.Contains(string(text), reason) || strings.Contains(string(text), "retired") {
+		text, jerr := json.Marshal(r.details)
+		if jerr != nil {
+			t.Fatal(jerr)
+		}
+		if strings.Contains(string(text), reason) || strings.Contains(string(text), "retired") {
 			t.Errorf("the reason is in the audit log: %s %v", r.action, r.details)
 		}
 	}

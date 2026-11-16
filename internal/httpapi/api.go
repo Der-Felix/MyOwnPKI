@@ -203,7 +203,7 @@ func (a *API) wrap(rt Route) http.Handler {
 		if ck, err := r.Cookie(auth.CookieName); err == nil {
 			c.token = ck.Value
 		}
-		err := a.serve(c, rt)
+		err := a.serve(c, rt) //nolint:contextcheck // false positive: serve reads the context from c.r, the request of this handler
 		if err != nil {
 			c.fail(err)
 		}

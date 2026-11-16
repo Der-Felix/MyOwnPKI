@@ -172,8 +172,7 @@ func (s *Server) invalidate(ctx context.Context, o *pkidb.AcmeOrder, cause error
 	if !errors.As(cause, &ae) {
 		ae = problemErr(http.StatusInternalServerError, "serverInternal", "internal error")
 	}
-	b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:" + ae.typ, "detail": ae.detail, "status": ae.status})
-	if err := pkidb.New(s.db).SetACMEOrderStatus(ctx, pkidb.SetACMEOrderStatusParams{Status: "invalid", Error: sql.NullString{String: string(b), Valid: true}, UpdatedAt: dbTime(s.now()), ID: o.ID}); err != nil {
+	if err := pkidb.New(s.db).SetACMEOrderStatus(ctx, pkidb.SetACMEOrderStatusParams{Status: "invalid", Error: problemJSON(ae.typ, ae.detail, ae.status), UpdatedAt: dbTime(s.now()), ID: o.ID}); err != nil {
 		s.log.Error("acme invalidate order", slog.String("order", o.ID), slog.Any("error", err))
 	}
 }
@@ -336,8 +335,7 @@ func (s *Server) certificate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ExpireStale(ctx context.Context) error {
 	now := dbTime(s.now())
 	q := pkidb.New(s.db)
-	b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:unauthorized", "detail": "the order expired", "status": http.StatusForbidden})
-	if _, err := q.ExpireACMEOrders(ctx, pkidb.ExpireACMEOrdersParams{Error: sql.NullString{String: string(b), Valid: true}, UpdatedAt: now, ExpiresAt: now}); err != nil {
+	if _, err := q.ExpireACMEOrders(ctx, pkidb.ExpireACMEOrdersParams{Error: problemJSON("unauthorized", "the order expired", http.StatusForbidden), UpdatedAt: now, ExpiresAt: now}); err != nil {
 		return err
 	}
 	_, err := q.ExpireACMEAuthzs(ctx, pkidb.ExpireACMEAuthzsParams{UpdatedAt: now, ExpiresAt: now})

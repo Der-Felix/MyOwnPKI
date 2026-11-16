@@ -101,7 +101,7 @@ func PageChanges(ctx context.Context, b Backend, vs []Version) [][]string {
 	for i, v := range vs {
 		var before Snapshot
 		if v.Number > 1 {
-			prev := Version{}
+			var prev Version
 			if i+1 < len(vs) && vs[i+1].Number == v.Number-1 {
 				prev = vs[i+1]
 			} else {

@@ -259,7 +259,14 @@ func (s *Server) problem(w http.ResponseWriter, status int, typ, detail string, 
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(body) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
+}
+
+// problemJSON is the problem document that an order or a challenge keeps in
+// its error column (RFC 8555 section 6.7).
+func problemJSON(typ, detail string, status int) sql.NullString {
+	b, _ := json.Marshal(map[string]any{"type": "urn:ietf:params:acme:error:" + typ, "detail": detail, "status": status}) //nolint:errchkjson // two strings and an int always encode
+	return sql.NullString{String: string(b), Valid: true}
 }
 
 // acmeError carries a problem through the handlers.
@@ -303,7 +310,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 func (s *Server) reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 }
 
 func (s *Server) now() time.Time { return s.clk.Now().UTC().Truncate(time.Second) }

@@ -160,7 +160,11 @@ func TestSetAppendsVersions(t *testing.T) {
 		if d["version"] != float64(ver.Number) || d["snapshot_sha256"] != ver.SHA256 {
 			t.Errorf("audit entry %d: %v, want version %d and hash %s", i, d["version"], ver.Number, ver.SHA256)
 		}
-		if text, _ := json.Marshal(d); strings.Contains(string(text), "smaller limits") {
+		text, jerr := json.Marshal(d)
+		if jerr != nil {
+			t.Fatal(jerr)
+		}
+		if strings.Contains(string(text), "smaller limits") {
 			t.Errorf("the reason is in the audit log: %s", text)
 		}
 	}

@@ -150,7 +150,11 @@ func TestRestoreCreatesANewVersion(t *testing.T) {
 	if d["version"] != float64(4) || d["restored_from"] != float64(2) || d["snapshot_sha256"] != last.SHA256 {
 		t.Errorf("audit details: %v", d)
 	}
-	if text, _ := json.Marshal(d); strings.Contains(string(text), "please") {
+	text, jerr := json.Marshal(d)
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	if strings.Contains(string(text), "please") {
 		t.Errorf("the reason is in the audit log: %s", text)
 	}
 	if n := len(entriesOf(t, v.SystemDB.Write, ActionSettings)); n != 2 {
@@ -238,7 +242,7 @@ func TestRestorePermissions(t *testing.T) {
 		_, err := s.Restore(ctx, store.DefaultTenant, 1, opts(cur, ""), who)
 		if err == nil {
 			// The settings are version 1 again; make them differ for the next caller.
-			change(t, s, testinstance.Console, func(x *Settings) { x.Organization = fmt.Sprint("Again", cur) })
+			change(t, s, testinstance.Console, func(x *Settings) { x.Organization = fmt.Sprint("Again", cur) }) //nolint:contextcheck // change uses t.Context(), the same context as ctx here
 		}
 		return err
 	}

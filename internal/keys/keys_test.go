@@ -681,7 +681,10 @@ func TestRecoveryKeyNeverPrintsByAccident(t *testing.T) {
 	secret := k.Reveal()
 	var logBuf bytes.Buffer
 	slog.New(slog.NewTextHandler(&logBuf, nil)).Info("init", slog.Any("recovery", k))
-	js, _ := json.Marshal(map[string]any{"k": k})
+	js, err := json.Marshal(map[string]any{"k": k})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, s := range map[string]string{
 		"%v": fmt.Sprintf("%v", k), "String": k.String(), "%+v": fmt.Sprintf("%+v", k), "%#v": fmt.Sprintf("%#v", k),
 		"json": string(js), "slog": logBuf.String(),

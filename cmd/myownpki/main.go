@@ -66,7 +66,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "db":
 		return runDB(ctx, fs.Args()[1:], stdout, stderr)
 	case "config":
-		return runConfig(fs.Args()[1:], stdout, stderr)
+		return runConfig(ctx, fs.Args()[1:], stdout, stderr)
 	case "notify":
 		return runNotify(ctx, fs.Args()[1:], stdout, stderr)
 	case "passphrase":

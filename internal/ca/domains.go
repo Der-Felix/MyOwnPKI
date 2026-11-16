@@ -338,7 +338,7 @@ func (e *Engine) createDomain(ctx context.Context, req DomainRequest, now time.T
 		return &d, nil
 	}
 	// A restore of a deleted domain creates it again under its old ID.
-	id := ""
+	var id string
 	if rs != nil {
 		id = rs.id
 	} else if id, err = ids.New("dom", now, e.rand()); err != nil {
@@ -694,12 +694,12 @@ func caNames(ctx context.Context, q *pkidb.Queries) (map[string]string, error) {
 }
 
 func domainRow(d *Domain) pkidb.InsertDomainParams {
-	ct, _ := json.Marshal(d.ChallengeTypes)
+	ct, _ := json.Marshal(d.ChallengeTypes) //nolint:errchkjson // a list of strings always encodes
 	ranges := make([]string, 0, len(d.IPRanges))
 	for _, r := range d.IPRanges {
 		ranges = append(ranges, r.String())
 	}
-	ir, _ := json.Marshal(ranges)
+	ir, _ := json.Marshal(ranges) //nolint:errchkjson // a []string always encodes
 	v := sql.NullInt64{}
 	if d.ValidityDays > 0 {
 		v = sql.NullInt64{Int64: int64(d.ValidityDays), Valid: true}

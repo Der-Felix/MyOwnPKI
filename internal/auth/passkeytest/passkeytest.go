@@ -171,7 +171,7 @@ func (a *Authenticator) flags() byte {
 }
 
 func (a *Authenticator) clientData(typ, challenge string) []byte {
-	b, _ := json.Marshal(map[string]any{"type": typ, "challenge": challenge, "origin": a.Origin, "crossOrigin": false})
+	b, _ := json.Marshal(map[string]any{"type": typ, "challenge": challenge, "origin": a.Origin, "crossOrigin": false}) //nolint:errchkjson // strings and a bool always encode
 	return b
 }
 

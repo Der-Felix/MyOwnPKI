@@ -88,7 +88,7 @@ func (c *call) preconditionFailed(err error) bool {
 	c.status = http.StatusPreconditionFailed
 	c.w.Header().Set("Content-Type", "application/problem+json")
 	c.w.WriteHeader(http.StatusPreconditionFailed)
-	_ = json.NewEncoder(c.w).Encode(doc)
+	_ = json.NewEncoder(c.w).Encode(doc) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell
 	return true
 }
 
