@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -572,6 +573,60 @@ func TestSiteLinksStayBelowTheBase(t *testing.T) {
 	} {
 		if _, err := Parse("x", []byte(header+"[x]("+dest+")\n")); err != nil {
 			t.Errorf("%s: %v", dest, err)
+		}
+	}
+}
+
+// TestZeroWidthCharactersAreRefused: invisible characters could hide text in a
+// command a reader copies, in a code block and in a code span as in prose.
+func TestZeroWidthCharactersAreRefused(t *testing.T) {
+	t.Parallel()
+	for _, r := range []rune{0x200b, 0x200c, 0x200d, 0x2060, 0xfeff} {
+		for name, body := range map[string]string{
+			"block": "```bash\nls" + string(r) + " -l\n```\n",
+			"span":  "Run `ls" + string(r) + " -l` now.\n",
+			"text":  "Run" + string(r) + " it.\n",
+		} {
+			_, err := Parse("x", []byte(header+body))
+			if err == nil || !strings.Contains(err.Error(), "character is not allowed") {
+				t.Errorf("U+%04X in a %s: %v", r, name, err)
+			}
+		}
+	}
+}
+
+// TestManyBracesAreLinear: a brace is checked at its own position only. A line
+// of 30,000 of them took 8 seconds when each one searched the rest of the line.
+func TestManyBracesAreLinear(t *testing.T) {
+	t.Parallel()
+	for name, line := range map[string]string{
+		"open":       strings.Repeat("{", 30000),
+		"open names": strings.Repeat("{a", 15000),
+		"unclosed":   "{" + strings.Repeat("a", 30000),
+		"pairs":      strings.Repeat("{a}", 10000),
+	} {
+		start := time.Now()
+		_, err := Parse("x", []byte(header+"A "+line+"\n"))
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("%s: parsing took %s", name, d)
+		}
+		if name == "pairs" && (err == nil || !strings.Contains(err.Error(), "inside code only")) {
+			t.Errorf("%s: a placeholder in text must be refused: %v", name, err)
+		}
+		if name != "pairs" && err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestPlaceholderLen(t *testing.T) {
+	t.Parallel()
+	for s, want := range map[string]int{
+		"{ca_name} x": 9, "{a}": 3, "{a1_b}": 6, "{}": 0, "{A}": 0, "{1a}": 0,
+		"{a b}": 0, "{a": 0, "x{a}": 0, "{{a}": 0, "": 0,
+	} {
+		if got := placeholderLen(s); got != want {
+			t.Errorf("placeholderLen(%q) = %d, want %d", s, got, want)
 		}
 	}
 }

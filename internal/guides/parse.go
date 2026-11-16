@@ -23,6 +23,13 @@ var (
 	uiPath        = regexp.MustCompile(`^/[A-Za-z0-9._~/-]*(\?[A-Za-z0-9._~=&-]*)?(#[a-z0-9-]+)?$`)
 )
 
+// isZeroWidth reports the invisible characters that would hide text inside a
+// command a reader copies: zero-width space, non-joiner, joiner and word
+// joiner (the byte order mark U+FEFF is refused with the controls).
+func isZeroWidth(r rune) bool {
+	return r == 0x200B || r == 0x200C || r == 0x200D || r == 0x2060
+}
+
 // parser carries the state of one file.
 type parser struct {
 	slug    string
@@ -56,8 +63,8 @@ func Parse(slug string, src []byte) (*Guide, error) {
 	}
 	text := strings.ReplaceAll(string(src), "\r\n", "\n")
 	for i, r := range text {
-		if r == '\r' || r == 0xFEFF || (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || unicode.Is(unicode.Bidi_Control, r) {
-			return nil, &ParseError{Slug: slug, Line: 1 + strings.Count(text[:i], "\n"), Msg: "a control, byte order mark or bidirectional character is not allowed"}
+		if r == '\r' || r == 0xFEFF || (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || unicode.Is(unicode.Bidi_Control, r) || isZeroWidth(r) {
+			return nil, &ParseError{Slug: slug, Line: 1 + strings.Count(text[:i], "\n"), Msg: "a control, byte order mark, zero-width or bidirectional character is not allowed"}
 		}
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")

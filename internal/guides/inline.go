@@ -104,8 +104,8 @@ func (ip inlineParser) run(s string, plainOnly bool) ([]Inline, error) {
 		case c == '\\':
 			return nil, ip.errf("a backslash is not allowed outside a code span or a code block")
 		case c == '{':
-			if loc := placeholderPattern.FindStringIndex(s[i:]); loc != nil && loc[0] == 0 {
-				return nil, ip.errf("the placeholder " + s[i:i+loc[1]] + " works inside code only")
+			if n := placeholderLen(s[i:]); n > 0 {
+				return nil, ip.errf("the placeholder " + s[i:i+n] + " works inside code only")
 			}
 			text.WriteByte(c)
 			i++
@@ -119,6 +119,26 @@ func (ip inlineParser) run(s string, plainOnly bool) ([]Inline, error) {
 }
 
 func isASCIILetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
+
+// placeholderLen returns the length of a placeholder ({name}, the form of
+// placeholderPattern) at the very start of s, or 0. It looks at the current
+// position only: searching the rest of s for every brace made a line of many
+// braces quadratic.
+func placeholderLen(s string) int {
+	if len(s) < 3 || s[0] != '{' || s[1] < 'a' || s[1] > 'z' {
+		return 0
+	}
+	for j := 2; j < len(s); j++ {
+		switch c := s[j]; {
+		case c == '}':
+			return j + 1
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_':
+		default:
+			return 0
+		}
+	}
+	return 0
+}
 
 // plainText checks s as the content of bold, italic or a link text and returns
 // it as one string.
