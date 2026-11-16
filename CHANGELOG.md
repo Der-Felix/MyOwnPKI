@@ -113,7 +113,7 @@ live test by the maintainer is pending.
   file in its own volume, masks them in CI, and takes the agent for its second act from the verified package of the server image.
   The server still never reads its passphrase from a file or a variable.
 - **An independent security review of the agent recipes and the guides found no blocker; its findings were fixed.** A temporary
-  file left by an interrupted write (for a combined file a copy of the key, which HAProxy may load when `crt` is a directory)
+  file left by an interrupted write (for a combined file a copy of the key, which another HAProxy version may load when `crt` is a directory; HAProxy 2.8.30 ignored it in the CI run)
   is now removed at the start of the agent; links to the site and the repository with a `..` segment are refused; the certbot
   guide warns that the EAB MAC key on a command line is visible in the process list and the shell history; the buffers of the
   combined file and the previous pair are cleared; a guide parser that took seconds on a line of braces is linear; and the ACME
