@@ -249,16 +249,16 @@ func TestEveryEmbeddedGuideRenders(t *testing.T) {
 // a role limited to one CA gets the documented example in the commands.
 func TestGuideACMEDirectoryFollowsFirstSteps(t *testing.T) {
 	t.Parallel()
-	const real, example = "https://pki.example.test/acme/directory", "https://pki.homelab.lan/acme/directory"
+	const actual, example = "https://pki.example.test/acme/directory", "https://pki.homelab.lan/acme/directory"
 	v := newCustomUIEnv(t, func(d *AppDeps) {
 		d.Guides = testRegistry(t)
-		d.ACMEDirectory = real
+		d.ACMEDirectory = actual
 	})
 	v.User(t, "viewer", false, authz.Binding{Role: authz.Viewer})
 	v.User(t, "scoped", false, authz.Binding{CA: "issuing", Role: authz.Operator})
 	v.User(t, "noroles", false)
 	for i, tt := range []struct{ user, want, other string }{
-		{"viewer", real, example}, {"scoped", example, real}, {"noroles", example, real},
+		{"viewer", actual, example}, {"scoped", example, actual}, {"noroles", example, actual},
 	} {
 		b := v.browser(fmt.Sprintf("192.0.2.%d", 20+i))
 		b.signIn(t, tt.user, testinstance.Password)
@@ -269,7 +269,7 @@ func TestGuideACMEDirectoryFollowsFirstSteps(t *testing.T) {
 	}
 	b := v.browser("192.0.2.30")
 	b.signIn(t, "demo", v.DemoPassword)
-	if html := b.get(t, "/guides/zeta").html(); !strings.Contains(html, "curl --silent "+real+"\n") {
+	if html := b.get(t, "/guides/zeta").html(); !strings.Contains(html, "curl --silent "+actual+"\n") {
 		t.Errorf("the admin must get the real address: %s", html)
 	}
 }

@@ -58,6 +58,7 @@ linters:
     - canonicalheader # header names are written in the form net/http sends them
     - dogsled       # three or more blank identifiers in one assignment hide what a call returns
     - fatcontext    # a context that grows inside a loop
+    - revive        # only the rules below: error-strings, error-naming, redefines-builtin-id (max, real, clear), context-as-argument, package-comments
 
     # --- Tests ---
     - usetesting
@@ -92,6 +93,17 @@ linters:
     perfsprint:
       strconcat: false       # "use + instead of Sprintf" is a style rewrite, not a fix
       concat-loop: false     # a few short loops in tools and test servers; no hot path
+
+    revive:
+      enable-all-rules: false   # the default rules are style; these five are not
+      rules:
+        - name: error-strings          # go-conventions.md "Errors": lower case, no punctuation at the end
+        - name: error-naming           # ErrFoo for values, FooError for types
+        - name: redefines-builtin-id   # a parameter called max or clear hides the builtin for the rest of the function
+        - name: context-as-argument    # the context is the first parameter (after the test handle)
+          arguments:
+            - allowTypesBefore: "*testing.T,testing.TB"
+        - name: package-comments       # every package says what it is for
 
     nolintlint:
       require-explanation: true
@@ -169,6 +181,10 @@ linters:
       # not a leftover; unused parameters and unused results are still reported.
       - linters: [unparam]
         text: always receives
+      # The package comment of trust lives in trust.templ; revive does not read the generated file.
+      - path: internal/web/pages/trust/trust[.]go
+        linters: [revive]
+        text: package-comments
 
 issues:
   # Report every finding. The defaults cap equal messages at 3 and a linter at 50,

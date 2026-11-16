@@ -52,7 +52,7 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch o.Status {
 	case "processing", "valid":
-		s.replyOrder(w, ctx, o) // finalize again: the state as it is
+		s.replyOrder(ctx, w, o) // finalize again: the state as it is
 		return
 	case "ready":
 	default:
@@ -89,10 +89,10 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.replyOrder(w, ctx, o)
+	s.replyOrder(ctx, w, o)
 }
 
-func (s *Server) replyOrder(w http.ResponseWriter, ctx context.Context, o *pkidb.AcmeOrder) {
+func (s *Server) replyOrder(ctx context.Context, w http.ResponseWriter, o *pkidb.AcmeOrder) {
 	if o.Status == "processing" {
 		w.Header().Set("Retry-After", "30")
 	}

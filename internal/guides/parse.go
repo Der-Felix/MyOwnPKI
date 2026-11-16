@@ -144,9 +144,9 @@ type frontMatterError string
 func (e frontMatterError) Error() string { return string(e) }
 
 func setFrontMatter(g *Guide, key, value string, inSources *bool) error {
-	short := func(max int) error {
-		if value == "" || utf8.RuneCountInString(value) > max || strings.ContainsAny(value, "\t<>`") {
-			return frontMatterError(key + " is one line of 1 to " + strconv.Itoa(max) + " characters without < > or backticks")
+	short := func(limit int) error {
+		if value == "" || utf8.RuneCountInString(value) > limit || strings.ContainsAny(value, "\t<>`") {
+			return frontMatterError(key + " is one line of 1 to " + strconv.Itoa(limit) + " characters without < > or backticks")
 		}
 		return nil
 	}

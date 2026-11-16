@@ -436,7 +436,7 @@ func (e *env) endpointTargets(t *testing.T) []auditTarget {
 func TestHostileIDsNeverBecomeAnAuditTarget(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	real, err := e.svc.Create(t.Context(), testinstance.Console, Request{Host: "a.homelab.lan", Port: 443})
+	existing, err := e.svc.Create(t.Context(), testinstance.Console, Request{Host: "a.homelab.lan", Port: 443})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,11 +485,11 @@ func TestHostileIDsNeverBecomeAnAuditTarget(t *testing.T) {
 	}
 
 	// A refusal for a real ID keeps the ID: that is what the log is for.
-	if err := e.svc.Delete(t.Context(), viewer, real.ID); !errors.Is(err, authz.ErrDenied) {
+	if err := e.svc.Delete(t.Context(), viewer, existing.ID); !errors.Is(err, authz.ErrDenied) {
 		t.Fatal(err)
 	}
 	last := e.endpointTargets(t)
-	if got := last[len(last)-1]; got.id != real.ID {
-		t.Errorf("target of a refusal for a real ID: %q, want %q", got.id, real.ID)
+	if got := last[len(last)-1]; got.id != existing.ID {
+		t.Errorf("target of a refusal for a real ID: %q, want %q", got.id, existing.ID)
 	}
 }

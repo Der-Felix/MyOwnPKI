@@ -242,8 +242,8 @@ func FuzzValidReport(f *testing.F) {
 // validReport: byte lengths and UTF-8 for text, a closed set for states and
 // formats, a hand-written scan for the deployment name, hex by character.
 func reportLimitsHold(in ReportInput) bool {
-	text := func(s string, max int) bool {
-		return len(s) <= max && utf8.ValidString(s) && !strings.Contains(s, "\x00")
+	text := func(s string, limit int) bool {
+		return len(s) <= limit && utf8.ValidString(s) && !strings.Contains(s, "\x00")
 	}
 	isHex := func(s string, exactly int) bool {
 		if len(s) > 64 || len(s)%2 == 1 || (exactly > 0 && len(s) != 0 && len(s) != exactly) {

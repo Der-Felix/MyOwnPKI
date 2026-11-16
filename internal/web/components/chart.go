@@ -1,3 +1,6 @@
+// Package components holds the building blocks that the page packages share
+// (tables, folds, the chart) as templ components, and the geometry of the
+// server-rendered charts in chart.go.
 package components
 
 import (

@@ -83,9 +83,9 @@ func TestCredentialsFileSpecialBits(t *testing.T) {
 
 func TestCredentialsFileSymlink(t *testing.T) {
 	t.Parallel()
-	real := credsFile(t, goodCreds)
-	link := filepath.Join(filepath.Dir(real), "link.yaml")
-	if err := os.Symlink(real, link); err != nil {
+	target := credsFile(t, goodCreds)
+	link := filepath.Join(filepath.Dir(target), "link.yaml")
+	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	_, err := loadDNSCredentials(link, DNSTypeCloudflare)
@@ -94,14 +94,14 @@ func TestCredentialsFileSymlink(t *testing.T) {
 		t.Fatalf("%q", ce.Detail)
 	}
 	// A dangling link and a link to a directory are refused the same way.
-	dangling := filepath.Join(filepath.Dir(real), "dangling.yaml")
-	if err = os.Symlink(filepath.Join(filepath.Dir(real), "absent.yaml"), dangling); err != nil {
+	dangling := filepath.Join(filepath.Dir(target), "dangling.yaml")
+	if err = os.Symlink(filepath.Join(filepath.Dir(target), "absent.yaml"), dangling); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	_, err = loadDNSCredentials(dangling, DNSTypeCloudflare)
 	wantCredsState(t, err, credSymlink)
-	dirLink := filepath.Join(filepath.Dir(real), "dir.yaml")
-	if err = os.Symlink(filepath.Dir(real), dirLink); err != nil {
+	dirLink := filepath.Join(filepath.Dir(target), "dir.yaml")
+	if err = os.Symlink(filepath.Dir(target), dirLink); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	_, err = loadDNSCredentials(dirLink, DNSTypeCloudflare)
@@ -109,10 +109,10 @@ func TestCredentialsFileSymlink(t *testing.T) {
 	// A link in the directory part of the path is the admin's choice (the
 	// parent directory is what is checked): the real file still loads.
 	parentLink := filepath.Join(t.TempDir(), "etc-dns")
-	if err = os.Symlink(filepath.Dir(real), parentLink); err != nil {
+	if err = os.Symlink(filepath.Dir(target), parentLink); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if c, err := loadDNSCredentials(filepath.Join(parentLink, filepath.Base(real)), DNSTypeCloudflare); err != nil {
+	if c, err := loadDNSCredentials(filepath.Join(parentLink, filepath.Base(target)), DNSTypeCloudflare); err != nil {
 		t.Fatalf("a symlinked directory: %v", err)
 	} else {
 		c.wipe()

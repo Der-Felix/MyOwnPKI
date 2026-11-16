@@ -139,15 +139,15 @@ func TestRecomputedChainIsCaughtByTheCheckpoint(t *testing.T) {
 func TestResignedWithOwnKeyNeedsThePinnedKey(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	real := newSigner(1)
+	genuine := newSigner(1)
 	appendN(t, e.tenAudit, tenantScope, 6)
-	checkpoint(t, e.tenAudit, real, t0.Add(time.Hour))
+	checkpoint(t, e.tenAudit, genuine, t0.Add(time.Hour))
 	rewrite(t, e.tenAudit, 3, newSigner(2)) // attacker signs with an own key
 
 	if r := verify(t, e.tenAudit, tenantScope); r.Break != nil {
 		t.Fatalf("unpinned: %+v – a re-signed chain is consistent in itself", r.Break)
 	}
-	r, err := VerifyWith(t.Context(), e.tenAudit, tenantScope, VerifyOptions{CheckpointKey: real.fingerprint()[:16]})
+	r, err := VerifyWith(t.Context(), e.tenAudit, tenantScope, VerifyOptions{CheckpointKey: genuine.fingerprint()[:16]})
 	if err != nil {
 		t.Fatal(err)
 	}
