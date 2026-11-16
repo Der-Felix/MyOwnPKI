@@ -23,9 +23,22 @@ unless you prefer not to be.
 
 ## Supported versions
 
-There is no release yet: MyOwnPKI is in development (phase 1, see [docs/PLAN.md](docs/PLAN.md))
-and must not be used to run a production CA. Fixes go to the `main` branch. Once releases exist,
-this section will list which ones receive security fixes.
+MyOwnPKI is pre-1.0 (the 0.3 series, see [docs/PLAN.md](docs/PLAN.md) and the
+[changelog](CHANGELOG.md)). Security fixes go to the **latest release** and to the `main` branch;
+earlier releases get no backport, so the answer to a report is "update to the next release". Before
+1.0 a minor version may change the API, the configuration and the database schema; the release
+notes say how to upgrade.
+
+| Version | Security fixes |
+|---|---|
+| the latest 0.3.x release | yes |
+| `main` | yes |
+| earlier releases | no, please update |
+
+The parsers that read data from outside (CSRs, ACME requests, uploads, REST bodies, the legacy
+archive) are fuzzed in CI, see [CONTRIBUTING.md](CONTRIBUTING.md). A crash found there is fixed in
+the open, except when it is reachable without authentication in a released version: then it is
+handled like a report through the channel above.
 
 The legacy Bash suite in [`legacy/`](legacy/README.md) is supported as an offline root CA tool;
 reports for it are welcome through the same channel.

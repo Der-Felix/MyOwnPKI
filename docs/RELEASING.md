@@ -68,6 +68,23 @@ $env:NO_PROXY = "github.com,api.github.com"
 1. Check the branch: read the report at the top of `docs/NIGHTLOG.md` (after a night run), test in
    the browser, run `task check` and `task ci:local`. Include every SKIP line in the release
    report; a SKIP is not a successful check.
+   - Optional, before a release that changes a parser (CSR, certificate, CRL, ACME request, REST body,
+     upload, legacy archive): a longer fuzz run of each target on your machine, one hour per target is
+     the guide. CI fuzzes every target 10 seconds on each code change and 2 minutes every night, which
+     finds the common cases; the hour finds the rare ones. List the targets, then run one:
+
+     ```bash
+     grep -v '^#' scripts/ci/fuzz-targets.txt | awk 'NF { print $2 }'
+     ```
+
+     ```bash
+     task fuzz FUZZTIME=1h FUZZ_ONLY=FuzzParseCSR
+     ```
+
+     A crash is a new file under `testdata/fuzz/<Target>/` and a failing test: do not tag. Fix the
+     parser, commit the file with the fix and start the check again.
+   - `scripts/ci/fuzz-targets.txt` must list every `func Fuzz...` of the tree (CI job `fuzz` fails
+     otherwise): `bash scripts/ci/fuzz.sh --check`.
 2. `CHANGELOG.md`: the section `## [<version>] - <date>` must carry the day you push the tag –
    change it if not and commit (`docs: date of v<version>`). The release notes are taken from this
    section; the workflow stops if it is missing. What the workflow will take (Git Bash – the same

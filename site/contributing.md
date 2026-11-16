@@ -22,6 +22,9 @@ rules are short. The authoritative text is
 - Builds are pure Go. New dependencies need approval first; only permissive licenses.
 - Commits follow Conventional Commits, for example `docs(site): explain the Salt rollout`. Each commit
   builds and passes `task check`.
+- Three tasks measure the tests and the code and are not part of `task check`: `task cover` (a coverage table per
+  package), `task fuzz` (the fuzz targets of `scripts/ci/fuzz-targets.txt`, run by CI on every code change) and
+  `task deadcode` (functions nothing reaches). A new `func Fuzz...` needs a line in the list.
 
 ## Fixing a page on this site
 

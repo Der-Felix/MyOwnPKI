@@ -16,7 +16,8 @@ which is the source for the threat model and the decisions behind them.
 ## Report a vulnerability
 
 Please report vulnerabilities **privately**, never as a public issue or pull request. The process is
-in [SECURITY.md](https://github.com/Der-Felix/MyOwnPKI/blob/main/SECURITY.md).
+in [SECURITY.md](https://github.com/Der-Felix/MyOwnPKI/blob/main/SECURITY.md). Security fixes go to the latest release and to
+`main`; earlier releases get no backport, so keep the program updated.
 
 ## What protects what
 
@@ -26,6 +27,7 @@ in [SECURITY.md](https://github.com/Der-Felix/MyOwnPKI/blob/main/SECURITY.md).
 | The root | Can be offline. A root signs only intermediate CAs and CRLs; the engine refuses to issue end-entity certificates with it. |
 | Backups | Contain the CA keys, encrypted. A backup alone cannot sign; a backup plus the passphrase or the recovery key can. |
 | Certificate content | Extensions come from the preset and the policy, **never from the CSR**. CSRs, uploads and ACME payloads are treated as attacker input. Name constraints are enforced before signing, not only by clients. |
+| Input parsers | The code that reads data from outside is **fuzzed**: the ACME request and its key and account-binding parts, the CSR, certificate, CRL and name parsers, the REST body, the file upload of the issue wizard, the agent's CSR and report checks, the trust page's User-Agent and command generator, and the legacy archive reader. Every pull request runs each target for a few seconds and the nightly run for minutes; a crash input is kept in the repository as a regression test. A refusal never repeats more than a short piece of what the sender wrote. |
 | People | A second factor (an authenticator app with recovery codes) is mandatory. Passkeys work only through the REST API, not in the web UI. Sensitive actions ask for a fresh code (step-up): revoking, downloading keys, CA operations, user management, agent management, switching the agent enrollment mode. Wrong passwords lock the account for 15 minutes. |
 | Roles | *viewer*, *operator* and *admin* per tenant or per CA; instance admins unseal and manage users. |
 | API tokens | Never more than their owner has, one year at most, and they can never satisfy step-up. |
@@ -52,6 +54,9 @@ the repository.
 - **A lost passphrase and recovery key.** There is no recovery; create new CAs.
 - **Clients that trust the wrong root.** Always compare the root's SHA-256 with the admin UI, because the
   trust portal is served over plain HTTP so that it works before anything trusts your PKI.
+- **Fuzzing is no proof.** It finds crashes and rules that a parser breaks on odd input, not every bug. It does not cover
+  the files an administrator writes (the server configuration, `agent.yaml`, DNS credentials), which are trusted by design, nor the
+  libraries the program uses; those projects test their own code.
 
 ## Verify a download
 
