@@ -305,10 +305,7 @@ func (a *Agent) checkDeploymentTargets() error {
 	seen := map[string]string{}
 	for _, d := range a.cfg.Deployments {
 		f := deploymentPaths(d)
-		for _, path := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
-			if path == "" {
-				continue
-			}
+		for _, path := range f.Targets() {
 			canonical, err := resolveUnder(a.cfg.Paths, path)
 			if err != nil {
 				return err

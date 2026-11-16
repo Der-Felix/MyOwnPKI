@@ -204,11 +204,7 @@ type renewalPlan struct {
 
 func (a *Agent) currentLeaf(d Deployment) (*x509.Certificate, error) {
 	f := deploymentPaths(d)
-	path := f.Fullchain
-	if path == "" {
-		path = f.Certificate
-	}
-	data, _, err := a.readTarget(path)
+	data, _, err := a.readTarget(f.CertPath())
 	if err != nil {
 		return nil, err
 	}

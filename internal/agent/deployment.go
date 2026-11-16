@@ -549,10 +549,9 @@ func (s *editSession) neededDirs(d Deployment) ([]neededDir, error) {
 	if d.Profile == ProfileNginx {
 		wants = append(wants, want{"--dir", d.Dir, filepath.Dir(d.Dir)})
 	} else {
-		for _, f := range []struct{ flag, value string }{{"--certificate", d.Files.Certificate}, {"--chain", d.Files.Chain},
-			{"--fullchain", d.Files.Fullchain}, {"--key", d.Files.Key}} {
-			if f.value != "" {
-				wants = append(wants, want{f.flag, f.value, filepath.Dir(f.value)})
+		for _, f := range d.Files.fields() {
+			if f.Path != "" {
+				wants = append(wants, want{"--" + f.Name, f.Path, filepath.Dir(f.Path)})
 			}
 		}
 	}
@@ -836,12 +835,7 @@ func footprint(d Deployment) []string {
 	if d.Profile == ProfileNginx {
 		return append(out, d.Dir)
 	}
-	for _, p := range []string{d.Files.Certificate, d.Files.Chain, d.Files.Fullchain, d.Files.Key} {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	return append(out, d.Files.Targets()...)
 }
 
 // prunablePaths are the paths entries that only the removed deployment used.
@@ -934,13 +928,7 @@ func ListDeployments(w io.Writer, configPath string) error {
 	for _, d := range cfg.Deployments {
 		targets := d.Dir
 		if d.Profile == ProfileFile {
-			var parts []string
-			for _, p := range []string{d.Files.Certificate, d.Files.Chain, d.Files.Fullchain, d.Files.Key} {
-				if p != "" {
-					parts = append(parts, p)
-				}
-			}
-			targets = strings.Join(parts, ",")
+			targets = strings.Join(d.Files.Targets(), ",")
 		}
 		var hooks []string
 		if d.TestHook != "" {

@@ -337,9 +337,9 @@ func (c *Config) Validate() error {
 			if d.Files.Key == "" || d.Files.Certificate == "" && d.Files.Fullchain == "" {
 				add("%s: files: key and certificate or fullchain at least", where)
 			}
-			for field, p := range map[string]string{"certificate": d.Files.Certificate, "chain": d.Files.Chain, "fullchain": d.Files.Fullchain, "key": d.Files.Key} {
-				if p != "" {
-					under(where+": files."+field, p)
+			for _, field := range d.Files.fields() {
+				if field.Path != "" {
+					under(where+": files."+field.Name, field.Path)
 				}
 			}
 		default:
@@ -369,10 +369,7 @@ func (c *Config) Validate() error {
 			add("%s: check_name: every name is a wildcard, so the TLS check needs a concrete name, e.g. www.homelab.lan", where)
 		}
 		f := deploymentPaths(d)
-		for _, target := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
-			if target == "" {
-				continue
-			}
+		for _, target := range f.Targets() {
 			key := filepath.Clean(target)
 			if Under([]string{c.StateDir}, key) || key == filepath.Clean(c.CABundle) {
 				add("%s: target overlaps state_dir or ca_bundle", where)

@@ -112,11 +112,7 @@ func (a *Agent) writtenLeafFingerprint(d Deployment, want string) (string, error
 		return "", nil
 	}
 	files := deploymentPaths(d)
-	certPath := files.Fullchain
-	if certPath == "" {
-		certPath = files.Certificate
-	}
-	data, _, err := a.readTarget(certPath)
+	data, _, err := a.readTarget(files.CertPath())
 	if err != nil {
 		return "", fmt.Errorf("read back certificate for deployment %q: %w", d.Name, err)
 	}

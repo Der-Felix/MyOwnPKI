@@ -79,12 +79,8 @@ func (a *Agent) stageGroup(group reloadGroup, materials map[string]*Material) (*
 		}
 		files = append(files, items...)
 		f := deploymentPaths(d)
-		certPath := f.Fullchain
-		if certPath == "" {
-			certPath = f.Certificate
-		}
-		cert, _, certErr := a.readTarget(certPath)
-		key, _, keyErr := a.readTarget(f.Key)
+		cert, _, certErr := a.readTarget(f.CertPath())
+		key, _, keyErr := a.readTarget(f.KeyPath())
 		meta := journalDeployment{Name: d.Name}
 		switch {
 		case errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist):
@@ -213,10 +209,7 @@ func (a *Agent) recoveryGroup(j *deployJournal) (reloadGroup, error) {
 				return reloadGroup{}, bad
 			}
 			f := deploymentPaths(d)
-			for _, path := range []string{f.Certificate, f.Chain, f.Fullchain, f.Key} {
-				if path == "" {
-					continue
-				}
+			for _, path := range f.Targets() {
 				canonical, err := resolveUnder(a.cfg.Paths, path)
 				if err != nil {
 					return reloadGroup{}, err
