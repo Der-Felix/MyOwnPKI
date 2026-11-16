@@ -35,7 +35,10 @@ const (
 // EABAlgorithm names the MAC keys in the key ring.
 const EABAlgorithm = "hs256"
 
-const maxContacts = 5
+const (
+	maxContacts      = 5
+	maxAccountOrders = 100 // the orders an account lists
+)
 
 type accountJSON struct {
 	Status                 string   `json:"status"`
@@ -297,7 +300,9 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 }
 
 // accountOrders lists the account's orders (RFC 8555 §7.1.2.1), newest
-// first, at most 100.
+// first, at most 100. The database picks the account's rows: a limit on all
+// orders first would drop the orders of a quiet account once other accounts
+// made enough newer ones.
 func (s *Server) accountOrders(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.read(w, r, byKID)
 	if !ok {
@@ -307,16 +312,14 @@ func (s *Server) accountOrders(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, problemErr(http.StatusUnauthorized, "unauthorized", "an account sees only its own orders"))
 		return
 	}
-	rows, err := pkidb.New(s.db).ListACMEOrders(r.Context(), 1000)
+	rows, err := pkidb.New(s.db).ListACMEOrdersOfAccount(r.Context(), pkidb.ListACMEOrdersOfAccountParams{AccountID: req.account.ID, Limit: maxAccountOrders})
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	urls := []string{}
+	urls := make([]string, 0, len(rows))
 	for _, o := range rows {
-		if o.AccountID == req.account.ID && len(urls) < 100 {
-			urls = append(urls, s.url("/order/"+o.ID))
-		}
+		urls = append(urls, s.url("/order/"+o.ID))
 	}
 	s.reply(w, http.StatusOK, map[string]any{"orders": urls})
 }

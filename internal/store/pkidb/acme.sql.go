@@ -885,6 +885,50 @@ func (q *Queries) ListACMEOrders(ctx context.Context, limit int64) ([]AcmeOrder,
 	return items, nil
 }
 
+const listACMEOrdersOfAccount = `-- name: ListACMEOrdersOfAccount :many
+SELECT id, account_id, status, identifiers, expires_at, csr_der, certificate_id, error, created_at, updated_at, replaces FROM acme_orders WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?
+`
+
+type ListACMEOrdersOfAccountParams struct {
+	AccountID string
+	Limit     int64
+}
+
+func (q *Queries) ListACMEOrdersOfAccount(ctx context.Context, arg ListACMEOrdersOfAccountParams) ([]AcmeOrder, error) {
+	rows, err := q.db.QueryContext(ctx, listACMEOrdersOfAccount, arg.AccountID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AcmeOrder{}
+	for rows.Next() {
+		var i AcmeOrder
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Status,
+			&i.Identifiers,
+			&i.ExpiresAt,
+			&i.CsrDer,
+			&i.CertificateID,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Replaces,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listACMEOrdersOfAuthz = `-- name: ListACMEOrdersOfAuthz :many
 SELECT order_id FROM acme_order_authzs WHERE authz_id = ?
 `

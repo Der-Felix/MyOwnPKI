@@ -79,6 +79,9 @@ SELECT count(*) FROM acme_orders WHERE status = 'processing';
 -- name: ListACMEOrders :many
 SELECT * FROM acme_orders ORDER BY created_at DESC LIMIT ?;
 
+-- name: ListACMEOrdersOfAccount :many
+SELECT * FROM acme_orders WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?;
+
 -- name: ExpireACMEOrders :execrows
 UPDATE acme_orders SET status = 'invalid', error = ?, updated_at = ?
 WHERE status IN ('pending', 'ready') AND expires_at <= ?;
