@@ -156,12 +156,6 @@ func listenBoth(f listeners, attempts int) (net.Listener, net.PacketConn, error)
 // Addr is host:port of the server (UDP and TCP).
 func (s *Server) Addr() string { return s.addr }
 
-// Host is the IP address of the server.
-func (s *Server) Host() string {
-	host, _, _ := net.SplitHostPort(s.addr)
-	return host
-}
-
 // Messages returns a copy of the log.
 func (s *Server) Messages() []Message {
 	s.mu.Lock()
