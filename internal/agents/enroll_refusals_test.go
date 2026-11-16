@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -110,9 +111,9 @@ func TestEnrollRefusals(t *testing.T) {
 	}
 	for _, tt := range refused {
 		tt.in.SourceIP = "192.0.2.99"
-		_, err := e.s.Enroll(t.Context(), tt.in)
-		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), tt.want) {
-			t.Errorf("%s: %v, want an invalid request with %q", tt.name, err, tt.want)
+		_, eerr := e.s.Enroll(t.Context(), tt.in)
+		if !errors.Is(eerr, ErrInvalid) || !strings.Contains(eerr.Error(), tt.want) {
+			t.Errorf("%s: %v, want an invalid request with %q", tt.name, eerr, tt.want)
 		}
 	}
 	if n := e.enrollmentCount(t); n != 0 {
@@ -138,8 +139,8 @@ func TestEnrollRefusals(t *testing.T) {
 	}
 	for i, tt := range accepted {
 		tt.in.SourceIP = "192.0.2." + string(rune('1'+i))
-		if _, err := e.s.Enroll(t.Context(), tt.in); err != nil {
-			t.Errorf("%s: %v", tt.name, err)
+		if _, eerr := e.s.Enroll(t.Context(), tt.in); eerr != nil {
+			t.Errorf("%s: %v", tt.name, eerr)
 		}
 	}
 	rows, err := e.inst.PKIDB.Read.QueryContext(t.Context(), `SELECT hostname FROM agent_enrollments`)
@@ -157,6 +158,9 @@ func TestEnrollRefusals(t *testing.T) {
 		if h != strings.ToLower(h) || strings.HasSuffix(h, ".") {
 			t.Errorf("stored host name %q is not in canonical form", h)
 		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if hosts["proxy1.homelab.lan"] != len(accepted)-1 {
 		t.Errorf("%d enrollments for proxy1.homelab.lan, want %d (the capitals and the trailing dot are normalized)", hosts["proxy1.homelab.lan"], len(accepted)-1)
@@ -218,11 +222,11 @@ func TestEnrollTokenProblems(t *testing.T) {
 	ctx := t.Context()
 	tests := []struct {
 		name  string
-		token func(t *testing.T) string
+		token func() string
 		host  string
 		want  string
 	}{
-		{"revoked", func(t *testing.T) string {
+		{"revoked", func() string {
 			secret, jt, err := e.s.CreateJoinToken(ctx, testinstance.Console, "x", []string{"*.homelab.lan"}, 0)
 			if err != nil {
 				t.Fatal(err)
@@ -232,16 +236,16 @@ func TestEnrollTokenProblems(t *testing.T) {
 			}
 			return secret
 		}, "a.homelab.lan", "the join token was revoked"},
-		{"another host name", func(t *testing.T) string { return e.token(t, "b.homelab.lan") }, "a.homelab.lan", "the join token is not for a.homelab.lan"},
-		{"a pattern that only ends alike", func(t *testing.T) string { return e.token(t, "*.homelab.lan") }, "a.evilhomelab.lan", "the join token is not for a.evilhomelab.lan"},
-		{"the domain itself", func(t *testing.T) string { return e.token(t, "*.homelab.lan") }, "homelab.lan", "the join token is not for homelab.lan"},
-		{"an unknown secret", func(*testing.T) string { return "mjt_" + strings.Repeat("0", 43) }, "a.homelab.lan", "unknown join token"},
-		{"the pass prefix with a token's secret", func(t *testing.T) string {
+		{"another host name", func() string { return e.token(t, "b.homelab.lan") }, "a.homelab.lan", "the join token is not for a.homelab.lan"},
+		{"a pattern that only ends alike", func() string { return e.token(t, "*.homelab.lan") }, "a.evilhomelab.lan", "the join token is not for a.evilhomelab.lan"},
+		{"the domain itself", func() string { return e.token(t, "*.homelab.lan") }, "homelab.lan", "the join token is not for homelab.lan"},
+		{"an unknown secret", func() string { return "mjt_" + strings.Repeat("0", 43) }, "a.homelab.lan", "unknown join token"},
+		{"the pass prefix with a token's secret", func() string {
 			return PassPrefix + strings.TrimPrefix(e.token(t, "a.homelab.lan"), TokenPrefix)
 		}, "a.homelab.lan", "unknown join token"},
 	}
 	for _, tt := range tests {
-		secret := tt.token(t)
+		secret := tt.token()
 		out, _ := e.enrollOnly(t, tt.host, secret)
 		st, err := e.s.EnrollStatus(ctx, StatusInput{ID: out.ID, Handle: out.Handle, SourceIP: "192.0.2.10"})
 		if err != nil {
@@ -276,7 +280,7 @@ func TestSingleUseTokenIsSpentOnce(t *testing.T) {
 	for i := range n {
 		wg.Go(func() {
 			_, err := e.s.Enroll(t.Context(), EnrollInput{
-				Hostname: "h" + string(rune('a'+i)) + ".homelab.lan", Token: secret, Method: MethodStandalone, SourceIP: "192.0.2.10", CSRDER: mustCSR(t),
+				Hostname: fmt.Sprintf("h%d.homelab.lan", i), Token: secret, Method: MethodStandalone, SourceIP: "192.0.2.10", CSRDER: mustCSR(t),
 			})
 			errs <- err
 		})

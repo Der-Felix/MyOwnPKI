@@ -102,67 +102,82 @@ func TestUploadCRLRefusals(t *testing.T) {
 		want []string // every one must be among the reasons
 	}{
 		{"signed by another root", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			return signCRL(t, other, f.crlTemplate(5000))
 		}, []string{"not signed by any generation of root \"offline-root\""}},
 		{"right key, wrong authority key identifier", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			return signCRL(t, wrongAKI(f), f.crlTemplate(5000))
 		}, []string{"not signed by any generation"}},
 		{"SHA-1 signature", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.SignatureAlgorithm = x509.ECDSAWithSHA1
 			return signCRL(t, f.off, tmpl)
 		}, []string{"only SHA-2 (RSA, ECDSA) and Ed25519 signatures are accepted"}},
 		{"CRL number zero", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			return signCRL(t, f.off, f.crlTemplate(0))
 		}, []string{"the CRL has no CRL number"}},
 		{"CRL number beyond 63 bits", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(0)
 			tmpl.Number = new(big.Int).Lsh(big.NewInt(1), 63)
 			return signCRL(t, f.off, tmpl)
 		}, []string{"larger than this server can store (63 bits)"}},
 		{"thisUpdate one second beyond the clock skew", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.ThisUpdate = t0.Add(5*time.Minute + time.Second)
 			return signCRL(t, f.off, tmpl)
 		}, []string{"thisUpdate 2026-10-13T08:05:01Z is in the future"}},
 		{"nextUpdate is now", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.NextUpdate = t0
 			return signCRL(t, f.off, tmpl)
 		}, []string{"nextUpdate 2026-10-13T08:00:00Z has passed already"}},
 		{"unknown critical extension", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1}, Critical: true, Value: []byte{5, 0}}}
 			return signCRL(t, f.off, tmpl)
 		}, []string{"unknown critical CRL extension 1.3.6.1.4.1.99999.1"}},
 		{"delta CRL", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.ExtraExtensions = []pkix.Extension{{Id: oidDeltaCRLIndicator, Critical: true, Value: []byte{2, 1, 1}}}
 			return signCRL(t, f.off, tmpl)
 		}, []string{"this is a delta CRL – upload the full CRL"}},
 		{"non-critical delta indicator is a delta CRL too", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.ExtraExtensions = []pkix.Extension{{Id: oidDeltaCRLIndicator, Value: []byte{2, 1, 1}}}
 			return signCRL(t, f.off, tmpl)
 		}, []string{"this is a delta CRL"}},
 		{"several reasons at once", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			tmpl := f.crlTemplate(5000)
 			tmpl.ThisUpdate, tmpl.NextUpdate = t0.Add(-3*day), t0.Add(-2*day)
 			tmpl.ExtraExtensions = []pkix.Extension{{Id: oidDeltaCRLIndicator, Critical: true, Value: []byte{2, 1, 1}}}
 			return signCRL(t, other, tmpl)
 		}, []string{"not signed by any generation", "has passed already", "this is a delta CRL"}},
 		{"PEM of another type", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signCRL(t, f.off, f.crlTemplate(5000))})
 		}, []string{"expected a PEM block -----BEGIN X509 CRL----- or a DER file"}},
 		{"PEM with text after it", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			p := pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: signCRL(t, f.off, f.crlTemplate(5000))})
 			return append(p, "trailing\n"...)
 		}, []string{"there is data after the CRL – upload exactly one CRL"}},
 		{"PEM with the same CRL twice", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			p := pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: signCRL(t, f.off, f.crlTemplate(5000))})
 			return append(p, p...)
 		}, []string{"there is data after the CRL – upload exactly one CRL"}},
 		{"DER with a byte after it", func(t *testing.T, f *offlineFixture) []byte {
+			t.Helper()
 			return append(signCRL(t, f.off, f.crlTemplate(5000)), 0)
 		}, []string{"there is data after the CRL – upload exactly one CRL"}},
 		{"more than 4 MiB", func(*testing.T, *offlineFixture) []byte {

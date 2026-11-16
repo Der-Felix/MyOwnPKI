@@ -104,7 +104,7 @@ func TestImportExternalRecordsTheCertificate(t *testing.T) {
 	for _, row := range v.auditRows(t) {
 		if row.action == ActionImportExternal && row.result == "success" {
 			found = true
-			if row.details["serial"] != "1234ABCD" || row.details["fingerprint"] != info.Fingerprint || !strings.Contains(row.details["issuer"].(string), "Foreign Root") {
+			if row.details["serial"] != "1234ABCD" || row.details["fingerprint"] != info.Fingerprint || !strings.Contains(fmt.Sprint(row.details["issuer"]), "Foreign Root") {
 				t.Errorf("audit details %v", row.details)
 			}
 		}
@@ -261,7 +261,7 @@ func TestImportExternalIsAtomic(t *testing.T) {
 // wouldn't accept for a new one; it is named anyway.
 func TestDescribeKey(t *testing.T) {
 	t.Parallel()
-	rsa1024, err := rsa.GenerateKey(rand.Reader, 1024)
+	rsa1024, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // a key below the policy minimum is the case: describeKey must still name it
 	if err != nil {
 		t.Fatal(err)
 	}

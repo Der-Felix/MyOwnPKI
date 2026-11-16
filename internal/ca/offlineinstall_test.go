@@ -296,16 +296,16 @@ func TestInstallCACertificateIsAtomic(t *testing.T) {
 		t.Errorf("half an install: waiting %v, status %s, current generation %v", waiting, status, current)
 	}
 	var crls int
-	if err := f.v.pki.QueryRowContext(t.Context(), `SELECT count(*) FROM crls`).Scan(&crls); err != nil || crls != 0 {
-		t.Errorf("%d CRLs after a failed install (%v)", crls, err)
+	if cerr := f.v.pki.QueryRowContext(t.Context(), `SELECT count(*) FROM crls`).Scan(&crls); cerr != nil || crls != 0 {
+		t.Errorf("%d CRLs after a failed install (%v)", crls, cerr)
 	}
 	for _, row := range f.v.auditRows(t) {
 		if row.action == ActionCACertInstall && row.result == "success" {
 			t.Errorf("a success entry for an install that failed: %+v", row)
 		}
 	}
-	if _, err := f.v.pki.ExecContext(t.Context(), `DROP TRIGGER fail_crl`); err != nil {
-		t.Fatal(err)
+	if _, derr := f.v.pki.ExecContext(t.Context(), `DROP TRIGGER fail_crl`); derr != nil {
+		t.Fatal(derr)
 	}
 	res, err := f.v.e.InstallCACertificate(t.Context(), "issuing", good, tester)
 	if err != nil || res.Status != StatusActive || res.CRL == nil {

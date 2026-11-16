@@ -210,9 +210,9 @@ func TestRevokeCATwice(t *testing.T) {
 	if err != nil || len(first.Warnings) != 0 {
 		t.Fatalf("revoke generation 1: %+v %v", first, err)
 	}
-	if _, err := v.e.RevokeCA(t.Context(), RevokeCARequest{Name: "issuing", Generation: 1, Reason: ReasonCACompromise, Who: tester}); !strings.Contains(deniedErr(t, err),
+	if _, rerr := v.e.RevokeCA(t.Context(), RevokeCARequest{Name: "issuing", Generation: 1, Reason: ReasonCACompromise, Who: tester}); !strings.Contains(deniedErr(t, rerr),
 		`CA "issuing" generation 1 is revoked already – a revocation is final`) {
-		t.Errorf("generation 1 twice: %v", err)
+		t.Errorf("generation 1 twice: %v", rerr)
 	}
 	if out := v.issue(t, Request{CA: "issuing", Preset: "server", DNSNames: []string{"a.homelab.lan"}}); parse(t, out.CertDER).IssuingCertificateURL[0] != baseURL+"/ca/issuing/2.crt" {
 		t.Errorf("the leaf is not from generation 2: %v", parse(t, out.CertDER).IssuingCertificateURL)

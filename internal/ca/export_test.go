@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/elliptic"
 	"crypto/x509"
+	"database/sql"
 	"encoding/pem"
 	"errors"
 	"os"
@@ -284,55 +285,57 @@ func TestExportNeverWritesTheKey(t *testing.T) {
 	}
 }
 
-// dbContains looks for needle in every column of every table.
-func dbContains(t *testing.T, db pkidb.DBTX, needle []byte) (table, column string) {
+// queryRows runs a query and hands every row to visit until it returns true.
+func queryRows(t *testing.T, db pkidb.DBTX, query string, visit func(rows *sql.Rows) bool) {
 	t.Helper()
-	tables, err := db.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+	rows, err := db.QueryContext(t.Context(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
-	for tables.Next() {
-		var n string
-		if err = tables.Scan(&n); err != nil {
-			t.Fatal(err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		if visit(rows) {
+			return
 		}
-		names = append(names, n)
 	}
-	if err = tables.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	_ = tables.Close()
-	for _, name := range names {
-		cols, qerr := db.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('`+name+`')`)
-		if qerr != nil {
-			t.Fatal(qerr)
+}
+
+func queryColumn(t *testing.T, db pkidb.DBTX, query string) []string {
+	t.Helper()
+	var out []string
+	queryRows(t, db, query, func(rows *sql.Rows) bool {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
 		}
-		var colNames []string
-		for cols.Next() {
-			var c string
-			if err = cols.Scan(&c); err != nil {
-				t.Fatal(err)
-			}
-			colNames = append(colNames, c)
-		}
-		_ = cols.Close()
-		for _, c := range colNames {
-			rows, qerr := db.QueryContext(t.Context(), `SELECT CAST("`+c+`" AS BLOB) FROM "`+name+`" WHERE "`+c+`" IS NOT NULL`)
-			if qerr != nil {
-				t.Fatal(qerr)
-			}
-			for rows.Next() {
+		out = append(out, s)
+		return false
+	})
+	return out
+}
+
+// dbContains looks for needle in every column of every table.
+func dbContains(t *testing.T, db pkidb.DBTX, needle []byte) (table, column string) {
+	t.Helper()
+	for _, name := range queryColumn(t, db, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`) {
+		for _, col := range queryColumn(t, db, `SELECT name FROM pragma_table_info('`+name+`')`) {
+			queryRows(t, db, `SELECT CAST("`+col+`" AS BLOB) FROM "`+name+`" WHERE "`+col+`" IS NOT NULL`, func(rows *sql.Rows) bool {
 				var b []byte
-				if err = rows.Scan(&b); err != nil {
+				if err := rows.Scan(&b); err != nil {
 					t.Fatal(err)
 				}
 				if bytes.Contains(b, needle) {
-					_ = rows.Close()
-					return name, c
+					table, column = name, col
+					return true
 				}
+				return false
+			})
+			if table != "" {
+				return table, column
 			}
-			_ = rows.Close()
 		}
 	}
 	return "", ""

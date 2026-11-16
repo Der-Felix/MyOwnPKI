@@ -24,36 +24,43 @@ func TestParentMustBeUsable(t *testing.T) {
 	}{
 		{"unknown parent", func(*testing.T, *env) {}, `there is no parent CA named "parent"`},
 		{"retired parent", func(t *testing.T, v *env) {
+			t.Helper()
 			v.root(t, "parent", nil)
 			if err := v.e.RetireCA(t.Context(), "parent", tester); err != nil {
 				t.Fatal(err)
 			}
 		}, `parent CA "parent" is retired, not active`},
 		{"parent that waits for its signature", func(t *testing.T, v *env) {
+			t.Helper()
 			v.importRoot(t, "offline-root", newOfflineRoot(t, "Offline Root", t0.Add(-day)))
 			v.intermediate(t, "parent", "offline-root", nil)
 		}, `parent CA "parent" is pending_signature, not active`},
 		{"parent with an HSM key", func(t *testing.T, v *env) {
+			t.Helper()
 			v.root(t, "parent", nil)
 			if _, err := v.pki.ExecContext(t.Context(), `UPDATE cas SET key_mode = 'hsm' WHERE name = 'parent'`); err != nil {
 				t.Fatal(err)
 			}
 		}, `parent CA "parent" uses an HSM key, which this build can't use`},
 		{"parent without a signed certificate", func(t *testing.T, v *env) {
+			t.Helper()
 			v.root(t, "parent", nil)
 			if _, err := v.pki.ExecContext(t.Context(), `UPDATE cas SET current_generation = NULL WHERE name = 'parent'`); err != nil {
 				t.Fatal(err)
 			}
 		}, `parent CA "parent" has no signed certificate yet`},
 		{"parent whose certificate has expired", func(t *testing.T, v *env) {
+			t.Helper()
 			v.root(t, "parent", func(r *RootRequest) { r.ValidityDays = 30 })
 			v.clk.Advance(31 * day)
 		}, `the chain of parent CA "parent" is not valid now (Homelab parent valid from 2026-10-13 to 2026-11-12)`},
 		{"the last second of the parent's certificate", func(t *testing.T, v *env) {
+			t.Helper()
 			v.root(t, "parent", func(r *RootRequest) { r.ValidityDays = 30 })
 			v.clk.Set(t0.AddDate(0, 0, 30).Add(time.Second))
 		}, "is not valid now"},
 		{"a root above the parent that has expired", func(t *testing.T, v *env) {
+			t.Helper()
 			top := v.addCA(t, "top", caOpts{notAfter: t0.AddDate(0, 0, 30)})
 			v.addCA(t, "parent", caOpts{parent: top, key: mustKey(t, elliptic.P256())})
 			v.clk.Advance(31 * day)

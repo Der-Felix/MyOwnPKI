@@ -57,40 +57,40 @@ func TestCheckConstraintsRows(t *testing.T) {
 	)}
 	tests := []struct {
 		name  string
-		names func(t *testing.T) Names
+		names Names
 		want  string
 	}{
-		{"dns at the permitted name", func(*testing.T) Names { return Names{DNS: []string{"homelab.lan"}} }, ""},
-		{"dns below the permitted name", func(*testing.T) Names { return Names{DNS: []string{"a.b.homelab.lan"}} }, ""},
-		{"dns that only ends alike", func(*testing.T) Names { return Names{DNS: []string{"evilhomelab.lan"}} }, `dns "evilhomelab.lan" is outside the name constraints of CA "issuing" (permitted: homelab.lan)`},
-		{"dns elsewhere", func(*testing.T) Names { return Names{DNS: []string{"evil.com"}} }, `dns "evil.com" is outside`},
-		{"dns excluded exactly", func(*testing.T) Names { return Names{DNS: []string{"secret.homelab.lan"}} }, `dns "secret.homelab.lan" is excluded by the name constraints of CA "issuing" (secret.homelab.lan)`},
-		{"dns below an excluded name", func(*testing.T) Names { return Names{DNS: []string{"x.secret.homelab.lan"}} }, "is excluded"},
-		{"wildcard that covers an excluded name", func(*testing.T) Names { return Names{DNS: []string{"*.homelab.lan"}} }, `dns "*.homelab.lan" is excluded`},
-		{"wildcard one level lower", func(*testing.T) Names { return Names{DNS: []string{"*.apps.homelab.lan"}} }, ""},
-		{"wildcard outside", func(*testing.T) Names { return Names{DNS: []string{"*.evil.com"}} }, "is outside"},
-		{"ipv4 inside", func(t *testing.T) Names { return Names{IPs: addrs(t, "10.1.2.3")} }, ""},
-		{"ipv4 at the edge of the prefix", func(t *testing.T) Names { return Names{IPs: addrs(t, "10.255.255.255")} }, ""},
-		{"ipv4 just outside the prefix", func(t *testing.T) Names { return Names{IPs: addrs(t, "11.0.0.0")} }, `ip "11.0.0.0" is outside the name constraints of CA "issuing" (permitted: 10.0.0.0/8, fd00::/8)`},
-		{"ipv4 excluded", func(t *testing.T) Names { return Names{IPs: addrs(t, "10.9.200.1")} }, `ip "10.9.200.1" is excluded by the name constraints of CA "issuing" (10.9.0.0/16)`},
-		{"ipv4 next to the excluded prefix", func(t *testing.T) Names { return Names{IPs: addrs(t, "10.10.0.1")} }, ""},
-		{"ipv6 inside", func(t *testing.T) Names { return Names{IPs: addrs(t, "fd12:3456::1")} }, ""},
-		{"ipv6 outside", func(t *testing.T) Names { return Names{IPs: addrs(t, "fe80::1")} }, `ip "fe80::1" is outside`},
-		{"email at the permitted host", func(*testing.T) Names { return Names{Emails: []string{"alice@homelab.lan"}} }, ""},
-		{"email at a subdomain of a host constraint", func(*testing.T) Names { return Names{Emails: []string{"alice@mail.homelab.lan"}} }, `email "alice@mail.homelab.lan" is outside`},
-		{"email at another host", func(*testing.T) Names { return Names{Emails: []string{"alice@evil.com"}} }, "is outside"},
-		{"email of an excluded mailbox", func(*testing.T) Names { return Names{Emails: []string{"bob@homelab.lan"}} }, `email "bob@homelab.lan" is excluded`},
-		{"uri below the permitted domain", func(*testing.T) Names { return Names{URIs: []string{"https://svc.homelab.lan/x"}} }, ""},
-		{"uri at the bare domain of a dotted constraint", func(*testing.T) Names { return Names{URIs: []string{"https://homelab.lan/"}} }, `uri "https://homelab.lan/" is outside`},
-		{"uri with an ip host", func(*testing.T) Names { return Names{URIs: []string{"https://10.0.0.1/"}} }, "is outside"},
-		{"uri without a host", func(*testing.T) Names { return Names{URIs: []string{"urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66"}} }, "is outside"},
-		{"uri excluded host", func(*testing.T) Names { return Names{URIs: []string{"https://evil.homelab.lan/"}} }, `uri "https://evil.homelab.lan/" is excluded`},
-		{"uri host in capitals", func(*testing.T) Names { return Names{URIs: []string{"https://SVC.HomeLab.LAN/"}} }, ""},
+		{"dns at the permitted name", Names{DNS: []string{"homelab.lan"}}, ""},
+		{"dns below the permitted name", Names{DNS: []string{"a.b.homelab.lan"}}, ""},
+		{"dns that only ends alike", Names{DNS: []string{"evilhomelab.lan"}}, `dns "evilhomelab.lan" is outside the name constraints of CA "issuing" (permitted: homelab.lan)`},
+		{"dns elsewhere", Names{DNS: []string{"evil.com"}}, `dns "evil.com" is outside`},
+		{"dns excluded exactly", Names{DNS: []string{"secret.homelab.lan"}}, `dns "secret.homelab.lan" is excluded by the name constraints of CA "issuing" (secret.homelab.lan)`},
+		{"dns below an excluded name", Names{DNS: []string{"x.secret.homelab.lan"}}, "is excluded"},
+		{"wildcard that covers an excluded name", Names{DNS: []string{"*.homelab.lan"}}, `dns "*.homelab.lan" is excluded`},
+		{"wildcard one level lower", Names{DNS: []string{"*.apps.homelab.lan"}}, ""},
+		{"wildcard outside", Names{DNS: []string{"*.evil.com"}}, "is outside"},
+		{"ipv4 inside", Names{IPs: addrs(t, "10.1.2.3")}, ""},
+		{"ipv4 at the edge of the prefix", Names{IPs: addrs(t, "10.255.255.255")}, ""},
+		{"ipv4 just outside the prefix", Names{IPs: addrs(t, "11.0.0.0")}, `ip "11.0.0.0" is outside the name constraints of CA "issuing" (permitted: 10.0.0.0/8, fd00::/8)`},
+		{"ipv4 excluded", Names{IPs: addrs(t, "10.9.200.1")}, `ip "10.9.200.1" is excluded by the name constraints of CA "issuing" (10.9.0.0/16)`},
+		{"ipv4 next to the excluded prefix", Names{IPs: addrs(t, "10.10.0.1")}, ""},
+		{"ipv6 inside", Names{IPs: addrs(t, "fd12:3456::1")}, ""},
+		{"ipv6 outside", Names{IPs: addrs(t, "fe80::1")}, `ip "fe80::1" is outside`},
+		{"email at the permitted host", Names{Emails: []string{"alice@homelab.lan"}}, ""},
+		{"email at a subdomain of a host constraint", Names{Emails: []string{"alice@mail.homelab.lan"}}, `email "alice@mail.homelab.lan" is outside`},
+		{"email at another host", Names{Emails: []string{"alice@evil.com"}}, "is outside"},
+		{"email of an excluded mailbox", Names{Emails: []string{"bob@homelab.lan"}}, `email "bob@homelab.lan" is excluded`},
+		{"uri below the permitted domain", Names{URIs: []string{"https://svc.homelab.lan/x"}}, ""},
+		{"uri at the bare domain of a dotted constraint", Names{URIs: []string{"https://homelab.lan/"}}, `uri "https://homelab.lan/" is outside`},
+		{"uri with an ip host", Names{URIs: []string{"https://10.0.0.1/"}}, "is outside"},
+		{"uri without a host", Names{URIs: []string{"urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66"}}, "is outside"},
+		{"uri excluded host", Names{URIs: []string{"https://evil.homelab.lan/"}}, `uri "https://evil.homelab.lan/" is excluded`},
+		{"uri host in capitals", Names{URIs: []string{"https://SVC.HomeLab.LAN/"}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := checkConstraints([]caConstraints{issuing}, tt.names(t), "")
+			got := checkConstraints([]caConstraints{issuing}, tt.names, "")
 			switch {
 			case tt.want == "" && len(got) != 0:
 				t.Errorf("refused: %q", got)
