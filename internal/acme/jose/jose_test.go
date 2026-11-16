@@ -364,3 +364,52 @@ func TestParseInner(t *testing.T) {
 	}
 }
 
+// TestRefusalsDoNotEchoTheRequest: found by FuzzParse – a refusal named the
+// offending member, algorithm, key type or curve in full, so a request of
+// 64 KiB came back as a response of 64 KiB.
+func TestRefusalsDoNotEchoTheRequest(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 5000)
+	es := newSigner(t, ES256)
+	hdr := func(extra string) string {
+		return `{"alg":"ES256","nonce":"n1","url":"https://acme.example/x","jwk":` + es.jwk + extra + `}`
+	}
+	ecPoint := strings.TrimSuffix(es.jwk, "}")
+	cases := map[string]error{}
+	add := func(name string, err error) { cases[name] = err }
+	_, err := Parse([]byte(`{"protected":"","payload":"","signature":"","` + long + `":1}`))
+	add("unknown member", err)
+	_, err = Parse([]byte(`{"` + long + `":1,"` + long + `":2}`))
+	add("duplicate member", err)
+	_, err = Parse([]byte(`{"` + long + "\xbc" + `":1}`))
+	add("bad member", err)
+	_, err = Parse(es.body(t, strings.Replace(hdr(""), `"ES256"`, `"`+long+`"`, 1), `{}`))
+	add("algorithm", err)
+	_, err = Parse(es.body(t, strings.Replace(hdr(""), `"ES256"`, `"HS`+long+`"`, 1), `{}`))
+	add("MAC algorithm", err)
+	_, err = ParseJWK([]byte(`{"kty":"` + long + `"}`))
+	add("key type", err)
+	_, err = ParseJWK([]byte(`{"kty":"EC","crv":"` + long + `"}`))
+	add("curve", err)
+	_, err = ParseJWK([]byte(`{"kty":"OKP","crv":"` + long + `"}`))
+	add("OKP curve", err)
+	_, err = ParseJWK([]byte(ecPoint + `,"alg":"` + long + `"}`))
+	add("JWK alg", err)
+	_, err = VerifyEAB([]byte(`{"protected":"e30","payload":"e30","signature":"","`+long+`":1}`), nil, "u", nil)
+	add("EAB member", err)
+	eabHeader := b64.EncodeToString([]byte(`{"alg":"HS256","kid":"k","url":"u","` + long + `":1}`))
+	_, err = VerifyEAB([]byte(`{"protected":"`+eabHeader+`","payload":"e30","signature":""}`), nil, "u", nil)
+	add("EAB header member", err)
+	eabHeader = b64.EncodeToString([]byte(`{"alg":"` + long + `","kid":"k","url":"u"}`))
+	_, err = VerifyEAB([]byte(`{"protected":"`+eabHeader+`","payload":"e30","signature":""}`), nil, "u", nil)
+	add("EAB algorithm", err)
+	for name, err := range cases {
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if n := len(err.Error()); n > 300 {
+			t.Errorf("%s: the refusal has %d bytes", name, n)
+		}
+	}
+}

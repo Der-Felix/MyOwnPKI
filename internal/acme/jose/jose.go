@@ -77,10 +77,10 @@ func object(what string, data []byte) (map[string]json.RawMessage, error) {
 		}
 		var raw json.RawMessage
 		if err = dec.Decode(&raw); err != nil {
-			return nil, malformed("%s: member %q: %v", what, key, err)
+			return nil, malformed("%s: member %q: %v", what, short(key), err)
 		}
 		if _, dup := out[key]; dup {
-			return nil, malformed("%s: member %q appears twice", what, key)
+			return nil, malformed("%s: member %q appears twice", what, short(key))
 		}
 		out[key] = raw
 	}
@@ -100,4 +100,14 @@ func str(what string, raw json.RawMessage) (string, error) {
 		return "", malformed("%s must be a string", what)
 	}
 	return s, nil
+}
+
+// short cuts attacker input to 80 bytes for an error message: a refusal names
+// the rule and the start of the offending text, it does not send the request
+// back. Messages print it with %q, which escapes control characters.
+func short(s string) string {
+	if len(s) > 80 {
+		return s[:77] + "..."
+	}
+	return s
 }
