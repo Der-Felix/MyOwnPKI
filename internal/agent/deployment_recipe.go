@@ -36,13 +36,26 @@ func applyRecipe(spec *DeploymentSpec, name, root string) error {
 	}
 	spec.Recipe, spec.recipeExample, spec.recipeNotes = r.Name, r.Example, r.Notes
 
+	// {name} is replaced in every path of the recipe, and only in paths. The
+	// name becomes a path segment, so it must be a name the agent accepts
+	// (lower case letters, digits, "-"): no "/", no "..".
+	expand := func(p string) (string, error) {
+		if strings.Contains(p, "{name}") && !nameRE.MatchString(spec.Name) {
+			return "", fmt.Errorf("deployment name %q: lower case letters, digits and '-', e.g. proxy (the recipe %s puts it into a path)", spec.Name, r.Name)
+		}
+		return path(strings.ReplaceAll(p, "{name}", spec.Name)), nil
+	}
 	ownLocation := spec.Dir != "" || spec.Files != (Files{})
 	if !ownLocation && (spec.Profile == "" || spec.Profile == r.Profile) {
 		spec.Profile = r.Profile
+		var err error
 		if r.Profile == ProfileNginx {
-			spec.Dir = path(strings.ReplaceAll(r.Dir, "{name}", spec.Name))
+			spec.Dir, err = expand(r.Dir)
 		} else {
-			spec.Files = Files{Certificate: path(r.Certificate), Chain: path(r.Chain), Fullchain: path(r.Fullchain), Key: path(r.Key)}
+			spec.Files, err = recipeFiles(r, expand)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	for _, f := range []struct {
@@ -78,4 +91,20 @@ func applyRecipe(spec *DeploymentSpec, name, root string) error {
 	}
 	spec.LowPorts = spec.LowPorts || r.LowPorts
 	return nil
+}
+
+// recipeFiles maps the file targets of a recipe through expand.
+func recipeFiles(r recipe.Recipe, expand func(string) (string, error)) (Files, error) {
+	var f Files
+	for _, field := range []struct {
+		to   *string
+		from string
+	}{{&f.Certificate, r.Certificate}, {&f.Chain, r.Chain}, {&f.Fullchain, r.Fullchain}, {&f.Key, r.Key}, {&f.Combined, r.Combined}} {
+		p, err := expand(field.from)
+		if err != nil {
+			return Files{}, err
+		}
+		*field.to = p
+	}
+	return f, nil
 }

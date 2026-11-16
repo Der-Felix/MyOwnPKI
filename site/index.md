@@ -57,8 +57,8 @@ The parts, and who talks to whom:
   into plain files, reloads the service and rolls back when the reload fails. An *Add host*
   assistant takes a new host from its name to a deployed certificate, the
   [Salt formula]({{ '/hosts/salt/' | relative_url }}) rolls the agent out to many hosts, and
-  [recipes]({{ '/recipes/' | relative_url }}) cover nginx, Postfix, Dovecot and Proxmox VE (the last
-  three are unverified examples). A deployment can also use **dns-01** (since v0.3.7) for wildcard
+  [recipes]({{ '/recipes/' | relative_url }}) cover nginx, Apache, HAProxy, Postfix, Dovecot and Proxmox VE (all but nginx
+  are unverified examples). A deployment can also use **dns-01** (since v0.3.7) for wildcard
   certificates and hosts without port 80: [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}).
 - **Trust portal** (since v0.3.9): the page at `/` of the public listener hands your root to people. It guesses the
   visitor's system and gives the steps and commands for Windows, macOS, iPhone and iPad (with a configuration
@@ -117,7 +117,7 @@ level 3 when you want the server to see what is deployed where and to renew on a
 | Install the server | [Installation]({{ '/install/' | relative_url }}) |
 | Update to a new release | [Upgrade]({{ '/upgrade/' | relative_url }}) |
 | Get certificates onto a host, with or without the agent | [Adding hosts]({{ '/hosts/' | relative_url }}) |
-| Set up nginx, Postfix, Dovecot or Proxmox VE with the agent | [Recipes]({{ '/recipes/' | relative_url }}) |
+| Set up nginx, Apache, HAProxy, Postfix, Dovecot or Proxmox VE with the agent | [Recipes]({{ '/recipes/' | relative_url }}) |
 | Get a wildcard certificate, or a certificate for a host without port 80, with the agent | [dns-01 and wildcard certificates]({{ '/dns-01/' | relative_url }}) |
 | Roll the agent out with the Salt formula | [Rolling out with Salt]({{ '/hosts/salt/' | relative_url }}) |
 | See what a certificate would look like before I issue it | [Preview a certificate]({{ '/guides/preview-a-certificate/' | relative_url }}) |

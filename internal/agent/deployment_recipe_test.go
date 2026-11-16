@@ -94,18 +94,24 @@ func TestEveryRecipeRendersAValidDeployment(t *testing.T) {
 	}
 }
 
-func TestRecipeNginxGolden(t *testing.T) {
-	f := freshFixture(t)
-	spec := DeploymentSpec{Name: "test", Names: []string{"proxy.homelab.lan"}, ACMEDirectory: recipeACME}
-	if err := applyRecipe(&spec, "nginx", f.root); err != nil {
-		t.Fatal(err)
-	}
-	if err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "recipe-nginx.out.yaml", f.normalize(f.read(f.config)))
-	if strings.Contains(f.stdout.String(), "example recipe") {
-		t.Error("nginx is not an example recipe")
+// The configuration a recipe writes, byte for byte. Only nginx is a recipe
+// that ran on a live host; the others say so in their dry run.
+func TestRecipeGolden(t *testing.T) {
+	for _, name := range []string{"nginx", "apache2", "httpd", "haproxy"} {
+		t.Run(name, func(t *testing.T) {
+			f := freshFixture(t)
+			spec := DeploymentSpec{Name: "test", Names: []string{"proxy.homelab.lan"}, ACMEDirectory: recipeACME}
+			if err := applyRecipe(&spec, name, f.root); err != nil {
+				t.Fatal(err)
+			}
+			if err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err != nil {
+				t.Fatal(err)
+			}
+			golden(t, "recipe-"+name+".out.yaml", f.normalize(f.read(f.config)))
+			if got := strings.Contains(f.stdout.String(), "example recipe"); got != (name != "nginx") {
+				t.Errorf("example wording present = %v:\n%s", got, f.stdout.String())
+			}
+		})
 	}
 }
 
@@ -168,8 +174,8 @@ func TestRecipeDeploymentsShareTheirHooks(t *testing.T) {
 
 func TestRecipeUnknownNameListsTheKnownOnes(t *testing.T) {
 	t.Parallel()
-	err := ApplyRecipe(&DeploymentSpec{Name: "x"}, "apache")
-	if err == nil || err.Error() != `unknown recipe "apache" – known: dovecot, nginx, postfix, proxmox` {
+	err := ApplyRecipe(&DeploymentSpec{Name: "x"}, "lighttpd")
+	if err == nil || err.Error() != `unknown recipe "lighttpd" – known: apache2, dovecot, haproxy, httpd, nginx, postfix, proxmox` {
 		t.Errorf("error = %v", err)
 	}
 }
@@ -245,5 +251,73 @@ func TestDryRunDeploymentAddNeedsNoRootAndWritesNothing(t *testing.T) {
 	var usage *UsageError
 	if _, err = ParseDeploymentAdd(fs, config, []string{"one", "two"}); !errors.As(err, &usage) || usage.Message == "" {
 		t.Errorf("two names: %v", err)
+	}
+}
+
+// HAProxy usually serves many certificates: two deployments from the recipe
+// get a file each, do not collide, and share one test and one reload hook, so
+// they are one reload group.
+func TestHAProxyRecipeTwoDeploymentsShareOneReloadGroup(t *testing.T) {
+	f := freshFixture(t)
+	for _, name := range []string{"www", "api"} {
+		spec := DeploymentSpec{Name: name, Names: []string{name + ".homelab.lan"}, ACMEDirectory: recipeACME}
+		if err := applyRecipe(&spec, "haproxy", f.root); err != nil {
+			t.Fatal(err)
+		}
+		if err := AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	cfg, err := LoadConfig(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Deployments) != 2 || len(cfg.Hooks) != 2 || cfg.Deployments[0].ReloadHook != cfg.Deployments[1].ReloadHook {
+		t.Fatalf("hooks %v deployments %+v", cfg.Hooks, cfg.Deployments)
+	}
+	want := []string{f.p("etc", "ssl", "myownpki", "haproxy", "www.pem"), f.p("etc", "ssl", "myownpki", "haproxy", "api.pem")}
+	for i, d := range cfg.Deployments {
+		if filepath.FromSlash(d.Files.Combined) != want[i] || d.Files.Key != "" || d.Files.Fullchain != "" {
+			t.Errorf("deployment %s: files %+v, want combined %s", d.Name, d.Files, want[i])
+		}
+	}
+	if grouped := groups(cfg.Deployments); len(grouped) != 1 || len(grouped[0].deployments) != 2 {
+		t.Errorf("groups = %+v, want one group of both", grouped)
+	}
+	if len(cfg.Sandbox.Write) != 0 || (cfg.Sandbox.LowPorts != nil && *cfg.Sandbox.LowPorts) {
+		t.Errorf("the HAProxy recipe widens the sandbox: %+v", cfg.Sandbox)
+	}
+	// A third deployment under the same name is refused, the file stays unique.
+	spec := DeploymentSpec{Name: "www", ACMEDirectory: recipeACME}
+	if err = applyRecipe(&spec, "haproxy", f.root); err != nil {
+		t.Fatal(err)
+	}
+	if err = AddDeployment(context.Background(), AddOptions{EditOptions: f.edit(), Spec: spec, CreateDirs: true}); err == nil || !strings.Contains(err.Error(), `deployment "www" exists`) {
+		t.Errorf("second www: %v", err)
+	}
+}
+
+// {name} becomes a path segment, so only a name the agent accepts gets in: a
+// "/" or ".." never reaches a path, whatever the recipe (the name is checked
+// again when the deployment is added).
+func TestRecipeNameCannotReachAPath(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"../etc", "a/b", "..", "a..b/c", `a\b`, "A", "a b", "a\nb", "", ".", "-a", "a/../../etc/cron.d/x", "%2e%2e"} {
+		for _, rc := range []string{"nginx", "apache2", "httpd", "haproxy"} {
+			spec := DeploymentSpec{Name: name}
+			err := applyRecipe(&spec, rc, "")
+			if err == nil {
+				t.Errorf("%s with name %q was accepted: dir %q files %+v", rc, name, spec.Dir, spec.Files)
+				continue
+			}
+			if spec.Dir != "" || spec.Files != (Files{}) {
+				t.Errorf("%s with name %q: an error, but a path was set: %q %+v", rc, name, spec.Dir, spec.Files)
+			}
+		}
+	}
+	// Recipes without {name} in a path do not need a name for it.
+	spec := DeploymentSpec{Name: "x/y"}
+	if err := applyRecipe(&spec, "postfix", ""); err != nil || spec.Files.Fullchain != "/etc/ssl/myownpki/postfix/fullchain.pem" {
+		t.Errorf("postfix: %v %+v", err, spec.Files)
 	}
 }

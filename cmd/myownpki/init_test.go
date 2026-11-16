@@ -44,7 +44,7 @@ func TestInitDemo(t *testing.T) {
 	if code := finishInit(t.Context(), opt, setup.NewLineInput(strings.NewReader(""), &out), &out, &stderr); code != exitOK {
 		t.Fatalf("exit %d: %s%s", code, out.String(), stderr.String())
 	}
-	for _, want := range []string{"DEMO instance – all secrets are in one file", "init-demo-secrets.txt", "Checkpoint key fingerprint", "Test CA created: root, issuing"} {
+	for _, want := range []string{"DEMO instance – all secrets are in one file", "init-demo-secrets.txt", "Checkpoint key fingerprint", "Test CA created: root, issuing", "\nNext: sign in and open Help, First steps.\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}

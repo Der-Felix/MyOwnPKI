@@ -46,6 +46,39 @@ Two-week rule: the newest release of the LTS line that is older than 2026-10-29.
 |---|---|---|---|---|
 | [Salt](https://github.com/saltstack/salt) onedir | 3008.5 (2026-10-26), the 3008 LTS line | Apache-2.0 (`salt-3008.5.dist-info` in the tarball; the onedir also bundles CPython and Python libraries under their own licenses) | `salt-call --local` renders and applies (`test=True`) the test pillars of `deploy/salt/myownpki` | `salt-3008.5-onedir-linux-x86_64.tar.xz` from `packages.broadcom.com/artifactory/saltproject-generic/onedir/3008.5/`, SHA-256 `3bbc89d18ff1cef340bfe662d0e973db8387c9affbb0633df1645725bb63786e` (the digest of the file at the repository, of the asset of the same name on the GitHub release `v3008.5`, and the file matched the published `.SHA512` asset) |
 
+## Container images of the demo (v0.3.11)
+
+Used only by `deploy/demo/` (docs/PHASE3.md §17, steps 75 and 76) and its CI check
+`scripts/ci/demo-check.sh`; not shipped in a release and not in `go.mod`. Both are pinned by the
+digest of the multi-platform index (`linux/amd64` and `linux/arm64` are in both), read from the
+registry API on 2026-11-16 (`registry-1.docker.io`, header `Docker-Content-Digest`, equal to the
+digest of the Docker Hub tag). Two-week rule: the newest tag whose image was pushed more than 14
+days before (on or before 2026-11-02); the newer `certbot` v5.10.0 (2026-11-10) and `nginx`
+1.30.6-trixie (2026-11-05) were too young.
+
+| Image | Tag pushed | License | For | Index digest |
+|---|---|---|---|---|
+| `certbot/certbot:v5.9.0` | 2026-10-29 | Apache-2.0 | certbot (http-01, `--standalone`) in the demo's first act | `sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` |
+| `nginx:1.31.7-trixie` | 2026-10-21 | BSD-2-Clause | nginx of the demo's second act (the `web` build, `deploy/demo/web/Dockerfile`) | `sha256:8632b3314d74c61f0e27f59055bab13f7793b988c94c090154d867bc29e0f39b` |
+
+The demo's second image (`web`) is built on the server image of the same release and adds only
+the agent tarball of that release, checked against the `checksums.txt` that is in the image.
+
+## Distribution packages of the Apache and HAProxy tests (v0.3.11)
+
+Used only by the CI job `agent end-to-end (Apache, HAProxy)` (docs/PHASE3.md §17, step 69) and by
+`scripts/ci/agent-e2e-apache.sh` and `agent-e2e-haproxy.sh`; not shipped, not in `go.mod`, not an
+image. The job installs the packages of the runner's own distribution (`ubuntu-24.04`) with
+`apt-get`, so the version is the one that distribution carries on the day of the run, which is
+what an admin on that release gets; the tests print `apache2 -v` and `haproxy -v` into the log.
+They are not pinned by digest: the tests start the service with a private configuration and
+check behavior, not a version.
+
+| Package | License | For |
+|---|---|---|
+| `apache2` (Debian and Ubuntu) | Apache-2.0 | the real Apache of the `apache2` recipe test (`mod_ssl`, `apache2ctl`) |
+| `haproxy` (Debian and Ubuntu) | GPL-2.0-or-later (headers LGPL-2.1) | the real HAProxy of the `haproxy` recipe test (`haproxy -c`, master-worker reload) |
+
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 
 Used only by `.github/workflows/release.yml` (and locally by `task release:check` /
@@ -58,12 +91,28 @@ the pins were chosen. Two-week rule: newest release older than 2026-10-07.
 | [GoReleaser](https://github.com/goreleaser/goreleaser) | v2.18.2 (2026-09-17) | MIT | builds, archives, checksums, image, draft release | `goreleaser_Linux_x86_64.tar.gz` SHA-256 `0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3` |
 | [cosign](https://github.com/sigstore/cosign) | v3.1.3 (2026-08-06) | Apache-2.0 | keyless signatures of `checksums.txt` and the image | `cosign-linux-amd64` SHA-256 `4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71` |
 | [syft](https://github.com/anchore/syft) | v1.54.1 (2026-10-06) | Apache-2.0 | SPDX SBOM per archive | `syft_1.54.1_linux_amd64.tar.gz` SHA-256 `c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47` |
-| [distroless](https://github.com/GoogleContainerTools/distroless) `gcr.io/distroless/static-debian12:nonroot` | index uploaded 2026-08-21 | Apache-2.0 (the few Debian packages inside, such as CA certificates and time zone data, keep their own licenses) | base of the container image | `sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab` |
+| [distroless](https://github.com/GoogleContainerTools/distroless) `gcr.io/distroless/static-debian13:nonroot` (Debian 13 "trixie"; the index carries the tag `nonroot-48b5c0455fb00d6ea7223f1fc6862c46da736556`) | index uploaded 2026-10-31 (22:37 UTC) | Apache-2.0 (the few Debian packages inside, such as CA certificates and time zone data, keep their own licenses) | base of the container image | `sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329` |
 
-New digest of the base image (update deliberately, then wait two weeks):
+The base image moved from `static-debian12` to `static-debian13` in v0.3.11 (2026-11-16). Two-week
+rule for the image: the pin is the newest `nonroot` index uploaded more than 14 days ago, not the
+newest one (on 2026-11-16 the current `nonroot` index, uploaded 2026-11-12, was too young). It
+was read without Docker from the registry API: `…/tags/list` for the upload times (`timeUploadedMs`),
+`…/manifests/nonroot-<commit>` for the digest (header `Docker-Content-Digest`, equal to the SHA-256
+of the index body), and the index plus the per-platform manifests and config blobs for
+`linux/amd64` and `linux/arm64` (`User` `65532`, `WorkingDir` `/home/nonroot`, `SSL_CERT_FILE`
+`/etc/ssl/certs/ca-certificates.crt`; the layers hold that file, the time zone data, `/etc/passwd`
+and `/home/nonroot` owned by 65532 with mode `0700`).
+
+New digest of the base image (update deliberately, then wait two weeks): read the upload times and
+tags, pick the newest index older than 14 days that carries a `nonroot-<commit>` tag, then read its
+digest.
 
 ```bash
-curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" https://gcr.io/v2/distroless/static-debian12/manifests/nonroot
+curl -s https://gcr.io/v2/distroless/static-debian13/tags/list
+```
+
+```bash
+curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" https://gcr.io/v2/distroless/static-debian13/manifests/nonroot-<commit>
 ```
 
 ## Common passwords (`internal/auth/common-passwords.txt`)

@@ -352,10 +352,9 @@ func (e *yamlEditor) deploymentNode(d Deployment) *yaml.Node {
 	addStr(m, "dir", d.Dir)
 	if d.Files != (Files{}) {
 		files := newCollection(yaml.MappingNode)
-		addStr(files, "certificate", d.Files.Certificate)
-		addStr(files, "chain", d.Files.Chain)
-		addStr(files, "fullchain", d.Files.Fullchain)
-		addStr(files, "key", d.Files.Key)
+		for _, field := range d.Files.fields() {
+			addStr(files, field.Name, field.Path)
+		}
 		m.Content = append(m.Content, plainKey("files"), files)
 	}
 	addStr(m, "owner", d.Owner)

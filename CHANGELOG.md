@@ -15,6 +15,153 @@ change the API, the configuration and the database schema; the release notes say
   from 0.3.5 to 0.3.10 of a host without the key kept the file. The key still installs the file where it is missing and
   lets the pillar state what a host needs.
 
+## [0.3.11] - 2026-11-16
+
+Apache, HAProxy, guides and the demo. The agent gets three more example recipes (`apache2`, `httpd`, `haproxy`) and a new
+target, `files.combined`, one PEM file with the certificate chain and the private key, which HAProxy needs. The web UI gets
+a **Help** group with *First steps*, a read-only checklist of what a new instance still needs, and six short guides that
+ship inside the program. `deploy/demo/` is a throwaway Docker demo. The container image moves to a Debian 13 base. The
+release adds **no migration, no REST change and no dependency**; an agent older than 0.3.11 refuses `files.combined`, so
+update agents first. The recipes, the guides, the demo and the new image base have **not yet been run on a live host**; the
+live test by the maintainer is pending.
+
+### Added
+
+- **Recipes `apache2`, `httpd` and `haproxy`** for `myownpki-agent deployment add --recipe` and the *Add host* assistant. They
+  are examples until a live test: `deployment add` says so and lists what to verify. `apache2` (Debian, Ubuntu) and `httpd`
+  (Red Hat family) are the `nginx` profile (`fullchain.pem` and `privkey.pem` in `/etc/ssl/myownpki/<deployment name>`) with
+  the test hooks `apache2ctl configtest` and `httpd -t`, a `systemctl reload`, the local check `127.0.0.1:443` and the log
+  directory of the service as a sandbox directory. `haproxy` is the file profile with one file per deployment,
+  `/etc/ssl/myownpki/haproxy/<deployment name>.pem`, the test hook `haproxy -c -f /etc/haproxy/haproxy.cfg` and no sandbox
+  directory. No recipe edits the configuration of its service. The notes of each recipe say what `configtest` and `haproxy -c`
+  were observed to cover in CI and what not, what to set in the service's configuration, and (for `httpd`) the SELinux label of
+  `/etc/ssl/myownpki`.
+- **`files.combined`** (`--combined FILE`): a target of the file profile, used alone, that holds the certificate, the chain
+  and the private key in one PEM file. It gets the key mode of the deployment (`0600` by default, never rights for others), its
+  owner and group, and goes through the same atomic write, journal, test hook, reload hook, TLS check and rollback as every
+  other target. Validation, `deployment add --dry-run`, `list`, `remove`, `sandbox sync` and the dns-01 target check know it.
+- **`{name}` in every path of a recipe.** It used to be replaced in the directory only. The name becomes a path segment and
+  must be a name the agent accepts, so two HAProxy deployments write two files.
+- **The Help group of the web UI.** *First steps* (`/first-steps`) lists ten rows (unseal, a CA, the public base URL and CRL, a
+  domain, ACME, a first certificate, a host with an agent, backup, trusting the root, notifications), each *Done*, *Open*,
+  *Not detected* or *Not available to your role*, with a link to the page that finishes it and to the guide. It is computed
+  on every request from calls the dashboard already makes, under the permissions of the user, and it writes and stores
+  nothing. The dashboard of a new instance shows one note that points to it, and `myownpki init` ends with "Next: sign in and
+  open Help, First steps." *Guides* (`/guides`, `/guides/<name>`) shows six texts: *Build a certificate authority*, *Keep the
+  root offline*, *Connect certbot*, *Install the agent and add a host*, *Back up and restore* and *Using these guides*. Any
+  signed-in user can read them.
+- **The guide format** (`internal/guides`): a closed subset of Markdown (headings, paragraphs, lists, fenced code, tables,
+  notes, bold, italic, code, links) parsed by the program itself into typed blocks, with front matter (`title`, `summary`,
+  `audience`, `order`, `site`, `sources`). A new guide is a file under `internal/guides/content`; a test refuses raw HTML,
+  images, scripts, unknown placeholders and links outside the UI, other guides and the project's site and repository, and
+  requires that every command in a `bash` block starts with a known program and pipes into no shell (the command-prefix test).
+  `{acme_directory}` and `{ca_name}` in a command are replaced from the configuration and the engine, never from the request.
+- **The demo** (`deploy/demo/`: `docker-compose.yml`, `demo.sh`, `README.md`, `.env.example`). `./demo.sh run` starts a demo
+  instance with a test CA, unseals it, creates the domain `demo.test`, lets `certbot` get a certificate for `www.demo.test` by
+  http-01 and checks the chain against the demo root with `openssl verify`. `./demo.sh agent` is a second act: nginx served
+  by `myownpki-agent` from the image's own verified package, ending with one approval click in the UI. CI runs the first act
+  on the snapshot image (`scripts/ci/demo-check.sh`).
+- **CI job `agent end-to-end (Apache, HAProxy)`**: the `apache2` and `haproxy` recipes against the Apache and HAProxy
+  packages of the CI runner, started by the tests with a private configuration. It records its observations in the job
+  summary instead of assuming them, and compares each with the notes of the recipe (a note that says the opposite fails the
+  test). The first CI run, with Apache 2.4.58 and HAProxy 2.8.30 on Ubuntu 24.04, observed five facts: `apache2ctl configtest`
+  passes although the key does not belong to the certificate; a graceful reload of Apache with a damaged key stopped the
+  process and the agent's rollback did not bring it back (result `rolled_back`, process gone); `haproxy -c` fails on a key
+  that does not match the certificate; the directory form of HAProxy's `crt` ignores the agent's temporary `.myownpki-*`
+  file; and the order of certificate and key in the combined file does not matter. They are in the recipe notes and on the
+  recipes page.
+- **Documentation:** the site page *Guides in the UI*, the recipes page for Apache, HAProxy and `files.combined`, the upgrade
+  row and the agents-first note, the Salt page and README (`combined`), operations guide chapter 17 and the updates of §12.
+
+### Changed
+
+- **The container image moves from `distroless/static-debian12` to `static-debian13`**, pinned by the digest of the index
+  (the newest one older than two weeks, as `THIRD_PARTY.md` says). The user (65532), the data directory and the health check
+  are unchanged. The CI job `image` now checks the user, `--version`, the CA bundle and the owner of the data directory in
+  the built image.
+- **The hint of `deployment add`** about log files and low ports is no longer printed for `haproxy -c`, and for
+  `apache2ctl configtest` and `apachectl -t` it names only the log directory (Apache opens its error log even for a check).
+  It is still printed for `nginx -t`.
+- The `--recipe` help and the *Add host* assistant list the new recipes; the Salt formula passes `combined` through to
+  `deployment add` (the recipe names need no change there).
+- `api/openapi.yaml` `info.version` is 0.3.11.
+
+### Fixed
+
+- **Operations guide §12.1** told the admin to use *New intermediate*. The UI has **New CA** with the field *Parent CA*.
+- **The offline root guide** said one number for the CRL lifetime of an imported root. The server plans 180 days (and shows
+  that in the OpenSSL command it prints); `pki.sh crl` signs for `CRL_DAYS` of its `pki.conf`, 30 days by default, and the
+  server's alert counts from the dates of the uploaded CRL. The page now says what each tool does.
+- **`site/faq.md`** still listed v0.3.10 as planned.
+
+### Security notes
+
+- **No recipe edits a service configuration, and no hook takes a value from the server.** Every hook is an absolute argument
+  vector run without a shell; `{name}` appears only in paths, and a name that is not lower case letters, digits and `-` is
+  refused before a path is built. The only sandbox directory a recipe adds is a log directory.
+- **The combined file holds a private key.** It has the key mode and the owner of the deployment, never the mode of a
+  certificate, is written with an exclusive temporary file in the target directory and one rename, and is held in memory only
+  while it is built; the buffers are cleared after use and the key is in no log, error, journal field or status. The journal
+  backup of the old file is a `0600` state file. `combined` cannot name `state_dir`, `ca_bundle` or another deployment's file.
+- **The guides cannot carry markup or a script.** The parser accepts only the closed subset, templ escapes every string, links
+  are checked against a short list of targets, and a command in a guide must start with a known program.
+- **First steps reads and never writes.** It is computed from calls the user may make; a role limited to one CA sees *Not
+  available to your role* for tenant-wide rows, and the ACME directory in a guide is shown only to a role that reads the whole
+  tenant. No secret, token, passphrase or key is on any of the pages.
+- **The demo is marked as a demo for good** (banner and a warning at every start), is hardened like the production example
+  (`read_only`, `cap_drop: [ALL]`, `no-new-privileges`, no published port except `127.0.0.1:9443`), keeps its secrets in one
+  file in its own volume, masks them in CI, and takes the agent for its second act from the verified package of the server image.
+  The server still never reads its passphrase from a file or a variable.
+- **An independent security review of the agent recipes and the guides found no blocker; its findings were fixed.** A temporary
+  file left by an interrupted write (for a combined file a copy of the key, which another HAProxy version may load when `crt` is a directory; HAProxy 2.8.30 ignored it in the CI run)
+  is now removed at the start of the agent; links to the site and the repository with a `..` segment are refused; the certbot
+  guide warns that the EAB MAC key on a command line is visible in the process list and the shell history; the buffers of the
+  combined file and the previous pair are cleared; a guide parser that took seconds on a line of braces is linear; and the ACME
+  address is hidden from a CA-scoped role in the guides, as it already was in First steps.
+- **No new dependency**; `go.mod` and `go.sum` are unchanged. New CI-only images (certbot, nginx, the distroless base) are
+  pinned by digest in `THIRD_PARTY.md`.
+
+### Known limitations
+
+- **The live test by the maintainer is pending.** `apache2`, `httpd` and `haproxy` are **example recipes, not yet run on a live
+  host**: the real systemd unit and its sandbox, the Red Hat layout, SELinux, a reload with a failing configuration and the
+  local check against real `bind` lines are untested. CI runs the recipes against the Ubuntu packages only.
+- **`apache2ctl configtest` and `httpd -t` do not detect a key that does not match the certificate** (observed in CI with Apache
+  2.4.58 on Ubuntu 24.04; `httpd` on the Red Hat family was not run). The agent's check of the pair before it writes is the
+  guard; a pair damaged after it reaches the reload. `haproxy -c`, in contrast, fails on such a pair.
+- **A failed reload can stop Apache, and the rollback does not start it again.** In CI a graceful reload with a damaged key ended
+  the Apache process; the agent restored the previous files and reported `rolled_back`, but Apache stayed down. After a
+  `rolled_back` result look at `systemctl status apache2` (`httpd`). Seen with `apache2 -k graceful` on a private
+  configuration, not under the real unit.
+- **`apache2ctl configtest` in the agent's sandbox needs Apache to have started once since the boot.** It creates
+  `/run/apache2`, `/run/apache2/socks` and `/run/lock/apache2` when they are missing; the unit runs with `ProtectSystem=strict`
+  and the recipe makes only `/var/log/apache2` writable, so the test hook (and a `systemctl reload`) fails on a host where
+  Apache has not been started since the boot. After one normal start the directories exist and nothing is written.
+- **The six guides have not been run on a live instance**, nor have the certbot and EAB flags in them. A guide may differ from the
+  program in a detail; the long page on the site is the reference.
+- **The demo has not been run on the maintainer's Docker host,** and the image tag `0.3.11` exists only after the release is
+  published (until then set `MYOWNPKI_IMAGE`). The agent act of the demo needs one approval click and is not in CI. `./demo.sh run`
+  is not one `docker compose up`: the server never reads its passphrase from a file, and a domain needs a second factor.
+- **The guides are short in-app texts that point to the site,** not copies of it. A guide can drift from the long page; each
+  lists its `sources`. There is no Markdown library: the format is a small closed subset.
+- **First steps cannot see a backup or the devices that trust the root** (*Not detected*), does not test the public base URL
+  from outside, and has no "dismiss" and no redirect after sign-in.
+- **The Salt test cases `debian-apache2` and `debian-haproxy` are not added yet** (the `salt formula` job would run them for
+  the first time); `combined` and the recipe names pass through the formula unchanged.
+- **The Debian 13 base image** has not been run on a live Docker host with real webhooks and SMTP over TLS (`myownpki notify test`).
+
+### Upgrade notes
+
+- No migration (`myownpki db status` shows the same versions as 0.3.10), no configuration change and no change to the agent
+  protocol, so going back needs no restore.
+- **Update the agents first** on every host that will get a `files.combined` deployment (the HAProxy recipe, `--combined`, or
+  `combined` in a Salt pillar or a rendered `agent.yaml`): an older agent refuses the key and does not start. A host without
+  the key is untouched. The recipe names live in the agent, so an agent older than 0.3.11 does not know `apache2`, `httpd` or
+  `haproxy` either.
+- The container image has a new base. `docker compose pull` and `up -d` are enough; `docker compose ps` should show `healthy`.
+- The step-by-step version is on the site page *Upgrade*.
+
+
 ## [0.3.10] - 2026-11-15
 
 Preview and versioned settings. The review step of the issue wizard and a new REST operation show what the policy would

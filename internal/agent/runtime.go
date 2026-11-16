@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -204,15 +203,11 @@ type renewalPlan struct {
 
 func (a *Agent) currentLeaf(d Deployment) (*x509.Certificate, error) {
 	f := deploymentPaths(d)
-	path := f.Fullchain
-	if path == "" {
-		path = f.Certificate
-	}
-	data, _, err := a.readTarget(path)
+	data, _, err := a.readTarget(f.CertPath())
 	if err != nil {
 		return nil, err
 	}
-	block, _ := pem.Decode(data)
+	block := firstPEMBlock(data)
 	if block == nil || block.Type != "CERTIFICATE" {
 		return nil, errors.New("deployed certificate is not PEM")
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/auth"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/ca"
+	"github.com/Der-Felix/MyOwnPKI/internal/guides"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
 	"github.com/Der-Felix/MyOwnPKI/internal/tenant"
 	"github.com/Der-Felix/MyOwnPKI/internal/testinstance"
@@ -429,9 +430,14 @@ func realPages(t *testing.T) map[string]string {
 			"/authorities/new", "/authorities/import", "/authorities/" + v.CAIDs["issuing"] + "/manage", "/authorities/" + v.CAIDs["root"] + "/manage",
 			"/presets", "/presets/server", "/admin/users", "/admin/users/new", "/admin/users/" + v.UserID(t, "demo"), "/admin/settings",
 			"/admin/audit", "/admin/audit?scope=instance", "/admin/import", "/account",
-			"/acme/accounts", "/acme/names", "/acme/eab", "/acme/orders",
+			"/acme/accounts", "/acme/names", "/acme/eab", "/acme/orders", "/guides", "/first-steps",
 		} {
 			out["real "+p] = b.get(t, p).html()
+		}
+		if reg, gerr := guides.Embedded(); gerr == nil {
+			for _, g := range reg.List() {
+				out["real /guides/"+g.Slug] = b.get(t, "/guides/"+g.Slug).html()
+			}
 		}
 		confirmPending(t, b, token, "demo")
 		csrPEM, _ := testCSRWith(t, "web.homelab.lan", []string{"web.homelab.lan"}, nil)

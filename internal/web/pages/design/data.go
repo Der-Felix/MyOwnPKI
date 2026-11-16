@@ -5,6 +5,7 @@ package design
 import (
 	"time"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/guides"
 	"github.com/Der-Felix/MyOwnPKI/internal/report"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/charts"
 	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
@@ -183,4 +184,43 @@ var sampleDiff = admin.DiffTable{
 		{Label: "Challenge types", Before: []admin.DiffValue{{Text: "http-01", Mark: "removed"}, {Text: "dns-01"}}, After: []admin.DiffValue{{Text: "dns-01"}}},
 		{Label: "IP ranges", Before: nil, After: []admin.DiffValue{{Text: "192.0.2.0/24", Mark: "added"}}},
 	},
+}
+
+// guideSampleText is a small guide in the content format of internal/guides,
+// parsed for the gallery: running text, a list, a command, a table and both notes.
+const guideSampleText = `---
+title: Sample
+summary: The gallery sample.
+audience: Nobody
+---
+
+## A section
+
+Running text has **bold**, *italic*, ` + "`code`" + ` and [a link](/design). Lines stay at a readable length.
+
+### A subsection
+
+- A list item with a [link to the guides](/guides).
+- A second item.
+
+` + "```bash" + `
+openssl x509 -in example.pem -noout -dates
+` + "```" + `
+
+| Command | What it does |
+|---|---|
+| ` + "`openssl x509`" + ` | Reads a certificate |
+
+> **Note:** A note is one line of text with a label.
+
+> **Warning:** A warning says what can go wrong.
+`
+
+// guideSample returns the blocks of the sample guide.
+func guideSample() []guides.Block {
+	g, err := guides.Parse("sample", []byte(guideSampleText))
+	if err != nil {
+		panic("the gallery sample guide does not parse: " + err.Error())
+	}
+	return g.Blocks
 }

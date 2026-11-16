@@ -346,6 +346,38 @@ jobs:
       - name: nginx -t on port 443 under the real systemd unit
         run: bash scripts/ci/agent-e2e-nginx-systemd.sh
 
+  # Apache and HAProxy for real (PHASE3 step 69): the apache2 and haproxy
+  # recipes against the distribution's own services, started by the tests
+  # with a private configuration, pid file and loopback port, as the runner
+  # user. Its own job, so a failure here does not hide the nginx result. The
+  # tests print what the real services did (OBSERVED) and where the notes of
+  # the recipes are behind (NOTES-UPDATE, shown as a warning).
+  agent-e2e-services:
+    name: agent end-to-end (Apache, HAProxy)
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Download pinned Go modules
+        run: bash scripts/ci/agent-e2e-download.sh
+      # The packages of the runner's distribution, nothing else. The package
+      # scripts start the services; stop them so that only the tests' own
+      # instances run (they use other ports and files anyway).
+      - name: Install apache2 and haproxy from the distribution
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apache2 haproxy
+          sudo systemctl stop apache2 haproxy
+      - name: apache2 recipe with the real Apache
+        run: bash scripts/ci/agent-e2e-apache.sh
+      - name: haproxy recipe with the real HAProxy
+        run: bash scripts/ci/agent-e2e-haproxy.sh
+
   # The systemd installation for real (deploy/install.sh, docs/OPERATIONS.md
   # §2): a snapshot build, then test/install/systemd_test.sh as root on the
   # runner – first installation with --acme (ACME with its own TLS on :443,
@@ -393,13 +425,15 @@ jobs:
   # signatures: the other snapshots skip the image, so an image problem would
   # show only after the release tag. Checks that the image points
   # agent.package_dir at /opt/myownpki/agent-dist and carries every agent
-  # package with the snapshot's checksums.txt.
+  # package with the snapshot's checksums.txt. Then the demo of deploy/demo runs
+  # on that image (scripts/ci/demo-check.sh).
   image:
     name: release image (snapshot)
     needs: changes
     if: github.event_name != 'schedule' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The snapshot and the demo (pulls certbot, waits for second-factor windows).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -411,6 +445,11 @@ jobs:
           goreleaser: "true"
       - name: Snapshot with the image, check the agent packages in it
         run: bash scripts/ci/image-snapshot.sh
+      # The demo (deploy/demo) on the image the snapshot just built: certbot gets
+      # a certificate by http-01 and the chain verifies against the demo root.
+      # The agent act of the demo is a live test; its image only builds here.
+      - name: Demo with the snapshot image (certbot, http-01, openssl verify)
+        run: bash scripts/ci/demo-check.sh
 
   # The Salt formula (deploy/salt/myownpki, docs/PHASE3.md section 12): every test
   # pillar is rendered and applied with test=True by a pinned Salt (no minion, no

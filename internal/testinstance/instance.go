@@ -49,6 +49,8 @@ type Options struct {
 	BaseURL string
 	// NoPasskeys leaves passkeys off (default: on for BrowserOrigin).
 	NoPasskeys bool
+	// NoCA runs init without the test CAs: no root, no intermediate.
+	NoCA bool
 }
 
 // Instance is an initialized instance, sealed.
@@ -86,8 +88,12 @@ func New(tb testing.TB, o Options) *Instance {
 		Clock:   clock.NewFake(clock.System{}.Now().UTC().Truncate(time.Second).Add(700 * time.Millisecond)),
 		secrets: map[string][]byte{}, CAIDs: map[string]string{},
 	}
+	caBaseURL := o.BaseURL
+	if o.NoCA {
+		caBaseURL = "" // a demo init creates the CAs when it is given a base URL
+	}
 	res, err := setup.Run(tb.Context(), setup.Options{
-		Config: cfg, Mode: setup.Demo, WithCA: true, CABaseURL: o.BaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console, TestKDF: true,
+		Config: cfg, Mode: setup.Demo, WithCA: !o.NoCA, CABaseURL: caBaseURL, Hostname: o.Hostname, Clock: v.Clock, Who: Console, TestKDF: true,
 	}, setup.NewLineInput(strings.NewReader(""), io.Discard))
 	if err != nil {
 		tb.Fatal(err)

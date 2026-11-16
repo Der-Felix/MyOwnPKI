@@ -9,10 +9,10 @@ import (
 
 func TestNamesAndGet(t *testing.T) {
 	t.Parallel()
-	if got, want := Names(), []string{"dovecot", "nginx", "postfix", "proxmox"}; !slices.Equal(got, want) {
+	if got, want := Names(), []string{"apache2", "dovecot", "haproxy", "httpd", "nginx", "postfix", "proxmox"}; !slices.Equal(got, want) {
 		t.Fatalf("Names() = %v, want %v", got, want)
 	}
-	if _, ok := Get("apache"); ok {
+	if _, ok := Get("lighttpd"); ok {
 		t.Error("an unknown recipe was found")
 	}
 	// Get hands out copies: changing one must not change the next.
@@ -25,6 +25,10 @@ func TestNamesAndGet(t *testing.T) {
 		t.Errorf("a modified copy leaked into the table: %+v", b)
 	}
 }
+
+// liveTested names the recipes that ran on a live host (v0.3.5: nginx). Every
+// other recipe is an example. A recipe joins this set only after a live test.
+var liveTested = map[string]bool{"nginx": true}
 
 // Every recipe is a complete, safe description; the agent's tests render each
 // of them through the configuration validation as well.
@@ -39,14 +43,16 @@ func TestEveryRecipeIsWellFormed(t *testing.T) {
 			}
 			switch r.Profile {
 			case "nginx":
-				if !strings.HasPrefix(r.Dir, "/etc/ssl/myownpki/") || r.Fullchain != "" || r.Key != "" {
-					t.Errorf("nginx profile: dir %q files %q %q", r.Dir, r.Fullchain, r.Key)
+				if !strings.HasPrefix(r.Dir, "/etc/ssl/myownpki/") || r.Fullchain != "" || r.Key != "" || r.Combined != "" {
+					t.Errorf("nginx profile: dir %q files %q %q %q", r.Dir, r.Fullchain, r.Key, r.Combined)
 				}
 			case "file":
-				if r.Dir != "" || r.Key == "" || r.Certificate == "" && r.Fullchain == "" {
-					t.Errorf("file profile: %+v", r)
+				oneFile := r.Combined != "" && r.Certificate == "" && r.Chain == "" && r.Fullchain == "" && r.Key == ""
+				twoFiles := r.Combined == "" && r.Key != "" && (r.Certificate != "" || r.Fullchain != "")
+				if r.Dir != "" || oneFile == twoFiles {
+					t.Errorf("file profile: want the combined file alone, or a key with a certificate or fullchain: %+v", r)
 				}
-				for _, p := range []string{r.Certificate, r.Chain, r.Fullchain, r.Key} {
+				for _, p := range []string{r.Certificate, r.Chain, r.Fullchain, r.Key, r.Combined} {
 					if p != "" && !strings.HasPrefix(p, "/etc/ssl/myownpki/") {
 						t.Errorf("file %q is not below /etc/ssl/myownpki/", p)
 					}
@@ -86,8 +92,9 @@ func TestEveryRecipeIsWellFormed(t *testing.T) {
 					t.Errorf("sandbox directory %q is too broad", d)
 				}
 			}
-			// nginx is known from the CI job; the others must say they are examples.
-			if (name == "nginx") == r.Example || (r.Example && len(r.Notes) == 0) {
+			// A recipe is an example until it ran on a live host; an example must
+			// say what to verify.
+			if liveTested[name] == r.Example || (r.Example && len(r.Notes) == 0) {
 				t.Errorf("example flag %v, %d notes", r.Example, len(r.Notes))
 			}
 		})
@@ -112,8 +119,74 @@ func TestRecipeFacts(t *testing.T) {
 	if postfix.Check != "" || postfix.Hooks[0].Command[1] != "check" {
 		t.Errorf("postfix: %+v", postfix)
 	}
+	// Apache: one recipe per distribution family, named after the unit.
+	for _, tc := range []struct {
+		name, test, reload, logs string
+	}{
+		{"apache2", "/usr/sbin/apache2ctl configtest", "/usr/bin/systemctl reload apache2", "/var/log/apache2"},
+		{"httpd", "/usr/sbin/httpd -t", "/usr/bin/systemctl reload httpd", "/var/log/httpd"},
+	} {
+		r, _ := Get(tc.name)
+		hooks := map[string]string{}
+		for _, h := range r.Hooks {
+			hooks[h.Name] = strings.Join(h.Command, " ")
+		}
+		if r.Profile != "nginx" || r.Dir != "/etc/ssl/myownpki/{name}" || r.KeyMode != "0600" || r.Group != "" ||
+			r.Check != "127.0.0.1:443" || r.LowPorts || !slices.Equal(r.SandboxWrite, []string{tc.logs}) || !r.Example ||
+			r.TestHook != tc.name+"-test" || r.ReloadHook != tc.name+"-reload" || len(r.Hooks) != 2 ||
+			hooks[r.TestHook] != tc.test || hooks[r.ReloadHook] != tc.reload {
+			t.Errorf("%s: %+v", tc.name, r)
+		}
+		if notes := strings.Join(r.Notes, "\n"); !strings.Contains(notes, "SSLCertificateFile /etc/ssl/myownpki/<name>/fullchain.pem") ||
+			!strings.Contains(notes, "SSLCertificateKeyFile /etc/ssl/myownpki/<name>/privkey.pem") || !strings.Contains(notes, "match") {
+			t.Errorf("%s: the notes lack the vhost lines or the configtest caveat:\n%s", tc.name, notes)
+		}
+	}
+	// HAProxy: the one-file form, one file per deployment name.
+	ha, _ := Get("haproxy")
+	if ha.Profile != "file" || ha.Combined != "/etc/ssl/myownpki/haproxy/{name}.pem" || ha.Certificate != "" || ha.Chain != "" || ha.Fullchain != "" || ha.Key != "" ||
+		ha.Owner != "root" || ha.Group != "root" || ha.KeyMode != "0600" || ha.Check != "127.0.0.1:443" || ha.LowPorts || len(ha.SandboxWrite) != 0 || !ha.Example ||
+		ha.TestHook != "haproxy-test" || ha.ReloadHook != "haproxy-reload" {
+		t.Errorf("haproxy: %+v", ha)
+	}
+	if got := strings.Join(ha.Hooks[0].Command, " "); got != "/usr/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg" || strings.Join(ha.Hooks[1].Command, " ") != "/usr/bin/systemctl reload haproxy" {
+		t.Errorf("haproxy hooks: %v", ha.Hooks)
+	}
+	httpd, _ := Get("httpd")
+	if !strings.Contains(strings.Join(httpd.Notes, "\n"), "restorecon") {
+		t.Errorf("httpd: the notes do not mention the SELinux label: %v", httpd.Notes)
+	}
 	nginx, _ := Get("nginx")
 	if !nginx.LowPorts || nginx.Check != "127.0.0.1:443" || !slices.Equal(nginx.SandboxWrite, []string{"/var/log/nginx"}) {
 		t.Errorf("nginx: %+v", nginx)
+	}
+}
+
+// {name} stands for the deployment name and nothing else: it is in paths only,
+// never in a hook, a check or a directory the sandbox opens.
+func TestNameAppearsOnlyInPaths(t *testing.T) {
+	t.Parallel()
+	for _, name := range Names() {
+		r, _ := Get(name)
+		for _, h := range r.Hooks {
+			if strings.Contains(strings.Join(h.Command, " "), "{") {
+				t.Errorf("%s: hook %s has a placeholder: %v", name, h.Name, h.Command)
+			}
+		}
+		for _, v := range append([]string{r.Check, r.Owner, r.Group, r.KeyMode}, r.SandboxWrite...) {
+			if strings.Contains(v, "{") {
+				t.Errorf("%s: placeholder in %q", name, v)
+			}
+		}
+		for _, p := range []string{r.Dir, r.Certificate, r.Chain, r.Fullchain, r.Key, r.Combined} {
+			if strings.Contains(strings.ReplaceAll(p, "{name}", ""), "{") {
+				t.Errorf("%s: unknown placeholder in %q", name, p)
+			}
+		}
+		// A file shared by every deployment of a recipe (no {name}) would
+		// collide at the second one; only the single-service recipes may do that.
+		if r.Profile == "file" && r.Combined != "" && !strings.Contains(r.Combined, "{name}") {
+			t.Errorf("%s: the combined file has no {name}", name)
+		}
 	}
 }

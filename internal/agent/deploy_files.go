@@ -3,12 +3,15 @@ package agent
 import (
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 )
 
@@ -59,7 +62,33 @@ func targets(d Deployment, m *Material) ([]targetFile, error) {
 			out = append(out, targetFile{part.path, part.data, part.mode, uid, gid})
 		}
 	}
+	if f.Combined != "" {
+		// One file with the private key in it: the key mode, never the 0644 of
+		// a certificate. The buffer is a copy; stageGroup clears it.
+		out = append(out, targetFile{f.Combined, combinedPEM(m), os.FileMode(mode), uid, gid})
+	}
 	return out, nil
+}
+
+// combinedPEM is the certificate chain followed by the private key, the form
+// HAProxy reads from one file. The certificate comes first so that every
+// reader of "the first PEM block" gets the leaf, and crypto/tls takes the same
+// bytes as certificate and as key (it skips the blocks that are not its kind).
+// The buffer holds the key: its owner clears it after the write and it is
+// never logged or put into an error.
+func combinedPEM(m *Material) []byte {
+	chain := m.Fullchain
+	if len(chain) == 0 {
+		chain = append(append([]byte(nil), m.Certificate...), m.Chain...)
+	}
+	out := make([]byte, 0, len(chain)+len(m.Key)+2)
+	for _, part := range [][]byte{chain, m.Key} {
+		out = append(out, part...)
+		if len(out) > 0 && out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
+	}
+	return out
 }
 
 func deploymentOwner(owner, group string) (int, int, error) {
@@ -143,7 +172,7 @@ func (a *Agent) atomicTarget(t targetFile) error {
 	if merr := root.MkdirAll(dir, 0o755); merr != nil {
 		return merr
 	}
-	tmp := filepath.Join(dir, ".myownpki-"+rand.Text())
+	tmp := filepath.Join(dir, tempPrefix+rand.Text())
 	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -211,4 +240,83 @@ func (a *Agent) removeTarget(path string) error {
 		return err
 	}
 	return syncDirectory(root, filepath.Dir(name))
+}
+
+// tempPrefix starts the name of the exclusive temporary file of atomicTarget.
+const tempPrefix = ".myownpki-"
+
+// tempName is exactly what atomicTarget creates: the prefix and the 26
+// characters of crypto/rand.Text (base32, upper case). Nothing else is ever
+// removed as a leftover.
+var tempName = regexp.MustCompile(`^\.myownpki-[A-Z2-7]{26}$`)
+
+// removeStaleTemps removes the temporary files a killed or power-cut agent
+// left in the directories of its deployment targets. Such a file holds a copy
+// of a target, and for a combined file the private key; HAProxy may even load
+// it when its crt is a directory. It runs under the deployment lock, so no
+// write of this agent is in flight. Everything goes through os.Root on an
+// allowed path: only a regular file whose name is exactly a temporary name is
+// removed, a symlink or any other name is left alone. A failure is logged with
+// the path only and never stops the agent.
+func (a *Agent) removeStaleTemps() {
+	done := map[string]bool{}
+	for _, d := range a.cfg.Deployments {
+		for _, target := range deploymentPaths(d).Targets() {
+			dir := filepath.Dir(target)
+			if done[dir] {
+				continue
+			}
+			done[dir] = true
+			a.removeStaleTempsIn(target)
+		}
+	}
+}
+
+// removeStaleTempsIn cleans the directory of one target file.
+func (a *Agent) removeStaleTempsIn(target string) {
+	root, name, err := a.openTarget(target)
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	dir := filepath.Dir(name)
+	f, err := root.Open(dir)
+	if err != nil {
+		return
+	}
+	entries, err := f.ReadDir(-1)
+	_ = f.Close()
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !tempName.MatchString(e.Name()) || !e.Type().IsRegular() {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		// Look again right before the removal: a symlink put there since the
+		// listing is removed as a link at worst, but never counted as ours.
+		if info, lerr := root.Lstat(p); lerr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		full := filepath.Join(root.Name(), p)
+		if rerr := root.Remove(p); rerr != nil {
+			if a.log != nil {
+				a.log.Warn("deployment: a leftover temporary file could not be removed", slog.String("path", full), slog.Any("error", rerr))
+			}
+			continue
+		}
+		if a.log != nil {
+			a.log.Warn("deployment: removed a leftover temporary file of an interrupted write", slog.String("path", full))
+		}
+	}
+}
+
+// firstPEMBlock decodes the first PEM block of data and then clears data. The
+// "certificate" of a combined file is the whole file, so the buffer holds the
+// private key too; the block holds a decoded copy of the first block only.
+func firstPEMBlock(data []byte) *pem.Block {
+	block, _ := pem.Decode(data)
+	clear(data)
+	return block
 }

@@ -41,7 +41,7 @@ fileserver_backend: [gitfs, roots]
 gitfs_remotes:
   - https://github.com/Der-Felix/MyOwnPKI.git:
     - root: deploy/salt
-    - base: v0.3.10
+    - base: v0.3.11
 ```
 
 Put the root certificate and the packages where `root_source` and `package.source` point, by
@@ -66,7 +66,7 @@ Defaults are in `defaults.yaml` and merged with the pillar in `map.jinja`. A val
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
-| `version` | yes | none | The release to install, for example `0.3.10`. Part of the package file name |
+| `version` | yes | none | The release to install, for example `0.3.11`. Part of the package file name |
 | `server` | yes | none | Agent listener, `https://pki.homelab.lan:8444` (https, no path) |
 | `acme_directory` | yes | none | ACME directory URL (https); `setup --acme-directory` writes it into a new `agent.yaml` |
 | `root_source` | yes | none | `salt://` source of the root certificate (PEM) |
@@ -87,7 +87,7 @@ the flags of `myownpki-agent deployment add`, with `-` written as `_`:
 
 | Kind | Options |
 |---|---|
-| string | `recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `owner`, `group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `check_name`, `acme_directory`, `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`, `dns_zone`, `dns_resolver` |
+| string | `recipe`, `profile`, `challenge`, `webroot`, `dir`, `certificate`, `chain`, `fullchain`, `key`, `combined`, `owner`, `group`, `key_mode`, `test_hook`, `reload_hook`, `check`, `check_name`, `acme_directory`, `dns_provider`, `dns_type`, `dns_credentials`, `dns_nameserver`, `dns_zone`, `dns_resolver` |
 | string or list of strings (flag repeated) | `name`, `hook` (`NAME=/abs/command args`), `sandbox_write` |
 | `true` / `false` | `low_ports`, `create_dirs`, `restart` |
 
@@ -95,6 +95,8 @@ the flags of `myownpki-agent deployment add`, with `-` written as `_`:
 unquoted `0640` as a number. Leave `restart` unset: the formula runs `systemctl try-restart` when a
 deployment changed, which restarts a running agent and never starts a stopped one (`restart: true`
 would start an agent that still waits for approval).
+
+`recipe` takes the names of the agent: `nginx`, `apache2`, `httpd`, `haproxy`, `postfix`, `dovecot` and `proxmox`. The formula keeps no list of them, so a recipe of a newer agent works as soon as that agent is installed. **`combined` (since 0.3.11)** is the flag `--combined`: one file with the certificate chain and the private key, used alone (the `haproxy` recipe sets it; it excludes `certificate`, `chain`, `fullchain` and `key`). An agent older than 0.3.11 refuses it, so install 0.3.11 on the minion first. A `config_source` file that has `files.combined` in `agent.yaml` needs the same agent version.
 
 ### dns-01 deployments
 
@@ -171,7 +173,7 @@ Minimal pillar (the host waits for one approval; no deployment yet):
 ```yaml
 myownpki:
   agent:
-    version: "0.3.10"
+    version: "0.3.11"
     server: https://pki.homelab.lan:8444
     acme_directory: https://pki.homelab.lan/acme/directory
     root_source: salt://myownpki/files/root.pem

@@ -59,7 +59,7 @@ func ParseDeploymentAdd(fs *flag.FlagSet, configPath *string, args []string) (De
 	var spec DeploymentSpec
 	var names, hooks, sandboxWrite listFlag
 	var recipeName string
-	fs.StringVar(&recipeName, "recipe", "", "fill defaults for nginx, postfix, dovecot or proxmox (explicit flags win)")
+	fs.StringVar(&recipeName, "recipe", "", "fill defaults for nginx, apache2, httpd, haproxy, postfix, dovecot or proxmox (explicit flags win)")
 	fs.StringVar(&spec.Profile, "profile", "", "nginx or file (default: from --dir or the file flags)")
 	fs.Var(&names, "name", "certificate name, a FQDN; repeat for more (default: the host name)")
 	fs.StringVar(&spec.Challenge, "challenge", "", "webroot, standalone or dns-01 (default: as enrollment); a wildcard name needs dns-01")
@@ -69,6 +69,7 @@ func ParseDeploymentAdd(fs *flag.FlagSet, configPath *string, args []string) (De
 	fs.StringVar(&spec.Files.Chain, "chain", "", "file profile: chain file")
 	fs.StringVar(&spec.Files.Fullchain, "fullchain", "", "file profile: certificate and chain in one file")
 	fs.StringVar(&spec.Files.Key, "key", "", "file profile: private key file")
+	fs.StringVar(&spec.Files.Combined, "combined", "", "file profile: certificate chain and private key in one file (HAProxy), alone")
 	fs.StringVar(&spec.Owner, "owner", "", "owner of the files")
 	fs.StringVar(&spec.Group, "group", "", "group of the files")
 	fs.StringVar(&spec.KeyMode, "key-mode", "", "mode of the key, without rights for others (default 0600)")

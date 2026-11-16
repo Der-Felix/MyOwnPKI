@@ -231,7 +231,7 @@ func TestAddHostRefusesWhatCannotWork(t *testing.T) {
 		"system webroot":   {map[string]string{"webroot": "/etc"}, "system directory"},
 		"relative webroot": {map[string]string{"webroot": "www"}, "absolute path"},
 		"standalone+root":  {map[string]string{"challenge": "standalone"}, "belongs to the webroot challenge"},
-		"unknown service":  {map[string]string{"service": "apache"}, "choose one of the listed services"},
+		"unknown service":  {map[string]string{"service": "lighttpd"}, "choose one of the listed services"},
 		"script in names":  {map[string]string{"names": "<script>alert(1)</script>.homelab.lan"}, "no wildcard"},
 	} {
 		r := b.post(t, hostAddPath, hostForm(csrf, tc.change))

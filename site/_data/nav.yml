@@ -78,6 +78,8 @@
           url: /guides/audit-log/
         - title: When things go wrong
           url: /guides/when-things-go-wrong/
+        - title: Guides in the UI
+          url: /guides/guides-in-the-ui/
 - group: Operate
   items:
     - title: Monitoring

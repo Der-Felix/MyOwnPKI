@@ -171,7 +171,7 @@ For ACME without a reverse proxy see `--acme` above and
 
 ## Option B: container
 
-The image is `ghcr.io/der-felix/myownpki` for linux/amd64 and linux/arm64. It is distroless and runs
+The image is `ghcr.io/der-felix/myownpki` for linux/amd64 and linux/arm64. It is distroless (a Debian 13 base) and runs
 as the non-root user **UID 65532**. Each stable release is tagged with its version
 (`:{{ site.data.release.version }}`) and with `:latest`. Pin the version you tested: `:latest` moves with every
 stable release, and updating a CA should be a decision, not a pull. Pre-releases get only their version tag.
