@@ -5,10 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"os/exec"
@@ -223,4 +225,15 @@ func TestWindowsHelperRuns(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "TEST STORE REACHED") || !strings.Contains(out, "Done: imported") {
 		t.Errorf("independent confirmation: exit %d\n%s", code, out)
 	}
+}
+
+// colonHex is the SHA-256 of der as upper-case hex with colons – what
+// Windows, browsers and `openssl x509 -fingerprint -sha256` show.
+func colonHex(der []byte) string {
+	sum := sha256.Sum256(der)
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":")
 }

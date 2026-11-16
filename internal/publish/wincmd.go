@@ -2,7 +2,6 @@ package publish
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/pem"
 	"fmt"
 	"strings"
@@ -143,15 +142,4 @@ func windowsHelper(caName string, generation int64, der []byte, scope string) []
 		b.WriteString("\r\n")
 	}
 	return b.Bytes()
-}
-
-// colonHex is the SHA-256 of der as upper-case hex with colons – what
-// Windows, browsers and `openssl x509 -fingerprint -sha256` show.
-func colonHex(der []byte) string {
-	sum := sha256.Sum256(der)
-	parts := make([]string, len(sum))
-	for i, b := range sum {
-		parts[i] = fmt.Sprintf("%02X", b)
-	}
-	return strings.Join(parts, ":")
 }
