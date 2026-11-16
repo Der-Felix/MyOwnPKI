@@ -134,29 +134,6 @@ func (s *Service) CreateUser(ctx context.Context, req NewUserRequest) (*Enrollme
 	return &enr, nil
 }
 
-// ConfirmTOTP confirms the authenticator of a new user right away (init on
-// the console asks for the first code).
-func (s *Service) ConfirmTOTP(ctx context.Context, userID, code string, who keys.Who) error {
-	now := s.now()
-	if err := s.authorize(ctx, who, "user.totp_confirm", userID); err != nil {
-		return err
-	}
-	return s.inTx(ctx, func(q *systemdb.Queries, tx *sql.Tx) error {
-		u, err := q.GetUser(ctx, userID)
-		if err != nil {
-			return err
-		}
-		ok, _, err := s.useTOTP(ctx, q, u, code, now)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return ErrInvalidCode
-		}
-		return s.enqueueTarget(ctx, tx, who, "user.totp_confirm", u.ID, map[string]any{"username": u.Username})
-	})
-}
-
 // SetRole gives a user a role in a tenant (optionally one CA). The user's
 // sessions end: new rights only with a new session (security.md).
 func (s *Service) SetRole(ctx context.Context, userID string, b authz.Binding, who keys.Who) error {

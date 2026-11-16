@@ -174,12 +174,6 @@ func (s *Service) LoginTOTP(ctx context.Context, pendingToken, code, ip string) 
 	return s.loginTOTP(ctx, pendingToken, code, Client{IP: ip})
 }
 
-// LoginRecoveryCode completes a sign-in with a recovery code (lost phone).
-// Each code works once.
-func (s *Service) LoginRecoveryCode(ctx context.Context, pendingToken, code, ip string) (*LoginResult, error) {
-	return s.loginRecoveryCode(ctx, pendingToken, code, Client{IP: ip})
-}
-
 // SecondFactor completes a sign-in with what the user typed: six digits are
 // a TOTP code, anything else is tried as a recovery code. Failures of both
 // count in the same throttle and lockout as wrong passwords.
@@ -320,12 +314,6 @@ func (s *Service) keepLock(u systemdb.User, device string, now time.Time) sql.Nu
 		return u.LockedUntil
 	}
 	return sql.NullString{}
-}
-
-// StepUp confirms a sensitive action with a fresh TOTP code (security.md):
-// the session snapshots the proof time and the tenant's current lifetime.
-func (s *Service) StepUp(ctx context.Context, token, code, ip string) (*Session, error) {
-	return s.StepUpFrom(ctx, token, code, Client{IP: ip})
 }
 
 // StepUpFrom is StepUp with the client's device cookie.

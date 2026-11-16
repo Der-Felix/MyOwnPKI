@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
+	"github.com/Der-Felix/MyOwnPKI/internal/store/systemdb"
 )
 
 func confirmedAt(t *testing.T, v *env, id string) (string, bool) {
@@ -197,4 +200,27 @@ func TestConfirmTOTPUnknownUser(t *testing.T) {
 	if strings.Contains(strings.Join(v.actions(t), "\n"), "user.totp_confirm/success") {
 		t.Error("a success entry for a user that does not exist")
 	}
+}
+
+// ConfirmTOTP confirms the authenticator of a new user right away (init on
+// the console asks for the first code).
+func (s *Service) ConfirmTOTP(ctx context.Context, userID, code string, who keys.Who) error {
+	now := s.now()
+	if err := s.authorize(ctx, who, "user.totp_confirm", userID); err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(q *systemdb.Queries, tx *sql.Tx) error {
+		u, err := q.GetUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		ok, _, err := s.useTOTP(ctx, q, u, code, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrInvalidCode
+		}
+		return s.enqueueTarget(ctx, tx, who, "user.totp_confirm", u.ID, map[string]any{"username": u.Username})
+	})
 }
