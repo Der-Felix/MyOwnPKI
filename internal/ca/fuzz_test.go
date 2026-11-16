@@ -365,6 +365,9 @@ func FuzzParseCertificate(f *testing.F) {
 	f.Add(leafPEM)
 	f.Add(fuzzPEM("CERTIFICATE", caCert))
 	f.Add(fuzzPEM("CERTIFICATE", fuzzCert(&x509.Certificate{DNSNames: many})))
+	f.Add(fuzzPEM("CERTIFICATE", fuzzCert(&x509.Certificate{DNSNames: many[:100]})))                                                  // at the cap of ImportExternal
+	f.Add(fuzzPEM("CERTIFICATE", fuzzCert(&x509.Certificate{DNSNames: many[:101]})))                                                  // one over it
+	f.Add(fuzzPEM("CERTIFICATE", fuzzCert(&x509.Certificate{DNSNames: many[:100], IPAddresses: []net.IP{net.ParseIP("192.0.2.1")}}))) // the cap counts all four types
 	f.Add(padded)
 	f.Add(bytes.Repeat([]byte("A"), MaxCertSize+1))
 	f.Add(append(bytes.Clone(leafPEM), leafPEM...))
@@ -403,6 +406,24 @@ func FuzzParseCertificate(f *testing.F) {
 			t.Fatalf("accepted a certificate that does not parse: %v", perr)
 		}
 
+		// The cap of ImportExternal: at most 100 names, counted as the certificate lists them (the count of
+		// the issuance path, written again); a refusal names the limit and stays short. Nothing is stored
+		// for a refused certificate, so the rows below are only checked for an accepted one.
+		n := len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs)
+		cerr := checkExternalNames(cert)
+		switch {
+		case n <= 100 && cerr != nil:
+			t.Fatalf("refused %d names: %v", n, cerr)
+		case n > 100 && cerr == nil:
+			t.Fatalf("accepted %d names, the cap is 100", n)
+		case cerr != nil:
+			checkRefusal(t, "checkExternalNames", cerr)
+			if !strings.Contains(cerr.Error(), "at most 100") || !strings.Contains(cerr.Error(), strconv.Itoa(n)) {
+				t.Fatalf("the refusal does not name the count and the limit: %v", cerr)
+			}
+			return
+		}
+
 		// The rows ImportExternal stores for the SANs: no row twice, none invented, none lost.
 		rows := certNames(cert)
 		want := map[[2]string]bool{}
@@ -434,7 +455,7 @@ func FuzzParseCertificate(f *testing.F) {
 		if len(seen) != len(want) {
 			t.Fatalf("%d rows for %d distinct SANs", len(seen), len(want))
 		}
-		if n := len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs); len(rows) > n {
+		if len(rows) > n {
 			t.Fatalf("%d rows for %d SANs", len(rows), n)
 		}
 	})

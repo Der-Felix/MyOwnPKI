@@ -2597,7 +2597,10 @@ paths:
       tags: [imports]
       operationId: importExternalCertificate
       summary: Add a certificate from another CA for expiry monitoring
-      description: "Stored with `source: external`; never signed, renewed or revoked by this server."
+      description: |
+        Stored with `source: external`; never signed, renewed or revoked by this server. A
+        certificate with more than 100 names (DNS, IP, e-mail and URI together, as the certificate
+        lists them) is refused with 422 `policy-violation`, as an issuance would be; nothing is stored.
       x-required-role: admin
       requestBody:
         description: "One certificate in PEM"

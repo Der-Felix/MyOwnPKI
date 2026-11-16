@@ -237,6 +237,19 @@ func (e *Engine) ImportExternal(ctx context.Context, certPEM []byte, who keys.Wh
 	return e.Certificate(ctx, who, id)
 }
 
+// checkExternalNames refuses a certificate of another CA with more than maxSANs
+// names, the limit the issuance path has (names.go). The names are counted as
+// the certificate lists them, over all four types and before any is stored: a
+// 64 KiB certificate holds about 3,000 of them and each would become a
+// certificate_sans row. The text names the count and the limit only; it echoes
+// no name of the certificate.
+func checkExternalNames(cert *x509.Certificate) error {
+	if n := len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs); n > maxSANs {
+		return deny("%d names – at most %d per certificate", n, maxSANs)
+	}
+	return nil
+}
+
 func (e *Engine) importExternal(ctx context.Context, certPEM []byte, who keys.Who, now time.Time) (string, error) {
 	if err := e.authorize(who, authz.ManageTenant, "", now); err != nil {
 		return "", err
@@ -247,6 +260,9 @@ func (e *Engine) importExternal(ctx context.Context, certPEM []byte, who keys.Wh
 	}
 	if cert.IsCA {
 		return "", deny("this is a CA certificate – import a root with POST /cas/import")
+	}
+	if err = checkExternalNames(cert); err != nil {
+		return "", err
 	}
 	sum := sha256.Sum256(cert.Raw)
 	fp := strings.ToUpper(hex.EncodeToString(sum[:]))
