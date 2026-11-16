@@ -19,7 +19,13 @@ import (
 // test adjusts (ACME off).
 func newCustomUIEnv(t *testing.T, adjust func(*AppDeps)) *uiEnv {
 	t.Helper()
-	v := &uiEnv{Instance: testinstance.New(t, testinstance.Options{})}
+	return newCustomUIEnvWith(t, testinstance.Options{}, adjust)
+}
+
+// newCustomUIEnvWith also chooses the options of the test instance (NoCA).
+func newCustomUIEnvWith(t *testing.T, o testinstance.Options, adjust func(*AppDeps)) *uiEnv {
+	t.Helper()
+	v := &uiEnv{Instance: testinstance.New(t, o)}
 	deps := &AppDeps{
 		Auth: v.Auth, Engine: v.Engine, Keys: v.Ring, Presets: v.Presets, Clock: v.Clock, Demo: true, Tenant: store.DefaultTenant,
 		Settings: &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}, TenantAudit: v.TenantAudit.Read, InstanceAudit: v.InstanceAudit.Read,

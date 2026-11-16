@@ -176,6 +176,9 @@ func (a *app) dashboard(c *rc) {
 		},
 		Attention: []view.Message{},
 	}
+	if a.instanceIsNew(c, cas, endEntity) {
+		d.Messages = append(d.Messages, newInstanceNotice)
+	}
 	if a.d.Alerts != nil {
 		open, _, alertErr := a.d.Alerts.List(ctx, c.who(), a.now())
 		switch {

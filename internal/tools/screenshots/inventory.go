@@ -101,6 +101,7 @@ var inventoryPages = []inventoryPage{
 	{"account", "/account", "/account", light},
 	{"design", "/design", "/design", light},
 
+	{"first-steps", "/first-steps", "/first-steps", light},
 	{"guides", "/guides", "/guides", light},
 	{"guide", "/guides/{slug}", "/guides/{guide}", light},
 }

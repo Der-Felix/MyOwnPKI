@@ -1,0 +1,80 @@
+package help
+
+import (
+	"github.com/Der-Felix/MyOwnPKI/internal/web/components"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/layout"
+	"github.com/Der-Felix/MyOwnPKI/internal/web/view"
+)
+
+// Link is a link of a First steps row: the page that finishes the step or the
+// guide that explains it.
+type Link struct {
+	External    bool // leads to the documentation site: the link says rel=noopener noreferrer
+	Label, Href string
+}
+
+// Step is one row of the checklist. Status and StatusText are the words the
+// reader sees: Done, Open, Not detected or Not available to your role.
+type Step struct {
+	Title      string
+	Text       string
+	Status     view.Status
+	StatusText string
+	Links      []Link
+}
+
+// FirstStepsData is the whole page: read-only, computed on each request.
+type FirstStepsData struct {
+	Messages []view.Message
+	Intro    []string
+	Steps    []Step
+}
+
+// FirstSteps renders the checklist as a table. It has no form and no button
+// that changes anything: every action is a link to the page that owns it.
+templ FirstSteps(p view.Page, d FirstStepsData) {
+	@layout.App(p) {
+		@components.Messages(d.Messages)
+		<section class="section" aria-labelledby="h-checklist">
+			<div class="section-head"><h2 id="h-checklist">Checklist</h2></div>
+			for _, t := range d.Intro {
+				<p class="muted">{ t }</p>
+			}
+			<div class="table-wrap table-adaptive">
+				<table class="table">
+					<caption class="visually-hidden">First steps and their state</caption>
+					<thead>
+						<tr>
+							<th scope="col">Step</th>
+							<th scope="col">State</th>
+							<th scope="col">What it means</th>
+							<th scope="col">Where</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, s := range d.Steps {
+							<tr>
+								<th scope="row">{ s.Title }</th>
+								<td>@components.Status(s.Status, s.StatusText)</td>
+								<td>{ s.Text }</td>
+								<td>
+									if len(s.Links) > 0 {
+										<ul class="link-list">
+											for _, l := range s.Links {
+												if l.External {
+													<li><a href={ templ.URL(l.Href) } rel="noopener noreferrer">{ l.Label }</a></li>
+												} else {
+													<li><a href={ templ.URL(l.Href) }>{ l.Label }</a></li>
+												}
+											}
+										</ul>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+	}
+}

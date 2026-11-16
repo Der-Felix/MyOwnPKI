@@ -29,6 +29,7 @@ never in a guide.
 
 ## Where to start
 
+- [First steps](/first-steps) lists what a new instance still needs and links to the page that finishes each item.
 - The [list of guides](/guides) shows every guide with a one-line summary.
 
 ## Reading the commands

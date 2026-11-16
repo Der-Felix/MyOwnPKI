@@ -288,6 +288,7 @@ func registerApp(mux *http.ServeMux, d AppDeps, log *slog.Logger) {
 	a.protected(mux, "POST /account/passkeys/{id}/remove", a.removePasskey, "password")
 	mux.HandleFunc("GET /admin/appearance", a.signedIn(a.appearance))
 	mux.HandleFunc("POST /admin/appearance", a.signedIn(a.saveAppearance))
+	mux.HandleFunc("GET /first-steps", a.signedIn(a.firstSteps))
 	mux.HandleFunc("GET /guides", a.signedIn(a.guideList))
 	mux.HandleFunc("GET /guides/{slug}", a.signedIn(a.guidePage))
 	mux.HandleFunc("GET /design", a.signedIn(a.design))
