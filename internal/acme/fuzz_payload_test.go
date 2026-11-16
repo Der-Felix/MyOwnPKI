@@ -446,3 +446,22 @@ func hashRows(t *testing.T, h interface{ Write([]byte) (int, error) }, rows *sql
 		t.Fatal(err)
 	}
 }
+
+// TestWrongJWSURLIsNotEchoedInFull: the refusal for a JWS whose "url" is not
+// the request's URL is sent before any signature is checked, so it is open
+// to everybody; it names the start of the URL, not all 64 KiB of it (the
+// same class as TestRefusalsDoNotEchoTheRequest in the jose package).
+func TestWrongJWSURLIsNotEchoedInFull(t *testing.T) {
+	t.Parallel()
+	v := newEnv(t, ca.ApprovalOpen)
+	c := v.client(t)
+	url := testBase + "/new-account"
+	body := c.jws(url+"/"+strings.Repeat("x", 20000), map[string]any{"termsOfServiceAgreed": true}, true)
+	a := c.postRaw(url, body)
+	if a.code != http.StatusUnauthorized || a.problem() != "unauthorized" {
+		t.Fatalf("%d %s", a.code, a.body)
+	}
+	if len(a.body) > 1000 {
+		t.Errorf("the refusal has %d bytes", len(a.body))
+	}
+}

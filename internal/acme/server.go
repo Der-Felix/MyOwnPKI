@@ -405,7 +405,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request, mode keyMode) (*re
 		return nil, false
 	}
 	if want := s.url(strings.TrimPrefix(r.URL.Path, s.prefix)); j.URL != want {
-		s.problem(w, http.StatusUnauthorized, "unauthorized", fmt.Sprintf("the JWS url %q is not this request's URL %q", j.URL, want), nil)
+		s.problem(w, http.StatusUnauthorized, "unauthorized", fmt.Sprintf("the JWS url %q is not this request's URL %q", clip(j.URL), want), nil)
 		return nil, false
 	}
 	req := &request{jws: j, ip: clientIP(r)}
