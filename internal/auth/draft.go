@@ -43,8 +43,5 @@ func (d *Draft) Confirm(code string, now time.Time) bool {
 	return ok
 }
 
-// Confirmed reports whether Confirm succeeded.
-func (d *Draft) Confirmed() bool { return d.confirmedStep > 0 }
-
 // Clear removes the secret from memory once it is stored and shown.
 func (d *Draft) Clear() { clear(d.secret) }

@@ -175,20 +175,6 @@ func (k RecoveryKey) CheckGroups(typed map[int]string) bool {
 	return ok == 1
 }
 
-// RecoveryOutput is where init shows a new recovery key.
-type RecoveryOutput int
-
-// Output targets.
-const (
-	ShowOnTerminal RecoveryOutput = iota + 1
-	WriteToFile
-)
-
-// ErrRecoveryKeyNeedsFile: without an interactive terminal (Docker, systemd,
-// a pipe) the key would end up in a log, so it may only go to a file.
-var ErrRecoveryKeyNeedsFile = errors.New("standard output is not an interactive terminal – " +
-	"the recovery key would end up in a log; use --recovery-key-file <path>")
-
 // IsTerminal reports whether f is a character device (a terminal). Note: a
 // container started with -t has a terminal whose output still reaches the
 // container log – the docs tell operators to use --recovery-key-file there.
