@@ -4,10 +4,10 @@
 # `docker build` in the repository does not work: use `task release:snapshot`
 # on a machine with Docker, or the released image ghcr.io/der-felix/myownpki.
 #
-# Distroless static, non-root (UID 65532), pinned by digest (two-week rule):
+# Distroless static (Debian 13), non-root (UID 65532), pinned by digest (two-week rule):
 # no shell, no package manager – only the static Go binary, CA certificates
 # and /etc/passwd. Update the digest deliberately (THIRD_PARTY.md).
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
 
 ARG TARGETPLATFORM
 
@@ -26,7 +26,7 @@ ENV MYOWNPKI_AGENT_PACKAGE_DIR=/opt/myownpki/agent-dist
 # The data directory (data_dir), empty and owned by nonroot. There is no
 # shell for mkdir/chown, so the base image's own empty, 0700 nonroot home
 # is copied; a new named volume takes over this owner and mode.
-COPY --from=gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab --chown=65532:65532 /home/nonroot /var/lib/myownpki
+COPY --from=gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 --chown=65532:65532 /home/nonroot /var/lib/myownpki
 VOLUME ["/var/lib/myownpki"]
 
 # The configuration is mounted read-only at /etc/myownpki/config.yaml (the

@@ -348,7 +348,7 @@ func TestDockerFiles(t *testing.T) {
 			t.Errorf("Dockerfile lacks %q", want)
 		}
 	}
-	const base = "gcr.io/distroless/static-debian12:nonroot@sha256:"
+	const base = "gcr.io/distroless/static-debian13:nonroot@sha256:"
 	if n := strings.Count(text, base); n != 2 || strings.Count(text, "gcr.io/") != 2 {
 		t.Errorf("the Dockerfile must name the pinned base image twice (FROM and COPY --from), found %d", n)
 	}

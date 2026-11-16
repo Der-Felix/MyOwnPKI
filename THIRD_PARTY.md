@@ -58,12 +58,28 @@ the pins were chosen. Two-week rule: newest release older than 2026-10-07.
 | [GoReleaser](https://github.com/goreleaser/goreleaser) | v2.18.2 (2026-09-17) | MIT | builds, archives, checksums, image, draft release | `goreleaser_Linux_x86_64.tar.gz` SHA-256 `0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3` |
 | [cosign](https://github.com/sigstore/cosign) | v3.1.3 (2026-08-06) | Apache-2.0 | keyless signatures of `checksums.txt` and the image | `cosign-linux-amd64` SHA-256 `4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71` |
 | [syft](https://github.com/anchore/syft) | v1.54.1 (2026-10-06) | Apache-2.0 | SPDX SBOM per archive | `syft_1.54.1_linux_amd64.tar.gz` SHA-256 `c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47` |
-| [distroless](https://github.com/GoogleContainerTools/distroless) `gcr.io/distroless/static-debian12:nonroot` | index uploaded 2026-08-21 | Apache-2.0 (the few Debian packages inside, such as CA certificates and time zone data, keep their own licenses) | base of the container image | `sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab` |
+| [distroless](https://github.com/GoogleContainerTools/distroless) `gcr.io/distroless/static-debian13:nonroot` (Debian 13 "trixie"; the index carries the tag `nonroot-48b5c0455fb00d6ea7223f1fc6862c46da736556`) | index uploaded 2026-10-31 (22:37 UTC) | Apache-2.0 (the few Debian packages inside, such as CA certificates and time zone data, keep their own licenses) | base of the container image | `sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329` |
 
-New digest of the base image (update deliberately, then wait two weeks):
+The base image moved from `static-debian12` to `static-debian13` in v0.3.11 (2026-11-16). Two-week
+rule for the image: the pin is the newest `nonroot` index uploaded more than 14 days ago, not the
+newest one (on 2026-11-16 the current `nonroot` index, uploaded 2026-11-12, was too young). It
+was read without Docker from the registry API: `…/tags/list` for the upload times (`timeUploadedMs`),
+`…/manifests/nonroot-<commit>` for the digest (header `Docker-Content-Digest`, equal to the SHA-256
+of the index body), and the index plus the per-platform manifests and config blobs for
+`linux/amd64` and `linux/arm64` (`User` `65532`, `WorkingDir` `/home/nonroot`, `SSL_CERT_FILE`
+`/etc/ssl/certs/ca-certificates.crt`; the layers hold that file, the time zone data, `/etc/passwd`
+and `/home/nonroot` owned by 65532 with mode `0700`).
+
+New digest of the base image (update deliberately, then wait two weeks): read the upload times and
+tags, pick the newest index older than 14 days that carries a `nonroot-<commit>` tag, then read its
+digest.
 
 ```bash
-curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" https://gcr.io/v2/distroless/static-debian12/manifests/nonroot
+curl -s https://gcr.io/v2/distroless/static-debian13/tags/list
+```
+
+```bash
+curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" https://gcr.io/v2/distroless/static-debian13/manifests/nonroot-<commit>
 ```
 
 ## Common passwords (`internal/auth/common-passwords.txt`)
