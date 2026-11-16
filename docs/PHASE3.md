@@ -3335,6 +3335,8 @@ commit adds it with `pin-migrations.sh`; the release workflow step is not change
 
 ### 19.8 Decisions (owner; defaults are the cautious option)
 
+> **Decided by the owner on 2026-11-16:** D1 = (b), a dedicated Ed25519 backup key with a pinned fingerprint and format 2 (step 101 is therefore a decision record the main session approves, not a question); D14 = v0.9.0 is tagged when steps 101 to 118 and the upgrade test are green, with the pending live tests listed as open in the release notes. All other decisions stay at their defaults unless the owner objects.
+
 | Topic | Default | Why / alternative |
 |---|---|---|
 | **D1. Backup authenticity** (**no ADR; touches PLAN §5 key list and §14 backup row: needs owner decision**) | (b) a dedicated Ed25519 backup key and a pinned fingerprint, format 2 | (a) cannot work for the timer; (c) leaves the §14 sentence false |
