@@ -46,7 +46,7 @@ var reRefreshMeta = regexp.MustCompile(`<meta http-equiv="refresh" content="([^"
 func noScript(t *testing.T, name, html string) {
 	t.Helper()
 	for _, banned := range []string{"hx-", "<script", "style=", "onclick", "htmx"} {
-		if strings.Contains(html, banned) {
+		if strings.Contains(withoutCSRF(html), banned) {
 			t.Errorf("%s contains %q", name, banned)
 		}
 	}
@@ -695,5 +695,20 @@ func TestRefreshOnlyOnProgressPages(t *testing.T) {
 		if html := b.get(t, target).html(); reRefreshMeta.MatchString(html) || strings.Count(html, `href="/hosts/add"`) < 1 {
 			t.Errorf("%s: refresh %v / nav entry %d", target, reRefreshMeta.MatchString(html), strings.Count(html, `href="/hosts/add"`))
 		}
+	}
+}
+
+// The CSRF token is random text: a banned word inside it is no htmx attribute, and a real attribute stays visible.
+func TestWithoutCSRFHidesOnlyTheToken(t *testing.T) {
+	t.Parallel()
+	const field = `<input type="hidden" name="csrf_token" value="hx-0htmx-Zz_9">`
+	page := `<form>` + field + `</form>`
+	for _, banned := range []string{"hx-", "htmx"} {
+		if strings.Contains(withoutCSRF(page), banned) {
+			t.Errorf("the token is still in the page: %q", banned)
+		}
+	}
+	if got := withoutCSRF(page + `<a hx-get="/x">`); !strings.Contains(got, ` hx-get="/x"`) {
+		t.Errorf("an htmx attribute was removed: %s", got)
 	}
 }

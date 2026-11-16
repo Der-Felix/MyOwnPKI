@@ -111,6 +111,13 @@ func (b *browser) get(t *testing.T, target string) page {
 
 var reCSRFField = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
 
+// withoutCSRF removes the CSRF token from a page before a test looks for a word in it. The token is 43 random
+// base64url characters, and "hx-" (a banned htmx attribute) is among the strings that appear in one by chance:
+// 4 of 6,000 sign-ins gave a page with it, which failed TestGuideList once on the Windows runner.
+func withoutCSRF(html string) string {
+	return reCSRFField.ReplaceAllString(html, `name="csrf_token" value=""`)
+}
+
 // csrf reads the token of the session from a signed-in page.
 func (b *browser) csrf(t *testing.T) string {
 	t.Helper()

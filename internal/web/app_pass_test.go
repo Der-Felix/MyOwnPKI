@@ -42,7 +42,7 @@ func TestEnrollmentPassPage(t *testing.T) {
 	}
 	// The UI ships no htmx and no script, and the pass section adds none.
 	for _, banned := range []string{"hx-", "<script", "style=", "onclick"} {
-		if strings.Contains(page, banned) {
+		if strings.Contains(withoutCSRF(page), banned) {
 			t.Errorf("join tokens page contains %q", banned)
 		}
 	}
