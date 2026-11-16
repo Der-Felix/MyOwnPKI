@@ -63,7 +63,7 @@ func TestUpgradeFromV01(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = newData
 	console := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "console"}, Principal: authz.Console()}
-	if _, err := backup.Restore(ctx, backupDir, "", backup.Options{Layout: store.Layout{DataDir: newData}, AuthKeyFile: cfg.AuthKeyFile(),
+	if _, err := backup.Restore(ctx, backupDir, backup.Check{}, backup.Options{Layout: store.Layout{DataDir: newData}, AuthKeyFile: cfg.AuthKeyFile(),
 		Clock: clock.System{}, Who: console}); err != nil {
 		t.Fatalf("restore of the v0.1.0 backup: %v", err)
 	}

@@ -342,11 +342,14 @@ report lists anything it could not take over. The UI offers the same import as a
 ## 6. Backup and restore
 
 ```bash
-myownpki backup /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml
+runuser -u myownpki -- myownpki backup /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml
 ```
 
 - Works while the server runs (a consistent copy of every database). Writes a new directory with a
-  `manifest.json` (file hashes, migration versions, audit heads, checkpoint key).
+  `manifest.json` (file hashes, migration versions, audit heads, checkpoint key) and, since v0.9.0, a
+  `manifest.sig`: the signature of the **backup key** over the manifest (see "The backup key" below).
+  Run it as the service user, as above: a backup made by root would create the key file as root, and the
+  daily timer (the service user) could not read it.
 - **Contains the CA and certificate keys – encrypted with the root key.** The backup alone can't
   sign; the backup **plus the passphrase or the recovery key** can. Keep them apart (see the top).
 - `auth.key` is in the backup when it lives in the data directory. If it lives elsewhere
@@ -354,8 +357,50 @@ myownpki backup /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml
 - Check a backup without touching anything (do it now and then, and always before you rely on it):
 
   ```bash
-  myownpki backup verify /backup/myownpki-2026-10-21 --checkpoint-key <fingerprint>
+  myownpki backup verify /backup/myownpki-2026-10-21 --backup-key <backup key fingerprint> --checkpoint-key <checkpoint key fingerprint>
   ```
+
+### The backup key
+
+Every backup is signed. The key is an Ed25519 key in the file `backup-signing.key` in the data directory (mode 0600).
+`myownpki init` makes it and prints its fingerprint (`SHA256:` and 32 hex digits) next to the checkpoint key's;
+an instance from before v0.9.0 gets it with its first backup. It needs no passphrase – the daily timer
+never unseals – and it is **never part of a backup**.
+
+What a signature tells you, and what not:
+
+- Without the key, nobody can change a backup unnoticed: someone who can write the backup directory (an offsite
+  share, a USB disk, a bucket) could before v0.9.0 change `pki.db` or `system.db`, recompute the hashes in the
+  manifest, and `verify` and `restore` passed. Now `verify` and `restore` refuse that: *the signature does not
+  match the manifest*.
+- A signature proves that **the holder of a key** made the backup, not whose key it is. Somebody who rewrites a
+  backup can sign it with a key of his own. So **write down the fingerprint** the first time (`init`, or the
+  output of the first `backup`) and pass it as `--backup-key`. With the pin, an unsigned backup and a backup
+  signed by any other key are refused.
+- Whoever holds a backup **and** the key file can sign. Keep the key file in the data directory, not next to
+  the backups (the daily backup directory, a copy offsite).
+
+What `backup verify` prints:
+
+| Output | Meaning | Exit |
+|---|---|---|
+| `Signature valid: made by key SHA256:…, the key you named.` | Signed, and by the key given as `--backup-key` | 0 |
+| `Signature valid: made by key SHA256:…, the backup key of this host.` | Signed by the key file of this host. `backup verify` (not `restore`) uses it as the expected key when `--backup-key` is not given and the configuration can be read | 0 |
+| `Signature valid: made by key SHA256:… – a key nobody has vouched for yet.` and `note: signed by key …` | Signed, no key to compare with. Compare the fingerprint with the one you noted; it proves nothing about who made the backup until you do | 0 |
+| `Signature: none – this backup is unauthenticated.` and `note: unauthenticated – this backup has no signature (made before 0.9.0)…` | A backup of a version before 0.9.0 (format `myownpki-backup/1`). It still verifies and restores; nobody can tell whether it was changed after it was made | 0 (1 with `--backup-key`, unless `--allow-unsigned`) |
+| `problem: signed by key …, not by the expected key …` | A valid signature by another key than the one you pinned | 1 |
+| `problem: manifest.sig: the signature does not match the manifest …` | The manifest or the signature was changed, or damaged | 1 |
+| `problem: manifest.sig is missing …` | A backup of format 2 always has the signature: it was deleted | 1 |
+
+`--allow-unsigned` only lets a **format 1** backup pass although `--backup-key` is given (your old backups). It never
+accepts a format 2 backup with a missing, damaged or foreign signature.
+
+**Lost key file** (disk replaced, data directory restored from a backup): the key is not in a backup, so the next
+`myownpki backup` on that instance makes a **new** key and says *This key was made now*. It cannot tell a first run
+from a loss. Backups made before verify with the fingerprint you noted for them (`--backup-key <old fingerprint>`),
+not with the new one – and `backup verify` on that host, which expects its own key, then answers *signed by key
+…, not by the expected key …*: pass the old fingerprint. Note the new fingerprint, too. A deliberate change of the
+key is the same thing: delete `backup-signing.key`.
 
 Restore into an **empty or missing** data directory, with the server stopped. With the packaged
 install (§2.1) stop the service, move the old data directory away, create an empty one, run
@@ -366,15 +411,18 @@ install (§2.1) stop the service, move the old data directory away, create an em
 systemctl stop myownpki
 mv /var/lib/myownpki /var/lib/myownpki.old
 install -d -m 0700 -o myownpki -g myownpki /var/lib/myownpki
-myownpki restore /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml --checkpoint-key <fingerprint>
+myownpki restore /backup/myownpki-2026-10-21 --config /etc/myownpki/config.yaml --backup-key <backup key fingerprint> --checkpoint-key <checkpoint key fingerprint>
 chown -R myownpki:myownpki /var/lib/myownpki
 systemctl start myownpki
 ```
 
 (`restore` replaces the empty directory by the restored one, which belongs to root until the
 `chown -R`; a data directory owned by someone else also makes `install.sh` refuse to continue.)
-It runs every check first (hashes, database integrity, audit chains and heads, the certificate name
-index) and writes nothing if one fails. Then start the server and unseal it with the passphrase
+It runs every check first (the signature, hashes, database integrity, audit chains and heads, the certificate name
+index) and writes nothing if one fails. The restored instance has **no backup key** – it stays with the old
+host – so on a new host the restore output says so; the first backup made there creates a new key (note its
+fingerprint). A backup you restore without `--backup-key` is accepted if its signature is valid, and the output
+shows the fingerprint to compare with your notes. Then start the server and unseal it with the passphrase
 **that was valid when the backup was taken**. Certificates issued after the backup are not in it;
 their serial numbers are still in the issued certificates and the audit trail of your clients.
 
@@ -389,8 +437,9 @@ myownpki backup scheduled /var/backups/myownpki --keep 14 --config /etc/myownpki
 ```
 
 1. a backup into `/var/backups/myownpki/<UTC time>`, e.g. `20261025T003512Z` (0700, the service
-   user) – audited as *system / backup-timer*;
-2. every restore check on it (as `backup verify`);
+   user), signed with the backup key – audited as *system / backup-timer*, the entry carries the key's
+   fingerprint;
+2. every restore check on it (as `backup verify`), with the key that just signed it as the expected key;
 3. only if the check passed: **prune** – the newest 14 scheduled backups stay, older ones are
    deleted.
 

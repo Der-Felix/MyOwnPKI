@@ -137,7 +137,7 @@ func TestPrune(t *testing.T) {
 		t.Errorf("second run: %+v %v", again, err)
 	}
 	// The kept ones still pass every restore check.
-	if _, err := Verify(t.Context(), filepath.Join(parent, scheduled[3]), ""); err != nil {
+	if _, err := Verify(t.Context(), filepath.Join(parent, scheduled[3]), Check{}); err != nil {
 		t.Error(err)
 	}
 }

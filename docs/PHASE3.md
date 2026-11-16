@@ -3197,6 +3197,30 @@ documented rollback keeps working; a format-2 timer backup needs a 0.9 binary. *
 replication, Litestream stays after 1.0); this adds a key to the inventory of PLAN §5 and changes the sentence of §14, both
 owner-approved design records: **needs owner decision D1**. If D1 is (c), step 102 shrinks to the docs (S).
 
+**Result of step 101 (2026-11-16, D1 = (b)).** The owner chose (b). The decision record is in the repository: PLAN §5 has the
+backup key in its key list (what the signature promises, what it does not, the lost-key case), the PLAN §14 backup row says
+what `verify` and `restore` check now and when a pin is needed, `references/security.md` lists the key, and OPERATIONS §6
+has the chapter "The backup key" with a table of what `backup verify` prints. Details that step 102 fixed where this
+section left room:
+
+- **Fingerprint:** `SHA256:` and the first 16 bytes of the SHA-256 over the raw public key as 32 hex digits (the same
+  shape as the checkpoint key's, with the prefix so the two cannot be mixed up). `--backup-key` takes it with or
+  without the prefix, upper or lower case, at least 16 digits.
+- **`--allow-unsigned` is narrow:** it waives only the missing signature of a **format 1** backup. A format 2 backup
+  without a valid signature, and a valid signature by a key other than the pinned one, are refused with and without it
+  (the signature of a key you did not expect is no "unsigned" backup).
+- **Expected key without a flag:** `backup verify` (not `restore`) takes the key file of its own host as the expected key
+  when `--backup-key` is not given and the configuration can be read; `backup scheduled` verifies against the key that
+  just signed. `restore` goes into an empty data directory, where no key file can exist, so it has none.
+- **Layout of format 2:** the same manifest fields as format 1 (an older binary answers "backup format … is not …", not
+  "unknown field"), plus `manifest.sig` (JSON: `format`, `algorithm`, `public_key`, `signature`, hex). The signature covers
+  `"myownpki-backup-manifest-v1" 0x00` and the exact bytes of `manifest.json`. `manifest.sig` is written first, `manifest.json`
+  last, so a crash never leaves something that looks complete.
+- **The key's own package:** `internal/backup/backupkey` (not `sign.go`), because `internal/setup` creates the key at
+  `init` and `internal/backup`'s tests build instances through `internal/setup`; one package would be an import cycle.
+- **Who runs it:** a manual `myownpki backup` as root would create the key file owned by root, and the timer (service user)
+  could not read it. OPERATIONS shows `runuser -u myownpki`, and the error for a key file that cannot be read says so.
+
 **`ImportExternal` (103).** `importExternal` counts DNS, IP, e-mail and URI names **before** `certNames` and refuses above
 `maxSANs`: `deny("%d names – at most %d per certificate", n, maxSANs)` (the sentence of `names.go:251`). The function is
 `checkExternalNames(cert)` so a fuzz target can call it unchanged. A REST client sees **422 `policy-violation`** with that reason,

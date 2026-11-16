@@ -99,9 +99,18 @@ Background: [ACME explained]({{ '/learn/acme/' | relative_url }}).
 ### Backup
 
 A consistent copy of every database that `myownpki backup` writes while the server runs, with a manifest of
-hashes. It contains the CA keys, **encrypted**: a backup alone cannot sign, but a backup together with the
-[passphrase](#passphrase) or the [recovery key](#recovery-key) can. See
+hashes and, since 0.9.0, a signature of that manifest by the [backup key](#backup-key). It contains the CA keys,
+**encrypted**: a backup alone cannot sign, but a backup together with the [passphrase](#passphrase) or the
+[recovery key](#recovery-key) can. See
 [operations guide §6]({{ '/reference/operations/' | relative_url }}#6-backup-and-restore).
+
+### Backup key
+
+The key that signs the manifest of every backup (Ed25519, 0.9.0 and later). It is a file in the data directory, needs no
+passphrase and is never part of a backup. A signature shows that the holder of that key made the backup; you compare its
+fingerprint with the one you noted at `init` and pass it as `--backup-key` to `backup verify` and `restore`, which is what
+makes a copied or changed backup detectable. See
+[Backup and restore]({{ '/guides/backup-and-restore/' | relative_url }}#the-backup-key).
 
 ### Base URL
 

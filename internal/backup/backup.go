@@ -2,7 +2,8 @@
 // step 16): every database as one consistent copy (VACUUM INTO, also while
 // the server runs), the audit databases last, a manifest with SHA-256 per
 // file and the head of every audit chain. A restore goes only into an empty
-// data directory and only after every check passed.
+// data directory and only after every check passed. Since format 2 the
+// manifest is signed with the backup key of the instance (sign.go).
 package backup
 
 import (
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/store"
@@ -27,8 +29,14 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/version"
 )
 
-// Format names the layout of a backup directory.
-const Format = "myownpki-backup/1"
+// Format names the layout of a backup directory made today: manifest.json and
+// manifest.sig, an Ed25519 signature over the manifest (sign.go).
+const Format = "myownpki-backup/2"
+
+// FormatUnsigned is the layout of the backups of versions before 0.9.0: the
+// same manifest, no signature. They still verify and restore, but nobody can
+// tell whether they were changed after they were made.
+const FormatUnsigned = "myownpki-backup/1"
 
 // ManifestFile is written last: a directory without it is not a backup.
 const ManifestFile = "manifest.json"
@@ -86,6 +94,8 @@ type Options struct {
 	AuthKeyFile string // config auth.key_file
 	Clock       clock.Clock
 	Who         keys.Who
+	// KeyRand is the random source of a new backup key (nil = crypto/rand).
+	KeyRand io.Reader
 }
 
 // source is one file to copy.
@@ -118,11 +128,34 @@ func sources(l store.Layout, tenants []string) ([]source, error) {
 	return append(out, audits...), nil
 }
 
-// Create writes a backup into dir, which must not exist yet.
-func Create(ctx context.Context, dir string, o Options) (*Manifest, error) {
+// Created is the result of Create: the manifest and what is known about the
+// key that signed it.
+type Created struct {
+	*Manifest
+	// SigningKey is the fingerprint of the backup key that signed.
+	SigningKey string
+	// NewKey: the key file did not exist and was made for this backup. A lost
+	// file can't be told from a first run, so the caller says so.
+	NewKey bool
+	// Warnings about the key file (permissions).
+	Warnings []string
+}
+
+// Create writes a signed backup into dir, which must not exist yet. The
+// signing key (<data_dir>/backup-signing.key) is made on first use; it needs
+// no passphrase and is never copied into a backup.
+func Create(ctx context.Context, dir string, o Options) (*Created, error) {
 	l := o.Layout
 	if _, err := os.Stat(l.SystemDB()); err != nil {
 		return nil, fmt.Errorf("no instance at %s: %w", l.DataDir, err)
+	}
+	key, isNew, warnings, kerr := backupkey.LoadOrCreate(backupkey.Path(l.DataDir), o.KeyRand)
+	if kerr != nil {
+		if errors.Is(kerr, fs.ErrPermission) {
+			// A key made by root can't be read by the service user's timer: say it before it happens.
+			return nil, fmt.Errorf("backup signing key: %w – run the backup as the user that owns the data directory (the service user)", kerr)
+		}
+		return nil, fmt.Errorf("backup signing key: %w", kerr)
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -130,15 +163,15 @@ func Create(ctx context.Context, dir string, o Options) (*Manifest, error) {
 		}
 		return nil, err
 	}
-	m, err := create(ctx, dir, o)
+	m, err := create(ctx, dir, o, key)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	return m, nil
+	return &Created{Manifest: m, SigningKey: key.Fingerprint(), NewKey: isNew, Warnings: warnings}, nil
 }
 
-func create(ctx context.Context, dir string, o Options) (*Manifest, error) {
+func create(ctx context.Context, dir string, o Options, key *backupkey.Key) (*Manifest, error) {
 	l := o.Layout
 	rows, err := store.Tenants(ctx, l)
 	if err != nil {
@@ -161,7 +194,7 @@ func create(ctx context.Context, dir string, o Options) (*Manifest, error) {
 	}
 	_, _, err = audit.Append(ctx, ia.Write, store.InstanceScope, audit.Entry{
 		Time: now, Actor: o.Who.Actor, Action: ActionBackup, Target: audit.Target{Type: "instance", ID: "backup"},
-		Result: audit.ResultSuccess, SourceIP: o.Who.SourceIP, Details: map[string]any{"tenants": m.Tenants, "databases": len(srcs)},
+		Result: audit.ResultSuccess, SourceIP: o.Who.SourceIP, Details: map[string]any{"tenants": m.Tenants, "databases": len(srcs), "signing_key": key.Fingerprint()},
 	}, "")
 	if cerr := ia.Close(); err == nil {
 		err = cerr
@@ -219,7 +252,7 @@ func create(ctx context.Context, dir string, o Options) (*Manifest, error) {
 		m.Files = append(m.Files, f)
 		m.AuthKey = true
 	}
-	return m, writeManifest(dir, m)
+	return m, writeManifest(dir, m, key)
 }
 
 // vacuumInto copies one database as a consistent snapshot.
@@ -304,47 +337,82 @@ func inside(dir, path string) (string, bool) {
 	return rel, true
 }
 
-func writeManifest(dir string, m *Manifest) error {
+// writeManifest writes the signature and then manifest.json: a directory
+// without manifest.json is not a backup, so a crash in between leaves
+// nothing that looks complete. The signature covers the exact bytes written.
+func writeManifest(dir string, m *Manifest, key *backupkey.Key) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, ManifestFile+".tmp")
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+	data = append(data, '\n')
+	sig, err := signManifest(key, data)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(dir, ManifestFile))
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{{SignatureFile, sig}, {ManifestFile, data}} {
+		tmp := filepath.Join(dir, f.name+".tmp")
+		if err := os.WriteFile(tmp, f.data, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, f.name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // maxManifest bounds what is read as a manifest.
 const maxManifest = 1 << 20
 
-func readManifest(dir string) (*Manifest, error) {
+// parseManifest reads the bytes of a manifest.json: strict JSON, nothing
+// after it, a known format and a time. It does not check the signature or
+// the paths it lists.
+func parseManifest(data []byte) (*Manifest, error) {
+	if len(data) > maxManifest {
+		return nil, fmt.Errorf("%s is larger than %d KiB", ManifestFile, maxManifest>>10)
+	}
+	var m Manifest
+	if err := decodeStrict(data, &m); err != nil {
+		return nil, fmt.Errorf("%s can't be read: %w", ManifestFile, err)
+	}
+	if m.Format != Format && m.Format != FormatUnsigned {
+		return nil, fmt.Errorf("backup format %q is not %q (or %q, the format before 0.9.0) – made by a newer version?", clip(m.Format), Format, FormatUnsigned)
+	}
+	if _, err := time.Parse(audit.TimeFormat, m.CreatedAt); err != nil {
+		return nil, fmt.Errorf("%s: created_at %q is not a time", ManifestFile, clip(m.CreatedAt))
+	}
+	return &m, nil
+}
+
+// loadManifest reads manifest.json of a backup: the parsed manifest and the
+// exact bytes the signature covers.
+func loadManifest(dir string) (*Manifest, []byte, error) {
 	path := filepath.Join(dir, ManifestFile)
 	st, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("%s has no %s – not a MyOwnPKI backup, or an incomplete one", dir, ManifestFile)
+		return nil, nil, fmt.Errorf("%s has no %s – not a MyOwnPKI backup, or an incomplete one", dir, ManifestFile)
 	}
 	if st.Size() > maxManifest {
-		return nil, fmt.Errorf("%s is larger than %d KiB", ManifestFile, maxManifest>>10)
+		return nil, nil, fmt.Errorf("%s is larger than %d KiB", ManifestFile, maxManifest>>10)
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- the manifest of the backup to check
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var m Manifest
-	dec := json.NewDecoder(strings.NewReader(string(data)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil {
-		return nil, fmt.Errorf("%s can't be read: %w", ManifestFile, err)
+	m, err := parseManifest(data)
+	if err != nil {
+		return nil, nil, err
 	}
-	if m.Format != Format {
-		return nil, fmt.Errorf("backup format %q is not %q", m.Format, Format)
-	}
-	if _, err := time.Parse(audit.TimeFormat, m.CreatedAt); err != nil {
-		return nil, fmt.Errorf("%s: created_at %q is not a time", ManifestFile, m.CreatedAt)
-	}
-	return &m, nil
+	return m, data, nil
+}
+
+func readManifest(dir string) (*Manifest, error) {
+	m, _, err := loadManifest(dir)
+	return m, err
 }
 
 func exists(path string) bool {

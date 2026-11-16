@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
 	"github.com/Der-Felix/MyOwnPKI/internal/setup"
@@ -149,6 +150,9 @@ func finishInit(ctx context.Context, opt setup.Options, ui setup.UI, stdout, std
 	}
 	out("\nCheckpoint key fingerprint – note it down; `%s audit verify --checkpoint-key` checks the audit log against it:\n    %s\n",
 		binary, res.CheckpointFingerprint)
+	out("\nBackup key fingerprint – note it down too; every backup is signed with this key, and `%s backup verify --backup-key` and `%s restore --backup-key` check a backup against it:\n    %s\n",
+		binary, binary, res.BackupKeyFingerprint)
+	out("The key itself is the file %s in the data directory. It is never part of a backup – keep it there, not next to the backups.\n", backupkey.FileName)
 	out("\nKeep apart: the unseal passphrase, the recovery key and the backups. A backup plus either of them is the whole CA.\n")
 	out("The auth key %s encrypts the TOTP secrets; keep it with the backups (lost: `%s user reset-2fa --new-auth-key`).\n", opt.Config.AuthKeyFile(), binary)
 	switch opt.Mode {

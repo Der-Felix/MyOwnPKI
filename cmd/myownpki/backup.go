@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/Der-Felix/MyOwnPKI/internal/audit"
 	"github.com/Der-Felix/MyOwnPKI/internal/authz"
 	"github.com/Der-Felix/MyOwnPKI/internal/backup"
+	"github.com/Der-Felix/MyOwnPKI/internal/backup/backupkey"
 	"github.com/Der-Felix/MyOwnPKI/internal/clock"
 	"github.com/Der-Felix/MyOwnPKI/internal/config"
 	"github.com/Der-Felix/MyOwnPKI/internal/keys"
@@ -24,10 +26,10 @@ import (
 func runBackup(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	usage := func() {
 		_, _ = fmt.Fprintf(stderr, "Usage:\n  %s backup DIR [--config FILE]          copy every database into the new directory DIR (also while the server runs)\n"+
-			"  %s backup verify DIR [--checkpoint-key FP]  run every restore check on DIR, write nothing\n"+
+			"  %s backup verify DIR [--backup-key FP] [--allow-unsigned] [--checkpoint-key FP] [--config FILE]\n    run every restore check on DIR, write nothing\n"+
 			"  %s backup scheduled DIR --keep 14 [--config FILE]  the timer's run: DIR/<UTC time>, verify, then prune\n"+
 			"  %s backup prune DIR --keep 14 [--dry-run]  keep the newest N scheduled backups in DIR, delete older ones\n"+
-			"  %s restore DIR [--config FILE] [--checkpoint-key FP]  restore into the (empty) data directory\n", binary, binary, binary, binary, binary)
+			"  %s restore DIR [--config FILE] [--backup-key FP] [--allow-unsigned] [--checkpoint-key FP]\n    restore into the (empty) data directory\n", binary, binary, binary, binary, binary)
 	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		usage()
@@ -61,6 +63,7 @@ func runBackup(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return exitProblem
 	}
 	_, _ = fmt.Fprintf(stdout, "Backup written to %s: %d files, tenants %v.\n", dir, len(m.Files), m.Tenants)
+	printSigningKey(stdout, m)
 	for _, lg := range m.Audit {
 		_, _ = fmt.Fprintf(stdout, "  audit %-16s head %s (%d entries)\n", lg.Scope, lg.Head, lg.Entries)
 	}
@@ -78,16 +81,71 @@ func runBackup(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	return exitOK
 }
 
+// trustFlags are the options that say how far a backup is trusted.
+type trustFlags struct {
+	checkpoint, backupKey *string
+	allowUnsigned         *bool
+}
+
+func addTrustFlags(fset *flag.FlagSet) trustFlags {
+	return trustFlags{
+		checkpoint: fset.String("checkpoint-key", "", "fingerprint of the checkpoint key noted at init (recommended)"),
+		backupKey:  fset.String("backup-key", "", "fingerprint of the backup key noted at init or at the first backup (recommended): the backup must be signed by it"),
+		allowUnsigned: fset.Bool("allow-unsigned", false,
+			"accept a backup of a version before 0.9.0, which has no signature, although --backup-key is given"),
+	}
+}
+
+func (t trustFlags) check() backup.Check {
+	return backup.Check{CheckpointKey: *t.checkpoint, BackupKey: *t.backupKey, AllowUnsigned: *t.allowUnsigned}
+}
+
+// hostBackupKey is the fingerprint of the backup key of this host, which
+// `backup verify` expects when --backup-key is not given: the backups of this
+// instance are signed by it. "" = there is no such key (a machine that only
+// verifies, or an instance that has not made a backup yet). A configuration
+// that can't be read is an error only when it was named with --config.
+func hostBackupKey(configFlagValue string, stderr io.Writer) (string, int) {
+	environ := os.Environ()
+	cfg, _, err := config.Load(configPath(configFlagValue, environ), environ)
+	if err != nil {
+		if configFlagValue != "" {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return "", exitProblem
+		}
+		return "", -1
+	}
+	k, _, err := backupkey.Load(backupkey.Path(cfg.DataDir))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", -1
+	case err != nil:
+		_, _ = fmt.Fprintf(stderr, "note: this host's backup key is not used as the expected key: %v\n", err)
+		return "", -1
+	}
+	return k.Fingerprint(), -1
+}
+
 func runBackupVerify(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fset := flag.NewFlagSet(binary+" backup verify", flag.ContinueOnError)
 	fset.SetOutput(stderr)
-	pin := fset.String("checkpoint-key", "", "fingerprint of the checkpoint key noted at init (recommended)")
+	path := configFlag(fset)
+	tf := addTrustFlags(fset)
 	dir, code := parseUserArgs(fset, args, stderr)
 	if code >= 0 {
 		return code
 	}
-	rep, err := backup.Verify(ctx, dir, *pin)
-	printBackupReport(stdout, rep, *pin)
+	chk := tf.check()
+	fromHost := false
+	if chk.BackupKey == "" {
+		var fp string
+		if fp, code = hostBackupKey(*path, stderr); code >= 0 {
+			return code
+		}
+		chk.BackupKey, fromHost = fp, fp != ""
+	}
+	rep, err := backup.Verify(ctx, dir, chk)
+	printBackupReport(stdout, rep, chk, fromHost)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return exitProblem
@@ -101,7 +159,7 @@ func runRestore(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fset := flag.NewFlagSet(binary+" restore", flag.ContinueOnError)
 	fset.SetOutput(stderr)
 	path := configFlag(fset)
-	pin := fset.String("checkpoint-key", "", "fingerprint of the checkpoint key noted at init (recommended)")
+	tf := addTrustFlags(fset)
 	dir, code := parseUserArgs(fset, args, stderr)
 	if code >= 0 {
 		return code
@@ -110,8 +168,9 @@ func runRestore(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if code >= 0 {
 		return code
 	}
-	rep, err := backup.Restore(ctx, dir, *pin, backup.Options{Layout: store.Layout{DataDir: cfg.DataDir}, AuthKeyFile: cfg.AuthKeyFile(), Clock: clock.System{}, Who: consoleWho()})
-	printBackupReport(stdout, rep, *pin)
+	chk := tf.check()
+	rep, err := backup.Restore(ctx, dir, chk, backup.Options{Layout: store.Layout{DataDir: cfg.DataDir}, AuthKeyFile: cfg.AuthKeyFile(), Clock: clock.System{}, Who: consoleWho()})
+	printBackupReport(stdout, rep, chk, false)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		if errors.Is(err, backup.ErrRefused) {
@@ -123,13 +182,35 @@ func runRestore(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	return exitOK
 }
 
-func printBackupReport(w io.Writer, rep *backup.Report, pin string) {
+// printSigningKey says which key signed a backup that was just made.
+func printSigningKey(w io.Writer, c *backup.Created) {
+	_, _ = fmt.Fprintf(w, "  backup key %s – note it down: `%s backup verify` and `%s restore` check a backup against it with --backup-key\n", c.SigningKey, binary, binary)
+	if c.NewKey {
+		_, _ = fmt.Fprintf(w, "  This key was made now. Normal for the first backup; if there was one before, the old key file is lost –\n"+
+			"  backups made before verify only with the fingerprint you noted for them.\n")
+	}
+	for _, warn := range c.Warnings {
+		_, _ = fmt.Fprintf(w, "  WARNING: %s\n", warn)
+	}
+}
+
+func printBackupReport(w io.Writer, rep *backup.Report, chk backup.Check, keyFromHost bool) {
 	if rep == nil || rep.Manifest == nil {
 		return
 	}
 	m := rep.Manifest
 	_, _ = fmt.Fprintf(w, "Backup of %s (MyOwnPKI %s), tenants %v, %d files.\n", m.CreatedAt, m.Version, m.Tenants, len(m.Files))
-	if m.CheckpointKey != "" && pin == "" {
+	switch {
+	case rep.Authenticity == backup.Pinned && keyFromHost:
+		_, _ = fmt.Fprintf(w, "Signature valid: made by key %s, the backup key of this host.\n", rep.SigningKey)
+	case rep.Authenticity == backup.Pinned:
+		_, _ = fmt.Fprintf(w, "Signature valid: made by key %s, the key you named.\n", rep.SigningKey)
+	case rep.Authenticity == backup.Signed:
+		_, _ = fmt.Fprintf(w, "Signature valid: made by key %s – a key nobody has vouched for yet.\n", rep.SigningKey)
+	case rep.Authenticity == backup.Unauthenticated:
+		_, _ = fmt.Fprintln(w, "Signature: none – this backup is unauthenticated.")
+	}
+	if m.CheckpointKey != "" && chk.CheckpointKey == "" {
 		_, _ = fmt.Fprintf(w, "Checkpoint key %s – compare it with the one noted at init (or pass --checkpoint-key).\n", m.CheckpointKey)
 	}
 	if rep.Certificates > 0 {
@@ -192,7 +273,10 @@ func runBackupScheduled(ctx context.Context, args []string, stdout, stderr io.Wr
 		return exitProblem
 	}
 	_, _ = fmt.Fprintf(stdout, "Backup written to %s: %d files, tenants %v.\n", dir, len(m.Files), m.Tenants)
-	rep, err := backup.Verify(ctx, dir, "")
+	printSigningKey(stdout, m)
+	// The backup must be signed by the key that was just used: the check that
+	// the signature a restore needs is really there.
+	rep, err := backup.Verify(ctx, dir, backup.Check{BackupKey: m.SigningKey})
 	if err != nil {
 		for _, p := range problems(rep) {
 			_, _ = fmt.Fprintf(stderr, "problem: %s\n", p)

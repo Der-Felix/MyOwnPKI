@@ -176,7 +176,7 @@ Run `restore` as root: it builds a work copy next to the data directory (`/var/l
 user cannot write. Then give the restored files to the service user:
 
 ```bash
-/usr/local/bin/myownpki restore /var/backups/myownpki/<time> --config /etc/myownpki/config.yaml --checkpoint-key <fingerprint>
+/usr/local/bin/myownpki restore /var/backups/myownpki/<time> --config /etc/myownpki/config.yaml --backup-key <backup key fingerprint> --checkpoint-key <checkpoint key fingerprint>
 ```
 
 ```bash
