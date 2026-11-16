@@ -182,12 +182,18 @@ type Check struct {
 	// AllowUnsigned accepts a backup of format 1 although BackupKey is set.
 	// A format 2 backup without a valid signature is always refused.
 	AllowUnsigned bool
+	// HostKey is the fingerprint of the key file of the host that checks (what
+	// `backup verify` knows without being told). It is a hint, not a pin, and
+	// ignored when BackupKey is set: a backup signed by it counts as pinned;
+	// one signed by another key still verifies (it may come from another host)
+	// and says so; a backup without a signature is never refused because of it.
+	HostKey string
 }
 
 // checkSignature decides what the manifest.sig of dir proves about raw, the
-// exact bytes of manifest.json, and records it in r. pin is the normalized
-// BackupKey.
-func (r *Report) checkSignature(dir string, raw []byte, pin string, allowUnsigned bool) {
+// exact bytes of manifest.json, and records it in r. pin and host are the
+// normalized BackupKey and HostKey.
+func (r *Report) checkSignature(dir string, raw []byte, pin, host string, allowUnsigned bool) {
 	switch r.Manifest.Format {
 	case FormatUnsigned:
 		// A stray manifest.sig is not looked at: the file walk reports it as
@@ -216,6 +222,11 @@ func (r *Report) checkSignature(dir string, raw []byte, pin string, allowUnsigne
 		}
 		r.SigningKey = backupkey.Fingerprint(pub)
 		switch {
+		case pin == "" && host != "" && backupkey.Matches(r.SigningKey, host):
+			r.Authenticity = Pinned
+		case pin == "" && host != "":
+			r.Authenticity = Signed
+			r.Notes = append(r.Notes, fmt.Sprintf("signed by key %s, not this host's key %s – normal for a backup of another host; compare it with the fingerprint noted for that host and pass it as --backup-key", r.SigningKey, backupkey.Prefix+host))
 		case pin == "":
 			r.Authenticity = Signed
 			r.Notes = append(r.Notes, fmt.Sprintf("signed by key %s – compare it with the one noted at init (or at the first backup) and pass it as --backup-key; "+

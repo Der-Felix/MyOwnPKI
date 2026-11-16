@@ -207,12 +207,40 @@ func TestBackupSignatureCommands(t *testing.T) {
 	if code, text = run(runBackup, "verify", old, "--backup-key", fp); code != exitProblem || !strings.Contains(text, "has no signature") {
 		t.Fatalf("format 1 with a pin: %d\n%s", code, text)
 	}
-	// The host's own key is a pin too: no --backup-key needed to refuse it.
-	if code, text = run(runBackup, "verify", old, "--config", cfg); code != exitProblem || !strings.Contains(text, "has no signature") {
-		t.Fatalf("format 1 on the host: %d\n%s", code, text)
+	// The host's own key is only a hint: a backup without a signature is
+	// never refused because of it, only because of an explicit --backup-key.
+	if code, text = run(runBackup, "verify", old, "--config", cfg); code != exitOK ||
+		!strings.Contains(text, "unauthenticated") || !strings.Contains(text, "passed every check") {
+		t.Fatalf("format 1 on a host with a key, no pin: %d\n%s", code, text)
 	}
-	if code, text = run(runBackup, "verify", old, "--config", cfg, "--allow-unsigned"); code != exitOK || !strings.Contains(text, "unauthenticated") {
-		t.Fatalf("format 1 with --allow-unsigned: %d\n%s", code, text)
+	if code, text = run(runBackup, "verify", old, "--config", cfg, "--backup-key", fp); code != exitProblem || !strings.Contains(text, "has no signature") {
+		t.Fatalf("format 1 on the host with a pin: %d\n%s", code, text)
+	}
+	if code, text = run(runBackup, "verify", old, "--config", cfg, "--backup-key", fp, "--allow-unsigned"); code != exitOK || !strings.Contains(text, "unauthenticated") {
+		t.Fatalf("format 1 with a pin and --allow-unsigned: %d\n%s", code, text)
+	}
+
+	// A backup of another host: signed by a key that is not this host's. It
+	// passes with a note; only an explicit pin refuses it.
+	hostB, _ := dbConfig(t)
+	out.Reset()
+	if code = runDBMigrate(t.Context(), []string{"--config", hostB}, nil, &out, &out); code != exitOK {
+		text = out.String()
+		t.Fatal(text)
+	}
+	if code, text = run(runBackup, filepath.Join(t.TempDir(), "b"), "--config", hostB); code != exitOK {
+		t.Fatal(text)
+	}
+	fpB := fingerprintIn(t, text)
+	if code, text = run(runBackup, "verify", dir, "--config", hostB); code != exitOK ||
+		!strings.Contains(text, "signed by key "+fp+", not this host's key "+fpB) || !strings.Contains(text, "a key nobody has vouched for yet") {
+		t.Fatalf("backup of another host: %d\n%s", code, text)
+	}
+	if code, text = run(runBackup, "verify", dir, "--config", hostB, "--backup-key", fpB); code != exitProblem || !strings.Contains(text, "not by the expected key") {
+		t.Fatalf("backup of another host with a pin on this host's key: %d\n%s", code, text)
+	}
+	if code, text = run(runBackup, "verify", dir, "--config", hostB, "--backup-key", fp); code != exitOK || !strings.Contains(text, "the key you named") {
+		t.Fatalf("backup of another host with its own pin: %d\n%s", code, text)
 	}
 	another, _ := dbConfig(t)
 	if code, text = run(runRestore, old, "--config", another, "--backup-key", fp, "--allow-unsigned"); code != exitOK || !strings.Contains(text, "unauthenticated") {

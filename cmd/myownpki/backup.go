@@ -100,11 +100,15 @@ func (t trustFlags) check() backup.Check {
 	return backup.Check{CheckpointKey: *t.checkpoint, BackupKey: *t.backupKey, AllowUnsigned: *t.allowUnsigned}
 }
 
-// hostBackupKey is the fingerprint of the backup key of this host, which
-// `backup verify` expects when --backup-key is not given: the backups of this
-// instance are signed by it. "" = there is no such key (a machine that only
-// verifies, or an instance that has not made a backup yet). A configuration
-// that can't be read is an error only when it was named with --config.
+// hostBackupKey is the fingerprint of the backup key of this host. `backup
+// verify` uses it as a hint when --backup-key is not given (Check.HostKey): a
+// backup signed by it is reported as made by this host's key; a backup signed
+// by another key still passes, with a note (it may come from another host);
+// a backup without a signature is never refused because of it. Only an
+// explicit --backup-key refuses. "" = there is no such key (a machine that
+// only verifies, or an instance that has not made a backup yet). A
+// configuration that can't be read is an error only when it was named with
+// --config.
 func hostBackupKey(configFlagValue string, stderr io.Writer) (string, int) {
 	environ := os.Environ()
 	cfg, _, err := config.Load(configPath(configFlagValue, environ), environ)
@@ -136,16 +140,13 @@ func runBackupVerify(ctx context.Context, args []string, stdout, stderr io.Write
 		return code
 	}
 	chk := tf.check()
-	fromHost := false
 	if chk.BackupKey == "" {
-		var fp string
-		if fp, code = hostBackupKey(*path, stderr); code >= 0 {
+		if chk.HostKey, code = hostBackupKey(*path, stderr); code >= 0 {
 			return code
 		}
-		chk.BackupKey, fromHost = fp, fp != ""
 	}
 	rep, err := backup.Verify(ctx, dir, chk)
-	printBackupReport(stdout, rep, chk, fromHost)
+	printBackupReport(stdout, rep, chk)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return exitProblem
@@ -170,7 +171,7 @@ func runRestore(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	chk := tf.check()
 	rep, err := backup.Restore(ctx, dir, chk, backup.Options{Layout: store.Layout{DataDir: cfg.DataDir}, AuthKeyFile: cfg.AuthKeyFile(), Clock: clock.System{}, Who: consoleWho()})
-	printBackupReport(stdout, rep, chk, false)
+	printBackupReport(stdout, rep, chk)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		if errors.Is(err, backup.ErrRefused) {
@@ -194,14 +195,14 @@ func printSigningKey(w io.Writer, c *backup.Created) {
 	}
 }
 
-func printBackupReport(w io.Writer, rep *backup.Report, chk backup.Check, keyFromHost bool) {
+func printBackupReport(w io.Writer, rep *backup.Report, chk backup.Check) {
 	if rep == nil || rep.Manifest == nil {
 		return
 	}
 	m := rep.Manifest
 	_, _ = fmt.Fprintf(w, "Backup of %s (MyOwnPKI %s), tenants %v, %d files.\n", m.CreatedAt, m.Version, m.Tenants, len(m.Files))
 	switch {
-	case rep.Authenticity == backup.Pinned && keyFromHost:
+	case rep.Authenticity == backup.Pinned && chk.BackupKey == "":
 		_, _ = fmt.Fprintf(w, "Signature valid: made by key %s, the backup key of this host.\n", rep.SigningKey)
 	case rep.Authenticity == backup.Pinned:
 		_, _ = fmt.Fprintf(w, "Signature valid: made by key %s, the key you named.\n", rep.SigningKey)

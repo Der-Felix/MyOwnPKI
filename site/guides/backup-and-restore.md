@@ -110,9 +110,11 @@ Signature valid: made by key SHA256:… – a key nobody has vouched for yet.
 note: signed by key SHA256:… – compare it with the one noted at init …
 ```
 
-`backup verify` on the host that made the backup takes that host's own key as the expected one. Backups from before 0.9.0
-have no signature. They still verify and restore, and the output says `unauthenticated`: nobody can tell whether they were
-changed after they were made. With `--backup-key`, they are refused unless you add `--allow-unsigned`.
+Without `--backup-key`, `backup verify` on the host that made the backup says *the backup key of this host* when that
+host's key file signed the backup, and notes *signed by key X, not this host's key Y* when another key did (for example
+the backup of another host). It never refuses because of the host's key. Backups from before 0.9.0 have no signature.
+They still verify and restore, with or without a host key, and the output says `unauthenticated`: nobody can tell whether
+they were changed after they were made. With an explicit `--backup-key` they are refused unless you add `--allow-unsigned`.
 
 ## 3. Copy it offsite
 

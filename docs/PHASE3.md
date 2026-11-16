@@ -3209,9 +3209,12 @@ section left room:
 - **`--allow-unsigned` is narrow:** it waives only the missing signature of a **format 1** backup. A format 2 backup
   without a valid signature, and a valid signature by a key other than the pinned one, are refused with and without it
   (the signature of a key you did not expect is no "unsigned" backup).
-- **Expected key without a flag:** `backup verify` (not `restore`) takes the key file of its own host as the expected key
-  when `--backup-key` is not given and the configuration can be read; `backup scheduled` verifies against the key that
-  just signed. `restore` goes into an empty data directory, where no key file can exist, so it has none.
+- **Key of the host without a flag (corrected by the main session after the upgrade test):** `backup verify` (not
+  `restore`) looks up the key file of its own host when `--backup-key` is not given and the configuration can be read, but
+  only as a **hint** (`Check.HostKey`), never as a pin: signed by it is reported as the host's key; signed by another key
+  passes with the note "signed by key X, not this host's key Y" (a legitimate case: the backup of another host); a format 1
+  backup passes as unauthenticated, with or without a host key. Only an explicit `--backup-key` refuses. `backup scheduled`
+  pins the key that just signed. `restore` goes into an empty data directory, where no key file can exist, so it has none.
 - **Layout of format 2:** the same manifest fields as format 1 (an older binary answers "backup format … is not …", not
   "unknown field"), plus `manifest.sig` (JSON: `format`, `algorithm`, `public_key`, `signature`, hex). The signature covers
   `"myownpki-backup-manifest-v1" 0x00` and the exact bytes of `manifest.json`. `manifest.sig` is written first, `manifest.json`
