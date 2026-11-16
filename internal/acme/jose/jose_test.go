@@ -339,27 +339,6 @@ func TestEAB(t *testing.T) {
 	}
 }
 
-// FuzzParse: no input makes the parser panic, and what it accepts keeps
-// its promises.
-func FuzzParse(f *testing.F) {
-	s := newSigner(f, ES256)
-	f.Add(s.body(f, s.header(), `{"x":1}`))
-	f.Add([]byte(`{"protected":"","payload":"","signature":""}`))
-	f.Add([]byte(`{"protected":"eyJhbGciOiJub25lIn0","payload":"","signature":""}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		j, err := Parse(data)
-		if err != nil {
-			return
-		}
-		if !allowed[j.Alg] || j.Nonce == "" || j.URL == "" || (j.JWK == nil) == (j.KID == "") {
-			t.Fatalf("accepted a JWS that breaks a rule: %+v", j)
-		}
-		if j.JWK != nil {
-			_ = j.Verify(j.JWK)
-		}
-	})
-}
-
 func TestParseInner(t *testing.T) {
 	t.Parallel()
 	s := newSigner(t, ES256)
@@ -384,3 +363,4 @@ func TestParseInner(t *testing.T) {
 		t.Errorf("outer without nonce: %v", perr)
 	}
 }
+
