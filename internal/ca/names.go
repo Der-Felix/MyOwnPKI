@@ -43,25 +43,25 @@ func checkDNSName(s string, allowWildcard bool) (string, error) {
 		return "", fmt.Errorf("DNS name %q must not end with a dot", short(s))
 	}
 	if _, err := netip.ParseAddr(name); err == nil {
-		return "", fmt.Errorf("%q is an IP address – request it as an IP SAN, not as a DNS name", name)
+		return "", fmt.Errorf("%q is an IP address – request it as an IP SAN, not as a DNS name", short(name))
 	}
 	labels := strings.Split(name, ".")
 	if labels[0] == "*" {
 		if !allowWildcard {
-			return "", fmt.Errorf("wildcard name %q needs the wildcard preset", name)
+			return "", fmt.Errorf("wildcard name %q needs the wildcard preset", short(name))
 		}
 		if len(labels) < 3 {
-			return "", fmt.Errorf("wildcard %q is too broad – it needs at least two labels after \"*.\" (like *.homelab.lan)", name)
+			return "", fmt.Errorf("wildcard %q is too broad – it needs at least two labels after \"*.\" (like *.homelab.lan)", short(name))
 		}
 		labels = labels[1:]
 	}
 	for _, label := range labels {
 		if err := checkLabel(label); err != nil {
-			return "", fmt.Errorf("DNS name %q: %w", name, err)
+			return "", fmt.Errorf("DNS name %q: %w", short(name), err)
 		}
 	}
 	if isDigits(labels[len(labels)-1]) {
-		return "", fmt.Errorf("DNS name %q: the last label is all digits, which looks like an IP address", name)
+		return "", fmt.Errorf("DNS name %q: the last label is all digits, which looks like an IP address", short(name))
 	}
 	return name, nil
 }
@@ -76,11 +76,11 @@ func checkLabel(label string) error {
 	case strings.Contains(label, "*"):
 		return fmt.Errorf("\"*\" is only allowed as the whole leftmost label")
 	case len(label) > maxLabel:
-		return fmt.Errorf("label %q is longer than %d characters", label, maxLabel)
+		return fmt.Errorf("label %q is longer than %d characters", short(label), maxLabel)
 	case !ldh.MatchString(label):
-		return fmt.Errorf("label %q may only contain a-z, 0-9 and '-' (not at the start or end)", label)
+		return fmt.Errorf("label %q may only contain a-z, 0-9 and '-' (not at the start or end)", short(label))
 	case len(label) >= 4 && label[2:4] == "--" && !strings.HasPrefix(label, "xn--"):
-		return fmt.Errorf("label %q: '--' at positions 3-4 is reserved (RFC 5891)", label)
+		return fmt.Errorf("label %q: '--' at positions 3-4 is reserved (RFC 5891)", short(label))
 	}
 	return nil
 }
@@ -93,11 +93,11 @@ func checkIP(s string) (netip.Addr, error) {
 		return netip.Addr{}, fmt.Errorf("%q is not an IP address", short(s))
 	}
 	if ip.Zone() != "" {
-		return netip.Addr{}, fmt.Errorf("IP address %q: a zone (%%%s) can't go into a certificate", s, ip.Zone())
+		return netip.Addr{}, fmt.Errorf("IP address %q: a zone (%%...) can't go into a certificate", short(s))
 	}
 	ip = ip.Unmap()
 	if ip.IsUnspecified() {
-		return netip.Addr{}, fmt.Errorf("IP address %q is the unspecified address", s)
+		return netip.Addr{}, fmt.Errorf("IP address %q is the unspecified address", short(s))
 	}
 	return ip, nil
 }
@@ -117,20 +117,20 @@ func checkEmail(s string) (string, error) {
 	}
 	at := strings.LastIndexByte(s, '@')
 	if at <= 0 || at == len(s)-1 {
-		return "", fmt.Errorf("%q is not an e-mail address (want local@domain)", s)
+		return "", fmt.Errorf("%q is not an e-mail address (want local@domain)", short(s))
 	}
 	local, domain := s[:at], s[at+1:]
 	if len(local) > maxLocal {
-		return "", fmt.Errorf("e-mail address %q: the part before @ is longer than %d characters", s, maxLocal)
+		return "", fmt.Errorf("e-mail address %q: the part before @ is longer than %d characters", short(s), maxLocal)
 	}
 	for _, part := range strings.Split(local, ".") {
 		if !atext.MatchString(part) {
-			return "", fmt.Errorf("e-mail address %q: the part before @ is not a plain address (no quotes, spaces or double dots)", s)
+			return "", fmt.Errorf("e-mail address %q: the part before @ is not a plain address (no quotes, spaces or double dots)", short(s))
 		}
 	}
 	d, err := checkDNSName(domain, false)
 	if err != nil {
-		return "", fmt.Errorf("e-mail address %q: %w", s, err)
+		return "", fmt.Errorf("e-mail address %q: %w", short(s), err)
 	}
 	return local + "@" + d, nil
 }
@@ -149,10 +149,10 @@ func checkURI(s string) (string, error) {
 	}
 	u, err := url.Parse(s)
 	if err != nil || !u.IsAbs() || !schemePattern.MatchString(u.Scheme) {
-		return "", fmt.Errorf("%q is not an absolute URI (like https://host/path or spiffe://domain/workload)", s)
+		return "", fmt.Errorf("%q is not an absolute URI (like https://host/path or spiffe://domain/workload)", short(s))
 	}
 	if u.User != nil {
-		return "", fmt.Errorf("URI %q must not contain a user name or password", s)
+		return "", fmt.Errorf("URI %q must not contain a user name or password", short(s))
 	}
 	return s, nil
 }
