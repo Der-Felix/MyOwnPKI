@@ -204,7 +204,7 @@ used up; if it ever leaks, revoke it at once and read the list of hosts it admit
 ### Let the agent write the sandbox, and try unverified recipes on a test host
 
 `deployment add` and `sandbox sync` keep `agent.yaml` and the systemd drop-ins in step, so use them instead
-of editing `10-paths.conf` by hand. The Postfix, Dovecot and Proxmox VE recipes are unverified examples: run
+of editing `10-paths.conf` by hand. The Apache, HAProxy, Postfix, Dovecot and Proxmox VE recipes are unverified examples: run
 them on a non-production host first. How: [Recipes]({{ '/recipes/' | relative_url }}).
 
 ### Know what happens to the old certificate

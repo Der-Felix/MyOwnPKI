@@ -334,7 +334,7 @@ rollback and a view of what is installed. The three levels are compared in
 ### Which systems does the agent run on?
 
 Linux with systemd. It ships as `.deb`, `.rpm` and tarball for amd64 and arm64, with deployment profiles
-for nginx and for plain files, and recipes for nginx, Postfix, Dovecot and Proxmox VE (only the nginx recipe
+for nginx and for plain files, and recipes for nginx, Apache, HAProxy, Postfix, Dovecot and Proxmox VE (only the nginx recipe
 rests on a setup the project has run). Live tests so far used Debian amd64. Windows, macOS and FreeBSD
 are build and test targets only; those hosts use an ACME client.
 See [Adding hosts]({{ '/hosts/' | relative_url }}) and [Recipes]({{ '/recipes/' | relative_url }}).
@@ -484,7 +484,7 @@ See [Verify a download]({{ '/reference/security/' | relative_url }}#verify-a-dow
 
 ### What comes next?
 
-The plan lists a preview before issuance and versioned settings (v0.3.10),
-Apache and HAProxy profiles and guides inside the UI (v0.3.11), then a quality round and a beta before
-1.0. dns-01 in the agent (v0.3.7), the charts, reports and analysis pages (v0.3.8) and the trust portal (v0.3.9) are released. The
+The plan lists a quality round and a beta before 1.0. dns-01 in the agent (v0.3.7), the charts, reports and analysis pages (v0.3.8),
+the trust portal (v0.3.9), the preview before issuance and versioned settings (v0.3.10), and the Apache and HAProxy recipes with
+the guides inside the UI and the demo (v0.3.11) are released. The
 order is firmer than the numbers. Release plan: [docs/PLAN.md §10.1]({{ site.repository_url }}/blob/main/docs/PLAN.md).

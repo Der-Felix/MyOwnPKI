@@ -114,7 +114,7 @@ machine without internet, `install.sh --archive` installs from this archive.
 
 ### With Docker (the alternative)
 
-The image `ghcr.io/der-felix/myownpki` (linux/amd64 and linux/arm64) is distroless and runs as a
+The image `ghcr.io/der-felix/myownpki` (linux/amd64 and linux/arm64) is distroless (a Debian 13 base) and runs as a
 non-root user; the data directory is a volume, and the image's healthcheck runs
 `myownpki healthcheck`. For a single server, use [`deploy/docker-compose.yml`](deploy/docker-compose.yml)
 with [`deploy/docker/config.yaml`](deploy/docker/config.yaml):
