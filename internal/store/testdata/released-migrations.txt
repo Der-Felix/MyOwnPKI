@@ -1,0 +1,43 @@
+# Released migration files (PHASE3 section 19.5, step 107). Never edit by hand:
+# bash scripts/ci/pin-migrations.sh --print | --check | --add-tree vX.Y.Z
+# Columns: kind, version, name, SHA-256 (LF line endings, as the migration runner
+# stores it), first release. A released file is never changed, renamed or removed;
+# a defect is fixed by a new migration (docs/RELEASING.md).
+audit 0001 init 1f17c0183aecfb86ee449622797ebddcadf1e8d198c5ba10e85cf9d953dcc4db v0.1.0
+audit 0002 audit_entries 7e9cdc82b44597fe9958369e61224a4d59e26fbd6ef1c96113e7c937c1ff751e v0.1.0
+pki 0001 init 4e8a20a7ed82b25703fcf07036af8f01b7ffa8e26f920af235caa209c205f864 v0.1.0
+pki 0002 outbox 061b342fe76b4fbe7f90ede88eaa8708c965a035a7cd580d04bfada253f697ac v0.1.0
+pki 0003 keys 8ce5d2abc8b6322688f417d98844b8d1417f85da2e1f53b65a174389699260b6 v0.1.0
+pki 0004 ca cd0359b21058451b1eea58763609e920ead3b395514720fccfab9712bc1d18ed v0.1.0
+pki 0005 revocation 4cd5987c0e59e7c56976ff6cf4bf680cfeff548578f2e96e02ffe7e35bbd29b1 v0.1.0
+pki 0006 ca_history c69325e9833e3c229e0e829601b3774bcebfcfe2e6c7d68219c22ed22ede7148 v0.1.0
+pki 0007 key_destroy_import_jobs 4ef1d23f7d8479f2f23b8583cb3ad54074ed156f4f1e861c1c69629ab11cd419 v0.1.0
+pki 0008 domains a7229a96cf2fe275be94098a7a08846bce29ebf4b7413c6f55265a5b0e4ce143 v0.2.0
+pki 0009 acme a8541ec0ebcac23c3d1033cac76e70d2665c6d0cb7ccb53285a68cca561f983a v0.2.0
+pki 0010 acme_replaces 530df3ebdd13c98e386d05eacf769c7cbdf5f285c8bab2ee210e881ffe448e4a v0.2.0
+pki 0011 agents 0a511dfa0537afb4f6f1f0e92f38711d361f81911f6c412465aca09388922227 v0.3.0
+pki 0012 agent_acme 1e6391cbbf607bd3d276ae33f7768704d307b5900acc047d9ff3167ba1ea024e v0.3.0
+pki 0013 agent_reports 9be19c8032064bdbe775fafe5359ab2da9d7e9b33a14dd3f30f94180c668c674 v0.3.0
+pki 0014 predecessor_revocation 13497f0063e8bfec2ab63b8781dd1eb9628d2785b7afdc448ae97f2df148f712 v0.3.1
+pki 0015 agent_package_format b7a83dd4da36d71a014335477283a656805d653bd9d6201489ad9cff08330c26 v0.3.1
+pki 0016 written_fingerprint 2dc250ae78d36b72a4ac56666605c4d3db05866fb8421533b89aae3ca2efa479 v0.3.1
+pki 0017 acme_predecessor 5612d88956f8ef9068e3dae1a04f53d67ec469e49bad7b4c5a8782e6c0c90e64 v0.3.1
+pki 0018 endpoints b225b83eb99de385ebd8aa7c93f8f26a9575ff63705d4b5559dd0a5e2e6d5738 v0.3.4
+pki 0019 enrollment_pass 0f3058a3ec36c225aee7532a608c2fa871bd6462520607f53eb95e58fe5d3727 v0.3.5
+pki 0020 report_indexes 54f36cb27d3568bc52669581ddbc8a98c073452ae59c8832497545af078b1877 v0.3.8
+pki 0021 settings_versions fc0d6f2f866a07800aa3e75d9180f737da08ec4b23d5d173264e84c3446cde61 v0.3.10
+system 0001 init 693347b70e2d3f1e573127c3956cd024a41dce9d4d7ee46b09792eda1edbf27b v0.1.0
+system 0002 outbox 13674a8dc39e238910037bc106a95aad69322c6ab92b66b908859161d37326e8 v0.1.0
+system 0003 unseal 252c323e54e3a0fd1cc671748b65666d507902ec466cc239147288ee840895db v0.1.0
+system 0004 auth c5c87a92e6dc0a641d27d1251400495e51319d4b0da1903085932fa7aa320b39 v0.1.0
+system 0005 instance aa425750f334cbeb84ee296fccf4b08edcbbf4b32448cfd023e83e00636911cb v0.1.0
+system 0006 device_cookies 3b611cbe73220768db698cbfd60c3f19255dfc8aaf16715c0cada450ccef110e v0.1.0
+system 0007 passkeys be635bd5f06e301081dc5f38a4a890f84f8900e23344037ac0ddf5bb9510894c v0.1.0
+system 0008 tokens_settings 79486d9560c8ee161d0e1710d5cc41bd8090e9ee899cc997b40d589eb24bda5c v0.1.0
+system 0009 acme_limits 2ba0f3a4e63288681492ba409146fd81d3e673f9e2bfbdf96fb3bd3a88ced266 v0.2.0
+system 0010 trust_page 84a3c04c6853ceab6279e67fa722393b9f3969f9b55e11031a2e7ae1efd9c4c7 v0.2.2
+system 0011 agent_enrollment ce9d8b5b0c73efcec92599ce20880457aca17071fb52ea4afa632663f6d91550 v0.3.0
+system 0012 step_up_minutes 26534e73ee1f930f776251a29c71a6ea0707010555933601ccc8af4057188bce v0.3.1
+system 0013 predecessor_defaults 0da47cf6e35aebfd62e519d4ad1caa50a68ef1db1d9a14d8aba1dac490251c22 v0.3.1
+system 0014 monitoring 2c1a29eec2159c5402e5719d93527e9075c1bd3bf4cb8657a3022896c667ec64 v0.3.3
+system 0015 settings_versions a9a33335049a1a43e0a7584a0d9ffc80ee44cd628e95f5741f3d2f943e311f76 v0.3.10

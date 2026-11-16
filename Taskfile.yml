@@ -179,6 +179,21 @@ tasks:
       - GOFLAGS= CGO_ENABLED=0 GOBIN="{{.ROOT_DIR}}/.tools" go install github.com/go-acme/lego/v5@v{{.LEGO_VERSION}}
       - CGO_ENABLED=0 LEGO_BIN="{{.ROOT_DIR}}/.tools/lego{{exeExt}}" go test ./internal/acme/ -run 'TestLego' -count=1 -v
 
+  upgrade:pins:
+    desc: Compare the pinned SHA-256 of every released migration file with the release tags (needs the tags; git fetch --tags)
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/ci/pin-migrations.sh --check
+
+  upgrade:fetch:
+    desc: Download and verify the old release files of the upgrade test into .tools/upgrade/cache (pinned SHA-256 in scripts/upgrade/releases.txt); once done, UPGRADE_OFFLINE=1 needs no network
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash scripts/upgrade/fetch.sh --all
+
+  upgrade:
+    desc: "Upgrade test (Linux amd64): old release binaries make an installation, the binary of this tree updates it in place (UPGRADE_ONLY=0.3.12 for one start version; lego from task acme:lego for the ACME step; options: task upgrade -- --dry-run)"
+    cmds:
+      - export PATH="{{.POSIX_TOOLS_PATH}}$PATH"; bash test/upgrade/run.sh {{.CLI_ARGS}}
+
   upgrade:test:
     desc: Upgrade test – the previous release (UPGRADE_FROM) makes an instance and a backup; this build restores, migrates and issues by ACME
     cmds:

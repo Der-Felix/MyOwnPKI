@@ -85,6 +85,20 @@ $env:NO_PROXY = "github.com,api.github.com"
      parser, commit the file with the fix and start the check again.
    - `scripts/ci/fuzz-targets.txt` must list every `func Fuzz...` of the tree (CI job `fuzz` fails
      otherwise): `bash scripts/ci/fuzz.sh --check`.
+   - Released migrations are frozen: `internal/store/testdata/released-migrations.txt` pins the SHA-256
+     of every migration file a release shipped, and `TestReleasedMigrationsAreFrozen` fails when one
+     changes. Before the tag, check the pins against the tags that exist (they come from `git fetch
+     --tags`), and in the release commit pin the migrations that are new in this release:
+
+     ```bash
+     bash scripts/ci/pin-migrations.sh --check
+     ```
+
+     ```bash
+     bash scripts/ci/pin-migrations.sh --add-tree "v${VERSION}"
+     ```
+
+     A defect in a released migration is fixed by a new migration, never by an edit.
 2. `CHANGELOG.md`: the section `## [<version>] - <date>` must carry the day you push the tag –
    change it if not and commit (`docs: date of v<version>`). The release notes are taken from this
    section; the workflow stops if it is missing. What the workflow will take (Git Bash – the same
