@@ -1,0 +1,43 @@
+# MyOwnPKI configuration of the demo (deploy/demo/docker-compose.yml). Mounted
+# read-only at /etc/myownpki/config.yaml. Every key is explained in
+# deploy/config.example.yaml. No secrets in this file; for trying out only.
+
+data_dir: /var/lib/myownpki
+
+log:
+  level: info
+  format: json
+
+admin:
+  # All interfaces inside the container; the compose file publishes the port
+  # on 127.0.0.1 of the Docker host only.
+  listen: 0.0.0.0:9443
+  tls_names: ""
+  allowed_networks: ""
+
+public:
+  # CRLs and CA certificates, on the demo network only (not published).
+  listen: 0.0.0.0:8080
+
+auth:
+  key_file: ""
+  trusted_proxies: ""
+  passkey_origin: ""
+
+acme:
+  # The server speaks ACME over TLS itself (tls_issuer): the certificate for
+  # acme.demo.test comes from the demo CA "issuing" once the server is
+  # unsealed. Before that it serves a bootstrap certificate. The port is above
+  # 1024 because the container has no capabilities.
+  base_url: https://acme.demo.test:8443/acme
+  listen: 0.0.0.0:8443
+  trusted_proxies: "127.0.0.1, ::1"
+  resolver: ""
+  tls_issuer: issuing
+
+agent:
+  # The agent listener stays off until `./demo.sh agent` (second act) sets
+  # agent.base_url, agent.tls_issuer and agent.ca through the environment.
+  listen: 0.0.0.0:8444
+  # The packages of the exact release, built into the image.
+  package_dir: /opt/myownpki/agent-dist

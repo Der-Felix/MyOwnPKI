@@ -46,6 +46,24 @@ Two-week rule: the newest release of the LTS line that is older than 2026-10-29.
 |---|---|---|---|---|
 | [Salt](https://github.com/saltstack/salt) onedir | 3008.5 (2026-10-26), the 3008 LTS line | Apache-2.0 (`salt-3008.5.dist-info` in the tarball; the onedir also bundles CPython and Python libraries under their own licenses) | `salt-call --local` renders and applies (`test=True`) the test pillars of `deploy/salt/myownpki` | `salt-3008.5-onedir-linux-x86_64.tar.xz` from `packages.broadcom.com/artifactory/saltproject-generic/onedir/3008.5/`, SHA-256 `3bbc89d18ff1cef340bfe662d0e973db8387c9affbb0633df1645725bb63786e` (the digest of the file at the repository, of the asset of the same name on the GitHub release `v3008.5`, and the file matched the published `.SHA512` asset) |
 
+## Container images of the demo (v0.3.11)
+
+Used only by `deploy/demo/` (docs/PHASE3.md §17, steps 75 and 76) and its CI check
+`scripts/ci/demo-check.sh`; not shipped in a release and not in `go.mod`. Both are pinned by the
+digest of the multi-platform index (`linux/amd64` and `linux/arm64` are in both), read from the
+registry API on 2026-11-16 (`registry-1.docker.io`, header `Docker-Content-Digest`, equal to the
+digest of the Docker Hub tag). Two-week rule: the newest tag whose image was pushed more than 14
+days before (on or before 2026-11-02); the newer `certbot` v5.10.0 (2026-11-10) and `nginx`
+1.30.6-trixie (2026-11-05) were too young.
+
+| Image | Tag pushed | License | For | Index digest |
+|---|---|---|---|---|
+| `certbot/certbot:v5.9.0` | 2026-10-29 | Apache-2.0 | certbot (http-01, `--standalone`) in the demo's first act | `sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` |
+| `nginx:1.31.7-trixie` | 2026-10-21 | BSD-2-Clause | nginx of the demo's second act (the `web` build, `deploy/demo/web/Dockerfile`) | `sha256:8632b3314d74c61f0e27f59055bab13f7793b988c94c090154d867bc29e0f39b` |
+
+The demo's second image (`web`) is built on the server image of the same release and adds only
+the agent tarball of that release, checked against the `checksums.txt` that is in the image.
+
 ## Release tools and the container base image (approved for v0.1, night run 2026-10-21)
 
 Used only by `.github/workflows/release.yml` (and locally by `task release:check` /

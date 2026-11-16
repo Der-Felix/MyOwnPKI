@@ -1,0 +1,148 @@
+# MyOwnPKI demo: a throwaway instance, certbot and, optionally, nginx with the
+# agent. For trying it out only – never for production. Do not run it on a
+# host that has a real instance in the same Docker project name; this file
+# shares nothing with deploy/docker-compose.yml (own project name, volumes,
+# network and configuration).
+#
+# Use ./demo.sh (see README.md): the server starts sealed, and the script does
+# the init, the unseal, the domain and certbot for you.
+#
+# The image is a variable so that CI can point it at a snapshot build. The tag
+# below exists only after the release is published.
+
+name: myownpki-demo
+
+services:
+  # One-shot: `myownpki init --demo --with-ca`. Every secret of the instance
+  # goes into one file in the data volume (init-demo-secrets.txt); the instance
+  # stays marked as a demo for good. A second run fails with "initialized
+  # already", so it is not part of `up`: ./demo.sh up runs it once.
+  init:
+    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+    profiles: [init]
+    command: ["init", "--demo", "--with-ca", "--ca-base-url", "http://myownpki:8080"]
+    restart: "no"
+    volumes:
+      - demo-data:/var/lib/myownpki
+      - ./config.yaml:/etc/myownpki/config.yaml:ro
+    networks: [demo]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  myownpki:
+    image: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+    restart: "no"
+    volumes:
+      - demo-data:/var/lib/myownpki
+      - ./config.yaml:/etc/myownpki/config.yaml:ro
+    ports:
+      # The admin UI and API: on this host only.
+      - "127.0.0.1:9443:9443"
+    networks:
+      demo:
+        aliases:
+          # The host of acme.base_url: the name in the certificate of the ACME
+          # listener (acme.tls_issuer) and the address certbot connects to.
+          - acme.demo.test
+          # The name of the agent listener of the second act.
+          - agent.demo.test
+    environment:
+      # The agent listener is off until `./demo.sh agent` sets these.
+      MYOWNPKI_AGENT_BASE_URL: ${DEMO_AGENT_BASE_URL:-}
+      MYOWNPKI_AGENT_TLS_ISSUER: ${DEMO_AGENT_TLS_ISSUER:-}
+      MYOWNPKI_AGENT_CA: ${DEMO_AGENT_CA:-}
+    read_only: true
+    # SQLite may need a scratch file for large sorts.
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # A sealed server is healthy: the check only proves that the listener runs.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/myownpki", "healthcheck"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 5s
+    stop_grace_period: 30s
+
+  # First act: certbot gets a certificate for www.demo.test by http-01. It is
+  # kept running (nothing happens until ./demo.sh certbot runs the script in
+  # it) so that the network alias below exists: the server's http-01 check
+  # connects to www.demo.test:80, which must be this container.
+  certbot:
+    image: certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805
+    profiles: [certbot]
+    entrypoint: ["tail", "-f", "/dev/null"]
+    restart: "no"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - demo-certbot:/etc/letsencrypt
+      # The demo root, fetched by run.sh from the public listener; the web
+      # service of the second act reads it from here.
+      - demo-trust:/trust
+      - ./certbot/run.sh:/demo/run.sh:ro
+    networks:
+      demo:
+        aliases:
+          - www.demo.test
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/lib/letsencrypt
+      - /var/log/letsencrypt
+    # Root inside the container, but only what standalone http-01 on port 80
+    # needs.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, CHOWN]
+    security_opt:
+      - no-new-privileges:true
+
+  # Second act (profile "agent"): nginx served by myownpki-agent. A demo build
+  # from web/Dockerfile: the agent comes from the server image's own verified
+  # package. Not part of the CI check; see README.md.
+  web:
+    profiles: [agent]
+    build:
+      context: ./web
+      args:
+        MYOWNPKI_IMAGE: ${MYOWNPKI_IMAGE:-ghcr.io/der-felix/myownpki:0.3.11}
+    image: myownpki-demo-web:local
+    restart: "no"
+    volumes:
+      - demo-trust:/trust:ro
+      - demo-web-state:/var/lib/myownpki-agent
+      - demo-web-certs:/etc/nginx/myownpki
+    networks:
+      demo:
+        aliases:
+          - web.demo.test
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/cache/nginx
+      - /var/www/html
+      - /etc/myownpki-agent
+      - /etc/nginx/conf.d
+    # nginx starts as root and drops to its own user; the agent runs as root
+    # and writes the key with its mode. Nothing else.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  demo:
+    name: myownpki-demo
+
+volumes:
+  demo-data:
+  demo-certbot:
+  demo-trust:
+  demo-web-state:
+  demo-web-certs:
