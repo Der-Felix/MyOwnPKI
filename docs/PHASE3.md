@@ -2849,6 +2849,28 @@ rest is grouped in §18.4.
   10-accounts-per-address limit (the limit is checked first); the 409 of a `keyChange` to the account's own key says
   "belongs to another account already".
 
+**Built: steps 99 and 100 (2026-11-16).**
+
+- *Step 99.* `golangci-lint run --fix --enable-only modernize` ran after PR #49 and `main` were merged into the branch:
+  126 Go files (60 outside tests), 365 lines added and 490 removed, in one commit. What it did: `errors.AsType` for a `var`
+  and `errors.As` (24 places), `strings.SplitSeq` and `FieldsSeq`, `slices.Contains` and `slices.Backward`, `maps.Copy`,
+  `CutPrefix`, `CutSuffix` and `CutLast`, `max()`, `reflect.Type.Fields`, `sync.WaitGroup.Go`, `new(value)` for the pointer
+  helpers of tests (seven helpers that nothing calls any more are deleted), and promoted fields in the literals of embedded
+  structs. **Reviewed, one rewrite refused:** `omitzero` for four `time.Time` fields of `agent.DeploymentResult` would drop
+  the zero times from the JSON (`omitempty` never did anything for a struct); `omitempty` is removed instead and the output
+  is the same as before. The tool skipped two files because two of its own edits collided (`deploy.go`,
+  `trustkit/fuzz_test.go`); both were finished by hand, as were an unnamed loop variable, a shadowing one and a blank line it
+  left behind. `modernize` is **not** a permanent linter: the plan asks for one commit, and a newer `golangci-lint` would
+  add rules and findings. The same command now reports 0 issues on linux, darwin, freebsd and windows with and without the
+  tags `conformance` and `e2etest`; the tests of every touched package pass (not `internal/publish`: Defender, see above).
+- *Step 100.* Documentation (`CONTRIBUTING.md`, `SECURITY.md` "Supported versions", `site/security.md`,
+  `site/contributing.md`, `docs/RELEASING.md` with the optional fuzz hour, `go-conventions.md` Testing), the CHANGELOG
+  section `[0.3.12]` and the version 0.3.12 in the files that the bump of 0.3.11 changed. `CLAUDE.md` and `PLAN.md` follow
+  after the tag. Coverage of this release (`task cover`, Windows, 23 tests skipped, `internal/publish` left out): **85.3 %
+  of 31,181 statements**; combined numbers `acme` 87.1 %, `ca` 86.3 %, `agents` 84.2 %, `auth` 84.2 %, `server` 85.8 %,
+  `jose` 88.7 %, `backup` 87.2 %, `httpapi` 86.2 %, `web` 81.3 %, `ca/legacy` 80.9 % (the baseline of the Facts: 79.0 %
+  own-package, combined `acme` 77.8 %, `ca` 83.6 %, `agents` 81.9 %, `auth` 82.3 %, `server` 84.7 %).
+
 ### 18.2 Fuzz targets and invariants
 
 Every target follows the same rules, so a reviewer can check them in one pass:
@@ -3024,3 +3046,20 @@ configuration change, and any new dependency.
     the same line twice after step 93, and whether a persistent `recover` in `validator.start` changes the timing of
     the conformance run. The facts come from reading the code and running the tools named in each bullet; no
     `graphify` query was possible (no graph in this worktree).
+
+**Owner decisions found while building v0.3.12** (none of this is changed in the release; each point needs the
+maintainer's call):
+
+1. **The backup manifest is unsigned.** Editing `pki.db` and rewriting the hashes in the manifest passes `Verify` and
+   `Restore`.
+2. **`ImportExternal` has no SAN cap.**
+3. **The lists of `InspectCSR` are not capped at `maxSANs`.**
+4. **A valid DER CSR whose subject text starts with `-----BEGIN` is treated as PEM.**
+5. **`keys.ChooseRecoveryOutput`, `auth.Service.ConfirmTOTP` and `tenant.Store.Version` have callers only in tests**
+   (step 91 moved them into test files). Check whether `init` should use them; if not, they stay test helpers.
+6. **`auth.Draft.Confirmed` is unused.**
+7. **`apache2ctl configtest` needs `/run/apache2` after a boot** (a limitation of the `apache2` recipe, described in the
+   0.3.11 notes).
+8. **Salt test cases for Apache and HAProxy and `site/demo.md` are not added.**
+9. **The live tests of the v0.3.11 recipes, of the demo's agent act and of the flags of the certbot guide are the
+   owner's** (the live test is pending).
