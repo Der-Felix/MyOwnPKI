@@ -301,24 +301,15 @@ func (a *Agent) removeStaleTempsIn(target string) {
 		}
 		full := filepath.Join(root.Name(), p)
 		if rerr := root.Remove(p); rerr != nil {
-			a.warn("deployment: a leftover temporary file could not be removed", full, rerr)
+			if a.log != nil {
+				a.log.Warn("deployment: a leftover temporary file could not be removed", slog.String("path", full), slog.Any("error", rerr))
+			}
 			continue
 		}
-		a.warn("deployment: removed a leftover temporary file of an interrupted write", full, nil)
+		if a.log != nil {
+			a.log.Warn("deployment: removed a leftover temporary file of an interrupted write", slog.String("path", full))
+		}
 	}
-}
-
-// warn logs one warning that carries a path and, for a failure, the error
-// text; never file contents.
-func (a *Agent) warn(msg, path string, err error) {
-	if a.log == nil {
-		return
-	}
-	if err != nil {
-		a.log.Warn(msg, slog.String("path", path), slog.Any("error", err))
-		return
-	}
-	a.log.Warn(msg, slog.String("path", path))
 }
 
 // firstPEMBlock decodes the first PEM block of data and then clears data. The

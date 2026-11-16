@@ -82,6 +82,7 @@ func TestApacheConfigCheckHint(t *testing.T) {
 	}
 	for name, withWrite := range map[string]bool{"without sandbox write": false, "with sandbox write": true} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			f := freshFixture(t)
 			spec := DeploymentSpec{
 				Name: "p", Dir: f.p("ssl", "p"), ACMEDirectory: recipeACME,
