@@ -72,7 +72,7 @@ stands in for it) and **any live test on the maintainer's servers**.
 - **Windows Defender** blocks the `internal/publish` test binary (a known false positive,
   documented). This run never touched Defender; locally `task ci:local` passed once with the
   package, and CI is the full check.
-- **Live incident of 2026-11-15, before the run.** Postfix on the SMTP relay host had been down
+- **Live incident found on 2026-11-15, before the run (the outage began on 2026-11-12).** Postfix on the SMTP relay host had been down
   for three days after a reboot because of a boot race (`inet_interfaces` could not find the
   local address). The update did not cause it. The reload hook of the agent on that host failed
   because of it. The maintainer's decision is pending (see below).
@@ -100,7 +100,7 @@ stands in for it) and **any live test on the maintainer's servers**.
    monitoring check that notices a dead Postfix. Without both the boot race can happen again.
 6. **Housekeeping from the live update:** add the second host to the `low_ports` pillar mapping;
    delete the leftover `/root/myownpki-0.3.10` directory on the server; watch the next renewals
-   of the SMTP relay host and the home-assistant host.
+   of the SMTP relay host and the second updated host.
 7. **`system_trust`** may be enabled only when every agent is at 0.3.9 or newer. All agents were
    updated to 0.3.10 on the evening of 2026-11-15; the switch is the
    maintainer's.
