@@ -3063,3 +3063,326 @@ maintainer's call):
 8. **Salt test cases for Apache and HAProxy and `site/demo.md` are not added.**
 9. **The live tests of the v0.3.11 recipes, of the demo's agent act and of the flags of the certbot guide are the
    owner's** (the live test is pending).
+
+## 19. Beta: v0.9.0
+
+The roadmap row "Beta" (PLAN §10.1) is a phase, not a feature: **feature freeze, upgrade tests between versions, only fixes**.
+Owner decisions of 2026-11-16 (not reopened here): (1) the beta consists of **ordinary releases v0.9.0, v0.9.1, …** from the
+freeze on, with no pre-release tags; `install.sh`, `:latest` and the Salt formula behave as for every release; **v1.0.0 follows
+when the beta has no open finding that the owner rates a blocker**; (2) before the freeze the **security-relevant open points
+of §18.8 "Owner decisions found while building v0.3.12"** are fixed (points 1 to 4); the rest (points 5, 6 and 8: functions
+that only tests call, `auth.Draft.Confirmed`, Salt test cases for Apache and HAProxy and `site/demo.md`, plus the demo's
+version text) are small clean-ups inside the beta, none of them a blocker. Written on 2026-11-16 as a plan for review; the
+steps continue after 100 and **nothing is built**. The release number can shift (§10.1: "order before numbers"); the section
+keeps number 19. **No ADR (§2) is changed by any step.** Step 101 touches two owner-approved design records (PLAN §5 key list,
+§14 backup row) and is therefore marked "needs owner decision": the main session asks before step 102 starts.
+
+Goal, checked by CI and by the owner: (a) the four security points are fixed with tests; (b) the freeze rules are written where
+contributors and sessions read them; (c) **an installation made by a released version keeps working after the update**, proved
+by a test that runs the old release binaries, not only the current source built twice; (d) a stranger can install the beta,
+knows what to test and how to report, and knows what never to post; (e) the clean-ups are done or listed.
+
+### 19.1 Facts (what exists today)
+
+Measured here: git tags and migration counts, release assets (`gh release view`, read only), the code lines named below.
+Read, not run: everything else. Nothing was built or executed in this worktree.
+
+- **The upgrade test of today is narrow.** `task upgrade:test` (`Taskfile.yml`, `UPGRADE_FROM: 0.1.0`, test
+  `internal/acme/upgrade_test.go`) builds v0.1.0 with `go install …@v0.1.0`, makes an instance and a backup with it, restores
+  that backup with the **current code in the test process**, migrates, unseals and issues **one** certificate by ACME. It runs
+  in job `check`, needs the Go module proxy, runs on Windows too, and tests no server process, no in-place update, no agent, no
+  rollback and no release binary. The CI job `install` has a step "second build for update"
+  (`scripts/ci/install-second-build.sh`): the **same source** with another version string, so the update path, the automatic
+  backup and the rollback of `install.sh` are tested, but with an unchanged schema and unchanged data.
+- **Migrations:** `internal/store/migrate` keeps a checksum per applied migration in the database and refuses an applied file
+  that changed (`ErrModified`) or a database from a newer binary (`ErrNewer`), at start and in `db status` (exit 1). Nothing in
+  the **repository** pins the checksum of a released file: a changed `0007_….sql` is noticed only on a database that already
+  applied the old text. Migration counts per release (pki.db/system.db, measured with `git ls-tree`): v0.1.0 7/8, v0.2.0 10/9,
+  v0.2.2 10/10, v0.3.0 13/11, v0.3.1 17/13, v0.3.3 17/14, v0.3.4 18/14, v0.3.5 19/14, v0.3.8 20/14, v0.3.10 to v0.3.12 21/15;
+  audit.db is 2 throughout.
+- **Release assets exist for every stable tag** (measured): `myownpki_<v>_linux_amd64.tar.gz` 15 to 19 MB, `checksums.txt` and
+  its cosign bundle; `install.sh` from v0.2.2, `install-agent.sh` and the agent archive from v0.3.0 (9 to 10 MB), the agent
+  `.deb` and `.rpm` from v0.3.5. v0.1.0 has no `install.sh`. Two release candidates (v0.3.0-rc.1, -rc.2) exist and are not used.
+- **Agent protocol:** `check-agent-protocol.sh` runs `buf breaking` (`WIRE_JSON`) against `origin/main` only. The documents promise
+  one direction: "update the server before the agents; mixed operation is supported" (`docs/OPERATIONS.md` §9, about v0.3.0
+  agents and a newer server). **New agent against old server is not promised** (it happens only after a server rollback).
+- **Backup:** format `myownpki-backup/1`; the manifest holds SHA-256 and size per file, the migration version, the head of every
+  audit chain and the checkpoint key fingerprint; `check` refuses added, missing or changed files, wrong chains and a wrong SAN
+  index (`internal/backup/restore.go`). Files and manifest are written by the same hand, so **whoever can write the backup
+  directory can change `system.db` or `pki.db`, recompute the hashes and rewrite the manifest, and `Verify` and `Restore` pass**
+  (read, not tried). The audit chains are protected when `--checkpoint-key` is passed (the signing key comes from the root key);
+  private keys stay wrapped under the root key. Open: users, role bindings, domain rules, policies and revocation rows. The
+  default `auth.key` lies in the data directory and **is part of the backup** (`backup.go` `create`), so a forged user row could
+  carry a TOTP secret the forger chose. The daily timer runs `myownpki backup scheduled` as its **own process with no
+  passphrase** (the server never reads it from a file, PLAN §5): a key derived from the root key does not exist there.
+- **The caps:** `maxSANs = 100`, `short()` = 80 characters, `MaxCSRSize` and `MaxCertSize` = 64 KiB (`internal/ca`). The issuance
+  path checks the count (`names.go:250`); `importExternal` (`renewcert.go:239`) does not (a 64 KiB certificate holds about 3,000
+  names; `certNames` de-duplicates with `slices.Contains`, quadratic) and `TestImportExternalWithThousandsOfSANs` asserts that
+  3,000 names are **recorded on purpose**. `InspectCSR` (`renewcert.go:179`) copies every name unclipped (about 6,000 in 64 KiB;
+  the fuzz bound is `items > len(data)/2+8`, so the missing cap does not fail it). `uploadedCSR` (`internal/web/app_issue.go:238`)
+  takes a file for PEM when `-----BEGIN` is **anywhere** in it; the seed `makeDER("-----BEGIN not a pem")` of `FuzzUploadedCSR`
+  exists, and the target's oracle repeats the same test, so it cannot fail.
+- **The three test-only functions** (read): `keys.ChooseRecoveryOutput` is a test helper that restates a rule `init` enforces by
+  mode (`setup.go:263`: `--stdin` needs `--recovery-key-file`; interactive needs a terminal, `cmd/myownpki/init.go:62`; demo
+  writes a file); the type `RecoveryOutput`, `ShowOnTerminal`, `WriteToFile` and `ErrRecoveryKeyNeedsFile` (`keys/recovery.go:178`)
+  are used by nothing else, which `deadcode` does not report (no types or constants). `auth.Service.ConfirmTOTP` is test code
+  (`totp_confirm_test.go:207`): interactive `init` confirms through `Draft.Confirm`, `--stdin` and `--demo` through the first
+  login (`users.go` `confirmedStep`). `tenant.Store.Version` (`versions_test.go:335`) is covered in production by `Settings.Version`
+  (`settings.go:117`). **Answer: `init` needs none of them; they stay test helpers**, and `Draft.Confirmed` (unused) goes.
+- **Stale text:** `deploy/demo` names `ghcr.io/der-felix/myownpki:0.3.11` in four files (the release is 0.3.12); the compare links
+  at the bottom of `CHANGELOG.md` stop at v0.3.10 (`[Unreleased]` compares `v0.3.10...HEAD`; `[0.3.11]` and `[0.3.12]` are missing);
+  `.github/ISSUE_TEMPLATE/` does not exist.
+
+### 19.2 Work plan
+
+Sizes are estimates by reading, not measured: S under half a day, M about one day, L two to three days. Every step is one
+commit (or the series named), builds and passes `task check`; `task ci:local` is run and every SKIP line is reported. Details of
+steps 101 to 105 are in 19.3, of 106 in 19.4, of 107 to 115 in 19.5, of 116 to 118 and 124 in 19.6, of 119 to 123 in 19.1
+("Stale text", "The three test-only functions").
+
+| # | Size | Step | Verifies with |
+|---|---|---|---|
+| 101 | S | **Backup authenticity: decision record (needs owner decision D1; nothing is built before the answer).** PLAN §14 backup row and §5 key list say what the signature promises and what it does not; `references/security.md` lists the new key | owner reads 19.3; no code |
+| 102 | L | **Backup signature (option b, only after D1).** New `internal/backup/sign.go`, changes in `backup.go`, `restore.go`, `prune.go`, `cmd/myownpki/backup.go`, `internal/setup` (init prints the fingerprint); format `myownpki-backup/2`; tests in `backup_failure_test.go` (tamper, re-sign with a foreign key, downgrade, format 1, lost key, key not in the backup), a seed set for a new `FuzzManifest` (line in `fuzz-targets.txt`); docs `site/guides/backup-and-restore.md`, OPERATIONS | `go test ./internal/backup ./cmd/myownpki`; the by-hand tamper in 19.3; `task fuzz FUZZ_ONLY=FuzzManifest` |
+| 103 | S | **`ImportExternal` cap.** `checkExternalNames` in `internal/ca/renewcert.go`; `TestImportExternalWithThousandsOfSANs` becomes a refusal test; seed of 101 names in `FuzzParseCertificate` | `go test ./internal/ca -run 'ImportExternal\|Fuzz'` |
+| 104 | S | **`InspectCSR` cap** and clipping in the same file (same file as 103: after it); the wizard's `prefill` uses the helper; `FuzzParseCSR` bound tightened | `go test ./internal/ca ./internal/web ./internal/httpapi` |
+| 105 | S | **Upload: DER decided by parsing.** `uploadedCSR` in `internal/web/app_issue.go`; the oracle of `FuzzUploadedCSR` changes | `go test ./internal/web -run 'Upload\|Fuzz'` |
+| 106 | S | **Freeze rules** (19.4): `CONTRIBUTING.md`, `site/contributing.md`, `CLAUDE.md` rule (status line follows with 124), `.github/pull_request_template.md` | `scripts/ci/site-check.sh`; read |
+| 107 | M | **Released migrations are frozen.** `internal/store/testdata/released-migrations.txt` (kind, version, name, SHA-256, first release), test `TestReleasedMigrationsAreFrozen` over `store.Migrations(kind)` (same checksum as the runner, CRLF-normalized), `scripts/ci/pin-migrations.sh` (`--from-tag vX` recomputes from git; `--check` needs tags) | the test fails when a pinned file changes or disappears, passes for a new unpinned file; run the script against v0.3.12 and diff |
+| 108 | M | **Release asset list and fetch.** `scripts/upgrade/releases.txt` (version, asset, SHA-256), `fetch.sh`, `pin-release.sh`, `--self-test` with a local file server | self-test; `task upgrade:fetch` twice (second run offline) |
+| 109 | L | **Harness core for one start version** (the previous release): `test/upgrade/run.sh`, `lib.sh` (TOTP from the demo secrets file, REST helper, ports), config template, populate steps, update in place, assertions A1 to A4, A8, A10 of 19.5 | `task upgrade UPGRADE_ONLY=0.3.12` |
+| 110 | M | **ACME and rules in the harness:** lego (pinned `LEGO_VERSION`, the conformance job's way) before and after; domain rule and settings versions (A5, A6); rollback by restore with the old binary (A9) | the same task for 0.3.12 |
+| 111 | M | **Agent in the harness (A7):** old agent archive enrolls, heartbeats, reports; stays running over the update. Renew-now by the old agent is a spike inside this step; if it needs port 80 and root it moves to 113 | harness log shows `last_seen` advancing after the update |
+| 112 | M | **The matrix:** capability profile per version (`test/upgrade/profiles.sh`: ACME from 0.2.0, agent from 0.3.0, enrollment pass from 0.3.5, settings versions from 0.3.10), the version list of 19.5, stored-data edge cases | `task upgrade` (all); `UPGRADE_ONLY=0.1.0` |
+| 113 | L | **systemd level:** `test/install/upgrade_systemd_test.sh`: `install.sh` of release V from the cache installs, this tree's `install.sh` updates (V = 0.2.2 and the previous release); automatic backup by the old binary, rollback text, timer, drop-ins | CI job `install` on the disposable runner; locally only with `MYOWNPKI_CI_DISPOSABLE=1` |
+| 114 | M | **CI wiring** (touches `ci.yml`, `local.sh`, `changes.sh`, `Taskfile.yml`, CONTRIBUTING): job `upgrade` (matrix) and `upgrade-nightly`, output `upgrade` of `changes.sh`, registry lines with SKIP reasons, `task upgrade`, `task upgrade:fetch`, `lint-meta` registry self-test | `task lint:ci`; `task ci:local -- --only upgrade`; a PR run |
+| 115 | S | **Protocol guard:** `check-agent-protocol.sh` also runs `buf breaking` against the tag `v0.3.0` (nightly) and the last release (every run); OPERATIONS §9 states both directions | script run; read |
+| 116 | M | **Issue templates:** `.github/ISSUE_TEMPLATE/bug.yml`, `feedback.yml`, `config.yml` (blank issues off; contact link to the private advisory); labels as commands in RELEASING (the owner runs them) | `task lint:ci` does not cover issue forms: the owner opens "New issue" after the push and checks all three |
+| 117 | M | **Beta page and banner:** `site/beta.md`, `_data/nav.yml`, README banner, `SECURITY.md` supported versions ("the latest 0.9.x"), `site/upgrade.md` notes | `scripts/ci/site-check.sh`; every command on the page run once |
+| 118 | S | **Known limitations of the beta** collected from CHANGELOG 0.3.12 and §18.8 into the page and the `[0.9.0]` notes | read |
+| 119 | S | **Demo image tag:** a test in `deploy/demo/demo_test.go` that the tag equals `DEFAULT_VERSION` of `install.sh`; the four files get the version; the bump list names them | `go test ./deploy/demo` |
+| 120 | S | **CHANGELOG compare links:** `[Unreleased]`, `[0.3.11]`, `[0.3.12]`, later `[0.9.0]`; a check in `site-check.sh` or the release awk that every `## [x]` has a link | `scripts/ci/site-check.sh` |
+| 121 | S | **Dead code:** delete `auth.Draft.Confirmed`; move `RecoveryOutput`, its constants and `ErrRecoveryKeyNeedsFile` into `keys_test.go` next to `ChooseRecoveryOutput` | `task deadcode`; `task check` |
+| 122 | S | **Salt test cases** for `apache2` and `haproxy` in `deploy/salt/test/cases/` (pillar, hashes of the fixtures) | `sudo bash scripts/ci/salt-test.sh` (CI job `salt`); `--self-test` locally |
+| 123 | S | **`site/demo.md`:** what the demo is and how to run it (`deploy/demo/README.md` is the source), nav entry | `scripts/ci/site-check.sh` |
+| 124 | M | **Release 0.9.0:** version bump in the files of the commit `chore(release): bump the version to 0.3.12` (README, `api/openapi.yaml`, `deploy/docker-compose.yml`, `deploy/install.sh` and `install-agent.sh`, `deploy/salt/myownpki/{README.md,map.jinja,pillar.example}`, `docs/OPERATIONS.md`, `docs/RELEASING.md`, `test/install/agent_functions_test.sh`) plus the demo files (step 119); CHANGELOG `[0.9.0]` (19.6); RELEASING additions (19.6); `CLAUDE.md` status line and PLAN §10.1 after the tag | `task ci:local`; `bash scripts/ci/site-check.sh`; the RELEASING checklist |
+| 125 | – | **After the tag (owner):** pin the release (`pin-release.sh v0.9.0`, a commit on `release/v0.9.1`), live tests of §19.9, announce the beta | the list gets its first 0.9 line |
+
+### 19.3 Security items before the freeze (steps 101 to 105)
+
+**Backup authenticity (101, 102).** Threat: someone who can write the backup directory (an offsite share, a USB disk, a bucket) but
+holds neither the host nor the passphrase. Options:
+
+| Option | Does | Against it |
+|---|---|---|
+| (a) MAC (HMAC-SHA-256) with a key derived from the root key | no new secret to keep | the daily timer has no passphrase, so it cannot MAC; a sealed server could not back up; `backup verify` of an old backup would need the passphrase of its time. **Rejected for the timer** |
+| **(b) Ed25519 signature by a dedicated backup key (recommended)** | a key file `<data_dir>/backup-signing.key` (0600, `O_EXCL`), made by `init` or by the first `backup`; **never copied into a backup**; `manifest.sig` holds the algorithm, the public key and the signature over the exact bytes of `manifest.json`; the fingerprint is pinned like the checkpoint key | one more fingerprint to note; whoever holds the backup **and** the key can re-sign; a lost key file means new backups get a new key |
+| (c) document only | "the backup directory is as sensitive as the CA"; `verify` is integrity, not authenticity | the PLAN §14 sentence "a manipulated backup never becomes the PKI" stays false |
+
+Design of (b): the format becomes `myownpki-backup/2` (an old binary refuses it with its existing "format … is not …" text, no
+migration, no config key, no schema change). `check` accepts `manifest.sig` next to `manifest.json` (as for `prune.go`'s list of
+expected files) and verifies it **before** it trusts any field. Verify and restore take `--backup-key FP` (at least 16 hex digits, as
+`--checkpoint-key`); without it the local key file's fingerprint is used when the file exists (`backup scheduled` always does), else
+the output says `note: signed by key SHA256:… – compare it with the one noted at init`. A valid signature by another key without a
+pin is accepted with that note (the forger signs with his own key; the pin is what stops him): the guide says to note the
+fingerprint and to pass it at restore. **Backups of older versions (format 1) still verify and restore**, with `note: this backup
+has no signature (made before 0.9.0) – nobody can tell whether it was changed after it was made`, exit 0. **Downgrade:** when
+`--backup-key` is given, an unsigned backup is refused unless `--allow-unsigned`; a format-2 backup without a valid signature is
+always refused. The `system.backup` audit entry carries the key fingerprint, so a changed key shows in the log. Failure modes:
+sealed server (no effect: backup, verify and restore never needed the passphrase); lost key file (old backups still verify with the
+public key in `manifest.sig` and the noted fingerprint; the next backup makes a new key and says so, it cannot tell a first run
+from a loss); restore into a new data directory (no key comes along: the restore output says the first backup there makes a new
+one); rotation = delete the file. Rollback: `install.sh` makes its update backup with the **old** binary (format 1), so its
+documented rollback keeps working; a format-2 timer backup needs a 0.9 binary. **ADR check: no ADR is touched** (ADR-07 is
+replication, Litestream stays after 1.0); this adds a key to the inventory of PLAN §5 and changes the sentence of §14, both
+owner-approved design records: **needs owner decision D1**. If D1 is (c), step 102 shrinks to the docs (S).
+
+**`ImportExternal` (103).** `importExternal` counts DNS, IP, e-mail and URI names **before** `certNames` and refuses above
+`maxSANs`: `deny("%d names – at most %d per certificate", n, maxSANs)` (the sentence of `names.go:251`). The function is
+`checkExternalNames(cert)` so a fuzz target can call it unchanged. A REST client sees **422 `policy-violation`** with that reason,
+the audit log gets the existing denied row. A public certificate with more than 100 names (some multi-domain commercial
+certificates) can no longer be recorded: D3. Tests: 100 accepted, 101 refused, mixed types, nothing stored, one denied audit row.
+
+**`InspectCSR` (104).** One helper keeps the first `maxSANs` names over all four lists in the order DNS, IP, e-mail, URI, clips each
+with `short()`, clips subject and common name, and adds to `Problems`: `"%d names – at most %d per certificate; the list shows the
+first %d"`. The answer stays 200 (a preview shows what is wrong); `prefill` of the wizard uses the same helper. Tests: the 2,500-name
+seed, order, clipping; `FuzzParseCSR` asserts at most `maxSANs` names and 80-byte strings.
+
+**Upload (105).** A file is DER when `x509.ParseCertificateRequest` accepts it (strict: one request, nothing after it; a PEM text
+never parses, it starts with `-`); otherwise a file containing `-----BEGIN` is PEM, as before (`openssl req -text` output with the
+block behind it stays accepted, CHANGELOG 0.3.12); otherwise the existing sentence "The file is neither a PEM nor a DER certificate
+request." A valid DER request whose subject text contains `-----BEGIN` is accepted instead of failing later with "no PEM block
+found". Rated P3 (§18.7): no bypass found, `parseCSR` still checks everything (read, not tried).
+
+### 19.4 Feature freeze rules (step 106)
+
+The freeze starts with the tag v0.9.0 and lasts until v1.0.0. Written into `CONTRIBUTING.md` (new section "Feature freeze"),
+`site/contributing.md`, a `CLAUDE.md` rule ("during the beta refuse feature work, name the post-1.0 list"), the PLAN §10.1 row and
+a pull request template with one checkbox.
+
+| Allowed | Not allowed (needs an exception) |
+|---|---|
+| **Fixes** (`fix:` or `fix(<area>):`; the commit says what was wrong) | features, new pages, new settings or configuration keys, new CLI commands |
+| **Docs** (`docs:`), **tests** and CI for them (`test:`, `ci:`) | REST additions (a path, a field), changes to `api/openapi.yaml` except to correct it |
+| **Security hardening** that only narrows what is accepted (`fix(security):` in the PR title; the §18.7 rules apply) | schema changes, except a **new** migration that fixes a defect (never an edit of a released file: step 107) |
+| **Dependency security updates** (`deps/<short>` branch, `chore(deps):`, the two-week rule's security exception of PLAN §13) | new dependencies, protocol changes in `proto/` beyond what `buf breaking` accepts, new agent profiles or recipes, any ADR change |
+
+An exception is the owner's: he writes "freeze exception" on the issue or pull request and adds the label `freeze-exception`; the
+commit body names the issue and the CHANGELOG lists it under *Changed*. A session never decides it. **The post-1.0 list**
+(PLAN §10.1 "After v1.0", §12 Backlog) stays as it is; ideas from testers get the label `post-1.0` and are looked at after 1.0.
+
+### 19.5 Upgrade tests
+
+**Layers.** U0 is the existing `task upgrade:test` and stays unchanged: from-source old binary, in-process, runs on the owner's
+Windows machine (restore on Windows is the point). **U1 (new, steps 107 to 112, 114): release binaries, black box, Linux amd64.**
+**U2 (new, step 113): the `install.sh` path as root on the disposable runner.** U1 and U2 do not run on Windows or macOS: the
+assets are Linux builds and U2 needs systemd; the Windows-specific risk (files that cannot be removed while open) has unit tests.
+
+**Start versions** (full run; the pull-request subset is marked *PR*):
+
+| Start | pki/system | Why |
+|---|---|---|
+| v0.1.0 *PR* | 7/8 | oldest schema, makes format-1 backups; the chain from here applies **every** migration in one start; no ACME, no agent |
+| v0.2.2 | 10/10 | first with `install.sh`, timer backups and own TLS; ACME; the last before agents |
+| v0.3.0 | 13/11 | first agent, baseline of the protocol |
+| v0.3.5 *PR* | 19/14 | enrollment passes, `deployment add`, endpoints: the biggest middle jump (13 to 19) |
+| v0.3.10 | 21/15 | before the quality round: data written by parsers that were lenient (a stored CRL with trailing data, 0.3.12 notes) must still load |
+| **previous release** *PR* | 21/15 | what operators run on release day: v0.3.12, after the tag v0.9.0, then v0.9.x. Never dropped |
+
+v0.3.11 is left out (same schema and data model as v0.3.12); a line in `releases.txt` adds it. Release candidates are not used.
+
+**Fetching** (step 108): `releases.txt` lists `version asset sha256` for the server archive, the agent archive, `install.sh` and
+`checksums.txt`; `fetch.sh` downloads `https://github.com/Der-Felix/MyOwnPKI/releases/download/v<V>/<asset>` with `curl --fail
+--location --proto =https --tlsv1.2 --retry 3` into `UPGRADE_CACHE` (default `.tools/upgrade/cache`), compares the SHA-256 and
+refuses and deletes on a mismatch, refuses a version that is not in the list (no `latest`), and **never runs a download before it
+is verified**; `install.sh` is run from the cache, never piped. `pin-release.sh v<V>` (owner, after each release) downloads
+`checksums.txt` and its bundle, verifies it with `cosign verify-blob` and the identity of `release.yml` for that tag (cosign is
+optional; without it the script says so and needs `--no-cosign`), and prints the lines for review. The hashes thus come from the
+signed file, and CI compares only hashes. **Network:** (1) the asset download from github.com and its CDN, (2) `go install` of
+lego (module proxy and checksum database; skipped when `LEGO_BIN` or `.tools/lego` exists), (3) at pin time only: GitHub and
+Sigstore's TUF mirror. **Offline:** `task upgrade:fetch` once, then `UPGRADE_OFFLINE=1 task upgrade`; a missing asset is a SKIP line.
+
+**Populate** (old binary, throwaway data directory, `init --demo --with-ca`, secrets from `init-demo-secrets.txt`, unseal through
+the REST API): two certificates by REST, one revoked; from 0.2.0 a domain rule and one ACME issuance with lego (account kept);
+from 0.3.0 an agent enrollment by its archive (join token needs the second factor); from 0.3.5 an enrollment pass; from 0.3.10 a
+settings version; an audit entry; `myownpki backup` (the pre-update backup); the facts are written to a file (serials, CRL,
+audit head, domain JSON).
+
+**After the update** (the new binary on the same data directory and the old, unchanged `config.yaml`):
+
+1. A1 `db status` before the start: exit 3 and "pending" (exit 0 for the same schema); after the start every database "up to date";
+   no `ErrModified`, no `ErrNewer`.
+2. A2 the old binary on the migrated data refuses with the `ErrNewer` text and changes nothing (the safety net of the rollback).
+3. A3 the pre-update leaf verifies with `openssl verify` against the unchanged chain; the revoked one is still revoked in the CRL
+   (`openssl crl -verify`), the CRL number is not lower, the CA certificate fingerprint is unchanged.
+4. A4 `audit verify --expect-head` with the old head and `--checkpoint-key` from init passes for every scope (the old log is a prefix).
+5. A5 a second ACME issuance with the old lego account works; the directory document keeps its endpoints.
+6. A6 the domain rule and, from 0.3.10, its version history read back; a `PUT` with the old `ETag` works.
+7. A7 the **old agent**, unchanged and still running, keeps heartbeating (`last_seen` advances, its version is the old one) and its
+   report is accepted. New agent against old server is **not promised and not tested** (D9); step 115 guards the wire format.
+8. A8 `backup verify` and `restore` of the pre-update backup with the **new** binary (after 102: the "no signature" note, exit 0), then start,
+   unseal, A3 and A4 again; a backup made after the update verifies.
+9. A9 rollback: stop, move the data away, `restore` the pre-update backup with the **old** binary, start, unseal, same facts as before.
+10. A10 `config check` accepts the old `config.yaml` (and the old `agent.yaml`, strict parsing): removing a key in the beta fails here.
+
+**CI placement and budget** (estimates; measuring is the first job of step 109): job `upgrade` (`needs: changes`, matrix over the
+*PR* subset, `timeout-minutes: 20`) runs on pull requests whose changed paths include `internal/store/**`, `internal/backup/**`,
+`internal/keys/**`, `internal/config/**`, `cmd/myownpki/**`, `proto/**`, `deploy/**`, `scripts/upgrade/**`, `test/upgrade/**`,
+`Taskfile.yml`; `changes.sh` gets a second output `upgrade`, true for every non-PR event and when in doubt. **Pushes to main run
+the full matrix** (so the check before a tag is the green main run); job `upgrade-nightly` (schedule and `workflow_dispatch`, full
+matrix) runs with the daily scan. Per start version about 2 to 4 minutes plus about 40 MB of download (not measured). Not a
+required check, like `salt`. `permissions: contents: read`, no secret, no new third-party action, no cache (D5 of §18.5).
+`task upgrade` has the registry lines of `local.sh` with SKIP reasons ("needs Linux amd64", "needs the cached assets").
+**Migration pin (107):** the file lists every released file with its first release; a new file is allowed until the release
+commit adds it with `pin-migrations.sh`; the release workflow step is not changed, `docs/RELEASING.md` gets the line.
+
+### 19.6 Beta for outside testers (steps 116 to 118, 124)
+
+- **Page `site/beta.md`:** what the beta is and what is frozen; install (`install.sh --version 0.9.x`, the container tag, the
+  demo); the tester checklist: install with `install.sh`, `init` and the recovery key, issue by ACME with certbot, lego and Caddy,
+  the agent on a Debian host (package), backup, `backup verify --backup-key`, restore into an empty directory, update from 0.3.12,
+  the trust portal on a phone, the demo; known limitations (the apache2 `/run/apache2` note, the pending live test of the 0.3.11
+  recipes, fuzzing covers parsers and not operator files, Windows and FreeBSD agents later); how to report.
+- **Reports:** issue forms `bug` (version, install method, what was expected and seen, `myownpki --version`, `db status`), `feedback`,
+  a contact link to the private advisory for security; labels `bug`, `feedback`, `beta`, `post-1.0`, `freeze-exception`,
+  `blocker` (the owner sets the last two). **Never post:** keys or the recovery key, the unseal passphrase, API tokens, join tokens
+  and enrollment passes, session cookies, backup directories or files, `init-demo-secrets.txt`, `auth.key`, TOTP seeds or
+  `otpauth://` links, DNS credentials, `agent.yaml` with credentials. Logs are asked for with a check that they hold none.
+- **README banner:** "Status: public beta (v0.9.x). The feature set is frozen; only fixes follow until v1.0. Try it, break it,
+  report it; never post secrets." with the link to the page.
+- **CHANGELOG `[0.9.0]`:** an intro paragraph (the freeze, the upgrade tests, no new feature), **Fixed** (the three input caps,
+  the demo text), **Security** (the backup signature, in plain words after the release for anything reachable before login:
+  none of 101 to 105 is), **Added** (upgrade tests, beta page, issue forms, freeze rules), **Changed** (backup format 2, README),
+  **Upgrade notes** (a backup of format 2 needs a 0.9 binary; install.sh's update backup does not; `outdated_agent` on the Analysis
+  page flags every 0.3.x agent as a warning because the minor version differs).
+- **`docs/RELEASING.md` additions** under "Before the tag": job `upgrade` green on `main` for **every** start version (no SKIP of
+  it accepted); `scripts/ci/pin-migrations.sh --check` against the previous tag; the demo tag test; after the publish: `pin-release.sh`
+  and the labels command once.
+
+### 19.7 Order of work and parallelism
+
+1. **First, alone:** 101 (the owner decides D1), meanwhile all others may start.
+2. **Parallel from the start** (different files): **Agent 1** 102 (`internal/backup`, `cmd/myownpki/backup.go`, `internal/setup`,
+   guides); **Agent 2** 103, 104, 105 in this order (103 and 104 share `renewcert.go`; 105 is `internal/web`); **Agent 3** 107, 108,
+   109, 110, 111, 112 in order (`scripts/upgrade`, `test/upgrade`, `internal/store` tests); **Agent 4** 116 to 123 (docs, site,
+   templates, demo, Salt, `keys`/`auth` clean-ups; 117 and 120 touch README, SECURITY and CHANGELOG, which nobody else edits
+   before 124).
+3. **After Agent 3:** 113 and 114 (114 edits `ci.yml`, `local.sh`, `changes.sh`, `Taskfile.yml`, so one agent), then 115
+   (`ci.yml` again: same agent). `CONTRIBUTING.md` is edited by 106 first, then by 114 (one paragraph): 106 merges before 114.
+4. **106** may run with Agent 4. **Then, in order and alone:** 124, then the owner's steps. `CHANGELOG.md` is edited by 124 only, plus
+   120 for the links; the per-step lines are collected from the commit list at 124 (§18.5 D13: no line for a security fix before it is released).
+5. A merge conflict is expected in `scripts/ci/fuzz-targets.txt` (102) and `site/_data/nav.yml` (117, 123): one line each.
+
+### 19.8 Decisions (owner; defaults are the cautious option)
+
+| Topic | Default | Why / alternative |
+|---|---|---|
+| **D1. Backup authenticity** (**no ADR; touches PLAN §5 key list and §14 backup row: needs owner decision**) | (b) a dedicated Ed25519 backup key and a pinned fingerprint, format 2 | (a) cannot work for the timer; (c) leaves the §14 sentence false |
+| D2. Backups without a signature | restore with a note; refused when `--backup-key` is given, unless `--allow-unsigned` | "must still restore" (owner); refusing by default would lock out every old backup |
+| D3. SAN cap of `ImportExternal` | refuse above `maxSANs` (100) | the old test chose "record everything"; alternative: a larger constant (250) or record the first 100 and warn |
+| D4. `InspectCSR` | keep 100, clip, say so in `Problems` | a preview should not fail where the issuance would explain |
+| D5. What the freeze allows | fixes, docs, tests, narrowing security changes, dependency security updates; a new migration only to fix a defect | the exception route of 19.4 for the rest |
+| D6. Start versions | v0.1.0, v0.2.2, v0.3.0, v0.3.5, v0.3.10 and the previous release; *PR* subset of three | 19.5; adding one is one line in `releases.txt` |
+| D7. Old binaries | release assets with pinned SHA-256 in the repository (cosign checked when pinning); U0 stays source-built | a Linux-only black box plus a cross-platform in-process check |
+| D8. CI | `upgrade` on pull requests by path, full on main and nightly; not a required check | cost and noise; the tag check is the green main run |
+| D9. New agent, old server | not promised, not tested; the wire guard of step 115 only | agents update after the server (OPERATIONS §9) |
+| D10. Demo image tag | a manual bump with a test against `DEFAULT_VERSION` | a static compose file cannot read the version at build time |
+| D11. Test-only functions | keep as test helpers (move the unused types and constants next to them); delete `Draft.Confirmed` | §18.5 D12 |
+| D12. Issue forms and labels | as in 19.6; the owner runs the label commands | they publish |
+| D13. Exit from the beta | the criteria of 19.9 | the owner may shorten or lengthen the two weeks |
+| D14. v0.9.0 date | after the owner's live tests of 0.3.11 or with their result listed as known limitations | they are pending since 0.3.11 |
+
+### 19.9 Triage, risks, done, exit
+
+| Finding in the beta | Handling | Blocks v1.0 |
+|---|---|---|
+| **Blocker:** data loss or a refused start after an update, a restore that loses data, a failing upgrade test from a listed version, an old agent that stops working with the new server, a certificate issued outside policy, §18.7 class P1 | fix in the next 0.9.x at once; D13 of §18.5 for a private advisory | yes |
+| **Major:** a wrong result with a workaround (a page broken, an alert wrong, a guide command that fails) | next 0.9.x if small, else a "known limitation" of 1.0; the owner decides | the owner decides |
+| **Minor:** text, layout, a doc error, §18.7 P2 and P3 | fixed when cheap | no |
+| **Wish:** a feature or setting | label `post-1.0`, never built in the beta | no |
+
+| Risk | Handling |
+|---|---|
+| The old binaries need ports, TOTP timing and lego against a real listener: a flaky matrix | step 109 measures one version first; ports are chosen free, TOTP waits for the next window (`demo.sh` does); a version that stays flaky moves to the nightly set |
+| The runner's address for http-01 (the conformance job already uses the host IP) | the same way; if lego cannot be used for an old version, that version issues over REST only |
+| Format 2 locks old binaries out of timer backups (rollback after some days) | in the upgrade notes; `install.sh` backs up with the old binary |
+| A fix in the beta changes behavior a client relied on | fixes only narrow; the CHANGELOG lists them (§18.5 D13) |
+| Nobody tests: a beta with no reports | the owner's own live tests are the baseline; the page asks for a checklist report |
+| The freeze is broken by habit | the PR template, the `CLAUDE.md` rule and the exception label |
+
+**Done for v0.9.0:** steps 102 to 105 merged with their tests (or D1 = (c) with the docs); the freeze rules are in place; steps 107
+to 112 and 114 merged and **job `upgrade` green on `main` for all start versions** (step 113 green on the `install` job); the beta
+page, issue forms and README banner merged; steps 119 to 123 merged or listed in the notes; `task ci:local` run with every SKIP
+reported; the owner's live tests of 0.3.11 and of the update on the homelab done or named as open; the release candidate rehearsal
+of RELEASING passed; the CHANGELOG dated by the owner. **Exit to v1.0.0:** no open finding the owner rates a blocker; two weeks
+without a new defect found by an outside tester (D13); the upgrade test green from **every** listed start version on `main` and
+nightly in those two weeks; the owner's live tests done; a restore and an update of a real instance rehearsed once by the owner;
+`docs/PLAN.md`, `CLAUDE.md`, README and SECURITY say 1.0; the post-1.0 list untouched.
+
+**Not verified (honest):** measured here: the tag list, migration counts per release, the asset names and sizes of six releases,
+the line numbers cited. Read, not run: every code path of 19.1 and 19.3 (the forged-backup attack, the DER-with-BEGIN refusal,
+the 3,000-name import), the lego-on-the-runner assumption, that `go install` of old tags still builds with Go 1.27.4 (the v0.1.0
+case runs in CI today; the others are not run), that every old version accepts `init --demo --with-ca` with the same flags
+(v0.1.0 does), runtime and download size of the matrix, whether an old agent can enroll without port 80 for renewals, and the
+Windows behavior of anything in U1. The `graphify` graph exists only in the main checkout; one query was run there (the backup
+package), the rest comes from reading the files and from `git` and `gh` read-only calls.
