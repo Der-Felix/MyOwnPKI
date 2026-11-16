@@ -35,11 +35,14 @@ runuser -u myownpki -- /usr/local/bin/myownpki backup /var/backups/myownpki/befo
 ```
 
 The backup runs while the server is up and writes a directory with a `manifest.json`. Check it
-without touching anything, with the checkpoint fingerprint from `init`:
+without touching anything, with the fingerprints from `init`:
 
 ```bash
-runuser -u myownpki -- /usr/local/bin/myownpki backup verify /var/backups/myownpki/before-update --checkpoint-key <fingerprint>
+runuser -u myownpki -- /usr/local/bin/myownpki backup verify /var/backups/myownpki/before-update --backup-key <backup key fingerprint> --checkpoint-key <checkpoint key fingerprint>
 ```
+
+From 0.9.0 on every backup is signed. A backup made by an older version has no signature: it still verifies and
+restores and is reported as *unauthenticated*; with `--backup-key` it needs `--allow-unsigned`.
 
 Then copy the directory to another machine. A backup on the same disk does not survive the disk. The
 backup contains the CA keys, **encrypted** with the root key: it cannot sign without the

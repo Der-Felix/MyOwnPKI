@@ -241,6 +241,7 @@ before you create it.
 | Recovery key (9 groups of 6 characters, shown once) | The same as the passphrase: the second way in, if the passphrase is lost. It sets a new passphrase (`passphrase reset`); the unseal screen takes only the passphrase | On paper, in a safe or another place that is not your password manager and not the backup disk |
 | Admin password and authenticator (TOTP) | Sign-in to the UI and API | The admin's password manager and phone |
 | Checkpoint key fingerprint (shown at the end of `init`) | Lets you prove later that the audit log is the one you had | Write it down; you need it for `backup verify` and `restore` |
+| Backup key fingerprint (shown below it) | Lets you prove later who made a backup: every backup is signed with this key | Write it down; pass it as `--backup-key` to `backup verify` and `restore`. The key file stays in the data directory, never next to the backups |
 | Backups | Everything, but encrypted: they cannot sign without the passphrase | A third place: a backup disk or another machine |
 
 Keep the passphrase, the recovery key and the backups in **three different places**. Once a year,

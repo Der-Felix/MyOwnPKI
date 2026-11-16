@@ -74,7 +74,7 @@ server. Test once a year that you can unseal and that the paper is readable. How
 
 The timer writes and verifies a backup every night, but a backup on the same disk does not survive the
 disk, and a backup you never restored is a hope. Copy `/var/backups/myownpki` to another machine, run
-`backup verify` with the checkpoint fingerprint, and **restore onto a spare machine** at least once, and
+`backup verify` with the checkpoint and backup key fingerprints (`--backup-key` is what proves nobody changed the copy), and **restore onto a spare machine** at least once, and
 again after a major upgrade. Remember `auth.key` if it lives outside the data directory. How:
 [operations guide §6]({{ '/reference/operations/' | relative_url }}#6-backup-and-restore) and
 [Upgrade]({{ '/upgrade/' | relative_url }}#back-up-first).
