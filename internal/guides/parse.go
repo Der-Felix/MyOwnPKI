@@ -276,8 +276,8 @@ func (p *parser) parseHeading(i int) error {
 	line := p.lines[i]
 	level := 2
 	text := strings.TrimPrefix(line, "## ")
-	if strings.HasPrefix(line, "### ") {
-		level, text = 3, strings.TrimPrefix(line, "### ")
+	if after, ok := strings.CutPrefix(line, "### "); ok {
+		level, text = 3, after
 	}
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > 100 || strings.ContainsAny(text, "`*[]<>{}\\") {

@@ -541,7 +541,7 @@ func TestEmbeddedCommandsAreKnownPrograms(t *testing.T) {
 				continue
 			}
 			continued := false
-			for _, line := range strings.Split(b.Code, "\n") {
+			for line := range strings.SplitSeq(b.Code, "\n") {
 				cmd := strings.TrimSpace(line)
 				wasContinued := continued
 				continued = strings.HasSuffix(cmd, "\\")

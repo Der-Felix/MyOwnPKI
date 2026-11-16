@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -110,9 +111,7 @@ func TestShellQuoteKeepsEveryValueOneWord(t *testing.T) {
 func goodForm(extra map[string]string) func(string) string {
 	form := map[string]string{"hostname": "proxy1.homelab.lan", "service": "nginx", "challenge": "webroot", "webroot": "/var/www/acme",
 		"format": "deb", "arch": "amd64", "admission": admitToken}
-	for k, v := range extra {
-		form[k] = v
-	}
+	maps.Copy(form, extra)
 	return func(k string) string { return form[k] }
 }
 
@@ -270,7 +269,7 @@ func runBlock(t *testing.T, block string) (agentCalls, installCalls [][]string) 
 			return nil
 		}
 		var calls [][]string
-		for _, rec := range strings.Split(string(data), "\x01") {
+		for rec := range strings.SplitSeq(string(data), "\x01") {
 			if rec == "" {
 				continue
 			}

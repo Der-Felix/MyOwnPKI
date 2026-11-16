@@ -274,8 +274,7 @@ func (e *Engine) checkDomain(ctx context.Context, q *pkidb.Queries, d *Domain) (
 		return append(problems, "a domain needs the CA that signs for it"), nil
 	}
 	is, err := loadIssuer(ctx, q, d.CA)
-	var denied *DeniedError
-	if errors.As(err, &denied) {
+	if denied, ok := errors.AsType[*DeniedError](err); ok {
 		return append(problems, denied.Reasons...), nil
 	}
 	if err != nil {

@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -20,8 +21,8 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 	for _, h := range r.Header.Values("X-Forwarded-For") {
 		hops = append(hops, strings.Split(h, ",")...)
 	}
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop, ok := parseHop(strings.TrimSpace(hops[i]))
+	for _, h := range slices.Backward(hops) {
+		hop, ok := parseHop(strings.TrimSpace(h))
 		if !ok {
 			break // garbage: stop at the last address we could check
 		}

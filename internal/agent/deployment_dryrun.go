@@ -44,8 +44,8 @@ func DryRunDeploymentAdd(ctx context.Context, cmd DeploymentAddCommand, host Dry
 	spec := cmd.Spec
 	spec.under(host.Root)
 	err := AddDeployment(ctx, AddOptions{
-		EditOptions: EditOptions{ConfigPath: host.ConfigPath, UnitPath: host.UnitPath, DryRun: true, Restart: cmd.Restart,
-			Stdout: &out, Stderr: stderr, skipPreflight: true},
+		ConfigPath: host.ConfigPath, UnitPath: host.UnitPath, DryRun: true, Restart: cmd.Restart,
+		Stdout: &out, Stderr: stderr, skipPreflight: true,
 		Spec: spec, CreateDirs: cmd.CreateDirs,
 	})
 	if err != nil {

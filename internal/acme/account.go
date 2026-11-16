@@ -214,8 +214,7 @@ func (s *Server) checkEAB(ctx context.Context, raw json.RawMessage, accountKey *
 		return mac, werr
 	})
 	if err != nil {
-		var ae *acmeError
-		if errors.As(err, &ae) {
+		if ae, ok := errors.AsType[*acmeError](err); ok {
 			return "", ae
 		}
 		if errors.Is(err, jose.ErrBadSignature) {

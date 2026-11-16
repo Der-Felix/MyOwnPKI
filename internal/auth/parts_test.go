@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -366,12 +367,8 @@ func TestCSRF(t *testing.T) {
 	session := map[string]string{"Cookie": "s=1", "Sec-Fetch-Site": "same-origin"}
 	with := func(extra map[string]string) map[string]string {
 		m := map[string]string{}
-		for k, v := range session {
-			m[k] = v
-		}
-		for k, v := range extra {
-			m[k] = v
-		}
+		maps.Copy(m, session)
+		maps.Copy(m, extra)
 		return m
 	}
 	for name, c := range map[string]struct {

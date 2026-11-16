@@ -72,7 +72,7 @@ func TestConformanceTLS(t *testing.T) {
 		t.Fatal(uerr)
 	}
 	issuing, open := "issuing", ca.ApprovalOpen
-	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing, Approval: &open}, Who: console}); derr != nil {
+	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Approval: &open, Who: console}); derr != nil {
 		t.Fatal(derr)
 	}
 	rootFile := filepath.Join(work, "root.pem")

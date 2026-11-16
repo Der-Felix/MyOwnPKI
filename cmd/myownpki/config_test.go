@@ -137,7 +137,7 @@ func TestConfigCheckAgentCA(t *testing.T) {
 	inst.Unseal(t)
 	for name, eku := range map[string][]string{"agent-ca": {"clientAuth"}, "wide-ca": nil, "both-ca": {"clientAuth", "serverAuth"}} {
 		if _, err := inst.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{
-			CASettings: ca.CASettings{Name: name, BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+			Name: name, BaseURL: "http://pki.homelab.lan", Parent: "root",
 			Subject: ca.Subject{CommonName: name}, EKULimit: eku, Who: testinstance.Console,
 		}); err != nil {
 			t.Fatal(err)

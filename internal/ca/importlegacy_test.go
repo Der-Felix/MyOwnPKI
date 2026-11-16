@@ -358,8 +358,7 @@ func TestImportLegacyRootOnline(t *testing.T) {
 	}
 	// A root still issues no end-entity certificates (decision 81).
 	_, err = v.e.Issue(t.Context(), Request{CA: "root", Preset: "server", DNSNames: []string{"x.homelab.example"}, Who: tester})
-	var d *DeniedError
-	if !errors.As(err, &d) {
+	if _, ok := errors.AsType[*DeniedError](err); !ok {
 		t.Errorf("issue from the imported root: %v", err)
 	}
 }

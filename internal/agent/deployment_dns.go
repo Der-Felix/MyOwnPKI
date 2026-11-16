@@ -156,8 +156,7 @@ func (s *editSession) warnCredentials(d Deployment, spec DeploymentSpec) {
 		return
 	}
 	text := "cannot be read"
-	var ce *credentialsError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*credentialsError](err); ok {
 		text = ce.State
 		if ce.Detail != "" {
 			text += ": " + ce.Detail

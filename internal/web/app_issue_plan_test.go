@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -61,9 +62,7 @@ func (e *reviewEnv) step(t *testing.T, from int, goTo string, extra url.Values) 
 		"csrf_token": {e.token}, "from": {strconv.Itoa(from)}, "go": {goTo}, "preset": {"server"}, "ca": {e.CAIDs["issuing"]},
 		"keymode": {"server"}, "alg": {"ecdsa-p256"}, "days": {"90"}, "cn": {"web.homelab.lan"}, "dns": {"web.homelab.lan"},
 	}
-	for k, vs := range extra {
-		f[k] = vs
-	}
+	maps.Copy(f, extra)
 	return e.b.post(t, "/certificates/new", f)
 }
 
@@ -298,9 +297,7 @@ func TestReviewAndIssueSendTheSameRequest(t *testing.T) {
 func mergeValues(a, b url.Values) url.Values {
 	out := url.Values{}
 	for _, m := range []url.Values{a, b} {
-		for k, vs := range m {
-			out[k] = vs
-		}
+		maps.Copy(out, m)
 	}
 	return out
 }

@@ -62,8 +62,8 @@ func setup(t *testing.T) (http.Handler, *store.DB, []byte, []byte) {
 	}
 	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}, Principal: authz.Console()}
 	if _, ierr := e.ImportRoot(t.Context(), ca.ImportRootRequest{
-		CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"},
-		CertPEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), Who: who,
+		Name: "root", BaseURL: "http://pki.homelab.lan",
+		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), Who: who,
 	}); ierr != nil {
 		t.Fatal(ierr)
 	}

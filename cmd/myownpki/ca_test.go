@@ -87,7 +87,7 @@ func TestCAListAndShow(t *testing.T) {
 	who := keys.Who{Actor: audit.Actor{Type: audit.ActorUser, Name: "it-admin"}, Principal: authz.Console()}
 	for _, cn := range []string{"Homelab Root", "Homelab Root"} {
 		if _, err := e.ImportRoot(t.Context(), ca.ImportRootRequest{
-			CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"}, CertPEM: rootPEM(t, cn, t0.Add(-time.Hour)), Who: who,
+			Name: "root", BaseURL: "http://pki.homelab.lan", CertPEM: rootPEM(t, cn, t0.Add(-time.Hour)), Who: who,
 		}); err != nil {
 			t.Fatal(err)
 		}

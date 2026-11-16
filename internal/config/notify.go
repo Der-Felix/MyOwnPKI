@@ -68,7 +68,7 @@ func (e Email) Mode() string {
 // Recipients splits to.
 func (e Email) Recipients() []string {
 	var out []string
-	for _, r := range strings.Split(e.To, ",") {
+	for r := range strings.SplitSeq(e.To, ",") {
 		if r = strings.TrimSpace(r); r != "" {
 			out = append(out, r)
 		}

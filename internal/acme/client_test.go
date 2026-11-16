@@ -71,9 +71,8 @@ func newEnvOn(tb testing.TB, inst *testinstance.Instance, approval string) *env 
 	ctx := tb.Context()
 	issuing := "issuing"
 	wild := true
-	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{
-		CA: &issuing, Approval: &approval, Wildcards: &wild, IPRanges: []string{"192.0.2.0/24"},
-	}, Who: testinstance.Console}); err != nil {
+	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan",
+		CA: &issuing, Approval: &approval, Wildcards: &wild, IPRanges: []string{"192.0.2.0/24"}, Who: testinstance.Console}); err != nil {
 		tb.Fatal(err)
 	}
 	s, err := New(Options{Engine: inst.Engine, BaseURL: testBase, TrustedProxies: "127.0.0.1, ::1", Clock: inst.Clock})

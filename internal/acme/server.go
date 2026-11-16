@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -238,8 +240,8 @@ func (s *Server) clientIP(r *http.Request, peer netip.Addr) string {
 			hops = append(hops, strings.TrimSpace(h))
 		}
 	}
-	for i := len(hops) - 1; i >= 0; i-- {
-		a, err := netip.ParseAddr(hops[i])
+	for _, hop := range slices.Backward(hops) {
+		a, err := netip.ParseAddr(hop)
 		if err != nil {
 			break // a broken entry: everything left of it is unknown
 		}
@@ -254,9 +256,7 @@ func (s *Server) clientIP(r *http.Request, peer netip.Addr) string {
 // problem writes an RFC 8555 §6.7 problem document.
 func (s *Server) problem(w http.ResponseWriter, status int, typ, detail string, extra map[string]any) {
 	body := map[string]any{"type": "urn:ietf:params:acme:error:" + typ, "detail": detail, "status": status}
-	for k, v := range extra {
-		body[k] = v
-	}
+	maps.Copy(body, extra)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body) //nolint:errchkjson // a write error means the client has gone; nobody is left to tell

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -73,12 +74,7 @@ func (s *Store) Name(format, arch string) (string, bool) {
 }
 
 func validChoice(value string, allowed []string) bool {
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, value)
 }
 
 func validVersion(value string) bool {

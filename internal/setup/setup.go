@@ -698,9 +698,9 @@ func (r *run) createCA(ctx context.Context, ring *keys.Keyring, pki, ta *store.D
 	e := &ca.Engine{PKI: pki.Write, Audit: ta.Write, Scope: store.TenantScope(store.DefaultTenant), Keys: ring, Presets: presets, Clock: r.clk}
 	if !r.state.cas[TestRootName] {
 		res, err := e.CreateRoot(ctx, ca.RootRequest{
-			CASettings: ca.CASettings{Name: TestRootName, BaseURL: r.opt.CABaseURL},
-			Subject:    ca.Subject{CommonName: "MyOwnPKI Test Root CA " + r.suffix(ctx, pki), Organization: r.caOrg},
-			Who:        r.opt.Who,
+			Name: TestRootName, BaseURL: r.opt.CABaseURL,
+			Subject: ca.Subject{CommonName: "MyOwnPKI Test Root CA " + r.suffix(ctx, pki), Organization: r.caOrg},
+			Who:     r.opt.Who,
 		})
 		if err != nil {
 			return err
@@ -713,10 +713,10 @@ func (r *run) createCA(ctx context.Context, ring *keys.Keyring, pki, ta *store.D
 	}
 	if !r.state.cas[TestIntermediateName] {
 		res, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{
-			CASettings: ca.CASettings{Name: TestIntermediateName, BaseURL: r.opt.CABaseURL},
-			Parent:     TestRootName,
-			Subject:    ca.Subject{CommonName: "MyOwnPKI Test Issuing CA " + r.suffix(ctx, pki), Organization: r.caOrg},
-			Who:        r.opt.Who,
+			Name: TestIntermediateName, BaseURL: r.opt.CABaseURL,
+			Parent:  TestRootName,
+			Subject: ca.Subject{CommonName: "MyOwnPKI Test Issuing CA " + r.suffix(ctx, pki), Organization: r.caOrg},
+			Who:     r.opt.Who,
 		})
 		if err != nil {
 			return err

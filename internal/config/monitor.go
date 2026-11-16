@@ -165,7 +165,7 @@ func intIn(key, s string, lo, hi int) (int, error) {
 // scanPorts parses "443, 8443": 1 to 32 different ports from 1 to 65535.
 func scanPorts(key, s string) ([]int, error) {
 	var out []int
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		p, err := strconv.Atoi(strings.TrimSpace(part))
 		if err != nil || p < 1 || p > 65535 {
 			return nil, fmt.Errorf("%s: ports from 1 to 65535, comma-separated, like \"443, 8443\" – got %q", key, s)

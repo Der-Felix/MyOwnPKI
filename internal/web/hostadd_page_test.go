@@ -2,6 +2,7 @@ package web
 
 import (
 	stdhtml "html"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,9 +25,7 @@ import (
 func hostForm(csrf string, change map[string]string) url.Values {
 	form := map[string]string{"hostname": "proxy1.homelab.lan", "service": "nginx", "challenge": "webroot", "webroot": "/var/www/acme", "names": "",
 		"format": "deb", "arch": "amd64"}
-	for k, v := range change {
-		form[k] = v
-	}
+	maps.Copy(form, change)
 	out := url.Values{"csrf_token": {csrf}}
 	for k, v := range form {
 		out.Set(k, v)
@@ -254,7 +253,7 @@ func TestAddHostRefusesWhatCannotWork(t *testing.T) {
 	// A domain without http-01.
 	issuing := "issuing"
 	if _, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "dnsonly.lan",
-		DomainSettings: ca.DomainSettings{CA: &issuing, ChallengeTypes: []string{ca.ChallengeDNS01}}, Who: testinstance.Console}); err != nil {
+		CA: &issuing, ChallengeTypes: []string{ca.ChallengeDNS01}, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	r := b.post(t, hostAddPath, hostForm(csrf, map[string]string{"hostname": "a.dnsonly.lan"}))

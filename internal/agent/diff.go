@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -47,9 +48,9 @@ func unifiedDiff(name string, old []byte, oldExists bool, updated []byte) string
 		for i := range lcs {
 			lcs[i] = make([]int, len(midB)+1)
 		}
-		for i := len(midA) - 1; i >= 0; i-- {
+		for i, m := range slices.Backward(midA) {
 			for j := len(midB) - 1; j >= 0; j-- {
-				if midA[i] == midB[j] {
+				if m == midB[j] {
 					lcs[i][j] = lcs[i+1][j+1] + 1
 				} else {
 					lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])

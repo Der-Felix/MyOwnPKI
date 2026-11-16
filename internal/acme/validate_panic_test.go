@@ -138,7 +138,7 @@ func TestValidatorPanicFailsOnlyTheChallenge(t *testing.T) {
 				t.Errorf("the panic text is in the server log:\n%s", log)
 			}
 			var found bool
-			for _, line := range strings.Split(log, "\n") {
+			for line := range strings.SplitSeq(log, "\n") {
 				var rec map[string]any
 				if json.Unmarshal([]byte(line), &rec) != nil || rec["msg"] != "acme validation panicked" {
 					continue

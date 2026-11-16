@@ -59,12 +59,12 @@ func newEnv(t *testing.T, mode string) *env {
 	inst.Unseal(t)
 	ctx := t.Context()
 	if _, err := inst.Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: ptr("issuing")}, Who: testinstance.Console}); err != nil {
+	if _, err := inst.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	e := &env{inst: inst, check: &fakeChecker{placed: map[string]string{}}, mode: mode}
@@ -74,8 +74,6 @@ func newEnv(t *testing.T, mode string) *env {
 	}
 	return e
 }
-
-func ptr[T any](v T) *T { return &v }
 
 func newCSR(t *testing.T) (*ecdsa.PrivateKey, []byte) {
 	t.Helper()

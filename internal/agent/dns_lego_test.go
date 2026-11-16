@@ -165,12 +165,7 @@ func (h *dnsHarness) round(ctx context.Context, g *dnsGuard, authzs []acme.Autho
 
 // visible reports whether the value is in the zone right now.
 func (h *dnsHarness) visible(name, value string) bool {
-	for _, v := range h.store.TXT(name) {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.store.TXT(name), value)
 }
 
 func (h *dnsHarness) wantNoChallengeRecords() {

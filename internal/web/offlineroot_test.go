@@ -49,7 +49,7 @@ func (o *offlineRoot) sign(t *testing.T, b *ca.OfflineBundle, now time.Time) str
 	}
 	serial, _ := new(big.Int).SetString(b.Serial, 16)
 	var aia, cdp string
-	for _, l := range strings.Split(b.ExtConfig, "\n") {
+	for l := range strings.SplitSeq(b.ExtConfig, "\n") {
 		if v, ok := strings.CutPrefix(l, "authorityInfoAccess    = caIssuers;URI:"); ok {
 			aia = v
 		}

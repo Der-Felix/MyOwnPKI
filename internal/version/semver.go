@@ -97,7 +97,7 @@ func validIdentifiers(value string, prerelease bool) bool {
 	if value == "" {
 		return false
 	}
-	for _, id := range strings.Split(value, ".") {
+	for id := range strings.SplitSeq(value, ".") {
 		if id == "" {
 			return false
 		}

@@ -23,15 +23,15 @@ type DeploymentResult struct {
 	Name                  string    `json:"name"`
 	State                 string    `json:"state"`
 	Serial                string    `json:"serial,omitempty"`
-	NotAfter              time.Time `json:"not_after,omitempty"`
+	NotAfter              time.Time `json:"not_after"`
 	Fingerprint           string    `json:"fingerprint,omitempty"`
 	WrittenFingerprint    string    `json:"written_fingerprint,omitempty"`
 	CheckConfigured       bool      `json:"check_configured"`
-	DeployedAt            time.Time `json:"deployed_at,omitempty"`
+	DeployedAt            time.Time `json:"deployed_at"`
 	LastError             string    `json:"last_error,omitempty"`
-	AttemptedAt           time.Time `json:"attempted_at,omitempty"`
+	AttemptedAt           time.Time `json:"attempted_at"`
 	Failures              int       `json:"failures,omitempty"`
-	NextAttempt           time.Time `json:"next_attempt,omitempty"`
+	NextAttempt           time.Time `json:"next_attempt"`
 	HandledRenewalVersion int64     `json:"handled_renewal_version,omitempty"`
 }
 

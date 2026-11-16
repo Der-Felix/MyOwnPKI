@@ -251,7 +251,7 @@ func TestIssuedTLSDenied(t *testing.T) {
 	ctx := t.Context()
 	e.inst.Unseal(t)
 	if _, err := e.inst.Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "lab", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "lab", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Lab CA"}, NameConstraints: ca.NameConstraints{PermittedDNS: []string{"dmz.homelab.lan"}},
 		Who: testinstance.Console,
 	}); err != nil {
@@ -393,8 +393,8 @@ func TestIssuedTLSValidity(t *testing.T) {
 	ctx := t.Context()
 	e.inst.Unseal(t)
 	for _, c := range []ca.IntermediateRequest{
-		{CASettings: ca.CASettings{Name: "short-max", BaseURL: "http://pki.homelab.lan", MaxValidityDays: 30}, Subject: ca.Subject{CommonName: "Short max"}},
-		{CASettings: ca.CASettings{Name: "ends-soon", BaseURL: "http://pki.homelab.lan"}, Subject: ca.Subject{CommonName: "Ends soon"}, ValidityDays: 20},
+		{Name: "short-max", BaseURL: "http://pki.homelab.lan", MaxValidityDays: 30, Subject: ca.Subject{CommonName: "Short max"}},
+		{Name: "ends-soon", BaseURL: "http://pki.homelab.lan", Subject: ca.Subject{CommonName: "Ends soon"}, ValidityDays: 20},
 	} {
 		c.Parent, c.Who = "root", testinstance.Console
 		if _, err := e.inst.Engine.CreateIntermediate(ctx, c); err != nil {

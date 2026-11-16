@@ -171,8 +171,8 @@ func (a *API) importCA(c *call) error {
 		return badRequest("/crl_days", "at least 1")
 	}
 	res, err := a.d.Engine.ImportRoot(c.ctx(), ca.ImportRootRequest{
-		CASettings: ca.CASettings{Name: req.Name, BaseURL: req.PublicBaseURL, CRLDays: req.CRLDays},
-		CertPEM:    []byte(req.CertificatePEM), Who: c.who(),
+		Name: req.Name, BaseURL: req.PublicBaseURL, CRLDays: req.CRLDays,
+		CertPEM: []byte(req.CertificatePEM), Who: c.who(),
 	})
 	if err != nil {
 		return err

@@ -68,12 +68,10 @@ func (c *call) preconditionFailed(err error) bool {
 		return false
 	}
 	doc := preconditionDoc{
-		problemDoc: problemDoc{
-			Type: problemPrefix + "precondition-failed", Title: http.StatusText(http.StatusPreconditionFailed),
-			Status: http.StatusPreconditionFailed, RequestID: c.reqID,
-			Detail: "the object was changed after you read it (If-Match " + strconv.FormatInt(ce.Expected, 10) +
-				", current version " + strconv.FormatInt(ce.Latest.Number, 10) + "); read it again and retry",
-		},
+		Type: problemPrefix + "precondition-failed", Title: http.StatusText(http.StatusPreconditionFailed),
+		Status: http.StatusPreconditionFailed, RequestID: c.reqID,
+		Detail: "the object was changed after you read it (If-Match " + strconv.FormatInt(ce.Expected, 10) +
+			", current version " + strconv.FormatInt(ce.Latest.Number, 10) + "); read it again and retry",
 		CurrentVersion: ce.Latest.Number,
 	}
 	if ce.Latest.Number > 0 {

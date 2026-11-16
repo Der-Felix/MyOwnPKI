@@ -437,11 +437,9 @@ func TestConcurrentRestoresHaveOneWinner(t *testing.T) {
 		codes := make([]int, clients)
 		var wg sync.WaitGroup
 		for i, c := range cs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				codes[i] = c.do(t, http.MethodPost, tc.path, map[string]any{}, ifMatch(2)...).Code
-			}()
+			})
 		}
 		wg.Wait()
 		ok, stale := 0, 0

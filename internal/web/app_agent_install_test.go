@@ -49,7 +49,7 @@ func TestGuidedAgentInstallTrustStepUpAndOneTimeToken(t *testing.T) {
 	v, svc := newAgentsUIEnv(t)
 	// A different root sorts first; the trust decision must still follow the
 	// configured agent TLS issuer, never an arbitrary CA.
-	if _, err := v.Engine.CreateRoot(t.Context(), ca.RootRequest{CASettings: ca.CASettings{Name: "aaa-root", BaseURL: "http://other.homelab.lan"},
+	if _, err := v.Engine.CreateRoot(t.Context(), ca.RootRequest{Name: "aaa-root", BaseURL: "http://other.homelab.lan",
 		Subject: ca.Subject{CommonName: "Unrelated root"}, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestGuidedCommandFailClosed(t *testing.T) {
 	rootSum := sha256.Sum256(chain[len(chain)-1])
 	rootHash := hex.EncodeToString(rootSum[:])
 	var command string
-	for _, part := range strings.Split(response.html(), "<pre") {
+	for part := range strings.SplitSeq(response.html(), "<pre") {
 		if !strings.Contains(part, agentdist.BinaryPath+" setup") {
 			continue
 		}

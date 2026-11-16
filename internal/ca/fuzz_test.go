@@ -606,7 +606,7 @@ func FuzzNames(f *testing.F) {
 			if p := dnsProblem(out[at+1:], false); p != "" {
 				t.Fatalf("accepted e-mail %q with a bad domain: %s", out, p)
 			}
-			for _, part := range strings.Split(out[:at], ".") {
+			for part := range strings.SplitSeq(out[:at], ".") {
 				if part == "" || strings.ContainsAny(part, "@\"\\ ()<>[],;:\x00\t\r\n") {
 					t.Fatalf("accepted e-mail %q with a bad local part", out)
 				}

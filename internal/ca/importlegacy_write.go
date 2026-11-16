@@ -98,8 +98,7 @@ func (e *Engine) writeLegacy(ctx context.Context, p *legacyPlan, who keys.Who) e
 
 		// The next CRL of every online CA, numbered on from pki.sh –
 		// intermediates first, then an online root.
-		for i := len(p.cas) - 1; i >= 0; i-- {
-			c := p.cas[i]
+		for _, c := range slices.Backward(p.cas) {
 			if !c.online || c.rep.Status != StatusActive {
 				continue
 			}

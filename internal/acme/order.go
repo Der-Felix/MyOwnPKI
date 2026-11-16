@@ -85,8 +85,7 @@ func (s *Server) planOrder(ctx context.Context, acct *pkidb.AcmeAccount, in []id
 	for _, raw := range in {
 		id, err := normalize(raw)
 		if err != nil {
-			var ae *acmeError
-			if errors.As(err, &ae) {
+			if ae, ok := errors.AsType[*acmeError](err); ok {
 				sub(raw, ae.typ, ae.detail)
 				continue
 			}

@@ -35,7 +35,7 @@ func newEndpointsUIEnv(t *testing.T) *endpointsUIEnv {
 	v.Unseal(t)
 	issuing := "issuing"
 	if _, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{
-		Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing, IPRanges: []string{"192.0.2.0/24"}}, Who: testinstance.Console,
+		Name: "homelab.lan", CA: &issuing, IPRanges: []string{"192.0.2.0/24"}, Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func plainPage(t *testing.T, html string) {
 		}
 	}
 	for _, m := range reClassAttr.FindAllStringSubmatch(html, -1) {
-		for _, class := range strings.Fields(m[1]) {
+		for class := range strings.FieldsSeq(m[1]) {
 			if !defined[class] {
 				t.Errorf("class %q is not defined in web/styles", class)
 			}

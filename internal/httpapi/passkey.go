@@ -17,8 +17,7 @@ import (
 // readRaw reads a JSON body without decoding it (the WebAuthn answer).
 func (c *call) readRaw() ([]byte, error) {
 	body, err := io.ReadAll(c.r.Body) // the router limits the body to MaxBody
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		return nil, &bodyError{status: http.StatusRequestEntityTooLarge, kind: "too-large", msg: fmt.Sprintf("the body is larger than %d KiB", MaxBody>>10)}
 	}
 	if err != nil {
@@ -44,8 +43,7 @@ func (c *call) passkeyError(err error) error {
 	case errors.Is(err, auth.ErrInvalidCode):
 		return c.problem(http.StatusUnprocessableEntity, "wrong-secret", "the passkey was not accepted", nil)
 	}
-	var r *auth.RefusedError
-	if errors.As(err, &r) {
+	if r, ok := errors.AsType[*auth.RefusedError](err); ok {
 		fields := make([]fieldError, 0, len(r.Reasons))
 		for _, reason := range r.Reasons {
 			fields = append(fields, fieldError{Message: reason})

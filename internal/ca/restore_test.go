@@ -32,7 +32,7 @@ func (v *env) newDomain(t *testing.T, name, caName string, s DomainSettings) *Do
 
 // restoreOpts expects the given newest version.
 func restoreOpts(expected int64, reason string) ChangeOptions {
-	return ChangeOptions{ExpectedVersion: ptr(expected), Reason: reason}
+	return ChangeOptions{ExpectedVersion: new(expected), Reason: reason}
 }
 
 func TestRestoreDomainUpdateCreatesANewVersion(t *testing.T) {
@@ -41,11 +41,11 @@ func TestRestoreDomainUpdateCreatesANewVersion(t *testing.T) {
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
 	v.clk.Advance(time.Minute)
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true), ValidityDays: ptr(30), IPRanges: []string{"10.1.0.0/16"}}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true), ValidityDays: new(30), IPRanges: []string{"10.1.0.0/16"}}, tester); err != nil {
 		t.Fatal(err)
 	}
 	v.clk.Advance(time.Minute)
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: ptr(ApprovalOpen), Wildcards: ptr(false), IPRanges: []string{}, CA: ptr("open")}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Approval: new(ApprovalOpen), Wildcards: new(false), IPRanges: []string{}, CA: new("open")}, tester); err != nil {
 		t.Fatal(err)
 	}
 	old := v.domainHistory(t, d.ID)
@@ -123,7 +123,7 @@ func TestRestoreNeedsTheNewestVersion(t *testing.T) {
 	v := domainEnv(t)
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	// No number at all: the caller must say what it based the restore on.
@@ -163,8 +163,8 @@ func TestRestoreADeletedDomain(t *testing.T) {
 	t.Parallel()
 	v := domainEnv(t)
 	ctx := t.Context()
-	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{Approval: ptr(ApprovalOpen)})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(45)}, tester); err != nil {
+	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{Approval: new(ApprovalOpen)})
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(45)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	v.clk.Advance(time.Hour)
@@ -227,10 +227,10 @@ func TestRestoreRefusalsNameTheirReasons(t *testing.T) {
 
 	// The CA of the version is retired.
 	e := v.newDomain(t, "sub.homelab.lan", "open", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, e.ID, DomainSettings{CA: ptr("issuing"), ValidityDays: ptr(10)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, e.ID, DomainSettings{CA: new("issuing"), ValidityDays: new(10)}, tester); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.e.UpdateDomain(ctx, e.ID, DomainSettings{CA: ptr("open")}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, e.ID, DomainSettings{CA: new("open")}, tester); err != nil {
 		t.Fatal(err)
 	}
 	if err := v.e.RetireCA(ctx, "issuing", tester); err != nil {
@@ -273,7 +273,7 @@ func TestRestoreRefusalsNameTheirReasons(t *testing.T) {
 		}
 	}
 	// And the reasons of those are the reasons of an ordinary change.
-	if _, uerr := v.e.UpdateDomain(ctx, f.ID, DomainSettings{Preset: ptr("no-such-preset")}, tester); !deniedWith(uerr, `no preset named "no-such-preset"`) {
+	if _, uerr := v.e.UpdateDomain(ctx, f.ID, DomainSettings{Preset: new("no-such-preset")}, tester); !deniedWith(uerr, `no preset named "no-such-preset"`) {
 		t.Errorf("ordinary change with a missing preset: %v", uerr)
 	}
 }
@@ -363,7 +363,7 @@ func TestDomainHistoryReadsAndDiffs(t *testing.T) {
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
 	for i := range 4 {
 		v.clk.Advance(time.Minute)
-		if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(10 + i)}, tester); err != nil {
+		if _, err = v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(10 + i)}, tester); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -441,7 +441,7 @@ func TestDomainHistoryAndRestorePermissions(t *testing.T) {
 	v := domainEnv(t)
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	fresh, stale := v.clk.Now(), time.Time{}
@@ -488,7 +488,7 @@ func TestDomainHistoryAndRestorePermissions(t *testing.T) {
 		"operator": {operator, authz.ErrDenied}, "viewer": {viewer, authz.ErrDenied}, "admin of another CA": {otherCA, ErrNotFound},
 	} {
 		cur := int64(len(v.domainHistory(t, d.ID)))
-		if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(int(cur) + 20)}, tester); err != nil {
+		if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(int(cur) + 20)}, tester); err != nil {
 			t.Fatal(err)
 		}
 		_, err := v.e.RestoreDomain(ctx, d.ID, 1, restoreOpts(cur+1, ""), tc.who)
@@ -501,7 +501,7 @@ func TestDomainHistoryAndRestorePermissions(t *testing.T) {
 			}
 		}
 	}
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: ptr(77)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{ValidityDays: new(77)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	// The dry run does not ask for the second factor, and tells a token it cannot.
@@ -543,18 +543,16 @@ func TestConcurrentRestoresHaveOneWinner(t *testing.T) {
 	v := domainEnv(t)
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	const writers = 6
 	errs := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, errs[i] = v.e.RestoreDomain(ctx, d.ID, 1, restoreOpts(2, ""), tester)
-		}()
+		})
 	}
 	wg.Wait()
 	var won, lost int
@@ -586,7 +584,7 @@ func TestRestoreFailureRollsEverythingBack(t *testing.T) {
 			v := domainEnv(t)
 			ctx := t.Context()
 			d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-			if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+			if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 				t.Fatal(err)
 			}
 			gone := v.newDomain(t, "gone.lan", "open", DomainSettings{})
@@ -618,7 +616,7 @@ func TestRestoreReasonIsChecked(t *testing.T) {
 	v := domainEnv(t)
 	ctx := t.Context()
 	d := v.newDomain(t, "homelab.lan", "issuing", DomainSettings{})
-	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: ptr(true)}, tester); err != nil {
+	if _, err := v.e.UpdateDomain(ctx, d.ID, DomainSettings{Wildcards: new(true)}, tester); err != nil {
 		t.Fatal(err)
 	}
 	for name, reason := range map[string]string{"too long": strings.Repeat("x", settingsver.MaxReason+1), "newline": "a\nb"} {

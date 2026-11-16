@@ -394,8 +394,7 @@ func verifyTime(leaf *x509.Certificate, now time.Time) time.Time {
 
 // classifyDial maps a failed connect to the fixed vocabulary.
 func classifyDial(err error) string {
-	var ge *netguard.Error
-	if errors.As(err, &ge) {
+	if ge, ok := errors.AsType[*netguard.Error](err); ok {
 		switch {
 		case ge.Kind == netguard.KindDNS:
 			return KindDNS

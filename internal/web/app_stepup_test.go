@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -293,20 +294,16 @@ func TestStepUpConcurrentDoubleClick(t *testing.T) {
 	form := url.Values{"csrf_token": {csrf}, "pending_id": {id}, "code": {v.Code("demo")}}
 	cookies := func() map[string]string {
 		out := make(map[string]string, len(b.cookies))
-		for name, value := range b.cookies {
-			out[name] = value
-		}
+		maps.Copy(out, b.cookies)
 		return out
 	}
 	answers := make(chan page, 2)
 	var wg sync.WaitGroup
 	for range 2 {
 		click := &browser{v: v, ip: b.ip, cookies: cookies()}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			answers <- click.post(t, "/step-up", form)
-		}()
+		})
 	}
 	wg.Wait()
 	close(answers)
@@ -334,13 +331,11 @@ func TestPendingActionConcurrentConsumption(t *testing.T) {
 	var runs atomic.Int32
 	var wg sync.WaitGroup
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := store.consume(id, binding, binding, "user", now); err == nil {
 				runs.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if runs.Load() != 1 {

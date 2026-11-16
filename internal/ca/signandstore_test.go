@@ -44,11 +44,11 @@ func TestSignAndStoreLeavesNothingHalfDone(t *testing.T) {
 		run  func(context.Context, *env) (*CAResult, error)
 	}
 	root := action{"create root", func(ctx context.Context, v *env) (*CAResult, error) {
-		return v.e.CreateRoot(ctx, RootRequest{CASettings: CASettings{Name: "newroot", BaseURL: baseURL}, Subject: Subject{CommonName: "New Root"}, Who: tester})
+		return v.e.CreateRoot(ctx, RootRequest{Name: "newroot", BaseURL: baseURL, Subject: Subject{CommonName: "New Root"}, Who: tester})
 	}}
 	intermediate := action{"create intermediate", func(ctx context.Context, v *env) (*CAResult, error) {
 		return v.e.CreateIntermediate(ctx, IntermediateRequest{
-			CASettings: CASettings{Name: "newinter", BaseURL: baseURL}, Parent: "root", Subject: Subject{CommonName: "New Intermediate"},
+			Name: "newinter", BaseURL: baseURL, Parent: "root", Subject: Subject{CommonName: "New Intermediate"},
 			NameConstraints: NameConstraints{PermittedDNS: []string{"homelab.lan"}}, Who: tester,
 		})
 	}}
@@ -122,7 +122,7 @@ func TestOfflineParentCreationWhileSealed(t *testing.T) {
 	before := v.storeCounts(t)
 	v.e.Keys = keys.New(nil, nil, v.clk)
 	_, err := v.e.CreateIntermediate(t.Context(), IntermediateRequest{
-		CASettings: CASettings{Name: "issuing", BaseURL: baseURL}, Parent: "offline-root", Subject: Subject{CommonName: "Issuing"}, Who: tester,
+		Name: "issuing", BaseURL: baseURL, Parent: "offline-root", Subject: Subject{CommonName: "Issuing"}, Who: tester,
 	})
 	if !errors.Is(err, keys.ErrSealed) {
 		t.Fatalf("creating a CA with a sealed key ring: %v", err)

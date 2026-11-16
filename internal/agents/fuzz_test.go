@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -258,12 +259,7 @@ func reportLimitsHold(in ReportInput) bool {
 		return true
 	}
 	oneOf := func(s string, set ...string) bool {
-		for _, v := range set {
-			if s == v {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(set, s)
 	}
 	if !text(in.Version, 64) || !text(in.OS, 32) || !text(in.Arch, 32) {
 		return false

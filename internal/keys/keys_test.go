@@ -763,7 +763,7 @@ func TestRecoveryKeyOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	var keyLine string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if line != "" && !strings.HasPrefix(line, "#") {
 			keyLine = line
 		}

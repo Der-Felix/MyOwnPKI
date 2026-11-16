@@ -381,7 +381,7 @@ func (w *csrFuzz) build(key ed25519.PrivateKey, cn, dns, ips, email, uri string)
 		return nil, false
 	}
 	if ips != "" {
-		for _, s := range strings.Split(ips, ",") {
+		for s := range strings.SplitSeq(ips, ",") {
 			ip := net.ParseIP(s)
 			if ip == nil {
 				return nil, false

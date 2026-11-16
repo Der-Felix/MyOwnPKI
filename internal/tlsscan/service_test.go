@@ -38,8 +38,8 @@ func newEnv(t *testing.T) *env {
 	issuing := "issuing"
 	public := ca.AddressPublic
 	for _, d := range []ca.DomainRequest{
-		{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing, IPRanges: []string{"192.0.2.0/24"}}, Who: testinstance.Console},
-		{Name: "pub.lan", DomainSettings: ca.DomainSettings{CA: &issuing, AddressPolicy: &public, IPRanges: []string{"10.1.0.0/16"}}, Who: testinstance.Console},
+		{Name: "homelab.lan", CA: &issuing, IPRanges: []string{"192.0.2.0/24"}, Who: testinstance.Console},
+		{Name: "pub.lan", CA: &issuing, AddressPolicy: &public, IPRanges: []string{"10.1.0.0/16"}, Who: testinstance.Console},
 	} {
 		if _, err := inst.Engine.CreateDomain(t.Context(), d); err != nil {
 			t.Fatal(err)

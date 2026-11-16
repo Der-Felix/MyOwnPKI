@@ -246,7 +246,7 @@ func selected(name, only string) bool {
 	if only == "" {
 		return true
 	}
-	for _, prefix := range strings.Split(only, ",") {
+	for prefix := range strings.SplitSeq(only, ",") {
 		if strings.HasPrefix(name, strings.TrimSpace(prefix)) {
 			return true
 		}

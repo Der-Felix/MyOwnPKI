@@ -72,7 +72,7 @@ func TestParentMustBeUsable(t *testing.T) {
 			v := newEnv(t)
 			tt.setup(t, v)
 			_, err := v.e.CreateIntermediate(t.Context(), IntermediateRequest{
-				CASettings: CASettings{Name: "child", BaseURL: baseURL}, Parent: "parent", Subject: Subject{CommonName: "Child CA"}, Who: tester,
+				Name: "child", BaseURL: baseURL, Parent: "parent", Subject: Subject{CommonName: "Child CA"}, Who: tester,
 			})
 			if got := deniedErr(t, err); !strings.Contains(got, tt.want) {
 				t.Errorf("reasons %q, want %q", got, tt.want)
@@ -109,7 +109,7 @@ func TestRenewingAnOfflineRoot(t *testing.T) {
 		{"a retired root", "retired", newOfflineRoot(t, "Retired Root", t0.Add(-day)), `CA "retired" is retired`},
 	}
 	for _, tt := range tests {
-		_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{CASettings: CASettings{Name: tt.ca, BaseURL: baseURL}, CertPEM: tt.root.pem(), Who: tester})
+		_, err := v.e.ImportRoot(t.Context(), ImportRootRequest{Name: tt.ca, BaseURL: baseURL, CertPEM: tt.root.pem(), Who: tester})
 		if got := deniedErr(t, err); !strings.Contains(got, tt.want) {
 			t.Errorf("%s: %q, want %q", tt.name, got, tt.want)
 		}

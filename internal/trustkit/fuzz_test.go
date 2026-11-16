@@ -2,6 +2,7 @@ package trustkit
 
 import (
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -437,10 +438,5 @@ func baseOK(s string) bool {
 // name such as "0.." is no such segment, and a segment "." only names the
 // same directory (the base URL rule leaves it alone, it has no effect).
 func parentSegment(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(p, "/"), "..")
 }

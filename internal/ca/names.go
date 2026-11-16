@@ -124,7 +124,7 @@ func checkEmail(s string) (string, error) {
 	if len(local) > maxLocal {
 		return "", fmt.Errorf("e-mail address %q: the part before @ is longer than %d characters", short(s), maxLocal)
 	}
-	for _, part := range strings.Split(local, ".") {
+	for part := range strings.SplitSeq(local, ".") {
 		if !atext.MatchString(part) {
 			return "", fmt.Errorf("e-mail address %q: the part before @ is not a plain address (no quotes, spaces or double dots)", short(s))
 		}

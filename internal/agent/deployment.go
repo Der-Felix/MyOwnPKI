@@ -261,8 +261,8 @@ func (s *editSession) writeDropinFiles(plan *DropinPlan) (func() error, error) {
 	var undos []func() error
 	undo := func() error {
 		var errs []error
-		for i := len(undos) - 1; i >= 0; i-- {
-			errs = append(errs, undos[i]())
+		for _, undo := range slices.Backward(undos) {
+			errs = append(errs, undo())
 		}
 		return errors.Join(errs...)
 	}
@@ -647,7 +647,7 @@ func checkNoSymlink(p string) error {
 	vol := filepath.VolumeName(p)
 	rest := strings.TrimPrefix(p, vol)
 	cur := vol + string(filepath.Separator)
-	for _, part := range strings.Split(rest, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rest, string(filepath.Separator)) {
 		if part == "" {
 			continue
 		}

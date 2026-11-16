@@ -20,7 +20,7 @@ func (v *env) endpointDomain(t *testing.T, name string, ipRanges ...string) {
 	t.Helper()
 	issuing := "issuing"
 	if _, err := v.engine.CreateDomain(t.Context(), ca.DomainRequest{
-		Name: name, DomainSettings: ca.DomainSettings{CA: &issuing, IPRanges: ipRanges}, Who: testinstance.Console,
+		Name: name, CA: &issuing, IPRanges: ipRanges, Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
 	}

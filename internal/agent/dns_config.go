@@ -226,7 +226,7 @@ func checkLabels(h string) error {
 	if h == "" || len(h) > 253 {
 		return errors.New("1 to 253 characters")
 	}
-	for _, l := range strings.Split(h, ".") {
+	for l := range strings.SplitSeq(h, ".") {
 		if !nameRE.MatchString(l) {
 			return fmt.Errorf("label %q: lower case letters, digits and '-'", l)
 		}

@@ -731,8 +731,7 @@ func (e *Engine) logRefusal(ctx context.Context, req Request, now time.Time, cau
 // (with every reason) for policy refusals, failure for everything else.
 func (e *Engine) refuse(ctx context.Context, now time.Time, action string, who keys.Who, target audit.Target, details map[string]any, cause error) error {
 	result := audit.ResultFailure
-	var d *DeniedError
-	if errors.As(cause, &d) {
+	if d, ok := errors.AsType[*DeniedError](cause); ok {
 		result = audit.ResultDenied
 		details["reasons"] = capReasons(d.Reasons)
 		if len(d.DroppedCSRNames) > 0 {

@@ -118,8 +118,8 @@ func validPunycode(s string) bool {
 		return false
 	}
 	basic, digits := "", s
-	if i := strings.LastIndexByte(s, '-'); i >= 0 {
-		basic, digits = s[:i], s[i+1:]
+	if before, after, ok := strings.CutLast(s, "-"); ok {
+		basic, digits = before, after
 	}
 	if digits == "" {
 		return false // no encoded part: the label would be plain ASCII

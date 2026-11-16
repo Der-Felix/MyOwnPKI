@@ -376,7 +376,7 @@ func TestChartHasNoCSPRelevantMarkup(t *testing.T) {
 	}
 	// Only classes of components.css are used (the web tests check they are defined).
 	for _, m := range regexp.MustCompile(`class="([^"]*)"`).FindAllStringSubmatch(out, -1) {
-		for _, class := range strings.Fields(m[1]) {
+		for class := range strings.FieldsSeq(m[1]) {
 			if !strings.HasPrefix(class, "ch-") && !strings.HasPrefix(class, "chart") && !strings.HasPrefix(class, "table") &&
 				class != "visually-hidden" {
 				t.Errorf("unexpected class %q", class)

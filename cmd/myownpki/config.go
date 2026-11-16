@@ -173,13 +173,13 @@ func printConfig(w io.Writer, cfg config.Config, src config.Source) {
 // password, a secret or a file's content.
 func printMonitoring(w io.Writer, cfg config.Config, src config.Source) {
 	from := func(envs ...string) string {
-		var out string
+		var out strings.Builder
 		for _, env := range envs {
 			if slices.Contains(src.Env, env) {
-				out += "   (from " + env + ")"
+				out.WriteString("   (from " + env + ")")
 			}
 		}
-		return out
+		return out.String()
 	}
 	email := "off (notify.email.smtp is empty)"
 	if e := cfg.Notify.Email; e.Enabled() {

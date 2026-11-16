@@ -134,14 +134,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return unsealErr
 	}
 	if _, createErr := srv.Agents().Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
 	}); createErr != nil {
 		return createErr
 	}
 	issuing := "issuing"
 	if _, domainErr := srv.Agents().Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan",
-		DomainSettings: ca.DomainSettings{CA: &issuing}, Who: console}); domainErr != nil {
+		CA: &issuing, Who: console}); domainErr != nil {
 		return domainErr
 	}
 	svc := srv.Agents()

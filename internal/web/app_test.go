@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -183,14 +184,10 @@ func TestIssueWithACSR(t *testing.T) {
 	base := url.Values{"csrf_token": {token}, "preset": {"server"}, "ca": {v.CAIDs["issuing"]}, "keymode": {"csr"}, "alg": {"ecdsa-p256"}, "days": {"90"}}
 	step := func(from int, goTo string, extra url.Values) url.Values {
 		f := url.Values{}
-		for k, vs := range base {
-			f[k] = vs
-		}
+		maps.Copy(f, base)
 		f.Set("from", strconv.Itoa(from))
 		f.Set("go", goTo)
-		for k, vs := range extra {
-			f[k] = vs
-		}
+		maps.Copy(f, extra)
 		return f
 	}
 
@@ -414,7 +411,7 @@ func realPages(t *testing.T) map[string]string {
 			t.Fatal(err)
 		}
 		issuingCA := "issuing"
-		dom, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuingCA}, Who: testinstance.Console})
+		dom, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", CA: &issuingCA, Who: testinstance.Console})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -445,9 +442,7 @@ func realPages(t *testing.T) map[string]string {
 		form := func(from int, extra url.Values) url.Values {
 			f := url.Values{"csrf_token": {token}, "from": {strconv.Itoa(from)}, "go": {"next"}, "preset": {"server"}, "ca": {v.CAIDs["issuing"]},
 				"keymode": {"csr"}, "alg": {"ecdsa-p256"}, "days": {"90"}, "csr": {csrPEM}, "cn": {"web.homelab.lan"}, "dns": {"web.homelab.lan"}}
-			for k, vs := range extra {
-				f[k] = vs
-			}
+			maps.Copy(f, extra)
 			return f
 		}
 		out["real wizard key"] = b.post(t, "/certificates/new", form(1, nil)).html()

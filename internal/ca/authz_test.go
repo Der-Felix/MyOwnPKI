@@ -66,7 +66,7 @@ func TestEngineChecksPermissions(t *testing.T) {
 
 	// CA management: tenant-wide admin only, with step-up.
 	admin := signedIn("adm", v.clk.Now(), authz.Binding{Role: authz.Admin})
-	rootReq := RootRequest{CASettings: CASettings{Name: "root2", BaseURL: baseURL}, Subject: Subject{CommonName: "Root 2"}}
+	rootReq := RootRequest{Name: "root2", BaseURL: baseURL, Subject: Subject{CommonName: "Root 2"}}
 	for name, who := range map[string]keys.Who{"operator": fresh, "CA admin": signedIn("cadm", v.clk.Now(), authz.Binding{CA: "issuing", Role: authz.Admin})} {
 		rootReq.Who = who
 		if _, err := v.e.CreateRoot(t.Context(), rootReq); !errors.Is(err, authz.ErrDenied) {

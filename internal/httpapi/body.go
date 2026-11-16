@@ -49,8 +49,7 @@ func (c *call) decode(v any) error {
 	// Read once (the body is limited by MaxBytesReader): an unknown field is
 	// looked up a second time to name its full path.
 	data, err := io.ReadAll(c.r.Body)
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		limit := c.limit
 		if limit <= 0 {
 			limit = MaxBody

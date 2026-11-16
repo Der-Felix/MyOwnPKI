@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -178,15 +179,9 @@ func renderedPages(t *testing.T) map[string]string {
 	}
 	out["wizard error"] = do(t, h, http.MethodPost, "/certificates/new", wizardForm(3, "next", url.Values{"dns": {"bad..name"}})).Body.String()
 	out["wizard review"] = do(t, h, http.MethodPost, "/certificates/new", wizardForm(3, "next", url.Values{"keymode": {"server"}})).Body.String()
-	for k, html := range realPages(t) {
-		out[k] = html
-	}
-	for k, html := range reportPages(t) {
-		out[k] = html
-	}
-	for k, html := range historyPages(t) {
-		out[k] = html
-	}
+	maps.Copy(out, realPages(t))
+	maps.Copy(out, reportPages(t))
+	maps.Copy(out, historyPages(t))
 	return out
 }
 
@@ -298,7 +293,7 @@ func TestUsedClassesAreDefined(t *testing.T) {
 	missing := map[string]string{}
 	for page, html := range renderedPages(t) {
 		for _, m := range reClassAttr.FindAllStringSubmatch(html, -1) {
-			for _, class := range strings.Fields(m[1]) {
+			for class := range strings.FieldsSeq(m[1]) {
 				if !defined[class] {
 					missing[class] = page
 				}
@@ -412,9 +407,7 @@ func wizardForm(from int, goTo string, override url.Values) url.Values {
 		"cn": {"nas.homelab.lan"}, "dns": {"nas.homelab.lan"}, "ip": {"192.168.10.20"},
 		"keymode": {"server"}, "alg": {"ecdsa-p256"}, "days": {"397"},
 	}
-	for k, v := range override {
-		f[k] = v
-	}
+	maps.Copy(f, override)
 	return f
 }
 

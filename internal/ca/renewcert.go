@@ -151,7 +151,7 @@ func (e *Engine) customUsages(ctx context.Context, id string) (*[2][]string, err
 	}
 	split := func(s string) []string {
 		var out []string
-		for _, p := range strings.Split(s, ",") {
+		for p := range strings.SplitSeq(s, ",") {
 			if p = strings.TrimSpace(p); p != "" {
 				out = append(out, p)
 			}

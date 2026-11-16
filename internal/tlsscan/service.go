@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"time"
 
@@ -218,8 +219,7 @@ func (s *Service) ScanNow(ctx context.Context, who keys.Who, id string) error {
 	if err == nil && s.Kick != nil {
 		s.Kick()
 	}
-	var wait *WaitError
-	if errors.As(err, &wait) {
+	if _, ok := errors.AsType[*WaitError](err); ok {
 		return err // a too-eager click is no event for the audit log
 	}
 	target, details := endpointTarget(id)
@@ -300,9 +300,7 @@ func (s *Service) refused(ctx context.Context, who keys.Who, action string, targ
 		result = audit.ResultDenied
 	}
 	d := map[string]any{"error": clean(err.Error(), 300)}
-	for k, v := range details {
-		d[k] = v
-	}
+	maps.Copy(d, details)
 	if _, _, aerr := audit.Append(ctx, s.Engine.Audit, s.Engine.Scope, audit.Entry{
 		Time: s.now(), Actor: who.Actor, Action: action, Target: target, Result: result, SourceIP: who.SourceIP, Details: d,
 	}, ""); aerr != nil {

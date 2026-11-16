@@ -162,9 +162,8 @@ func TestConformance(t *testing.T) {
 	inst := testinstance.New(t, testinstance.Options{})
 	inst.Unseal(t)
 	issuing, open, yes := "issuing", ca.ApprovalOpen, true
-	if _, err := inst.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{
-		CA: &issuing, Approval: &open, Wildcards: &yes,
-	}, Who: testinstance.Console}); err != nil {
+	if _, err := inst.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan",
+		CA: &issuing, Approval: &open, Wildcards: &yes, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	handler := http.NotFoundHandler()

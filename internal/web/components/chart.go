@@ -388,10 +388,7 @@ func layoutVertical(m *chartModel, d chartData) float64 {
 	for _, c := range d.cats {
 		maxLabel = max(maxLabel, utf8.RuneCountInString(c.label))
 	}
-	every := int(math.Ceil((float64(maxLabel)*glyphWidth + 6) / slot))
-	if every < 1 {
-		every = 1
-	}
+	every := max(int(math.Ceil((float64(maxLabel)*glyphWidth+6)/slot)), 1)
 	for i, c := range d.cats {
 		cx := left + slot*(float64(i)+0.5)
 		x := cx - barW/2

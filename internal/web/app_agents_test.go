@@ -45,13 +45,13 @@ func newAgentsUIEnvVersion(t *testing.T, version string) (*uiEnv, *agents.Servic
 	v.Unseal(t)
 	ctx := t.Context()
 	if _, err := v.Engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: testinstance.Console,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	issuing := "issuing"
-	if _, err := v.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: testinstance.Console}); err != nil {
+	if _, err := v.Engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	settings := &tenant.Store{DB: v.SystemDB.Write, Clock: v.Clock}

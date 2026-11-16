@@ -22,8 +22,6 @@ import (
 // Step 62 of PHASE3 section 16: tenant.Store.Set appends a version in the
 // transaction of the change and its audit entry.
 
-func ptr[T any](v T) *T { return &v }
-
 // history returns the versions of the tenant settings, oldest first.
 func history(t *testing.T, db *sql.DB) []settingsver.Version {
 	t.Helper()
@@ -114,7 +112,7 @@ func TestSetAppendsVersions(t *testing.T) {
 	if err != nil || n != 2 {
 		t.Fatalf("first change: version %d %v, want 2", n, err)
 	}
-	got.AgentEnrollment = ptr(EnrollManual)
+	got.AgentEnrollment = new(EnrollManual)
 	if n, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{}, who); err != nil || n != 3 {
 		t.Fatalf("second change: version %d %v, want 3", n, err)
 	}
@@ -183,12 +181,12 @@ func TestSetExpectedVersion(t *testing.T) {
 
 	// ETag 0 = never changed: the first change with it works, the same number again does not.
 	got.Organization = "One"
-	n, err := s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: ptr(int64(0))}, who)
+	n, err := s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: new(int64(0))}, who)
 	if err != nil || n != 2 {
 		t.Fatalf("expected 0: %d %v", n, err)
 	}
 	got.Organization = "Two"
-	_, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: ptr(int64(0))}, who)
+	_, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: new(int64(0))}, who)
 	var ce *settingsver.ConflictError
 	if !errors.Is(err, settingsver.ErrConflict) || !errors.As(err, &ce) || ce.Latest.Number != 2 || ce.Expected != 0 || ce.Latest.Actor.Name != who.Actor.Name {
 		t.Fatalf("stale change: %v", err)
@@ -200,16 +198,16 @@ func TestSetExpectedVersion(t *testing.T) {
 	if len(history(t, v.SystemDB.Write)) != 2 || len(tenantAudit(t, v.SystemDB.Write)) != 1 {
 		t.Errorf("a refused change wrote a version or an audit entry")
 	}
-	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: ptr(int64(2))}, who); err != nil {
+	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: new(int64(2))}, who); err != nil {
 		t.Errorf("the current version: %v", err)
 	}
 	// A conflict is reported before a missing second factor: an old form should
 	// say so before it asks for a confirmation that would be wasted.
-	got.AgentEnrollment = ptr(EnrollAuto)
-	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: ptr(int64(1))}, adminWho()); !errors.Is(err, settingsver.ErrConflict) {
+	got.AgentEnrollment = new(EnrollAuto)
+	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: new(int64(1))}, adminWho()); !errors.Is(err, settingsver.ErrConflict) {
 		t.Errorf("stale mode change without step-up: %v, want a conflict", err)
 	}
-	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: ptr(int64(3))}, adminWho()); !errors.Is(err, authz.ErrStepUpRequired) {
+	if _, err = s.SetWith(ctx, store.DefaultTenant, *got, ChangeOptions{ExpectedVersion: new(int64(3))}, adminWho()); !errors.Is(err, authz.ErrStepUpRequired) {
 		t.Errorf("current mode change without step-up: %v, want ErrStepUpRequired", err)
 	}
 	if vs := history(t, v.SystemDB.Write); len(vs) != 3 {
@@ -230,13 +228,11 @@ func TestSetConcurrentWritersHaveOneWinner(t *testing.T) {
 	errs := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			mine := *got
 			mine.Organization = strings.Repeat("o", i+1)
-			_, errs[i] = s.SetWith(ctx, store.DefaultTenant, mine, ChangeOptions{ExpectedVersion: ptr(int64(0))}, testinstance.Console)
-		}()
+			_, errs[i] = s.SetWith(ctx, store.DefaultTenant, mine, ChangeOptions{ExpectedVersion: new(int64(0))}, testinstance.Console)
+		})
 	}
 	wg.Wait()
 	var won, lost int
@@ -324,7 +320,7 @@ func TestRefusedChangeIsNotRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got.AgentEnrollment = ptr(EnrollAuto)
+	got.AgentEnrollment = new(EnrollAuto)
 	if err = s.Set(ctx, store.DefaultTenant, *got, adminWho()); !errors.Is(err, authz.ErrStepUpRequired) {
 		t.Fatalf("Set: %v", err)
 	}

@@ -130,12 +130,12 @@ func TestEnrollmentPassOverTheAPI(t *testing.T) {
 	ctx := t.Context()
 	console := testinstance.Console
 	if _, err := v.engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: ptrTo("issuing")}, Who: console}); err != nil {
+	if _, err := v.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: console}); err != nil {
 		t.Fatal(err)
 	}
 	admin := v.client("192.0.2.1")
@@ -249,5 +249,3 @@ func TestEnrollmentPassOverTheAPI(t *testing.T) {
 		t.Error("the pass secret is in the audit log or the log")
 	}
 }
-
-func ptrTo[T any](v T) *T { return &v }

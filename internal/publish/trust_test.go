@@ -145,7 +145,7 @@ func checkPage(t *testing.T, h http.Handler, a answer) {
 		t.Error("the page claims something is secure")
 	}
 	for _, m := range reClass.FindAllStringSubmatch(page, -1) {
-		for _, c := range strings.Fields(m[1]) {
+		for c := range strings.FieldsSeq(m[1]) {
 			if !definedClasses()[c] {
 				t.Errorf("class %q is not in web/styles", c)
 			}

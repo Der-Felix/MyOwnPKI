@@ -318,11 +318,11 @@ func (in *instance) sampleAdministration(ctx context.Context, e *ca.Engine, s *a
 	if err != nil {
 		return err
 	}
-	if _, ierr := e.ImportRoot(ctx, ca.ImportRootRequest{CASettings: ca.CASettings{Name: "offline-root", BaseURL: "http://pki.homelab.example"},
+	if _, ierr := e.ImportRoot(ctx, ca.ImportRootRequest{Name: "offline-root", BaseURL: "http://pki.homelab.example",
 		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), Who: console}); ierr != nil {
 		return ierr
 	}
-	res, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{CASettings: ca.CASettings{Name: "branch-ca", BaseURL: "http://pki.homelab.example"},
+	res, err := e.CreateIntermediate(ctx, ca.IntermediateRequest{Name: "branch-ca", BaseURL: "http://pki.homelab.example",
 		Parent: "offline-root", Subject: ca.Subject{CommonName: "Homelab Branch CA", Organization: "Homelab"},
 		NameConstraints: ca.NameConstraints{PermittedDNS: []string{"branch.homelab.example"}, PermittedIP: []string{"192.0.2.0/24"}}, Who: console})
 	if err != nil {

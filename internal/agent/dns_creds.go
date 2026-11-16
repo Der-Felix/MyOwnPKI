@@ -344,8 +344,7 @@ func openCredentialsProblem(path string, err error) *credentialsError {
 
 // errnoText is the operating system's text without the path of a PathError.
 func errnoText(err error) string {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*os.PathError](err); ok {
 		return pe.Err.Error()
 	}
 	return err.Error()
@@ -488,8 +487,7 @@ func (c *Config) DNSProviderStatuses() []DNSProviderStatus {
 		st := DNSProviderStatus{Name: name, Type: p.Type, Path: p.CredentialsFile, State: credOK, Users: users[name]}
 		creds, err := loadDNSCredentials(p.CredentialsFile, p.Type)
 		if err != nil {
-			var ce *credentialsError
-			if errors.As(err, &ce) {
+			if ce, ok := errors.AsType[*credentialsError](err); ok {
 				st.State, st.Detail = ce.State, ce.Detail
 			} else {
 				st.State, st.Detail = credInvalid, "cannot be read"

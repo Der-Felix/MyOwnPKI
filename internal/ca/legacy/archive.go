@@ -109,8 +109,8 @@ type memFile struct {
 
 // parentName is the directory of a clean name ("" for a name at the top).
 func parentName(name string) string {
-	if i := strings.LastIndexByte(name, '/'); i >= 0 {
-		return name[:i]
+	if before, _, ok := strings.CutLast(name, "/"); ok {
+		return before
 	}
 	return ""
 }
@@ -132,8 +132,8 @@ func (m memFS) addDir(p string) error {
 	if len(m)+len(missing) > maxNodes {
 		return fmt.Errorf("more than %d files and directories in the archive", maxNodes)
 	}
-	for i := len(missing) - 1; i >= 0; i-- {
-		m.create(missing[i], &memFile{dir: true})
+	for _, dir := range slices.Backward(missing) {
+		m.create(dir, &memFile{dir: true})
 	}
 	return nil
 }
@@ -161,8 +161,8 @@ func (m memFS) addFile(name string, f *memFile) error {
 func (m memFS) create(name string, f *memFile) {
 	m[name] = f
 	base := name
-	if i := strings.LastIndexByte(name, '/'); i >= 0 {
-		base = name[i+1:]
+	if _, after, ok := strings.CutLast(name, "/"); ok {
+		base = after
 	}
 	parent := m[parentName(name)]
 	parent.kids = append(parent.kids, base)

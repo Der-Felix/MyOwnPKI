@@ -2,6 +2,7 @@ package preset
 
 import (
 	"bufio"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -57,9 +58,7 @@ func parseLegacyPresets(t *testing.T) legacyPresets {
 			if m := reLegacyCase.FindStringSubmatch(line); m != nil {
 				current = m[1]
 				lp.values[current] = map[string]string{}
-				for k, v := range defaults {
-					lp.values[current][k] = v
-				}
+				maps.Copy(lp.values[current], defaults)
 				continue
 			}
 			if m := reLegacyAssign.FindStringSubmatch(line); m != nil {
@@ -107,7 +106,7 @@ func (lp legacyPresets) family(name string) string {
 
 func splitList(s, sep string) []string {
 	var out []string
-	for _, part := range strings.Split(s, sep) {
+	for part := range strings.SplitSeq(s, sep) {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}

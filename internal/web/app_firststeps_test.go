@@ -85,10 +85,10 @@ func TestFirstStepsEmptyThenFilled(t *testing.T) {
 	}
 
 	// A CA: the CA rows turn done, the banner stays (no certificate, no domain).
-	if _, err := v.Engine.CreateRoot(t.Context(), ca.RootRequest{CASettings: ca.CASettings{Name: "root", BaseURL: "http://pki.homelab.lan"}, Subject: ca.Subject{CommonName: "Root"}, Who: testinstance.Console}); err != nil {
+	if _, err := v.Engine.CreateRoot(t.Context(), ca.RootRequest{Name: "root", BaseURL: "http://pki.homelab.lan", Subject: ca.Subject{CommonName: "Root"}, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{CASettings: ca.CASettings{Name: "issuing", BaseURL: "http://pki.homelab.lan"},
+	if _, err := v.Engine.CreateIntermediate(t.Context(), ca.IntermediateRequest{Name: "issuing", BaseURL: "http://pki.homelab.lan",
 		Parent: "root", Subject: ca.Subject{CommonName: "Issuing"}, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestFirstStepsEmptyThenFilled(t *testing.T) {
 
 	// A domain and a certificate: everything the data can show is done, no banner.
 	issuing := "issuing"
-	if _, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: &issuing}, Who: testinstance.Console}); err != nil {
+	if _, err := v.Engine.CreateDomain(t.Context(), ca.DomainRequest{Name: "homelab.lan", CA: &issuing, Who: testinstance.Console}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(b.get(t, "/").html(), newBanner) == false {

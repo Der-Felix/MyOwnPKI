@@ -172,9 +172,7 @@ func serveTLS(t *testing.T, cfg *tls.Config) *server {
 			if err != nil {
 				return
 			}
-			s.wg.Add(1)
-			go func() {
-				defer s.wg.Done()
+			s.wg.Go(func() {
 				defer func() { _ = conn.Close() }()
 				tc := tls.Server(conn, cfg)
 				if tc.HandshakeContext(t.Context()) != nil {
@@ -184,7 +182,7 @@ func serveTLS(t *testing.T, cfg *tls.Config) *server {
 				s.mu.Lock()
 				s.app += int(n)
 				s.mu.Unlock()
-			}()
+			})
 		}
 	}()
 	return s

@@ -87,8 +87,7 @@ func (w *Webhook) Send(ctx context.Context, d Digest) error {
 	}
 	resp, err := client.Do(req) // #nosec G704 -- the operator's own webhook URL, checked by config.WebhookURL
 	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
 			err = ue.Err
 		}
 		return fmt.Errorf("webhook %s: %w", u.Host, err)

@@ -453,7 +453,7 @@ func restoreBlankLines(orig, out []byte) []byte {
 		return out
 	}
 	var res []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if a, ok := anchorOf(line); ok && anchors[a] && len(res) > 0 && strings.TrimSpace(res[len(res)-1]) != "" {
 			res = append(res, "")
 		}

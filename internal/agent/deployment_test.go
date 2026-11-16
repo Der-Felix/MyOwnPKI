@@ -289,7 +289,7 @@ func TestAddWritesDropinsAndReloadsButDoesNotRestart(t *testing.T) {
 	}
 	// --restart does it.
 	f.runner.calls = nil
-	if err := RemoveDeployment(context.Background(), RemoveOptions{EditOptions: EditOptions{ConfigPath: f.config, UnitPath: f.unit, Restart: true}, Name: "proxy"}); err != nil {
+	if err := RemoveDeployment(context.Background(), RemoveOptions{ConfigPath: f.config, UnitPath: f.unit, Restart: true, Name: "proxy"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(f.runner.calls, ";"); got != "restart myownpki-agent.service" {

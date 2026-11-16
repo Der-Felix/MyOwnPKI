@@ -100,9 +100,7 @@ func (s *Server) SetNetwork(dial func(context.Context, string, string) (net.Conn
 }
 
 func (v *validator) start(j job) {
-	v.wg.Add(1)
-	go func() {
-		defer v.wg.Done()
+	v.wg.Go(func() {
 		select {
 		case v.sem <- struct{}{}:
 		case <-v.ctx.Done():
@@ -113,7 +111,7 @@ func (v *validator) start(j job) {
 		defer cancel()
 		err := v.guarded(ctx, j)
 		v.finish(j, err)
-	}()
+	})
 }
 
 // guarded is validate that cannot take the process down: a panic ends only
@@ -210,8 +208,7 @@ func (v *validator) policyDial(policy string) func(ctx context.Context, network,
 			},
 		}
 		conn, err = g.DialContext(ctx, network, addr)
-		var ge *netguard.Error
-		if errors.As(err, &ge) {
+		if ge, ok := errors.AsType[*netguard.Error](err); ok {
 			return nil, &validationError{typ: ge.Kind, detail: ge.Detail}
 		}
 		return conn, err
@@ -270,12 +267,10 @@ func (v *validator) http01(ctx context.Context, typ, value, token, keyAuth, poli
 	req.Header.Set("User-Agent", "MyOwnPKI-ACME-validator")
 	resp, err := client.Do(req)
 	if err != nil {
-		var pe *panicError
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*panicError](err); ok {
 			return pe
 		}
-		var ve *validationError
-		if errors.As(err, &ve) {
+		if ve, ok := errors.AsType[*validationError](err); ok {
 			return ve
 		}
 		return vfail("connection", "fetching %s: %s", url, netguard.NetProblem(err))
@@ -376,8 +371,7 @@ func (v *validator) finish(j job, verr error) {
 		perr = problemJSON(ve.typ, ve.detail, http.StatusForbidden)
 		status, authzStatus, expires, result = "invalid", "invalid", j.authz.ExpiresAt, audit.ResultFailure
 		details["error"] = ve.typ + ": " + clip(ve.detail)
-		var pe *panicError
-		if errors.As(verr, &pe) {
+		if pe, ok := errors.AsType[*panicError](verr); ok {
 			details["panic"] = pe.typ // the type only, no text
 		}
 		s.limits.allow("failed:"+j.authz.IdentifierValue, s.limitsNow(ctx).FailedPerName, time.Hour)

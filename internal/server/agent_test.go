@@ -64,12 +64,12 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 		t.Fatal(uerr)
 	}
 	if _, cerr := srv.engine.CreateIntermediate(ctx, ca.IntermediateRequest{
-		CASettings: ca.CASettings{Name: "agent-ca", BaseURL: "http://pki.homelab.lan"}, Parent: "root",
+		Name: "agent-ca", BaseURL: "http://pki.homelab.lan", Parent: "root",
 		Subject: ca.Subject{CommonName: "Agent CA"}, EKULimit: []string{"clientAuth"}, Who: console,
 	}); cerr != nil {
 		t.Fatal(cerr)
 	}
-	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", DomainSettings: ca.DomainSettings{CA: ptrTo("issuing")}, Who: console}); derr != nil {
+	if _, derr := srv.engine.CreateDomain(ctx, ca.DomainRequest{Name: "homelab.lan", CA: new("issuing"), Who: console}); derr != nil {
 		t.Fatal(derr)
 	}
 	srv.renewTLS(ctx) // the listener certificates, as at an unseal
@@ -142,8 +142,6 @@ func newAgentEnv(t *testing.T, configure ...func(*Options)) *agentEnv {
 	})
 	return e
 }
-
-func ptrTo[T any](v T) *T { return &v }
 
 // client is an agent's connection; cert nil = without a client certificate.
 // asked reports whether the server asked for a client certificate.

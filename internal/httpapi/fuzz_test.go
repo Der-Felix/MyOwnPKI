@@ -274,7 +274,7 @@ func pointerTokens(p string) (tokens []string, valid bool) {
 	if p == "" || p[0] != '/' || !utf8.ValidString(p) {
 		return nil, false
 	}
-	for _, raw := range strings.Split(p[1:], "/") {
+	for raw := range strings.SplitSeq(p[1:], "/") {
 		for i := range len(raw) {
 			if raw[i] == '~' && (i+1 == len(raw) || (raw[i+1] != '0' && raw[i+1] != '1')) {
 				return nil, false
@@ -364,8 +364,7 @@ func refusedByType(v any, tokens []string) bool {
 }
 
 func structField(t reflect.Type, key string) (reflect.Type, bool) {
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		tag := f.Tag.Get("json")
 		if tag == "-" {
 			continue

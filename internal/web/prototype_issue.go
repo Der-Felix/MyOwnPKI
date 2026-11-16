@@ -55,7 +55,7 @@ func signingCAs() []fixture.CA {
 
 func lines(s string) []string {
 	var out []string
-	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+	for l := range strings.SplitSeq(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			out = append(out, l)
 		}
