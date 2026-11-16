@@ -7,13 +7,169 @@ change the API, the configuration and the database schema; the release notes say
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-16
+
+The first release of the beta. The feature set is frozen from here on: only fixes, documentation, tests and security hardening
+follow until 1.0, and a release of the 0.9 series is an ordinary release (`install.sh`, the tag `latest` and the Salt formula
+behave as before). The work of this release is the trust in an update and in a backup: **a backup is signed now**, **an
+installation made by an old release is updated in place by a test** on every start version since 0.1.0, three inputs that came
+without a limit are capped, and a stranger can find out what to test and how to report. There is **no new feature, no
+migration, no configuration key, no change to the REST API and the agent protocol, and no new dependency**; the only
+interface that changes is the backup (format 2, one new key, three new flags).
+
+### Added
+
+- **Backups are signed with a dedicated Ed25519 key.** The key is the file `backup-signing.key` in the data directory (mode
+  0600). It is made by `init`, or by the first `backup` of an installation that was made by an earlier version, and it is
+  **never part of a backup**. A backup of the new format `myownpki-backup/2` holds a detached `manifest.sig` next to
+  `manifest.json`: the algorithm, the public key and a signature over the exact bytes of the manifest, which lists the SHA-256
+  of every file. `backup verify` and `restore` check the signature before they read any other field of the manifest. A file
+  that is added, removed or changed, a manifest that is rewritten, and a deleted signature are refused. Before, whoever could
+  write the backup directory (an offsite share, a USB disk, a bucket) could change a database, recompute the hashes, rewrite
+  the manifest, and the backup still verified.
+- **The fingerprint of the backup key** (`SHA256:` and 32 hex digits) is printed by `init` and by every `backup`, and it is
+  written to the audit entry `system.backup`, so a changed key shows in the log. Note it down like the checkpoint key.
+  **`--backup-key FINGERPRINT`** on `backup verify` and `restore` (at least 16 hex digits, with or without the prefix, upper or
+  lower case) says which key must have signed the backup; a backup signed by another key is refused. Without the option, a
+  valid signature by an unknown key is accepted with the note to compare its fingerprint, because whoever can write the backup
+  can also sign it with a key of his own: **the pinned fingerprint is what stops him.** `backup verify` without the option
+  looks up the key file of its own host and reports whether the backup was signed by it, as a hint, never as a refusal. The
+  timer's `backup scheduled` verifies each backup against the key that has just signed it.
+- **`--allow-unsigned`** accepts a backup of the old format 1 although `--backup-key` is given. It waives nothing else: a
+  format 2 backup without a valid signature, and a valid signature by another key than the pinned one, are refused with and
+  without it. A downgrade to format 1 therefore cannot be used to get past a pin.
+- **An upgrade test with release binaries** (`test/upgrade`, `task upgrade`). For every start version (0.1.0, 0.2.2, 0.3.0,
+  0.3.5, 0.3.10 and 0.3.12; the SHA-256 of each asset is pinned in `scripts/upgrade/releases.txt` and checked before anything
+  runs) the harness makes an installation with the old release binary (certificates, one revoked, a domain rule, an ACME
+  issuance with lego, an agent, an enrollment pass, a settings version, a backup), then starts the binary of the tree on the
+  same data directory and the same configuration and checks: the migrations, that the old binary refuses the migrated
+  databases, the certificate chain and the CRL, the audit log against the old head and the checkpoint key, a second ACME
+  issuance with the old account, the domain rule and its version history, that the old agent keeps reporting, the backup of
+  before the update (verify and restore with the new binary, rollback with the old one), and the old configuration files. A
+  second test (`scripts/ci/upgrade-systemd.sh`, in the CI job `install`) does the same through `install.sh` as root with systemd.
+- **CI jobs `upgrade`, `upgrade-nightly` and `protocol-nightly`.** `upgrade` runs the oldest version, 0.3.5 and the previous
+  release on a pull request that changes a path that can matter for an update, and **every** start version on a push to
+  `main` (the green main run is the check before a tag); `upgrade-nightly` runs every version once a day; `protocol-nightly`
+  also compares the agent protocol with v0.3.0. Every run compares the agent protocol (`buf breaking`) with `origin/main`
+  and with the previous release: an old agent keeps talking to a new server. A new agent against an old server is not
+  promised.
+- **Released migrations are frozen.** `internal/store/testdata/released-migrations.txt` pins the SHA-256 of every migration
+  file that a release shipped; `TestReleasedMigrationsAreFrozen` fails when one changes, and `scripts/ci/pin-migrations.sh`
+  checks the pins against the tags and adds the files of a new release. A defect in a released migration is fixed by a new
+  migration.
+- **A fuzz target for the backup manifest and its signature** (`FuzzManifest`), and tests for the agent-protocol check, the
+  stub DNS server of the upgrade test, and the Salt recipes `apache2` and `haproxy` (render cases in
+  `deploy/salt/test/cases/`).
+- **The beta page** (`site/beta.md`): what is frozen, how to install the beta, a checklist for testers, the known limitations,
+  how to report, what never to post. Also new: the page *Demo* (`site/demo.md`), the beta banner in the README, and the issue
+  forms *bug* and *feedback* (`.github/ISSUE_TEMPLATE/`) with a link to the private security advisory. `SECURITY.md` names the
+  latest 0.9.x release as the one that gets fixes.
+- **The rules of the feature freeze** in `CONTRIBUTING.md` and on the site page *Contributing*, and a pull request template
+  with a checkbox for them. A new feature, a new setting or REST field, a schema change that is not a fix and a new dependency
+  need the maintainer's exception.
+- **Documentation of the backup key:** the chapter *The backup key* in the operations guide (what the signature promises and
+  what it does not, what `backup verify` prints, a lost key, rotation), the guide *Backup and restore* in the web UI and on
+  the site, and the glossary.
+
+### Changed
+
+- **Backups have the format `myownpki-backup/2`.** The manifest has the same fields as before, so an older binary answers
+  "backup format … is not …", not "unknown field", and refuses it. `manifest.sig` is written first and `manifest.json` last,
+  so a crash never leaves something that looks complete. Backups of format 1 still verify and restore.
+- **`init` prints the fingerprint of the backup key** after the checkpoint key and says that the key file stays in the data
+  directory. `backup` prints it after every backup and says when the key was made at that moment.
+- **`restore` says what it does not bring along:** the backup key stays with the host that made the backup, so an instance
+  restored into a new data directory has none until its first backup makes a new one.
+- **The demo names the release** (`deploy/demo` uses the image `0.9.0`), and the test `TestImageTagIsTheCurrentRelease` fails
+  when it does not equal `DEFAULT_VERSION` of `install.sh`. `docs/RELEASING.md` has the new checks before the tag: job
+  `upgrade` green on `main` for every start version, the migration pins, the demo tag.
+- **Compare links of this file:** the links of 0.3.11 and 0.3.12 were missing and `[Unreleased]` compared from v0.3.10.
+- Two helpers that only tests called (`keys.ChooseRecoveryOutput`, `auth.Draft.Confirmed`) are removed or live in the test
+  file. `api/openapi.yaml` `info.version` is 0.9.0, and the descriptions of the CSR preview and of the import of an external
+  certificate say what is capped (below); no path, field or status code is added.
+
 ### Fixed
 
+- **A certificate from another CA with more than 100 names was recorded.** An issuance has been limited to 100 names since the
+  start, but `ImportExternal` (the import for expiry monitoring) was not: a certificate of 64 KiB holds about 3,000 names, and
+  the de-duplication of the names was quadratic. It is refused now, as an issuance is, with **422 `policy-violation`** and the
+  reason "N names – at most 100 per certificate"; nothing is stored and the audit log gets the denied entry. A public
+  multi-domain certificate with more than 100 names can therefore no longer be recorded.
+- **The preview of a CSR listed every name, unclipped.** `InspectCSR` (the preview in the issue wizard and `POST
+  /api/v1/csr/inspect`) copied up to about 6,000 names of a 64 KiB request, each in full. The preview lists the first 100 names
+  (DNS, IP, e-mail and URI in this order), each cut to 80 bytes, and adds an entry to `problems` ("N names – at most 100 per
+  certificate; the list shows the first 100"). The answer stays 200: a preview shows what is wrong.
+- **An uploaded CSR was taken for PEM when `-----BEGIN` stood anywhere in the file.** A valid DER request whose subject
+  contains that text (the subject is chosen by whoever made the request) failed later with "no PEM block found". A file that
+  parses as one DER request is DER now; any other file with a PEM header is PEM as before (`openssl req -text` output with the
+  block behind it stays accepted). No bypass was found: the request is checked in full afterwards.
 - **Documentation on `low_ports`:** the Salt page, the upgrade page and the formula README said that an enrolled host
   loses `20-low-ports.conf` at the next package update when `low_ports: true` is missing from its pillar. That is not so
   since agent 0.3.5: `setup` leaves the file as found and removes it only for `sandbox.low_ports: false`. A live update
   from 0.3.5 to 0.3.10 of a host without the key kept the file. The key still installs the file where it is missing and
   lets the pillar state what a host needs.
+
+### Security notes
+
+- **The backup is authenticated, if you pin its key.** The signature proves that the holder of the backup key made the
+  backup. It does not say whose key that is until you compare the fingerprint with the one you noted at `init` (or at the
+  first backup) and pass it as `--backup-key`: somebody who can write the backup directory can also write a new key and a new
+  signature. Whoever holds the backup **and** the key file can sign a changed backup, so keep the key file in the data
+  directory and the backups elsewhere. A backup of an older version stays unauthenticated for good; nobody can tell
+  afterwards whether it was changed.
+- **Not covered:** the key file is part of the host, not of the backup, so a lost key file cannot be restored. Old backups
+  still verify with the fingerprint you noted for them, and the next backup makes a new key (it cannot tell a first run from a
+  loss). Rotation is deleting the file.
+- **The three input caps only narrow what is accepted** (no bypass was found in the old behavior): the import and the preview
+  were unbounded in the number of names, not a way to get a certificate that the policy refuses.
+- **No new dependency**; `go.mod` and `go.sum` are unchanged. The new CI jobs have `permissions: contents: read`, no secret and
+  no third-party action, and the upgrade test runs a download only after its SHA-256 has been checked.
+
+### Known limitations
+
+- **The maintainer's own live tests are not finished.** The recipes `apache2`, `httpd` and `haproxy` (example recipes, run in
+  CI against Ubuntu packages only), the guides in the web UI, the flags in the certbot guide, the agent act of the demo and
+  the container image with its Debian 13 base have not been run on the maintainer's hosts yet. The notes of each 0.9.x release
+  say what is still open.
+- **Apache:** `apache2ctl configtest` and `httpd -t` do not notice a key that does not match its certificate (the agent's own
+  check of the pair before it writes is the guard). A failed reload can stop Apache, and the rollback does not start it again:
+  after a `rolled_back` result, look at `systemctl status apache2`. On a host where Apache has not been started since the
+  boot, the test hook fails because `/run/apache2` does not exist yet.
+- **Fuzzing covers the data that comes from outside** (CSRs, ACME requests, uploads, REST bodies, the legacy archive, the
+  backup manifest), not the files an administrator writes: the server configuration, `agent.yaml`, DNS credentials and the
+  agent's state.
+- **The agent runs on Linux only;** agents for Windows and FreeBSD come later. The upgrade tests run on Linux amd64. The server
+  archives for macOS, Windows and FreeBSD exist, but nobody has run an update on them.
+- **Old agents show a warning:** the analysis page lists every 0.3.x agent as `outdated_agent`, because its minor version
+  differs from the server's. The agent keeps working; update the server first and the agents afterwards. A new agent against
+  an old server is not promised to work.
+- **The first steps page** cannot see a backup or the devices that trust the root, and does not test the public address from
+  outside.
+
+### Upgrade notes
+
+- **No migration** (`myownpki db status` shows the same versions as 0.3.12: `pki.db` 0021, `system.db` 0015, `audit.db`
+  0002), no configuration key and no change to the agent protocol, so going back to 0.3.12 needs no restore of the databases.
+  The backup is the one thing that does not go back (next point).
+- **Backup format 2 needs a 0.9 binary.** A binary older than 0.9.0 refuses a backup of this release ("backup format … is not
+  …"). The backup that `install.sh` makes before an update is made by the **old** binary (format 1), so the rollback
+  described on the site page *Upgrade* keeps working. After a rollback, the backups that the daily timer made with 0.9.0
+  are of no use to the old binary; restore the one from before the update.
+- **The backup key is made at the first `init` or the first backup.** An installation made by an earlier version gets its key
+  when the first `myownpki backup` runs after the update, by hand or by the timer (as the service user: `runuser -u
+  myownpki -- myownpki backup …`; a manual run as root makes a key that the timer cannot read). The output prints the
+  fingerprint: note it down, and put it in the place where you keep the checkpoint key.
+- **Backups made before 0.9.0 are unauthenticated, and they still work.** `backup verify` and `restore` accept a backup of
+  format 1 with the note "this backup has no signature (made before 0.9.0)" and exit 0; the other checks (hashes, audit
+  chains, SAN index) run as before. Once you pin a key with **`--backup-key`**, such a backup is **refused** ("the backup has
+  no signature … but a backup key is pinned"), unless you also pass **`--allow-unsigned`**, which waives only the missing
+  signature of a format 1 backup. A backup of format 2 without a valid signature is refused in every case, and so is a valid
+  signature by another key than the pinned one. Without `--backup-key`, `verify` reports "signed by key …" and asks you to
+  compare the fingerprint; `restore` goes into an empty data directory where no key file exists, so only the option can pin.
+- **`outdated_agent` appears for every 0.3.x agent** on the *Analysis* page after the update (a warning, nothing is broken).
+  Update the agents after the server, as always: the package or `install-agent.sh`, or the Salt formula with
+  `version: "0.9.0"`.
+- The step-by-step version is on the site page *Upgrade*.
 
 ## [0.3.12] - 2026-11-16
 
@@ -1546,7 +1702,8 @@ The first release: MyOwnPKI replaces the `pki.sh` Bash suite in the browser (pha
   app (TOTP).
 - One tenant (`default`); the tenant UI comes later.
 
-[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.12...HEAD
+[Unreleased]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.12...v0.9.0
 [0.3.12]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.11...v0.3.12
 [0.3.11]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/Der-Felix/MyOwnPKI/compare/v0.3.9...v0.3.10
