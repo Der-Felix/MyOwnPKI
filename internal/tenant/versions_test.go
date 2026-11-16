@@ -328,3 +328,13 @@ func TestRefusedChangeIsNotRecorded(t *testing.T) {
 		t.Errorf("a refused change was recorded: %+v", vs)
 	}
 }
+
+// Version returns the newest version number of the tenant's settings, the
+// number of their ETag: 0 when they have not been changed since the version
+// history began. Reading needs the same right as Get.
+func (s *Store) Version(ctx context.Context, tenant string, who keys.Who) (int64, error) {
+	if err := who.Principal.Check(authz.ReadPKI, authz.Resource{Tenant: tenant}, s.Clock.Now()); err != nil && !anyRole(who.Principal, tenant) {
+		return 0, err
+	}
+	return settingsver.Current(ctx, settingsver.SystemBackend(systemdb.New(s.DB)), settingsver.KindTenant, tenant)
+}
