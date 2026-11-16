@@ -52,8 +52,18 @@ release_has() {
 #   agent     the agent archive         myownpki-agent_<V>_linux_amd64.tar.gz (from 0.3.0)
 #   install   the installation script   install.sh (from 0.2.2)
 #   checksums the signed checksum file  checksums.txt
+#   packages  the six agent packages    myownpki-agent_<V>_linux_<amd64|arm64>.<deb|rpm|tar.gz>, one name per line
+#             (0.3.5 or newer; the install.sh of 0.3.1 and newer wants all six next to --archive)
 asset_name() {
   case $1 in
+    packages)
+      local arch format
+      for arch in amd64 arm64; do
+        for format in deb rpm tar.gz; do
+          printf 'myownpki-agent_%s_linux_%s.%s\n' "$2" "$arch" "$format"
+        done
+      done
+      ;;
     server) printf 'myownpki_%s_linux_amd64.tar.gz\n' "$2" ;;
     agent) printf 'myownpki-agent_%s_linux_amd64.tar.gz\n' "$2" ;;
     install) printf 'install.sh\n' ;;

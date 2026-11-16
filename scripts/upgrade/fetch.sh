@@ -7,7 +7,8 @@
 #   fetch.sh --list                                        the pinned list
 #   fetch.sh --self-test                                   try it against a local directory
 #
-# KIND is server (default), agent, install or checksums. VERSION is a bare
+# KIND is server (default), agent, install, checksums or packages (the six agent packages, pinned only
+# for the previous release: the install.sh of 0.3.x wants them next to --archive). VERSION is a bare
 # number, 0.3.12, and must be in scripts/upgrade/releases.txt: there is no
 # "latest". Every file is downloaded to <cache>/<version>/<name>.part, compared
 # with the SHA-256 of releases.txt and only then moved into place; a mismatch
@@ -36,10 +37,20 @@ cache=${UPGRADE_CACHE:-$(upgrade_root)/.tools/upgrade/cache}
 offline=${UPGRADE_OFFLINE:-0}
 base=${UPGRADE_BASE_URL:-$upgrade_default_base_url}
 
-# fetch_one VERSION KIND: print the verified path or return 3 / exit 1.
+# fetch_one VERSION KIND: print the verified path of every asset of the kind (the packages
+# kind has six); returns 3 (offline) or 4 (not in the list), or exits 1.
 fetch_one() {
-  local version=$1 kind=$2 asset want dir file got
-  asset=$(asset_name "$kind" "$version") || die "unknown kind $kind (server, agent, install, checksums)"
+  local version=$1 kind=$2 names asset rc=0
+  names=$(asset_name "$kind" "$version") || die "unknown kind $kind (server, agent, install, checksums, packages)"
+  while IFS= read -r asset; do
+    fetch_asset "$version" "$asset" || rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+  done <<<"$names"
+}
+
+# fetch_asset VERSION ASSET: one file of the list.
+fetch_asset() {
+  local version=$1 asset=$2 want dir file got
   release_has "$version" || die "version $version is not in $(upgrade_releases_file) – there is no \"latest\"; add it with scripts/upgrade/pin-release.sh"
   want=$(release_sha "$version" "$asset")
   if [ -z "$want" ]; then
@@ -76,8 +87,8 @@ fetch_one() {
 # kinds_of VERSION: the kinds the list has for a version.
 kinds_of() {
   local kind
-  for kind in server agent install checksums; do
-    [ -z "$(release_sha "$1" "$(asset_name "$kind" "$1")")" ] || printf '%s\n' "$kind"
+  for kind in server agent install checksums packages; do
+    [ -z "$(release_sha "$1" "$(asset_name "$kind" "$1" | head -n 1)")" ] || printf '%s\n' "$kind"
   done
 }
 
@@ -107,10 +118,13 @@ cmd_self_test() {
   printf 'agent archive\n' >"$work/serve/v9.9.9/myownpki-agent_9.9.9_linux_amd64.tar.gz"
   printf 'echo hello\n' >"$work/serve/v9.9.9/install.sh"
   printf 'sums\n' >"$work/serve/v9.9.9/checksums.txt"
+  for n in $(asset_name packages 9.9.9); do printf 'package %s\n' "$n" >"$work/serve/v9.9.9/$n"; done
   {
     echo '# test list'
-    for kind in server agent install checksums; do
-      echo "9.9.9 $(asset_name "$kind" 9.9.9) $(sha256_file "$work/serve/v9.9.9/$(asset_name "$kind" 9.9.9)")"
+    for kind in server agent install checksums packages; do
+      for n in $(asset_name "$kind" 9.9.9); do
+        echo "9.9.9 $n $(sha256_file "$work/serve/v9.9.9/$n")"
+      done
     done
   } >"$work/releases.txt"
   # A pinned hash that the served file does not have: a list of its own.
@@ -123,7 +137,9 @@ cmd_self_test() {
   me=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fetch.sh
 
   out=$(bash "$me" 9.9.9) || die "self-test: a pinned file was not fetched"
+  [ "$(bash "$me" 9.9.9 packages | wc -l | tr -d ' ')" = 6 ] || die "self-test: the packages kind did not give six files"
   [ "$out" = "$work/cache/9.9.9/myownpki_9.9.9_linux_amd64.tar.gz" ] || die "self-test: unexpected path $out"
+  [ "$(bash "$me" 9.9.9 packages | wc -l | tr -d ' ')" = 6 ] || die "self-test: the packages kind did not give six files"
   bash "$me" --all >/dev/null || die "self-test: --all failed"
   UPGRADE_ONLY=7.7.7 bash "$me" --all >/dev/null || die "self-test: --all with an UPGRADE_ONLY that names no listed version failed"
 

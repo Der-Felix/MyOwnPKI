@@ -2,7 +2,7 @@
 # Pin a release for the upgrade test (PHASE3 §19.5, step 108). Run by the owner
 # after each release (and once for the versions of the first list).
 #
-#   pin-release.sh vX.Y.Z [--write] [--no-cosign]   print the lines of releases.txt for a release
+#   pin-release.sh vX.Y.Z [--write] [--packages] [--no-cosign]   print the lines of releases.txt for a release
 #   pin-release.sh --self-test
 #
 # It downloads checksums.txt and its cosign bundle (checksums.txt.sigstore.json)
@@ -12,6 +12,9 @@
 # (checksums.txt itself is pinned by its own hash). The lines are printed for
 # review; --write puts them into scripts/upgrade/releases.txt (the lines of that
 # version are replaced, the file stays in version order).
+# --packages adds the six agent packages of the release (about 55 MB when fetched): the
+# systemd update test needs them for the previous release, because install.sh insists on
+# all six next to --archive. Pin them with the release that becomes the previous one.
 #
 # cosign is optional: without it the script stops and says so; --no-cosign goes
 # on with the hashes of the TLS connection to github.com alone and prints a
@@ -44,6 +47,14 @@ pin_lines() {
     printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$' || die "checksums.txt has no valid SHA-256 for $asset"
     printf '%s %s %s\n' "$version" "$asset" "$sha"
   done
+  if [ "${PIN_PACKAGES:-0}" = 1 ]; then
+    for asset in $(asset_name packages "$version"); do
+      [ "$asset" != "$(asset_name agent "$version")" ] || continue # pinned above
+      sha=$(awk -v a="$asset" '$2 == a { print $1 }' "$sums")
+      printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$' || die "checksums.txt has no valid SHA-256 for $asset (--packages needs a release with all six agent packages)"
+      printf '%s %s %s\n' "$version" "$asset" "$sha"
+    done
+  fi
   printf '%s checksums.txt %s\n' "$version" "$(sha256_file "$sums")"
 }
 
@@ -95,10 +106,9 @@ self_test() {
   sums=$work/serve/v9.9.9/checksums.txt
   {
     echo "$(printf 'a%.0s' $(seq 1 64))  install.sh"
-    echo "$(printf 'b%.0s' $(seq 1 64))  myownpki-agent_9.9.9_linux_amd64.tar.gz"
-    echo "$(printf 'c%.0s' $(seq 1 64))  myownpki-agent_9.9.9_linux_arm64.tar.gz"
     echo "$(printf 'd%.0s' $(seq 1 64))  myownpki_9.9.9_linux_amd64.tar.gz"
     echo "$(printf 'e%.0s' $(seq 1 64))  myownpki_9.9.9_windows_amd64.zip"
+    for n in $(asset_name packages 9.9.9); do echo "$(printf 'f%.0s' $(seq 1 64))  $n"; done
   } >"$sums"
   export UPGRADE_BASE_URL UPGRADE_RELEASES="$work/releases.txt"
   UPGRADE_BASE_URL=$(url_of_dir "$work/serve")
@@ -111,6 +121,7 @@ self_test() {
   printf '%s\n' "$out" | grep -q "^9.9.9 checksums.txt $(sha256_file "$sums")\$" || die "self-test: checksums.txt is not pinned by its own hash"
   if printf '%s\n' "$out" | grep -q 'arm64\|windows'; then die "self-test: a file of another platform was pinned"; fi
 
+  [ "$(bash "$me" v9.9.9 --no-cosign --packages 2>/dev/null | wc -l | tr -d ' ')" = 9 ] || die "self-test: --packages did not add the six agent packages"
   # Without cosign (and without --no-cosign) nothing is printed.
   if COSIGN=/nonexistent/cosign bash "$me" v9.9.9 >/dev/null 2>&1; then die "self-test: pinning without cosign and without --no-cosign worked"; fi
 
@@ -133,6 +144,7 @@ while [ "$#" -gt 0 ]; do
   case $1 in
     --write) write=1 ;;
     --no-cosign) use_cosign=0 ;;
+    --packages) export PIN_PACKAGES=1 ;;
     --self-test) self_test; exit 0 ;;
     -h | --help) sed -n '2,/^set -euo/{/^#/s/^# \{0,1\}//p}' "$0"; exit 0 ;;
     -*) echo "pin-release: unknown option $1" >&2; exit 2 ;;
@@ -140,5 +152,5 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-[ -n "$tag" ] || { echo 'usage: pin-release.sh vX.Y.Z [--write] [--no-cosign] | --self-test' >&2; exit 2; }
+[ -n "$tag" ] || { echo 'usage: pin-release.sh vX.Y.Z [--write] [--packages] [--no-cosign] | --self-test' >&2; exit 2; }
 pin "$tag" "$write" "$use_cosign"
