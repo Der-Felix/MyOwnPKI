@@ -280,6 +280,8 @@ func crlDER(data []byte) ([]byte, error) {
 		return nil, deny("expected a PEM block -----BEGIN X509 CRL----- or a DER file")
 	case len(bytes.TrimSpace(rest)) > 0:
 		return nil, deny("there is data after the CRL – upload exactly one CRL")
+	case moreThanOnePEM(data):
+		return nil, deny("there is more than one PEM block – upload exactly one CRL")
 	}
 	return block.Bytes, nil
 }

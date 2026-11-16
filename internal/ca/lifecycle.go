@@ -901,6 +901,8 @@ func parseOneCertificate(data []byte) (*x509.Certificate, error) {
 		return nil, deny("the PEM block has headers – send a plain PEM certificate")
 	case len(bytes.TrimSpace(rest)) > 0:
 		return nil, deny("there is data after the certificate – send exactly one certificate")
+	case moreThanOnePEM(data):
+		return nil, deny("there is more than one PEM block – send exactly one certificate")
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {

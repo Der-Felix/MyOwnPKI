@@ -7,6 +7,11 @@ import (
 	"encoding/pem"
 )
 
+// moreThanOnePEM: pem.Decode skips a block it can't decode and returns the next one,
+// so a broken block in front of the one that is read would pass unseen. One
+// upload is one block, announced once.
+func moreThanOnePEM(data []byte) bool { return bytes.Count(data, []byte("-----BEGIN ")) > 1 }
+
 // MaxCSRSize limits an uploaded CSR. Real CSRs are a few KiB; the limit keeps
 // a hostile upload from costing memory and parse time.
 const MaxCSRSize = 64 << 10
@@ -31,6 +36,9 @@ func parseCSR(data []byte) (*x509.CertificateRequest, error) {
 	}
 	if len(bytes.TrimSpace(rest)) > 0 {
 		return nil, deny("there is data after the CSR – send exactly one CSR")
+	}
+	if moreThanOnePEM(data) {
+		return nil, deny("there is more than one PEM block – send exactly one CSR")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
