@@ -385,21 +385,26 @@ What `backup verify` prints:
 | Output | Meaning | Exit |
 |---|---|---|
 | `Signature valid: made by key SHA256:…, the key you named.` | Signed, and by the key given as `--backup-key` | 0 |
-| `Signature valid: made by key SHA256:…, the backup key of this host.` | Signed by the key file of this host. `backup verify` (not `restore`) uses it as the expected key when `--backup-key` is not given and the configuration can be read | 0 |
-| `Signature valid: made by key SHA256:… – a key nobody has vouched for yet.` and `note: signed by key …` | Signed, no key to compare with. Compare the fingerprint with the one you noted; it proves nothing about who made the backup until you do | 0 |
-| `Signature: none – this backup is unauthenticated.` and `note: unauthenticated – this backup has no signature (made before 0.9.0)…` | A backup of a version before 0.9.0 (format `myownpki-backup/1`). It still verifies and restores; nobody can tell whether it was changed after it was made | 0 (1 with `--backup-key`, unless `--allow-unsigned`) |
-| `problem: signed by key …, not by the expected key …` | A valid signature by another key than the one you pinned | 1 |
+| `Signature valid: made by key SHA256:…, the backup key of this host.` | No `--backup-key`, and the backup is signed by the key file of this host (`backup verify` looks for it through the configuration; `restore` does not) | 0 |
+| `Signature valid: made by key SHA256:… – a key nobody has vouched for yet.` and `note: signed by key …` | No `--backup-key` and no host key to compare with. Compare the fingerprint with the one you noted; it proves nothing about who made the backup until you do | 0 |
+| the same, with `note: signed by key X, not this host's key Y …` | No `--backup-key`; this host has a key, but it did not sign this backup – normal when you check the backup of another host. The same advice: compare X with the fingerprint noted for that host | 0 |
+| `Signature: none – this backup is unauthenticated.` and `note: unauthenticated – this backup has no signature (made before 0.9.0)…` | A backup of a version before 0.9.0 (format `myownpki-backup/1`). It still verifies and restores, **whether or not this host has a key**; nobody can tell whether it was changed after it was made | 0 without `--backup-key`; 1 with `--backup-key`, unless `--allow-unsigned` |
+| `problem: the backup has no signature … but a backup key is pinned …` | A format 1 backup and an explicit `--backup-key` | 1 (0 with `--allow-unsigned`) |
+| `problem: signed by key …, not by the expected key …` | A valid signature by another key than the one you gave with `--backup-key` | 1 |
 | `problem: manifest.sig: the signature does not match the manifest …` | The manifest or the signature was changed, or damaged | 1 |
 | `problem: manifest.sig is missing …` | A backup of format 2 always has the signature: it was deleted | 1 |
 
-`--allow-unsigned` only lets a **format 1** backup pass although `--backup-key` is given (your old backups). It never
-accepts a format 2 backup with a missing, damaged or foreign signature.
+The key file of the host is only a hint for `backup verify`: it never refuses a backup. **Only an explicit `--backup-key`
+refuses** – a backup that is unsigned (format 1), or signed by another key. `--allow-unsigned` lets a **format 1** backup
+pass although `--backup-key` is given (your old backups). It never accepts a format 2 backup with a missing, damaged or
+foreign signature.
 
 **Lost key file** (disk replaced, data directory restored from a backup): the key is not in a backup, so the next
 `myownpki backup` on that instance makes a **new** key and says *This key was made now*. It cannot tell a first run
 from a loss. Backups made before verify with the fingerprint you noted for them (`--backup-key <old fingerprint>`),
-not with the new one – and `backup verify` on that host, which expects its own key, then answers *signed by key
-…, not by the expected key …*: pass the old fingerprint. Note the new fingerprint, too. A deliberate change of the
+not with the new one – and `backup verify` on that host, without `--backup-key`, then notes *signed by key X, not this
+host's key Y* (it passes; Y is the new key): compare X with the fingerprint you noted, and pass it as `--backup-key`.
+Note the new fingerprint, too. A deliberate change of the
 key is the same thing: delete `backup-signing.key`.
 
 Restore into an **empty or missing** data directory, with the server stopped. With the packaged

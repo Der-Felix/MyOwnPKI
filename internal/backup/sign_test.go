@@ -660,3 +660,52 @@ func TestFirstBackupMakesTheKey(t *testing.T) {
 		t.Errorf("second backup: %+v %v", c2, err)
 	}
 }
+
+// TestHostKeyIsOnlyAHint: Check.HostKey (the key file of the host that
+// verifies) never refuses a backup. Signed by it: pinned. Signed by another
+// key: passes with a note. No signature (format 1): passes, unauthenticated.
+// Only an explicit BackupKey refuses, and then HostKey is ignored.
+func TestHostKeyIsOnlyAHint(t *testing.T) {
+	t.Parallel()
+	_, _, good, c := signedBackup(t)
+	other := forgerKey(t).Fingerprint()
+
+	rep, err := Verify(t.Context(), good, Check{HostKey: c.SigningKey})
+	if err != nil || rep.Authenticity != Pinned || rep.SigningKey != c.SigningKey {
+		t.Fatalf("signed by the host key: %v %+v", err, rep)
+	}
+	rep, err = Verify(t.Context(), good, Check{HostKey: other})
+	if err != nil || rep.Authenticity != Signed || !strings.Contains(notesOf(rep), "signed by key "+c.SigningKey+", not this host's key "+other) {
+		t.Fatalf("signed by another key: %v %s", err, notesOf(rep))
+	}
+	if _, err = Verify(t.Context(), good, Check{BackupKey: other, HostKey: c.SigningKey}); !errors.Is(err, ErrRefused) {
+		t.Errorf("an explicit pin on another key must refuse, whatever the host key: %v", err)
+	}
+	if _, err = Verify(t.Context(), good, Check{BackupKey: c.SigningKey, HostKey: other}); err != nil {
+		t.Errorf("an explicit pin on the signer passes, whatever the host key: %v", err)
+	}
+
+	old := backupCopy(t, good)
+	makeFormat1(t, old)
+	rep, err = Verify(t.Context(), old, Check{HostKey: c.SigningKey})
+	if err != nil || rep.Authenticity != Unauthenticated || !strings.Contains(notesOf(rep), "unauthenticated") {
+		t.Fatalf("format 1 with a host key: %v %+v", err, rep)
+	}
+	if _, err = Verify(t.Context(), old, Check{BackupKey: c.SigningKey, HostKey: c.SigningKey}); !errors.Is(err, ErrRefused) {
+		t.Errorf("format 1 with an explicit pin: %v", err)
+	}
+	if rep, err = Verify(t.Context(), old, Check{BackupKey: c.SigningKey, AllowUnsigned: true}); err != nil || rep.Authenticity != Unauthenticated {
+		t.Errorf("format 1 with a pin and allow-unsigned: %v", err)
+	}
+	// A deleted signature of a format 2 backup is refused with a host key too.
+	broken := backupCopy(t, good)
+	if err = os.Remove(filepath.Join(broken, SignatureFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Verify(t.Context(), broken, Check{HostKey: c.SigningKey}); !errors.Is(err, ErrRefused) {
+		t.Errorf("format 2 without a signature: %v", err)
+	}
+	if _, err = Verify(t.Context(), good, Check{HostKey: "abc"}); err == nil || errors.Is(err, ErrRefused) {
+		t.Errorf("a host key that is no fingerprint: %v", err)
+	}
+}

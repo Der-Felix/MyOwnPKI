@@ -42,7 +42,7 @@ func (r *Report) problem(format string, a ...any) {
 
 // Verify runs every check of a restore on a copy and writes nothing else.
 func Verify(ctx context.Context, dir string, c Check) (*Report, error) {
-	pin, err := normalizePin(c)
+	c, err := normalizeCheck(c)
 	if err != nil {
 		return nil, err
 	}
@@ -51,33 +51,38 @@ func Verify(ctx context.Context, dir string, c Check) (*Report, error) {
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
-	return check(ctx, dir, filepath.Join(tmp, "data"), c, pin)
+	return check(ctx, dir, filepath.Join(tmp, "data"), c)
 }
 
-// normalizePin checks the --backup-key text before anything is read.
-func normalizePin(c Check) (string, error) {
-	if c.BackupKey == "" {
-		return "", nil
+// normalizeCheck checks the --backup-key text before anything is read and
+// returns c with the fingerprints as lower-case hex digits.
+func normalizeCheck(c Check) (Check, error) {
+	var err error
+	if c.BackupKey != "" {
+		if c.BackupKey, err = backupkey.NormalizePin(c.BackupKey); err != nil {
+			return c, fmt.Errorf("backup key: %w", err)
+		}
 	}
-	pin, err := backupkey.NormalizePin(c.BackupKey)
-	if err != nil {
-		return "", fmt.Errorf("backup key: %w", err)
+	if c.HostKey != "" {
+		if c.HostKey, err = backupkey.NormalizePin(c.HostKey); err != nil {
+			return c, fmt.Errorf("host backup key: %w", err)
+		}
 	}
-	return pin, nil
+	return c, nil
 }
 
 // check copies the backup to work (a new directory) and checks it there:
 // the backup itself is never opened as a database. The signature is checked
 // first: nothing the manifest says is used before it is known who vouches
 // for it.
-func check(ctx context.Context, dir, work string, c Check, backupPin string) (*Report, error) {
+func check(ctx context.Context, dir, work string, c Check) (*Report, error) {
 	pin := c.CheckpointKey
 	m, raw, err := loadManifest(dir)
 	if err != nil {
 		return nil, err
 	}
 	r := &Report{Manifest: m}
-	r.checkSignature(dir, raw, backupPin, c.AllowUnsigned)
+	r.checkSignature(dir, raw, c.BackupKey, c.HostKey, c.AllowUnsigned)
 	if len(r.Problems) > 0 {
 		return r, fmt.Errorf("%w: %s", ErrRefused, strings.Join(r.Problems, "; "))
 	}
@@ -275,7 +280,7 @@ func (r *Report) checkHead(ctx context.Context, p, scope string, head audit.Head
 // Restore checks the backup as Verify does and moves it into the data
 // directory of o, which must be empty or missing.
 func Restore(ctx context.Context, dir string, c Check, o Options) (*Report, error) {
-	pin, perr := normalizePin(c)
+	c, perr := normalizeCheck(c)
 	if perr != nil {
 		return nil, perr
 	}
@@ -301,7 +306,7 @@ func Restore(ctx context.Context, dir string, c Check, o Options) (*Report, erro
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	work := filepath.Join(tmp, "data")
-	r, err := check(ctx, dir, work, c, pin)
+	r, err := check(ctx, dir, work, c)
 	if err != nil {
 		return r, err
 	}
