@@ -143,6 +143,17 @@ func TestRefusals(t *testing.T) {
 		{"http link", header + "[x](http://der-felix.github.io/MyOwnPKI/)\n", "documentation site or the repository"},
 		{"other site", header + "[x](https://example.org/)\n", "documentation site or the repository"},
 		{"look-alike site", header + "[x](https://der-felix.github.io/MyOwnPKI.evil.example/)\n", "documentation site or the repository"},
+		{"repository dot dot", header + "[x](https://github.com/Der-Felix/MyOwnPKI/../../evil/x)\n", "no . or .. segment"},
+		{"site dot dot", header + "[x](https://der-felix.github.io/MyOwnPKI/a/../../b)\n", "no . or .. segment"},
+		{"site dot segment", header + "[x](https://der-felix.github.io/MyOwnPKI/./a)\n", "no . or .. segment"},
+		{"site trailing dot dot", header + "[x](https://github.com/Der-Felix/MyOwnPKI/..)\n", "no . or .. segment"},
+		{"dot dot before query", header + "[x](https://github.com/Der-Felix/MyOwnPKI/..?a=b)\n", "no . or .. segment"},
+		{"dot dot before fragment", header + "[x](https://github.com/Der-Felix/MyOwnPKI/a/..#top)\n", "no . or .. segment"},
+		{"site encoded dot dot", header + "[x](https://github.com/Der-Felix/MyOwnPKI/%2e%2e/x)\n", "link address"},
+		{"site upper encoded dot dot", header + "[x](https://github.com/Der-Felix/MyOwnPKI/.%2E/x)\n", "link address"},
+		{"site backslash", header + "[x](https://github.com/Der-Felix/MyOwnPKI/..\\x)\n", "link address"},
+		{"site double slash", header + "[x](https://github.com/Der-Felix/MyOwnPKI//evil.example/x)\n", "no . or .. segment"},
+		{"site double slash later", header + "[x](https://github.com/Der-Felix/MyOwnPKI/a//b)\n", "no . or .. segment"},
 		{"mailto", header + "[x](mailto:a@b.example)\n", "link address"},
 		{"relative file", header + "[x](other.md)\n", "link goes to"},
 		{"protocol relative", header + "[x](//evil.example/x)\n", "plain path"},
@@ -543,6 +554,24 @@ func TestEmbeddedCommandsAreKnownPrograms(t *testing.T) {
 					t.Errorf("%s: the command %q pipes into a shell", g.Slug, cmd)
 				}
 			}
+		}
+	}
+}
+
+// TestSiteLinksStayBelowTheBase: ordinary links to the site and the repository
+// still pass, with a trailing slash, a query or a fragment.
+func TestSiteLinksStayBelowTheBase(t *testing.T) {
+	t.Parallel()
+	for _, dest := range []string{
+		"https://der-felix.github.io/MyOwnPKI",
+		"https://der-felix.github.io/MyOwnPKI/",
+		"https://der-felix.github.io/MyOwnPKI/guides/certbot/",
+		"https://github.com/Der-Felix/MyOwnPKI/blob/main/docs/PLAN.md#adr-01",
+		"https://github.com/Der-Felix/MyOwnPKI/issues?q=is:open",
+		"https://github.com/Der-Felix/MyOwnPKI/a.b/c..d/...",
+	} {
+		if _, err := Parse("x", []byte(header+"[x]("+dest+")\n")); err != nil {
+			t.Errorf("%s: %v", dest, err)
 		}
 	}
 }

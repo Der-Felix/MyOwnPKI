@@ -198,12 +198,36 @@ func (ip inlineParser) classify(dest string) (LinkTarget, string, error) {
 	case strings.HasPrefix(dest, "https://"):
 		for _, base := range []string{SiteBase, RepoBase} {
 			if rest, ok := strings.CutPrefix(dest, base); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+				if !plainSitePath(rest) {
+					return 0, "", ip.errf("a link to the documentation site or the repository has no . or .. segment and no //")
+				}
 				return LinkSite, dest, nil
 			}
 		}
 		return 0, "", ip.errf("an external link goes to the documentation site or the repository of the project only")
 	}
 	return 0, "", ip.errf("a link goes to a #heading, a /path of the UI, /guides/<slug> or, by https, the documentation site or the repository of the project")
+}
+
+// plainSitePath reports whether the part of an https link behind the base
+// ("" or "/..." with an optional query or fragment) stays below the base when
+// a browser normalizes it: no "." or ".." segment and no empty segment (//),
+// which a server may fold into one slash. A trailing slash is fine. Percent
+// escapes and backslashes never get here: linkChars refuses them.
+func plainSitePath(rest string) bool {
+	if k := strings.IndexAny(rest, "?#"); k >= 0 {
+		rest = rest[:k]
+	}
+	if rest == "" || rest == "/" {
+		return true
+	}
+	segs := strings.Split(rest[1:], "/")
+	for i, seg := range segs {
+		if seg == "." || seg == ".." || (seg == "" && i != len(segs)-1) {
+			return false
+		}
+	}
+	return true
 }
 
 // checkPlaceholders refuses a {name} that is not in the closed list. Text
