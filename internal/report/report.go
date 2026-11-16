@@ -409,6 +409,8 @@ func buildFleet(ctx context.Context, d *Deps, who keys.Who, now time.Time) (*Fle
 			f.Version.Current++
 		case versionOlder:
 			f.Version.Older++
+		case versionUnknown:
+			fallthrough
 		default:
 			f.Version.Unknown++
 		}

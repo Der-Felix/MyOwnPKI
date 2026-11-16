@@ -304,6 +304,8 @@ func (r *run) proveOperator(ctx context.Context) error {
 	switch r.opt.Mode {
 	case Demo:
 		pass, err = demoPassphrase(r.opt.DemoSecretsFile, r.l.DataDir)
+	case Interactive, Stdin:
+		fallthrough
 	default:
 		r.ui.Printf("An earlier init stopped half-way. To finish it, prove that you may use the root key.\n")
 		pass, err = r.ui.ReadSecret("Unseal passphrase: ")

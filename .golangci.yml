@@ -91,8 +91,13 @@ linters:
         - fieldalignment # memory layout micro-optimisation, hurts readability
 
     exhaustive:
-      # A `default:` branch counts as handling the rest – it must then reject, not ignore.
-      default-signifies-exhaustive: true
+      # A `default:` branch does not count: every member of one of our own enums is named, so a
+      # new member fails here and not in production. A switch that rejects everything else on
+      # purpose says so in a //nolint:exhaustive with the reason.
+      default-signifies-exhaustive: false
+      # Open sets that are not ours: the standard library adds members, a protobuf enum carries
+      # values this build has never heard of, and a switch over them always needs its default.
+      ignore-types: '^(crypto\.Hash|crypto/x509\.SignatureAlgorithm|reflect\.Kind|github\.com/Der-Felix/MyOwnPKI/internal/gen/.*)$'
 
     sloglint:
       attr-only: true        # slog.String("ca", name) – never loose key/value pairs

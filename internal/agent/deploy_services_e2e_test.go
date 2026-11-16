@@ -356,6 +356,8 @@ func (c noteClaim) check(t *testing.T) {
 		t.Error(message)
 	case noteAgrees:
 		t.Logf("the notes of recipe %q agree with the observation (%s)", c.recipe, c.topic)
+	case noteBehind:
+		fallthrough
 	default:
 		t.Log(message)
 	}

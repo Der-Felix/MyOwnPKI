@@ -333,6 +333,8 @@ func buildChart(c view.Chart) chartModel {
 	switch c.Kind {
 	case view.ChartBars, view.ChartStackedBars:
 		height = layoutHorizontal(&m, d)
+	case view.ChartColumns, view.ChartStacked:
+		fallthrough
 	default:
 		height = layoutVertical(&m, d)
 	}
