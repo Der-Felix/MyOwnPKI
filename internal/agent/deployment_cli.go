@@ -59,7 +59,7 @@ func ParseDeploymentAdd(fs *flag.FlagSet, configPath *string, args []string) (De
 	var spec DeploymentSpec
 	var names, hooks, sandboxWrite listFlag
 	var recipeName string
-	fs.StringVar(&recipeName, "recipe", "", "fill defaults for nginx, apache2, httpd, postfix, dovecot or proxmox (explicit flags win)")
+	fs.StringVar(&recipeName, "recipe", "", "fill defaults for nginx, apache2, httpd, haproxy, postfix, dovecot or proxmox (explicit flags win)")
 	fs.StringVar(&spec.Profile, "profile", "", "nginx or file (default: from --dir or the file flags)")
 	fs.Var(&names, "name", "certificate name, a FQDN; repeat for more (default: the host name)")
 	fs.StringVar(&spec.Challenge, "challenge", "", "webroot, standalone or dns-01 (default: as enrollment); a wildcard name needs dns-01")

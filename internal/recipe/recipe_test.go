@@ -9,7 +9,7 @@ import (
 
 func TestNamesAndGet(t *testing.T) {
 	t.Parallel()
-	if got, want := Names(), []string{"apache2", "dovecot", "httpd", "nginx", "postfix", "proxmox"}; !slices.Equal(got, want) {
+	if got, want := Names(), []string{"apache2", "dovecot", "haproxy", "httpd", "nginx", "postfix", "proxmox"}; !slices.Equal(got, want) {
 		t.Fatalf("Names() = %v, want %v", got, want)
 	}
 	if _, ok := Get("lighttpd"); ok {
@@ -141,6 +141,16 @@ func TestRecipeFacts(t *testing.T) {
 			!strings.Contains(notes, "SSLCertificateKeyFile /etc/ssl/myownpki/<name>/privkey.pem") || !strings.Contains(notes, "match") {
 			t.Errorf("%s: the notes lack the vhost lines or the configtest caveat:\n%s", tc.name, notes)
 		}
+	}
+	// HAProxy: the one-file form, one file per deployment name.
+	ha, _ := Get("haproxy")
+	if ha.Profile != "file" || ha.Combined != "/etc/ssl/myownpki/haproxy/{name}.pem" || ha.Certificate != "" || ha.Chain != "" || ha.Fullchain != "" || ha.Key != "" ||
+		ha.Owner != "root" || ha.Group != "root" || ha.KeyMode != "0600" || ha.Check != "127.0.0.1:443" || ha.LowPorts || len(ha.SandboxWrite) != 0 || !ha.Example ||
+		ha.TestHook != "haproxy-test" || ha.ReloadHook != "haproxy-reload" {
+		t.Errorf("haproxy: %+v", ha)
+	}
+	if got := strings.Join(ha.Hooks[0].Command, " "); got != "/usr/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg" || strings.Join(ha.Hooks[1].Command, " ") != "/usr/bin/systemctl reload haproxy" {
+		t.Errorf("haproxy hooks: %v", ha.Hooks)
 	}
 	httpd, _ := Get("httpd")
 	if !strings.Contains(strings.Join(httpd.Notes, "\n"), "restorecon") {
